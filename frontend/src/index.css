@@ -1,0 +1,152 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-body: #f8fafc;
+  --text-body: #0f172a;
+  --bg-root: radial-gradient(circle at 12% 10%, #eef2ff 0%, #f8fafc 45%, #ffffff 100%);
+  --scroll-track: rgba(15, 23, 42, 0.08);
+  --scroll-thumb: rgba(51, 65, 85, 0.35);
+  --scroll-thumb-hover: rgba(30, 41, 59, 0.55);
+}
+
+html.theme-light {
+  color-scheme: light;
+}
+
+html.theme-dark {
+  color-scheme: dark;
+  --bg-body: #020617;
+  --text-body: #e2e8f0;
+  --bg-root: radial-gradient(circle at 12% 10%, #0f172a 0%, #020617 45%, #000000 100%);
+  --scroll-track: rgba(148, 163, 184, 0.12);
+  --scroll-thumb: rgba(100, 116, 139, 0.6);
+  --scroll-thumb-hover: rgba(148, 163, 184, 0.75);
+}
+
+body {
+  background: var(--bg-body);
+  color: var(--text-body);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  overflow-x: hidden;
+  overflow-y: auto;
+  transition: background-color 0.22s ease, color 0.22s ease;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+#root {
+  min-height: 100%;
+  background: var(--bg-root);
+  color: var(--text-body);
+  transition: background 0.22s ease, color 0.22s ease;
+}
+
+.app-page-bg {
+  min-height: calc(100vh - 4rem);
+}
+
+html.theme-light .app-page-bg {
+  background-color: #ffffff;
+  background-image:
+    radial-gradient(circle at 18% 0%, rgba(14, 165, 233, 0.06), transparent 36%),
+    linear-gradient(rgba(15, 23, 42, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.045) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+html.theme-dark .app-page-bg {
+  background-color: #0a1020;
+  background-image:
+    radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.12), transparent 36%),
+    linear-gradient(rgba(148, 163, 184, 0.09) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.09) 1px, transparent 1px);
+  background-size: auto, 64px 64px, 64px 64px;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+}
+
+/* Dark mode utility override layer for existing Tailwind-heavy UI */
+html.theme-dark .bg-white,
+html.theme-dark .bg-slate-50,
+html.theme-dark .bg-slate-50\/50,
+html.theme-dark .bg-slate-50\/70,
+html.theme-dark .bg-slate-100,
+html.theme-dark .bg-white\/50,
+html.theme-dark .bg-white\/60,
+html.theme-dark .bg-white\/70,
+html.theme-dark .bg-white\/80,
+html.theme-dark .bg-white\/85,
+html.theme-dark .bg-white\/90,
+html.theme-dark .bg-white\/95 {
+  background-color: rgba(15, 23, 42, 0.86) !important;
+  color: #e2e8f0 !important;
+}
+
+html.theme-dark .text-slate-900,
+html.theme-dark .text-slate-800,
+html.theme-dark .text-slate-700,
+html.theme-dark .text-slate-600,
+html.theme-dark .text-slate-500,
+html.theme-dark .text-slate-400,
+html.theme-dark .text-text-primary,
+html.theme-dark .text-text-tertiary {
+  color: #cbd5e1 !important;
+}
+
+html.theme-dark .border,
+html.theme-dark .border-slate-100,
+html.theme-dark .border-slate-200,
+html.theme-dark .border-slate-300 {
+  border-color: rgba(148, 163, 184, 0.25) !important;
+}
+
+html.theme-dark input,
+html.theme-dark select,
+html.theme-dark textarea {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border-color: rgba(148, 163, 184, 0.35) !important;
+  color: #e2e8f0 !important;
+}
+
+html.theme-dark input::placeholder,
+html.theme-dark textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+html.theme-dark .from-cyan-50,
+html.theme-dark .from-amber-50,
+html.theme-dark .from-pink-50,
+html.theme-dark .from-violet-50,
+html.theme-dark .from-emerald-50 {
+  --tw-gradient-from: rgba(30, 41, 59, 0.96) var(--tw-gradient-from-position) !important;
+}
+
+html.theme-dark .to-cyan-100,
+html.theme-dark .to-amber-100,
+html.theme-dark .to-pink-100,
+html.theme-dark .to-violet-100,
+html.theme-dark .to-emerald-100 {
+  --tw-gradient-to: rgba(15, 23, 42, 0.92) var(--tw-gradient-to-position) !important;
+}

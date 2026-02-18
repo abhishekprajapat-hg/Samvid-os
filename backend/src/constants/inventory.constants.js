@@ -1,0 +1,43 @@
+const INVENTORY_STATUSES = ["Available", "Blocked", "Sold"];
+
+const INVENTORY_REQUEST_TYPES = ["create", "update"];
+const INVENTORY_REQUEST_STATUSES = ["pending", "approved", "rejected"];
+
+const INVENTORY_ALLOWED_FIELDS = [
+  "projectName",
+  "towerName",
+  "unitNumber",
+  "price",
+  "status",
+  "location",
+  "images",
+  "documents",
+];
+
+const INVENTORY_REQUIRED_CREATE_FIELDS = [
+  "projectName",
+  "towerName",
+  "unitNumber",
+  "price",
+  "location",
+];
+
+const INVENTORY_ACTIVITY_ACTIONS = {
+  REQUEST_CREATED: "REQUEST_CREATED",
+  REQUEST_APPROVED_CREATE: "REQUEST_APPROVED_CREATE",
+  REQUEST_APPROVED_UPDATE: "REQUEST_APPROVED_UPDATE",
+  REQUEST_REJECTED: "REQUEST_REJECTED",
+  DIRECT_CREATE: "DIRECT_CREATE",
+  DIRECT_UPDATE: "DIRECT_UPDATE",
+  DIRECT_DELETE: "DIRECT_DELETE",
+  BULK_CREATE: "BULK_CREATE",
+};
+
+module.exports = {
+  INVENTORY_STATUSES,
+  INVENTORY_REQUEST_TYPES,
+  INVENTORY_REQUEST_STATUSES,
+  INVENTORY_ALLOWED_FIELDS,
+  INVENTORY_REQUIRED_CREATE_FIELDS,
+  INVENTORY_ACTIVITY_ACTIONS,
+};
