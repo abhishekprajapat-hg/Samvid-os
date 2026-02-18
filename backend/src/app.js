@@ -23,6 +23,10 @@ if (process.env.NODE_ENV !== "test") {
   app.use(morgan("dev"));
 }
 
+app.get("/api/health", (_req, res) => {
+  res.json({ ok: true, service: "samvid-backend", timestamp: new Date().toISOString() });
+});
+
 app.use("/api/leads", require("./routes/lead.routes"));
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/users", require("./routes/user.routes"));
