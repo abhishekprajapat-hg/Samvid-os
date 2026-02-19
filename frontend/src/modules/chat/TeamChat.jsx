@@ -661,16 +661,16 @@ const TeamChat = ({ theme = "light" }) => {
 
   return (
     <div
-      className={`h-full min-h-0 w-full overflow-hidden ${isDark ? "bg-slate-950/35" : "bg-slate-100/75"}`}
+      className={`h-full min-h-0 w-full overflow-hidden p-2 sm:p-3 ${isDark ? "bg-slate-950/35" : "bg-slate-100/75"}`}
     >
       <Motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`grid h-full min-h-0 w-full grid-cols-1 overflow-hidden md:grid-cols-[360px_1fr] ${
-          isDark ? "bg-slate-900/70" : "bg-white/90"
+        className={`mx-auto grid h-full min-h-0 w-full max-w-[1520px] grid-cols-1 overflow-hidden rounded-2xl border shadow-sm md:grid-cols-[360px_1fr] ${
+          isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white/90"
         }`}
       >
-        <aside className={`${activeContact ? "hidden md:flex" : "flex"} flex-col border-r p-3 ${
+        <aside className={`${activeContact ? "hidden md:flex" : "flex"} min-h-0 flex-col overflow-hidden border-r p-3 ${
           isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white"
         }`}>
           <div className={`rounded-xl border px-3 py-2.5 ${isDark ? "border-slate-700 bg-slate-950/60" : "border-slate-200 bg-slate-50"}`}>
@@ -737,7 +737,7 @@ const TeamChat = ({ theme = "light" }) => {
             </p>
           </div>
 
-          <div className="mt-3 flex-1 space-y-3 overflow-y-auto pr-1 custom-scrollbar">
+          <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 custom-scrollbar">
             <div>
               <p className={`pb-1 pl-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 Conversations
