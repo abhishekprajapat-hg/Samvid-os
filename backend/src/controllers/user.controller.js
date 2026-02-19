@@ -5,6 +5,33 @@ const {
   redistributePipelineLeads,
 } = require("../services/leadAssignment.service");
 
+const LOCATION_ALLOWED_ROLES = ["FIELD_EXECUTIVE", "EXECUTIVE"];
+const LOCATION_VIEWER_ROLES = ["ADMIN", "MANAGER", "FIELD_EXECUTIVE"];
+
+const toFiniteNumber = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeLatitude = (value) => {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null) return null;
+  if (parsed < -90 || parsed > 90) return null;
+  return parsed;
+};
+
+const normalizeLongitude = (value) => {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null) return null;
+  if (parsed < -180 || parsed > 180) return null;
+  return parsed;
+};
+
+const normalizeOptionalNumber = (value) => {
+  const parsed = toFiniteNumber(value);
+  return parsed === null ? null : Math.max(0, parsed);
+};
+
 const findLeastLoadedManager = async (companyId) => {
   const managers = await User.find({
     role: "MANAGER",
@@ -351,5 +378,122 @@ exports.getMyTeam = async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateMyLocation = async (req, res) => {
+  try {
+    if (!LOCATION_ALLOWED_ROLES.includes(req.user.role)) {
+      return res.status(403).json({
+        message: "Only executives can update live location",
+      });
+    }
+
+    const lat = normalizeLatitude(req.body?.lat);
+    const lng = normalizeLongitude(req.body?.lng);
+
+    if (lat === null || lng === null) {
+      return res.status(400).json({
+        message: "Valid lat and lng are required",
+      });
+    }
+
+    const accuracy = normalizeOptionalNumber(req.body?.accuracy);
+    const heading = normalizeOptionalNumber(req.body?.heading);
+    const speed = normalizeOptionalNumber(req.body?.speed);
+    const locationUpdatedAt = new Date();
+
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: req.user._id, companyId: req.user.companyId },
+      {
+        $set: {
+          liveLocation: {
+            lat,
+            lng,
+            accuracy,
+            heading,
+            speed,
+            updatedAt: locationUpdatedAt,
+          },
+        },
+      },
+      {
+        new: true,
+        select: "_id name role liveLocation",
+      },
+    );
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    return res.json({
+      message: "Live location updated",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getFieldExecutiveLocations = async (req, res) => {
+  try {
+    if (!LOCATION_VIEWER_ROLES.includes(req.user.role)) {
+      return res.status(403).json({
+        message: "Only admin and managers can view field locations",
+      });
+    }
+
+    const staleMinutesRaw = Number.parseInt(req.query?.staleMinutes, 10);
+    const staleMinutes =
+      Number.isInteger(staleMinutesRaw) && staleMinutesRaw > 0
+        ? Math.min(staleMinutesRaw, 1440)
+        : 30;
+    const threshold = new Date(Date.now() - staleMinutes * 60 * 1000);
+
+    const query = {
+      companyId: req.user.companyId,
+      role: "FIELD_EXECUTIVE",
+      isActive: true,
+    };
+
+    if (req.user.role === "MANAGER") {
+      query.parentId = req.user._id;
+    } else if (req.user.role === "FIELD_EXECUTIVE") {
+      query._id = req.user._id;
+    }
+
+    const users = await User.find(query)
+      .select("name email phone role parentId isActive lastAssignedAt liveLocation")
+      .sort({ name: 1 });
+
+    const rows = users.map((user) => {
+      const location = user.liveLocation || null;
+      const updatedAt = location?.updatedAt ? new Date(location.updatedAt) : null;
+      const isFresh = Boolean(updatedAt && updatedAt >= threshold);
+
+      return {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+        parentId: user.parentId,
+        isActive: user.isActive,
+        lastAssignedAt: user.lastAssignedAt || null,
+        liveLocation: location,
+        isLocationFresh: isFresh,
+      };
+    });
+
+    return res.json({
+      count: rows.length,
+      staleMinutes,
+      users: rows,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Server error" });
   }
 };

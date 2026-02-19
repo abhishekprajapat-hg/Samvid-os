@@ -1,9 +1,10 @@
-import React, { useState, lazy, Suspense, useMemo, useEffect } from "react";
+import React, { useState, lazy, Suspense, useMemo, useEffect, useRef } from "react";
 import { Routes, Route, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import api from "./services/api";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ChatNotificationProvider } from "./context/chatNotificationProvider";
+import { updateMyLiveLocation } from "./services/userService";
 
 /* =======================
    LAZY IMPORTS
@@ -29,6 +30,25 @@ const ClientHome = lazy(() => import("./modules/portal/ClientHome"));
 const ClientListing = lazy(() => import("./modules/portal/ClientListing"));
 const Performance = lazy(() => import("./modules/reports/Performance"));
 
+const EARTH_RADIUS_METERS = 6371000;
+const LOCATION_SYNC_MIN_INTERVAL_MS = 30000;
+const LOCATION_SYNC_MIN_DISTANCE_METERS = 30;
+
+const toRadians = (degrees) => (degrees * Math.PI) / 180;
+
+const calculateDistanceMeters = (aLat, aLng, bLat, bLng) => {
+  const dLat = toRadians(bLat - aLat);
+  const dLng = toRadians(bLng - aLng);
+  const lat1 = toRadians(aLat);
+  const lat2 = toRadians(bLat);
+
+  const haversine =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) * Math.sin(dLng / 2) * Math.cos(lat1) * Math.cos(lat2);
+  const arc = 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine));
+  return EARTH_RADIUS_METERS * arc;
+};
+
 /* =======================
    MAIN APP
 ======================= */
@@ -39,6 +59,12 @@ export default function App() {
   const [theme, setTheme] = useState(() => {
     const storedTheme = localStorage.getItem("theme");
     return storedTheme === "dark" ? "dark" : "light";
+  });
+  const locationSyncStateRef = useRef({
+    inFlight: false,
+    lastSentAt: 0,
+    lastLat: null,
+    lastLng: null,
   });
 
   const location = useLocation();
@@ -85,6 +111,82 @@ export default function App() {
     root.classList.add(theme === "dark" ? "theme-dark" : "theme-light");
     localStorage.setItem("theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!isLoggedIn || userRole !== "FIELD_EXECUTIVE") return undefined;
+    if (typeof navigator === "undefined" || !navigator.geolocation) return undefined;
+
+    let alive = true;
+    const sendLocationUpdate = async (coords) => {
+      if (!alive) return;
+
+      const latitude = Number(coords?.latitude);
+      const longitude = Number(coords?.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+
+      const now = Date.now();
+      const state = locationSyncStateRef.current;
+      const hasPrevious = Number.isFinite(state.lastLat) && Number.isFinite(state.lastLng);
+
+      let movedDistance = Number.POSITIVE_INFINITY;
+      if (hasPrevious) {
+        movedDistance = calculateDistanceMeters(
+          state.lastLat,
+          state.lastLng,
+          latitude,
+          longitude,
+        );
+      }
+
+      const intervalSinceLastSend = now - Number(state.lastSentAt || 0);
+      const shouldSend =
+        !hasPrevious ||
+        intervalSinceLastSend >= LOCATION_SYNC_MIN_INTERVAL_MS ||
+        movedDistance >= LOCATION_SYNC_MIN_DISTANCE_METERS;
+
+      if (!shouldSend || state.inFlight) return;
+
+      state.inFlight = true;
+      try {
+        await updateMyLiveLocation({
+          lat: latitude,
+          lng: longitude,
+          accuracy: Number.isFinite(coords?.accuracy) ? Number(coords.accuracy) : null,
+          heading: Number.isFinite(coords?.heading) ? Number(coords.heading) : null,
+          speed: Number.isFinite(coords?.speed) ? Number(coords.speed) : null,
+        });
+
+        state.lastLat = latitude;
+        state.lastLng = longitude;
+        state.lastSentAt = now;
+      } catch {
+        // Keep background sync silent to avoid blocking app flow.
+      } finally {
+        state.inFlight = false;
+      }
+    };
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        sendLocationUpdate(position.coords);
+      },
+      () => {
+        // Geolocation can be denied; keep app usable without location streaming.
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 15000,
+        timeout: 20000,
+      },
+    );
+
+    return () => {
+      alive = false;
+      if (watchId !== null && watchId !== undefined) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [isLoggedIn, userRole]);
 
   /* 🔥 Dashboard by role */
   const DashboardByRole = useMemo(() => {

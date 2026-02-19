@@ -11,12 +11,36 @@ import {
   UserRound,
   Users,
 } from "lucide-react";
+import {
+  CircleMarker,
+  MapContainer,
+  Popup,
+  TileLayer,
+  useMap,
+} from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 import { getAllLeads } from "../../services/leadService";
-import { getUsers } from "../../services/userService";
+import { getFieldExecutiveLocations, getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 
 const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
 const VISIT_STATUS = "SITE_VISIT";
+const DEFAULT_MAP_CENTER = [28.6139, 77.209];
+const LOCATION_STALE_MINUTES = 30;
+const LIVE_LOCATION_REFRESH_INTERVAL_MS = 30000;
+const CITY_COORDINATES = {
+  noida: [28.5355, 77.391],
+  gurgaon: [28.4595, 77.0266],
+  gurugram: [28.4595, 77.0266],
+  delhi: [28.6139, 77.209],
+  ghaziabad: [28.6692, 77.4538],
+  faridabad: [28.4089, 77.3178],
+  indore: [22.7196, 75.8577],
+  mumbai: [19.076, 72.8777],
+  pune: [18.5204, 73.8567],
+  jaipur: [26.9124, 75.7873],
+  chandigarh: [30.7333, 76.7794],
+};
 
 const toDate = (value) => {
   if (value === null || value === undefined || value === "") return null;
@@ -67,18 +91,101 @@ const getExecutiveFromLead = (lead) => {
   return null;
 };
 
-const getPinPosition = (seedText) => {
-  const text = String(seedText || "0");
+const hashText = (value) => {
+  const text = String(value || "0");
   let hash = 0;
-
   for (let i = 0; i < text.length; i += 1) {
     hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
   }
+  return hash;
+};
 
-  const absHash = Math.abs(hash);
-  const top = 15 + (absHash % 70);
-  const left = 8 + ((absHash * 7) % 84);
-  return { top, left };
+const getCityCoordinates = (cityName) => {
+  const key = String(cityName || "").trim().toLowerCase();
+  return CITY_COORDINATES[key] || DEFAULT_MAP_CENTER;
+};
+
+const getLiveCoordinates = (executive) => {
+  const lat = Number(executive?.liveLocation?.lat);
+  const lng = Number(executive?.liveLocation?.lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return null;
+  }
+
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    return null;
+  }
+
+  return [lat, lng];
+};
+
+const buildExecutiveCoordinates = (row) => {
+  const livePosition = getLiveCoordinates(row.executive);
+  if (livePosition) {
+    return {
+      position: livePosition,
+      city: "Live",
+      mode: "live",
+      isFresh: row.executive?.isLocationFresh !== false,
+      updatedAt: row.executive?.liveLocation?.updatedAt || null,
+    };
+  }
+
+  const leadWithCity = row.assignedRows.find((lead) => String(lead.city || "").trim());
+  const city = String(leadWithCity?.city || "").trim();
+  const base = getCityCoordinates(city);
+
+  const hash = Math.abs(hashText(`${row.executive._id}:${city || "default"}`));
+  const latJitter = ((hash % 2001) - 1000) / 45000;
+  const lngJitter = ((Math.floor(hash / 2001) % 2001) - 1000) / 45000;
+
+  return {
+    position: [base[0] + latJitter, base[1] + lngJitter],
+    city: city || "Unknown",
+    mode: "estimated",
+    isFresh: false,
+    updatedAt: null,
+  };
+};
+
+const mergeUsersWithLocationRows = (users, locationRows) => {
+  if (!Array.isArray(users) || !users.length) return [];
+  if (!Array.isArray(locationRows) || !locationRows.length) return users;
+
+  const locationMap = new Map(
+    locationRows
+      .filter((row) => row?._id)
+      .map((row) => [String(row._id), row]),
+  );
+
+  return users.map((user) => {
+    const locationRow = locationMap.get(String(user?._id || ""));
+    if (!locationRow) {
+      return user;
+    }
+
+    return {
+      ...user,
+      liveLocation: locationRow.liveLocation || null,
+      isLocationFresh:
+        typeof locationRow.isLocationFresh === "boolean"
+          ? locationRow.isLocationFresh
+          : user.isLocationFresh,
+      lastAssignedAt: locationRow.lastAssignedAt || user.lastAssignedAt || null,
+    };
+  });
+};
+
+const MapViewportController = ({ center }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!Array.isArray(center) || center.length !== 2) return;
+    map.flyTo(center, 9, { duration: 0.6 });
+  }, [center, map]);
+
+  return null;
 };
 
 const FieldOps = () => {
@@ -89,6 +196,17 @@ const FieldOps = () => {
   const [leads, setLeads] = useState([]);
   const [users, setUsers] = useState([]);
   const [selectedExecutiveId, setSelectedExecutiveId] = useState("");
+
+  const refreshLiveLocations = useCallback(async () => {
+    try {
+      const locationRows = await getFieldExecutiveLocations({
+        staleMinutes: LOCATION_STALE_MINUTES,
+      });
+      setUsers((previous) => mergeUsersWithLocationRows(previous, locationRows));
+    } catch {
+      // Keep map usable even if live location endpoint is unavailable.
+    }
+  }, []);
 
   const loadFieldOps = useCallback(async (silent = false) => {
     try {
@@ -101,9 +219,20 @@ const FieldOps = () => {
       setError("");
       const [leadRows, userPayload] = await Promise.all([getAllLeads(), getUsers()]);
       const userRows = userPayload?.users || [];
+      let locationRows = [];
+
+      try {
+        locationRows = await getFieldExecutiveLocations({
+          staleMinutes: LOCATION_STALE_MINUTES,
+        });
+      } catch {
+        locationRows = [];
+      }
+
+      const mergedUsers = mergeUsersWithLocationRows(userRows, locationRows);
 
       setLeads(Array.isArray(leadRows) ? leadRows : []);
-      setUsers(Array.isArray(userRows) ? userRows : []);
+      setUsers(Array.isArray(mergedUsers) ? mergedUsers : []);
     } catch (fetchError) {
       setError(toErrorMessage(fetchError, "Failed to load field operations"));
       setLeads([]);
@@ -117,6 +246,14 @@ const FieldOps = () => {
   useEffect(() => {
     loadFieldOps(false);
   }, [loadFieldOps]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      refreshLiveLocations();
+    }, LIVE_LOCATION_REFRESH_INTERVAL_MS);
+
+    return () => clearInterval(intervalId);
+  }, [refreshLiveLocations]);
 
   const dashboard = useMemo(() => {
     const now = new Date();
@@ -225,6 +362,47 @@ const FieldOps = () => {
     [dashboard.executiveStats, selectedExecutiveId],
   );
 
+  const mapExecutives = useMemo(
+    () =>
+      dashboard.executiveStats.map((row) => {
+        const location = buildExecutiveCoordinates(row);
+        return {
+          ...row,
+          markerPosition: location.position,
+          markerCity: location.city,
+          markerMode: location.mode,
+          markerIsFresh: location.isFresh,
+          markerUpdatedAt: location.updatedAt,
+        };
+      }),
+    [dashboard.executiveStats],
+  );
+
+  const mapCenter = useMemo(() => {
+    const selected = mapExecutives.find(
+      (row) => String(row.executive._id) === String(selectedExecutiveId),
+    );
+    if (selected?.markerPosition) {
+      return selected.markerPosition;
+    }
+    if (!mapExecutives.length) {
+      return DEFAULT_MAP_CENTER;
+    }
+
+    const total = mapExecutives.reduce(
+      (acc, row) => ({
+        lat: acc.lat + row.markerPosition[0],
+        lng: acc.lng + row.markerPosition[1],
+      }),
+      { lat: 0, lng: 0 },
+    );
+
+    return [
+      total.lat / mapExecutives.length,
+      total.lng / mapExecutives.length,
+    ];
+  }, [mapExecutives, selectedExecutiveId]);
+
   if (loading) {
     return (
       <div className="w-full h-full flex items-center justify-center gap-2 text-sm text-slate-500">
@@ -303,7 +481,7 @@ const FieldOps = () => {
         <section className="rounded-2xl border border-slate-200 bg-white p-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
-              Executive Coverage Grid
+              Executive Coverage Map
             </h2>
             <span className="text-xs text-slate-500">
               {dashboard.fieldExecutives.length} executives online
@@ -314,35 +492,65 @@ const FieldOps = () => {
             <EmptyState text="No active field executives found for your access scope." />
           ) : (
             <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="relative h-[340px] overflow-hidden rounded-lg border border-slate-200 bg-[linear-gradient(90deg,rgba(148,163,184,0.16)_1px,transparent_1px),linear-gradient(0deg,rgba(148,163,184,0.16)_1px,transparent_1px)] bg-[size:32px_32px]">
-                {dashboard.executiveStats.map((row) => {
-                  const id = String(row.executive._id);
-                  const active = id === String(selectedExecutiveId);
-                  const pin = getPinPosition(id);
+              <div className="h-[340px] overflow-hidden rounded-lg border border-slate-200">
+                <MapContainer
+                  center={mapCenter}
+                  zoom={9}
+                  scrollWheelZoom
+                  className="h-full w-full"
+                  attributionControl={false}
+                >
+                  <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                  <MapViewportController center={mapCenter} />
+                  {mapExecutives.map((row) => {
+                    const id = String(row.executive._id);
+                    const active = id === String(selectedExecutiveId);
 
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => setSelectedExecutiveId(id)}
-                      className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-lg border px-2 py-1 text-left transition-shadow ${
-                        active
-                          ? "border-slate-900 bg-slate-900 text-white shadow-lg"
-                          : "border-slate-300 bg-white text-slate-700 hover:border-slate-500"
-                      }`}
-                      style={{ top: `${pin.top}%`, left: `${pin.left}%` }}
-                    >
-                      <div className="flex items-center gap-2">
-                        <MapPin size={14} />
-                        <span className="text-xs font-semibold">{row.executive.name || "Executive"}</span>
-                      </div>
-                      <p className={`mt-1 text-[11px] ${active ? "text-slate-200" : "text-slate-500"}`}>
-                        {row.activeAssigned} active | {row.siteVisits} visits
-                      </p>
-                    </button>
-                  );
-                })}
+                    return (
+                      <CircleMarker
+                        key={id}
+                        center={row.markerPosition}
+                        radius={active ? 11 : 8}
+                        pathOptions={{
+                          color: "#0f172a",
+                          fillColor: active ? "#0f172a" : "#06b6d4",
+                          fillOpacity: active ? 0.95 : 0.78,
+                          weight: active ? 3 : 2,
+                        }}
+                        eventHandlers={{
+                          click: () => setSelectedExecutiveId(id),
+                        }}
+                      >
+                        <Popup>
+                          <div className="min-w-[170px]">
+                            <p className="text-sm font-semibold text-slate-900">
+                              {row.executive.name || "Executive"}
+                            </p>
+                            <p className="text-xs text-slate-600">
+                              {row.markerMode === "live"
+                                ? `Live location${row.markerIsFresh ? "" : " (stale)"}`
+                                : `Estimated city: ${row.markerCity}`}
+                            </p>
+                            {row.markerMode === "live" && (
+                              <p className="text-xs text-slate-500">
+                                Updated: {formatDateTime(row.markerUpdatedAt)}
+                              </p>
+                            )}
+                            <p className="mt-1 text-xs text-slate-700">
+                              {row.activeAssigned} active | {row.siteVisits} visits
+                            </p>
+                          </div>
+                        </Popup>
+                      </CircleMarker>
+                    );
+                  })}
+                </MapContainer>
               </div>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Click any marker to open executive queue details.
+              </p>
             </div>
           )}
         </section>
@@ -364,6 +572,11 @@ const FieldOps = () => {
                     </p>
                     <p className="mt-0.5 text-xs text-slate-500">
                       {selectedExecutive.executive.email || selectedExecutive.executive.phone || "-"}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {getLiveCoordinates(selectedExecutive.executive)
+                        ? `Live location ${selectedExecutive.executive.isLocationFresh === false ? "stale" : "active"} | Updated ${formatDateTime(selectedExecutive.executive.liveLocation?.updatedAt)}`
+                        : "Live location unavailable"}
                     </p>
                   </div>
                   <span className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700">

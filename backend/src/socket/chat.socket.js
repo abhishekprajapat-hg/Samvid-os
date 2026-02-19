@@ -88,6 +88,9 @@ const registerChatSocketHandlers = (io) => {
   io.use(authenticateSocket);
 
   io.on("connection", (socket) => {
+    const accessibleRoomIds = new Set();
+    const activelyTypingRoomIds = new Set();
+
     const userRoom = `user:${socket.user._id}`;
     const roleRoom = `role:${socket.user.role}`;
     const companyId = socket.user.companyId ? String(socket.user.companyId) : null;
@@ -110,24 +113,62 @@ const registerChatSocketHandlers = (io) => {
     });
     socket.emit("messenger:ready", { userId: socket.user._id });
 
+    const resolveAccessibleRoomId = async (rawRoomId) => {
+      const requestedRoomId = String(rawRoomId || "").trim();
+      if (!requestedRoomId) {
+        throw new Error("roomId is required");
+      }
+
+      if (accessibleRoomIds.has(requestedRoomId)) {
+        return requestedRoomId;
+      }
+
+      const room = await getRoomByIdForUser({
+        user: socket.user,
+        roomId: requestedRoomId,
+      });
+      const resolvedRoomId = String(room?._id || requestedRoomId);
+      accessibleRoomIds.add(requestedRoomId);
+      accessibleRoomIds.add(resolvedRoomId);
+      socket.join(`room:${resolvedRoomId}`);
+      return resolvedRoomId;
+    };
+
     socket.on("chat:room:join", async (payload = {}, ack) => {
       try {
-        if (!payload.roomId) {
-          return sendAck(ack, { ok: false, error: "roomId is required" });
-        }
-
-        const room = await getRoomByIdForUser({
-          user: socket.user,
-          roomId: payload.roomId,
-        });
-
-        socket.join(`room:${room._id}`);
-
-        return sendAck(ack, { ok: true, roomId: room._id });
+        const roomId = await resolveAccessibleRoomId(payload.roomId);
+        return sendAck(ack, { ok: true, roomId });
       } catch (error) {
         return sendAck(ack, {
           ok: false,
           error: error.message || "Failed to join room",
+        });
+      }
+    });
+
+    socket.on("chat:typing", async (payload = {}, ack) => {
+      try {
+        const roomId = await resolveAccessibleRoomId(payload.roomId || payload.conversationId);
+        const isTyping = payload.isTyping !== false;
+        const eventPayload = {
+          roomId,
+          userId: String(socket.user._id),
+          isTyping,
+          at: new Date().toISOString(),
+        };
+
+        if (isTyping) {
+          activelyTypingRoomIds.add(roomId);
+        } else {
+          activelyTypingRoomIds.delete(roomId);
+        }
+
+        socket.to(`room:${roomId}`).emit("chat:typing", eventPayload);
+        return sendAck(ack, { ok: true, ...eventPayload });
+      } catch (error) {
+        return sendAck(ack, {
+          ok: false,
+          error: error.message || "Failed to update typing state",
         });
       }
     });
@@ -150,6 +191,21 @@ const registerChatSocketHandlers = (io) => {
               sharedProperty: payload.sharedProperty || null,
               mediaAttachments: payload.mediaAttachments || [],
             });
+
+        const resultRoomId = String(result?.room?._id || "");
+        if (resultRoomId) {
+          accessibleRoomIds.add(resultRoomId);
+          socket.join(`room:${resultRoomId}`);
+          if (activelyTypingRoomIds.has(resultRoomId)) {
+            activelyTypingRoomIds.delete(resultRoomId);
+            socket.to(`room:${resultRoomId}`).emit("chat:typing", {
+              roomId: resultRoomId,
+              userId: String(socket.user._id),
+              isTyping: false,
+              at: new Date().toISOString(),
+            });
+          }
+        }
 
         emitRealtimeMessageEvent(io, result);
         return sendAck(ack, {
@@ -243,6 +299,19 @@ const registerChatSocketHandlers = (io) => {
           error: error.message || "Failed to send message",
         });
       }
+    });
+
+    socket.on("disconnect", () => {
+      const userId = String(socket.user?._id || "");
+      activelyTypingRoomIds.forEach((roomId) => {
+        socket.to(`room:${roomId}`).emit("chat:typing", {
+          roomId,
+          userId,
+          isTyping: false,
+          at: new Date().toISOString(),
+        });
+      });
+      activelyTypingRoomIds.clear();
     });
   });
 };

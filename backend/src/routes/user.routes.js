@@ -22,6 +22,18 @@ router.get(
   userController.getMyTeam
 );
 
+router.patch(
+  "/location",
+  authMiddleware.protect,
+  userController.updateMyLocation
+);
+
+router.get(
+  "/field-locations",
+  authMiddleware.protect,
+  userController.getFieldExecutiveLocations
+);
+
 router.post(
   "/rebalance-executives",
   authMiddleware.protect,

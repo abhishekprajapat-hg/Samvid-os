@@ -83,6 +83,8 @@ const CLOUDINARY_CLOUD_NAME = "djfiq8kiy";
 const CLOUDINARY_UPLOAD_PRESET = "samvid_upload";
 const MAX_MEDIA_ATTACHMENTS = 8;
 const MAX_MEDIA_SIZE_BYTES = 25 * 1024 * 1024;
+const TYPING_IDLE_TIMEOUT_MS = 1200;
+const REMOTE_TYPING_TIMEOUT_MS = 3200;
 
 const detectMediaKind = ({ kind, mimeType = "" } = {}) => {
   const normalized = String(kind || "").trim().toLowerCase();
@@ -334,6 +336,31 @@ const extractIncomingMessageEvent = (payload = {}) => {
   };
 };
 
+const updateTypingUsers = (prev, { roomId, userId, isTyping }) => {
+  const normalizedRoomId = toId(roomId);
+  const normalizedUserId = toId(userId);
+  if (!normalizedRoomId || !normalizedUserId) return prev;
+
+  const currentUsers = Array.isArray(prev[normalizedRoomId]) ? prev[normalizedRoomId] : [];
+  let nextUsers = currentUsers;
+
+  if (isTyping) {
+    if (currentUsers.includes(normalizedUserId)) return prev;
+    nextUsers = [...currentUsers, normalizedUserId];
+  } else {
+    nextUsers = currentUsers.filter((id) => id !== normalizedUserId);
+    if (nextUsers.length === currentUsers.length) return prev;
+  }
+
+  const next = { ...prev };
+  if (nextUsers.length) {
+    next[normalizedRoomId] = nextUsers;
+  } else {
+    delete next[normalizedRoomId];
+  }
+  return next;
+};
+
 const TeamChat = ({ theme = "light" }) => {
   const isDark = theme === "dark";
   const location = useLocation();
@@ -349,8 +376,11 @@ const TeamChat = ({ theme = "light" }) => {
   const socketRef = useRef(null);
   const selectedConversationRef = useRef("");
   const chatOpenReadSyncRef = useRef(false);
+  const typingStateRef = useRef({ roomId: "", isTyping: false });
   const bottomRef = useRef(null);
   const mediaInputRef = useRef(null);
+  const typingStopTimeoutRef = useRef(null);
+  const remoteTypingTimeoutsRef = useRef(new Map());
   const seenSocketMessageIdsRef = useRef(new Set());
   const deliveredReceiptIdsRef = useRef(new Set());
   const seenReceiptIdsRef = useRef(new Set());
@@ -368,6 +398,7 @@ const TeamChat = ({ theme = "light" }) => {
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [selectedContactId, setSelectedContactId] = useState("");
   const [messages, setMessages] = useState([]);
+  const [typingByRoom, setTypingByRoom] = useState({});
   const [draft, setDraft] = useState("");
   const [queuedShare, setQueuedShare] = useState(null);
   const [queuedMedia, setQueuedMedia] = useState([]);
@@ -528,6 +559,85 @@ const TeamChat = ({ theme = "light" }) => {
     [unreadByConversation],
   );
 
+  const clearLocalTypingStopTimer = useCallback(() => {
+    if (typingStopTimeoutRef.current) {
+      clearTimeout(typingStopTimeoutRef.current);
+      typingStopTimeoutRef.current = null;
+    }
+  }, []);
+
+  const emitTypingState = useCallback((roomId, isTyping) => {
+    const normalizedRoomId = toId(roomId);
+    if (!normalizedRoomId) return;
+
+    const socket = socketRef.current;
+    if (!socket?.connected) return;
+
+    const currentTypingState = typingStateRef.current;
+    if (
+      currentTypingState.roomId === normalizedRoomId
+      && currentTypingState.isTyping === isTyping
+    ) {
+      return;
+    }
+
+    typingStateRef.current = { roomId: normalizedRoomId, isTyping };
+    socket.emit("chat:typing", { roomId: normalizedRoomId, isTyping });
+  }, []);
+
+  const stopLocalTyping = useCallback((roomId = "") => {
+    clearLocalTypingStopTimer();
+    const targetRoomId = toId(roomId || typingStateRef.current.roomId);
+    if (!targetRoomId) return;
+    emitTypingState(targetRoomId, false);
+  }, [clearLocalTypingStopTimer, emitTypingState]);
+
+  const queueLocalTypingStop = useCallback((roomId) => {
+    const normalizedRoomId = toId(roomId);
+    clearLocalTypingStopTimer();
+    if (!normalizedRoomId) return;
+
+    typingStopTimeoutRef.current = setTimeout(() => {
+      emitTypingState(normalizedRoomId, false);
+    }, TYPING_IDLE_TIMEOUT_MS);
+  }, [clearLocalTypingStopTimer, emitTypingState]);
+
+  const activeTypingUsers = useMemo(() => {
+    const roomId = toId(selectedConversationId);
+    if (!roomId) return [];
+    return typingByRoom[roomId] || [];
+  }, [selectedConversationId, typingByRoom]);
+
+  const isActiveContactTyping = activeTypingUsers.length > 0;
+
+  useEffect(() => {
+    const nextRoomId = toId(selectedConversationId);
+    const previousTypingState = typingStateRef.current;
+
+    if (
+      previousTypingState.isTyping
+      && previousTypingState.roomId
+      && previousTypingState.roomId !== nextRoomId
+    ) {
+      emitTypingState(previousTypingState.roomId, false);
+    }
+
+    typingStateRef.current = {
+      roomId: nextRoomId,
+      isTyping:
+        previousTypingState.roomId === nextRoomId
+        ? previousTypingState.isTyping
+        : false,
+    };
+    clearLocalTypingStopTimer();
+  }, [clearLocalTypingStopTimer, emitTypingState, selectedConversationId]);
+
+  useEffect(() => () => {
+    clearLocalTypingStopTimer();
+    remoteTypingTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    remoteTypingTimeoutsRef.current.clear();
+  }, [clearLocalTypingStopTimer]);
+
   useEffect(() => {
     const incomingShare = sanitizeSharePayload(location.state?.shareProperty);
     const openConversationId = String(location.state?.openConversationId || "").trim();
@@ -651,6 +761,11 @@ const TeamChat = ({ theme = "light" }) => {
 
     const onDisconnect = () => {
       setSocketConnected(false);
+      clearLocalTypingStopTimer();
+      typingStateRef.current = { roomId: "", isTyping: false };
+      remoteTypingTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+      remoteTypingTimeoutsRef.current.clear();
+      setTypingByRoom({});
     };
 
     const onConnectError = () => {
@@ -697,6 +812,17 @@ const TeamChat = ({ theme = "light" }) => {
       const senderId = toId(message?.sender?._id || message?.sender);
       const isIncoming = Boolean(senderId) && senderId !== currentUser.id;
 
+      if (senderId) {
+        const typingKey = `${conversationId}:${senderId}`;
+        const existingTypingTimeout = remoteTypingTimeoutsRef.current.get(typingKey);
+        if (existingTypingTimeout) {
+          clearTimeout(existingTypingTimeout);
+          remoteTypingTimeoutsRef.current.delete(typingKey);
+        }
+        setTypingByRoom((prev) =>
+          updateTypingUsers(prev, { roomId: conversationId, userId: senderId, isTyping: false }));
+      }
+
       if (isActiveConversation) {
         setMessages((prev) => mergeMessages(prev, [message]));
 
@@ -742,6 +868,31 @@ const TeamChat = ({ theme = "light" }) => {
       );
     };
 
+    const onTyping = (payload = {}) => {
+      const roomId = toId(payload?.roomId || payload?.conversationId);
+      const userId = toId(payload?.userId);
+      if (!roomId || !userId || userId === currentUser.id) return;
+
+      const isTyping = payload?.isTyping !== false;
+      const typingKey = `${roomId}:${userId}`;
+      const existingTypingTimeout = remoteTypingTimeoutsRef.current.get(typingKey);
+      if (existingTypingTimeout) {
+        clearTimeout(existingTypingTimeout);
+        remoteTypingTimeoutsRef.current.delete(typingKey);
+      }
+
+      setTypingByRoom((prev) => updateTypingUsers(prev, { roomId, userId, isTyping }));
+
+      if (!isTyping) return;
+
+      const timeoutId = setTimeout(() => {
+        setTypingByRoom((prev) =>
+          updateTypingUsers(prev, { roomId, userId, isTyping: false }));
+        remoteTypingTimeoutsRef.current.delete(typingKey);
+      }, REMOTE_TYPING_TIMEOUT_MS);
+      remoteTypingTimeoutsRef.current.set(typingKey, timeoutId);
+    };
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
@@ -750,6 +901,7 @@ const TeamChat = ({ theme = "light" }) => {
     socket.on("chat:message:delivered", onMessageDelivered);
     socket.on("chat:message:seen", onMessageSeen);
     socket.on("chat:room:read", onRoomRead);
+    socket.on("chat:typing", onTyping);
 
     return () => {
       socket.off("connect", onConnect);
@@ -760,11 +912,17 @@ const TeamChat = ({ theme = "light" }) => {
       socket.off("chat:message:delivered", onMessageDelivered);
       socket.off("chat:message:seen", onMessageSeen);
       socket.off("chat:room:read", onRoomRead);
+      socket.off("chat:typing", onTyping);
+      clearLocalTypingStopTimer();
+      typingStateRef.current = { roomId: "", isTyping: false };
+      remoteTypingTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+      remoteTypingTimeoutsRef.current.clear();
+      setTypingByRoom({});
       socket.disconnect();
       socketRef.current = null;
       setSocketConnected(false);
     };
-  }, [currentUser.id, emitConversationRead, emitMessageReceipt]);
+  }, [clearLocalTypingStopTimer, currentUser.id, emitConversationRead, emitMessageReceipt]);
 
   const timeline = useMemo(() => {
     let lastDayKey = "";
@@ -781,6 +939,7 @@ const TeamChat = ({ theme = "light" }) => {
   }, [messages]);
 
   const handlePickConversation = (conversationId) => {
+    stopLocalTyping(selectedConversationId);
     const id = String(conversationId);
     setSelectedConversationId(id);
     setSelectedContactId("");
@@ -788,6 +947,7 @@ const TeamChat = ({ theme = "light" }) => {
   };
 
   const handlePickContact = (contactId) => {
+    stopLocalTyping(selectedConversationId);
     const existing = findConversationByContact(conversations, contactId);
     if (existing) {
       handlePickConversation(existing._id);
@@ -805,6 +965,7 @@ const TeamChat = ({ theme = "light" }) => {
   };
 
   const handleMobileBack = () => {
+    stopLocalTyping(selectedConversationId);
     setSelectedConversationId("");
     setSelectedContactId("");
     setMessages([]);
@@ -816,6 +977,25 @@ const TeamChat = ({ theme = "light" }) => {
 
   const handleRemoveQueuedMedia = (url) => {
     setQueuedMedia((prev) => prev.filter((item) => item.url !== url));
+  };
+
+  const handleDraftChange = (e) => {
+    const nextValue = String(e.target.value || "");
+    setDraft(nextValue);
+
+    const roomId = toId(selectedConversationId);
+    if (!roomId) return;
+
+    if (nextValue.trim()) {
+      emitTypingState(roomId, true);
+      queueLocalTypingStop(roomId);
+    } else {
+      stopLocalTyping(roomId);
+    }
+  };
+
+  const handleDraftBlur = () => {
+    stopLocalTyping(selectedConversationId);
   };
 
   const handleMediaSelected = async (e) => {
@@ -866,6 +1046,7 @@ const TeamChat = ({ theme = "light" }) => {
     e.preventDefault();
     const text = draft.trim();
     if ((!text && !queuedShare && queuedMedia.length === 0) || sending || !activeContact) return;
+    stopLocalTyping(selectedConversationId);
 
     setSending(true);
     setDraft("");
@@ -1171,8 +1352,16 @@ const TeamChat = ({ theme = "light" }) => {
                   <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
                     {activeContact.name}
                   </p>
-                  <p className={`truncate text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    {activeContact.roleLabel || activeContact.role}
+                  <p className={`truncate text-[11px] ${
+                    isActiveContactTyping
+                      ? isDark
+                        ? "text-emerald-300"
+                        : "text-emerald-600"
+                      : isDark
+                        ? "text-slate-400"
+                        : "text-slate-500"
+                  }`}>
+                    {isActiveContactTyping ? "typing..." : (activeContact.roleLabel || activeContact.role)}
                   </p>
                 </div>
               </div>
@@ -1491,7 +1680,8 @@ const TeamChat = ({ theme = "light" }) => {
               </button>
               <textarea
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={handleDraftChange}
+                onBlur={handleDraftBlur}
                 placeholder={
                   activeContact
                     ? queuedShare
