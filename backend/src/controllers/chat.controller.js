@@ -154,6 +154,8 @@ exports.sendRoomMessage = async (req, res) => {
       sender: req.user,
       roomId: req.params.roomId,
       text: req.body?.text,
+      sharedProperty: req.body?.sharedProperty || null,
+      mediaAttachments: req.body?.mediaAttachments || [],
     });
 
     emitRealtimeMessage(req.app.get("io"), payload);
@@ -265,6 +267,8 @@ exports.sendMessage = async (req, res) => {
       text: req.body?.text,
       roomId: req.body?.conversationId || req.body?.roomId || null,
       recipientId: req.body?.recipientId || null,
+      sharedProperty: req.body?.sharedProperty || null,
+      mediaAttachments: req.body?.mediaAttachments || [],
     });
 
     emitRealtimeMessage(req.app.get("io"), payload);

@@ -48,7 +48,7 @@ const MENU_CONFIG = {
     ]
 };
 
-const Sidebar = ({ userRole = 'manager', onLogout, theme = "dark", onToggleTheme }) => {
+const Sidebar = ({ userRole = 'manager', onLogout, theme = "light", onToggleTheme }) => {
     const isDark = theme === "dark";
     const roleKeyMap = {
         ADMIN: "admin",

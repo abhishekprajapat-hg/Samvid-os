@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import React, { useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
+  Bell,
   Home,
   Users,
   Building2,
@@ -20,7 +21,8 @@ import {
   X,
   MessageSquare,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion as Motion, AnimatePresence } from "framer-motion";
+import { useChatNotifications } from "../../context/useChatNotifications";
 
 const MENU_CONFIG = {
   admin: [
@@ -64,10 +66,18 @@ const MENU_CONFIG = {
   ],
 };
 
-const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme }) => {
+const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const location = useLocation();
+  const [notificationOpen, setNotificationOpen] = useState(false);
+  const navigate = useNavigate();
   const isDark = theme === "dark";
+  const {
+    unreadTotal,
+    recentNotifications,
+    markConversationRead,
+    markAllRead,
+    clearRecentNotifications,
+  } = useChatNotifications();
 
   const roleKeyMap = {
     ADMIN: "admin",
@@ -79,13 +89,25 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
   const normalizedRole = roleKeyMap[userRole] || "manager";
   const currentMenu = MENU_CONFIG[normalizedRole] || MENU_CONFIG.manager;
 
-  useEffect(() => {
+  const handleCloseMenus = () => {
     setMobileMenuOpen(false);
-  }, [location.pathname]);
+    setNotificationOpen(false);
+  };
+
+  const handleOpenNotificationConversation = async (notification) => {
+    const conversationId = String(notification?.conversationId || "");
+    if (!conversationId) return;
+
+    setNotificationOpen(false);
+    await markConversationRead(conversationId, { persist: false });
+    navigate("/chat", {
+      state: { openConversationId: conversationId },
+    });
+  };
 
   return (
     <>
-      <motion.header
+      <Motion.header
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.35 }}
@@ -113,8 +135,11 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
 
           <nav className="hidden md:flex flex-1 items-center justify-center gap-4 lg:gap-5 py-1">
             {currentMenu.map((item) => (
-              <NavLink key={item.path} to={item.path}>
+              <NavLink key={item.path} to={item.path} onClick={handleCloseMenus}>
                 {({ isActive }) => (
+                  (() => {
+                    const showChatBadge = item.path === "/chat" && unreadTotal > 0;
+                    return (
                   <div
                     className={`group relative h-11 w-11 rounded-xl border text-xs font-semibold tracking-wide whitespace-nowrap flex items-center justify-center transition-all ${
                       isActive
@@ -127,6 +152,17 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
                     }`}
                   >
                     <item.icon size={18} />
+                    {showChatBadge && (
+                      <span
+                        className={`absolute -top-1 -right-1 min-w-[16px] rounded-full px-1 py-0.5 text-[10px] font-bold leading-none ${
+                          isDark
+                            ? "bg-rose-500 text-white"
+                            : "bg-rose-600 text-white"
+                        }`}
+                      >
+                        {unreadTotal > 99 ? "99+" : unreadTotal}
+                      </span>
+                    )}
                     <span
                       className={`pointer-events-none absolute z-[70] left-1/2 top-[calc(100%+8px)] -translate-x-1/2 px-2.5 py-1 rounded-md text-[10px] font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-100 ${
                         isDark
@@ -137,6 +173,8 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
                       {item.name}
                     </span>
                   </div>
+                    );
+                  })()
                 )}
               </NavLink>
             ))}
@@ -145,6 +183,115 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
           <div className="flex-1 md:hidden" />
 
           <div className="flex-none flex items-center justify-end gap-2">
+            <div className="relative">
+              <button
+                onClick={() => setNotificationOpen((prev) => !prev)}
+                className={`w-10 h-10 rounded-xl border flex items-center justify-center transition-colors ${
+                  isDark
+                    ? "text-slate-300 border-cyan-200/20 hover:bg-cyan-300/10 hover:text-cyan-200"
+                    : "text-slate-700 border-slate-300 hover:bg-sky-100 hover:text-sky-700"
+                }`}
+                title="Chat notifications"
+              >
+                <Bell size={18} />
+                {unreadTotal > 0 && (
+                  <span
+                    className={`absolute -top-1 -right-1 min-w-[16px] rounded-full px-1 py-0.5 text-[10px] font-bold leading-none ${
+                      isDark
+                        ? "bg-rose-500 text-white"
+                        : "bg-rose-600 text-white"
+                    }`}
+                  >
+                    {unreadTotal > 99 ? "99+" : unreadTotal}
+                  </span>
+                )}
+              </button>
+
+              <AnimatePresence>
+                {notificationOpen && (
+                  <Motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    className={`absolute right-0 top-[calc(100%+10px)] z-[80] w-[320px] rounded-2xl border shadow-2xl ${
+                      isDark
+                        ? "border-slate-700 bg-slate-950/95"
+                        : "border-slate-300 bg-white"
+                    }`}
+                  >
+                    <div className={`flex items-center justify-between px-3 py-2.5 border-b ${
+                      isDark ? "border-slate-700" : "border-slate-200"
+                    }`}>
+                      <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${
+                        isDark ? "text-slate-200" : "text-slate-700"
+                      }`}>
+                        Chat Notifications
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => markAllRead()}
+                          disabled={unreadTotal === 0}
+                          className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                            isDark ? "text-cyan-200 disabled:text-slate-500" : "text-cyan-700 disabled:text-slate-400"
+                          }`}
+                        >
+                          Mark all read
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearRecentNotifications}
+                          className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                            isDark ? "text-slate-300 hover:text-slate-100" : "text-slate-500 hover:text-slate-800"
+                          }`}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="max-h-[320px] overflow-y-auto custom-scrollbar p-2">
+                      {recentNotifications.length === 0 ? (
+                        <div className={`rounded-xl border border-dashed px-3 py-6 text-center text-xs ${
+                          isDark
+                            ? "border-slate-700 text-slate-400"
+                            : "border-slate-300 text-slate-500"
+                        }`}>
+                          No new chat notifications
+                        </div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {recentNotifications.map((notification) => (
+                            <button
+                              key={notification.id}
+                              type="button"
+                              onClick={() => handleOpenNotificationConversation(notification)}
+                              className={`w-full rounded-xl border px-3 py-2 text-left transition-colors ${
+                                isDark
+                                  ? "border-slate-700 bg-slate-900/70 hover:border-cyan-300/40"
+                                  : "border-slate-200 bg-slate-50 hover:border-cyan-300"
+                              }`}
+                            >
+                              <p className={`truncate text-xs font-semibold ${
+                                isDark ? "text-slate-100" : "text-slate-900"
+                              }`}>
+                                {notification.senderName}
+                              </p>
+                              <p className={`mt-0.5 truncate text-[11px] ${
+                                isDark ? "text-slate-400" : "text-slate-500"
+                              }`}>
+                                {notification.preview}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
             <button
               onClick={onToggleTheme}
               className={`w-10 h-10 rounded-xl border flex items-center justify-center transition-colors ${
@@ -183,19 +330,19 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
             </button>
           </div>
         </div>
-      </motion.header>
+      </Motion.header>
 
       <AnimatePresence>
         {mobileMenuOpen && (
           <>
-            <motion.div
+            <Motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileMenuOpen(false)}
               className="fixed inset-0 top-16 z-40 bg-black/30 md:hidden"
             />
-            <motion.div
+            <Motion.div
               initial={{ y: -16, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: -16, opacity: 0 }}
@@ -205,8 +352,11 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
             >
               <div className="p-3 grid grid-cols-1 gap-2">
                 {currentMenu.map((item) => (
-                  <NavLink key={item.path} to={item.path}>
+                  <NavLink key={item.path} to={item.path} onClick={handleCloseMenus}>
                     {({ isActive }) => (
+                      (() => {
+                        const showChatBadge = item.path === "/chat" && unreadTotal > 0;
+                        return (
                       <div
                         className={`h-10 px-3 rounded-xl border text-xs font-semibold tracking-wide flex items-center gap-3 transition-all ${
                           isActive
@@ -220,7 +370,18 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
                       >
                         <item.icon size={14} />
                         <span>{item.name}</span>
+                        {showChatBadge && (
+                          <span
+                            className={`ml-auto min-w-[18px] rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
+                              isDark ? "bg-rose-500 text-white" : "bg-rose-600 text-white"
+                            }`}
+                          >
+                            {unreadTotal > 99 ? "99+" : unreadTotal}
+                          </span>
+                        )}
                       </div>
+                        );
+                      })()
                     )}
                   </NavLink>
                 ))}
@@ -236,7 +397,7 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "dark", onToggleTheme 
                   <span>Logout</span>
                 </button>
               </div>
-            </motion.div>
+            </Motion.div>
           </>
         )}
       </AnimatePresence>

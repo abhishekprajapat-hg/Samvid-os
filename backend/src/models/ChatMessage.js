@@ -17,6 +17,98 @@ const recipientStatusSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const sharedPropertySchema = new mongoose.Schema(
+  {
+    inventoryId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Inventory",
+      required: true,
+    },
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 200,
+    },
+    projectName: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 120,
+    },
+    towerName: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 120,
+    },
+    unitNumber: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 80,
+    },
+    location: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 240,
+    },
+    price: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    status: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 40,
+    },
+    image: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 2048,
+    },
+  },
+  { _id: false },
+);
+
+const mediaAttachmentSchema = new mongoose.Schema(
+  {
+    url: {
+      type: String,
+      required: true,
+      trim: true,
+      maxlength: 2048,
+    },
+    kind: {
+      type: String,
+      enum: ["image", "video", "audio", "file"],
+      default: "file",
+    },
+    mimeType: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 120,
+    },
+    name: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 180,
+    },
+    size: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+  },
+  { _id: false },
+);
+
 const chatMessageSchema = new mongoose.Schema(
   {
     room: {
@@ -49,6 +141,14 @@ const chatMessageSchema = new mongoose.Schema(
     },
     seenBy: {
       type: [recipientStatusSchema],
+      default: [],
+    },
+    sharedProperty: {
+      type: sharedPropertySchema,
+      default: null,
+    },
+    mediaAttachments: {
+      type: [mediaAttachmentSchema],
       default: [],
     },
   },

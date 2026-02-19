@@ -10,6 +10,7 @@ import {
   History,
   Image as ImageIcon,
   Loader,
+  Share2,
   ShieldCheck,
   User,
 } from "lucide-react";
@@ -136,6 +137,46 @@ const InventoryDetails = () => {
 
   const safeImageIndex = Math.min(activeImageIndex, Math.max(images.length - 1, 0));
   const activeImage = images[safeImageIndex] || "";
+  const sharePayload = useMemo(() => {
+    const inventoryId = inventory?._id || asset?._id;
+    if (!inventoryId) return null;
+
+    const title =
+      asset?.title
+      || [inventory?.projectName, inventory?.towerName, inventory?.unitNumber]
+        .filter(Boolean)
+        .join(" - ")
+      || "Inventory Unit";
+
+    return {
+      inventoryId,
+      title,
+      location: inventory?.location || asset?.location || "",
+      price: Number(inventory?.price ?? asset?.price) || 0,
+      status: statusValue,
+      image: images[0] || "",
+    };
+  }, [
+    asset?._id,
+    asset?.location,
+    asset?.price,
+    asset?.title,
+    images,
+    inventory?._id,
+    inventory?.location,
+    inventory?.price,
+    inventory?.projectName,
+    inventory?.towerName,
+    inventory?.unitNumber,
+    statusValue,
+  ]);
+
+  const handleShareToChat = () => {
+    if (!sharePayload) return;
+    navigate("/chat", {
+      state: { shareProperty: sharePayload },
+    });
+  };
 
   if (loading) {
     return (
@@ -181,13 +222,24 @@ const InventoryDetails = () => {
           </p>
         </div>
 
-        <div
-          className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest ${statusClass(
-            statusValue,
-          )}`}
-        >
-          <ShieldCheck size={14} />
-          {statusValue}
+        <div className="flex flex-wrap items-center gap-2">
+          <div
+            className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest ${statusClass(
+              statusValue,
+            )}`}
+          >
+            <ShieldCheck size={14} />
+            {statusValue}
+          </div>
+          {sharePayload && (
+            <button
+              onClick={handleShareToChat}
+              className="inline-flex items-center gap-1.5 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-cyan-700 hover:bg-cyan-100"
+            >
+              <Share2 size={13} />
+              Share to Chat
+            </button>
+          )}
         </div>
       </div>
 

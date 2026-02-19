@@ -4,6 +4,12 @@ const Lead = require("../models/Lead");
 const User = require("../models/User");
 
 const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
+const DEFAULT_SEED_COUNT = 30;
+
+const parseSeedCount = (rawValue, fallback) => {
+  const parsed = Number.parseInt(rawValue, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 function buildLead(index, assignedTo) {
   const serial = String(index + 1).padStart(2, "0");
@@ -32,6 +38,11 @@ function buildLead(index, assignedTo) {
 
 async function seedLeads() {
   try {
+    const seedCount = parseSeedCount(
+      process.argv[2] || process.env.LEAD_SEED_COUNT,
+      DEFAULT_SEED_COUNT,
+    );
+
     await mongoose.connect(process.env.MONGO_URI);
 
     const executives = await User.find({
@@ -40,7 +51,7 @@ async function seedLeads() {
     }).select("_id");
 
     const leads = [];
-    for (let i = 0; i < 30; i += 1) {
+    for (let i = 0; i < seedCount; i += 1) {
       const assignedTo = executives.length
         ? executives[i % executives.length]._id
         : null;

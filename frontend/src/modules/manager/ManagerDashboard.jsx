@@ -16,7 +16,7 @@ import {
 import api from "../../services/api";
 import { toErrorMessage } from "../../utils/errorMessage";
 
-const ManagerDashboard = ({ theme = "dark" }) => {
+const ManagerDashboard = ({ theme = "light" }) => {
   const isDark = theme === "dark";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

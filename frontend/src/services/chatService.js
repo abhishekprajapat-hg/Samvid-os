@@ -20,10 +20,29 @@ export const getConversationMessages = async ({ conversationId, limit = 80, befo
   return res.data?.messages || [];
 };
 
-export const sendDirectMessage = async ({ text, conversationId, recipientId }) => {
-  const payload = { text };
+export const markConversationRead = async (conversationId) => {
+  const id = String(conversationId || "").trim();
+  if (!id) return null;
+
+  const res = await api.patch(`/chat/rooms/${id}/read`);
+  return res.data?.room || null;
+};
+
+export const sendDirectMessage = async ({
+  text,
+  conversationId,
+  recipientId,
+  sharedProperty,
+  mediaAttachments,
+}) => {
+  const payload = {};
+  if (typeof text === "string") payload.text = text;
   if (conversationId) payload.conversationId = conversationId;
   if (recipientId) payload.recipientId = recipientId;
+  if (sharedProperty) payload.sharedProperty = sharedProperty;
+  if (Array.isArray(mediaAttachments) && mediaAttachments.length > 0) {
+    payload.mediaAttachments = mediaAttachments;
+  }
 
   const res = await api.post("/chat/messages", payload);
   return {

@@ -3,6 +3,7 @@ import { Routes, Route, useLocation, useNavigate, Navigate } from "react-router-
 import { motion } from "framer-motion";
 import api from "./services/api";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { ChatNotificationProvider } from "./context/chatNotificationProvider";
 
 /* =======================
    LAZY IMPORTS
@@ -36,13 +37,35 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [sessionReady, setSessionReady] = useState(false);
-  const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
+  const [theme, setTheme] = useState(() => {
+    const storedTheme = localStorage.getItem("theme");
+    return storedTheme === "dark" ? "dark" : "light";
+  });
 
   const location = useLocation();
   const navigate = useNavigate();
 
   const isPublicPage = location.pathname.startsWith("/portal");
   const showWarpField = !isPublicPage && location.pathname !== "/";
+  const isChatPage = location.pathname === "/chat";
+
+  useEffect(() => {
+    if (!isChatPage) {
+      document.body.style.overflowY = "";
+      document.documentElement.style.overflowY = "";
+      return undefined;
+    }
+
+    const previousBodyOverflowY = document.body.style.overflowY;
+    const previousHtmlOverflowY = document.documentElement.style.overflowY;
+    document.body.style.overflowY = "hidden";
+    document.documentElement.style.overflowY = "hidden";
+
+    return () => {
+      document.body.style.overflowY = previousBodyOverflowY;
+      document.documentElement.style.overflowY = previousHtmlOverflowY;
+    };
+  }, [isChatPage]);
 
   /* 🔥 Restore session after refresh */
   useEffect(() => {
@@ -83,7 +106,9 @@ export default function App() {
 
   /* 🔥 Logout */
   const handleLogout = () => {
-    localStorage.clear();
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    localStorage.removeItem("user");
     delete api.defaults.headers.common["Authorization"];
     setIsLoggedIn(false);
     setUserRole(null);
@@ -106,7 +131,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen overflow-x-hidden relative bg-void">
+    <div className={`flex relative bg-void overflow-x-hidden ${isChatPage ? "h-screen overflow-hidden" : "min-h-screen"}`}>
 
       {showWarpField && (
         <Suspense fallback={null}>
@@ -114,9 +139,10 @@ export default function App() {
         </Suspense>
       )}
 
-      <ErrorBoundary>
-        <Suspense fallback={<div className="p-8">Loading...</div>}>
-          <Routes>
+      <ChatNotificationProvider enabled={isLoggedIn && !isPublicPage}>
+        <ErrorBoundary>
+          <Suspense fallback={<div className="p-8">Loading...</div>}>
+            <Routes>
 
           {/* ================= LOGIN ROUTES ================= */}
 
@@ -157,7 +183,7 @@ export default function App() {
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className="flex w-full min-h-screen"
+                  className={`flex w-full ${isChatPage ? "h-screen overflow-hidden" : "min-h-screen"}`}
                 >
                   {!isPublicPage && (
                     <>
@@ -170,7 +196,13 @@ export default function App() {
                     </>
                   )}
 
-                  <main className="flex-1 relative pt-16 app-page-bg overflow-y-auto">
+                  <main
+                    className={
+                      isChatPage
+                        ? "relative h-full min-h-0 flex-1 overflow-hidden pt-16 app-page-bg"
+                        : "relative min-h-0 flex-1 pt-16 overflow-y-auto app-page-bg"
+                    }
+                  >
                     <Routes>
                       <Route path="/" element={DashboardByRole} />
                       <Route
@@ -236,9 +268,10 @@ export default function App() {
             }
           />
 
-          </Routes>
-        </Suspense>
-      </ErrorBoundary>
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
+      </ChatNotificationProvider>
     </div>
   );
 }

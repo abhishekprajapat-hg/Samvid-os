@@ -72,7 +72,7 @@ const MasterSchedule = () => {
     nextFollowUp: "",
   });
 
-  const isDark = (localStorage.getItem("theme") || "dark") === "dark";
+  const isDark = (localStorage.getItem("theme") || "light") === "dark";
 
   const loadLeads = async () => {
     try {

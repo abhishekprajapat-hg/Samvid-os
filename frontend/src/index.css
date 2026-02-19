@@ -2,6 +2,11 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  /* Prevent horizontal layout shift when the vertical scrollbar toggles. */
+  scrollbar-gutter: stable;
+}
+
 :root {
   --bg-body: #f8fafc;
   --text-body: #0f172a;

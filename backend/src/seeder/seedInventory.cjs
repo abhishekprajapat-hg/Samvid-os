@@ -2,6 +2,12 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const Inventory = require("../models/Inventory");
 const User = require("../models/User");
+const DEFAULT_SEED_COUNT = 24;
+
+const parseSeedCount = (rawValue, fallback) => {
+  const parsed = Number.parseInt(rawValue, 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 const PROJECTS = [
   "Skyline Residency",
@@ -53,6 +59,11 @@ const buildUnit = ({ index, teamId, companyId, adminId }) => {
 
 async function seedInventory() {
   try {
+    const seedCount = parseSeedCount(
+      process.argv[2] || process.env.INVENTORY_SEED_COUNT,
+      DEFAULT_SEED_COUNT,
+    );
+
     await mongoose.connect(process.env.MONGO_URI);
 
     const [admin, manager] = await Promise.all([
@@ -81,7 +92,7 @@ async function seedInventory() {
       projectName: { $regex: /^Seed /i },
     });
 
-    const rows = Array.from({ length: 24 }, (_, index) =>
+    const rows = Array.from({ length: seedCount }, (_, index) =>
       buildUnit({
         index,
         teamId: manager._id,

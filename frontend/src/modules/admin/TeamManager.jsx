@@ -145,7 +145,7 @@ const UserFormPanel = ({
   );
 };
 
-const TeamManager = ({ theme = "dark" }) => {
+const TeamManager = ({ theme = "light" }) => {
   const [users, setUsers] = useState([]);
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);

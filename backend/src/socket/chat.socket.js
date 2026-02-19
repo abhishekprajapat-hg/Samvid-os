@@ -140,11 +140,15 @@ const registerChatSocketHandlers = (io) => {
               sender: socket.user,
               roomId,
               text: payload.text,
+              sharedProperty: payload.sharedProperty || null,
+              mediaAttachments: payload.mediaAttachments || [],
             })
           : await sendDirectMessage({
               sender: socket.user,
               text: payload.text,
               recipientId: payload.recipientId,
+              sharedProperty: payload.sharedProperty || null,
+              mediaAttachments: payload.mediaAttachments || [],
             });
 
         emitRealtimeMessageEvent(io, result);
@@ -223,6 +227,8 @@ const registerChatSocketHandlers = (io) => {
           text: payload.text,
           roomId: payload.conversationId || payload.roomId || null,
           recipientId: payload.recipientId,
+          sharedProperty: payload.sharedProperty || null,
+          mediaAttachments: payload.mediaAttachments || [],
         });
 
         emitRealtimeMessageEvent(io, result);

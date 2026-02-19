@@ -13,6 +13,7 @@ const {
   MAX_MESSAGE_LENGTH,
   MAX_GROUP_PARTICIPANTS,
 } = require("../constants/chat.constants");
+const { getInventoryById } = require("./inventoryWorkflow.service");
 const {
   toObjectIdString,
   uniqueIds,
@@ -41,6 +42,194 @@ const toPositiveInt = (value, fallback, max) => {
 const sanitizeText = (value) => {
   if (typeof value !== "string") return "";
   return value.trim();
+};
+
+const MEDIA_KINDS = new Set(["image", "video", "audio", "file"]);
+const MAX_MEDIA_ATTACHMENTS = 8;
+const MAX_MEDIA_ATTACHMENT_SIZE_BYTES = 25 * 1024 * 1024;
+
+const buildPropertyShareText = (sharedProperty) => {
+  const title = sanitizeText(sharedProperty?.title);
+  const fallback = title ? `Shared property: ${title}` : "Shared a property";
+  return fallback.slice(0, MAX_MESSAGE_LENGTH);
+};
+
+const buildMediaShareText = (mediaAttachments) => {
+  const count = Array.isArray(mediaAttachments) ? mediaAttachments.length : 0;
+  if (count <= 1) return "Shared a media file";
+  return `Shared ${count} media files`;
+};
+
+const sanitizeOptionalLimitedString = (value, maxLength) =>
+  sanitizeText(value).slice(0, maxLength);
+
+const sanitizePrice = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+};
+
+const detectMediaKind = ({ kind, mimeType }) => {
+  const cleanKind = sanitizeText(kind).toLowerCase();
+  if (MEDIA_KINDS.has(cleanKind)) return cleanKind;
+
+  const cleanMimeType = sanitizeText(mimeType).toLowerCase();
+  if (cleanMimeType.startsWith("image/")) return "image";
+  if (cleanMimeType.startsWith("video/")) return "video";
+  if (cleanMimeType.startsWith("audio/")) return "audio";
+  return "file";
+};
+
+const ensureHttpUrl = (value) => {
+  const url = sanitizeText(value);
+  if (!url) {
+    throw createHttpError(400, "Media URL is required");
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw createHttpError(400, "Media URL must be HTTP/HTTPS");
+    }
+  } catch (error) {
+    if (error?.statusCode) {
+      throw error;
+    }
+    throw createHttpError(400, "Invalid media URL");
+  }
+
+  return url.slice(0, 2048);
+};
+
+const resolveMediaAttachmentsPayload = (mediaAttachments) => {
+  if (mediaAttachments === undefined || mediaAttachments === null) {
+    return [];
+  }
+
+  if (!Array.isArray(mediaAttachments)) {
+    throw createHttpError(400, "mediaAttachments must be an array");
+  }
+
+  if (mediaAttachments.length > MAX_MEDIA_ATTACHMENTS) {
+    throw createHttpError(
+      400,
+      `Too many attachments (max ${MAX_MEDIA_ATTACHMENTS})`,
+    );
+  }
+
+  return mediaAttachments.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw createHttpError(400, `Invalid media attachment at index ${index}`);
+    }
+
+    const url = ensureHttpUrl(item.url || item.secure_url || "");
+    const mimeType = sanitizeOptionalLimitedString(item.mimeType || item.type || "", 120);
+    const name = sanitizeOptionalLimitedString(item.name || item.original_filename || "", 180);
+
+    let size = Number(item.size || 0);
+    if (!Number.isFinite(size) || size < 0) {
+      size = 0;
+    }
+    if (size > MAX_MEDIA_ATTACHMENT_SIZE_BYTES) {
+      throw createHttpError(
+        400,
+        `Attachment too large (max ${MAX_MEDIA_ATTACHMENT_SIZE_BYTES} bytes)`,
+      );
+    }
+
+    return {
+      url,
+      kind: detectMediaKind({ kind: item.kind, mimeType }),
+      mimeType,
+      name,
+      size: Math.round(size),
+    };
+  });
+};
+
+const resolveSharedPropertyPayload = async ({ sender, sharedProperty }) => {
+  if (!sharedProperty || typeof sharedProperty !== "object" || Array.isArray(sharedProperty)) {
+    return null;
+  }
+
+  const inventoryId =
+    sharedProperty.inventoryId || sharedProperty._id || sharedProperty.id || null;
+
+  if (!inventoryId) {
+    throw createHttpError(400, "sharedProperty.inventoryId is required");
+  }
+
+  const inventory = await getInventoryById({
+    user: sender,
+    inventoryId: toObjectIdString(inventoryId),
+  });
+
+  const titleParts = [inventory.projectName, inventory.towerName, inventory.unitNumber]
+    .map((value) => sanitizeText(value))
+    .filter(Boolean);
+  const title = titleParts.join(" - ") || "Inventory Unit";
+  const firstImage = Array.isArray(inventory.images)
+    ? sanitizeText(inventory.images[0] || "")
+    : "";
+
+  return {
+    inventoryId: inventory._id,
+    title: sanitizeOptionalLimitedString(title, 200),
+    projectName: sanitizeOptionalLimitedString(inventory.projectName, 120),
+    towerName: sanitizeOptionalLimitedString(inventory.towerName, 120),
+    unitNumber: sanitizeOptionalLimitedString(inventory.unitNumber, 80),
+    location: sanitizeOptionalLimitedString(inventory.location, 240),
+    price: sanitizePrice(inventory.price),
+    status: sanitizeOptionalLimitedString(inventory.status, 40),
+    image: sanitizeOptionalLimitedString(firstImage, 2048),
+  };
+};
+
+const resolveOutgoingMessagePayload = async ({
+  sender,
+  text,
+  sharedProperty,
+  mediaAttachments,
+}) => {
+  const cleanText = sanitizeText(text);
+  const resolvedSharedProperty = await resolveSharedPropertyPayload({
+    sender,
+    sharedProperty,
+  });
+  const resolvedMediaAttachments = resolveMediaAttachmentsPayload(mediaAttachments);
+
+  if (resolvedSharedProperty && resolvedMediaAttachments.length > 0) {
+    throw createHttpError(400, "Cannot send property and media together in one message");
+  }
+
+  if (!cleanText && !resolvedSharedProperty && !resolvedMediaAttachments.length) {
+    throw createHttpError(400, "Message text is required");
+  }
+
+  if (cleanText.length > MAX_MESSAGE_LENGTH) {
+    throw createHttpError(400, `Message too long (max ${MAX_MESSAGE_LENGTH} chars)`);
+  }
+
+  const hasSharedProperty = Boolean(resolvedSharedProperty);
+  const hasMediaAttachments = resolvedMediaAttachments.length > 0;
+  const resolvedText =
+    cleanText
+    || (hasSharedProperty
+      ? buildPropertyShareText(resolvedSharedProperty)
+      : hasMediaAttachments
+        ? buildMediaShareText(resolvedMediaAttachments)
+        : "");
+
+  return {
+    text: resolvedText,
+    type: hasSharedProperty
+      ? CHAT_MESSAGE_TYPES.PROPERTY
+      : hasMediaAttachments
+        ? CHAT_MESSAGE_TYPES.MEDIA
+        : CHAT_MESSAGE_TYPES.TEXT,
+    sharedProperty: resolvedSharedProperty,
+    mediaAttachments: resolvedMediaAttachments,
+  };
 };
 
 const toRoleLabel = (role) => ROLE_LABELS[role] || role;
@@ -90,6 +279,8 @@ const toMessageDto = (message) => ({
   sender: message.sender ? toUserDto(message.sender) : null,
   type: message.type || CHAT_MESSAGE_TYPES.TEXT,
   text: message.text,
+  sharedProperty: message.sharedProperty || null,
+  mediaAttachments: message.mediaAttachments || [],
   deliveredTo: message.deliveredTo || [],
   seenBy: message.seenBy || [],
   createdAt: message.createdAt,
@@ -186,7 +377,14 @@ const ensureRoomMembership = async ({ room, user, requireParticipantForSend = fa
   }
 };
 
-const appendMessageToRoom = async ({ room, sender, text, type = CHAT_MESSAGE_TYPES.TEXT }) => {
+const appendMessageToRoom = async ({
+  room,
+  sender,
+  text,
+  type = CHAT_MESSAGE_TYPES.TEXT,
+  sharedProperty = null,
+  mediaAttachments = [],
+}) => {
   const now = new Date();
 
   const message = await ChatMessage.create({
@@ -194,6 +392,8 @@ const appendMessageToRoom = async ({ room, sender, text, type = CHAT_MESSAGE_TYP
     sender: sender._id,
     type,
     text,
+    sharedProperty: sharedProperty || null,
+    mediaAttachments: Array.isArray(mediaAttachments) ? mediaAttachments : [],
     deliveredTo: [{ user: sender._id, at: now }],
     seenBy: [{ user: sender._id, at: now }],
   });
@@ -800,14 +1000,19 @@ const createBroadcastMessage = async ({
   };
 };
 
-const sendRoomMessage = async ({ sender, roomId, text }) => {
-  const cleanText = sanitizeText(text);
-  if (!cleanText) {
-    throw createHttpError(400, "Message text is required");
-  }
-  if (cleanText.length > MAX_MESSAGE_LENGTH) {
-    throw createHttpError(400, `Message too long (max ${MAX_MESSAGE_LENGTH} chars)`);
-  }
+const sendRoomMessage = async ({
+  sender,
+  roomId,
+  text,
+  sharedProperty = null,
+  mediaAttachments = [],
+}) => {
+  const outgoingMessage = await resolveOutgoingMessagePayload({
+    sender,
+    text,
+    sharedProperty,
+    mediaAttachments,
+  });
 
   const room = await getRoomByIdForUser({
     user: sender,
@@ -825,7 +1030,10 @@ const sendRoomMessage = async ({ sender, roomId, text }) => {
   const result = await appendMessageToRoom({
     room,
     sender,
-    text: cleanText,
+    text: outgoingMessage.text,
+    type: outgoingMessage.type,
+    sharedProperty: outgoingMessage.sharedProperty,
+    mediaAttachments: outgoingMessage.mediaAttachments,
   });
 
   if (
@@ -852,7 +1060,14 @@ const sendRoomMessage = async ({ sender, roomId, text }) => {
   };
 };
 
-const sendDirectMessage = async ({ sender, text, roomId = null, recipientId = null }) => {
+const sendDirectMessage = async ({
+  sender,
+  text,
+  roomId = null,
+  recipientId = null,
+  sharedProperty = null,
+  mediaAttachments = [],
+}) => {
   let resolvedRoomId = roomId;
   let managerNotificationUserId = null;
 
@@ -869,6 +1084,8 @@ const sendDirectMessage = async ({ sender, text, roomId = null, recipientId = nu
     sender,
     roomId: resolvedRoomId,
     text,
+    sharedProperty,
+    mediaAttachments,
   });
 
   return {

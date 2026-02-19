@@ -18,6 +18,8 @@ const CHAT_ROOM_TYPES = {
 const CHAT_MESSAGE_TYPES = {
   TEXT: "text",
   SYSTEM: "system",
+  PROPERTY: "property",
+  MEDIA: "media",
 };
 
 const BROADCAST_TARGET_ROLES = {

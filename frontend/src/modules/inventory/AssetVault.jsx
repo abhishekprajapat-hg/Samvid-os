@@ -13,6 +13,7 @@ import {
   UploadCloud,
   Trash2,
   AlertCircle,
+  Share2,
 } from "lucide-react";
 import {
   getInventoryAssets,
@@ -76,6 +77,20 @@ const formatPrice = (asset) => {
   }
 
   return `Rs ${value.toLocaleString("en-IN")}`;
+};
+
+const toSharePayload = (asset) => {
+  if (!asset?._id) return null;
+  const firstImage = Array.isArray(asset.images) ? asset.images[0] || "" : "";
+
+  return {
+    inventoryId: asset._id,
+    title: asset.title || "",
+    location: asset.location || "",
+    price: Number(asset.price) || 0,
+    status: asset.status || "",
+    image: firstImage,
+  };
 };
 
 const AssetVault = () => {
@@ -372,6 +387,15 @@ const AssetVault = () => {
     navigate(`/inventory/${assetId}`);
   };
 
+  const handleShareAsset = (asset) => {
+    const shareProperty = toSharePayload(asset);
+    if (!shareProperty) return;
+
+    navigate("/chat", {
+      state: { shareProperty },
+    });
+  };
+
   const handleApproveRequest = async (requestId) => {
     if (!canManage || !requestId) return;
 
@@ -665,6 +689,13 @@ const AssetVault = () => {
                         Edit Property
                       </button>
                       <button
+                        onClick={() => handleShareAsset(asset)}
+                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-cyan-700 hover:bg-cyan-50 transition-colors inline-flex items-center justify-center gap-2"
+                      >
+                        <Share2 size={13} />
+                        Share to Chat
+                      </button>
+                      <button
                         onClick={() => handleOpenDetails(asset._id)}
                         className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-colors"
                       >
@@ -689,6 +720,13 @@ const AssetVault = () => {
                         Admin approval required
                       </div>
                       <button
+                        onClick={() => handleShareAsset(asset)}
+                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-cyan-700 hover:bg-cyan-50 transition-colors inline-flex items-center justify-center gap-2"
+                      >
+                        <Share2 size={13} />
+                        Share to Chat
+                      </button>
+                      <button
                         onClick={() => handleOpenDetails(asset._id)}
                         className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-colors"
                       >
@@ -700,6 +738,13 @@ const AssetVault = () => {
                       <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                         View-only access
                       </div>
+                      <button
+                        onClick={() => handleShareAsset(asset)}
+                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-cyan-700 hover:bg-cyan-50 transition-colors inline-flex items-center justify-center gap-2"
+                      >
+                        <Share2 size={13} />
+                        Share to Chat
+                      </button>
                       <button
                         onClick={() => handleOpenDetails(asset._id)}
                         className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-colors"
