@@ -387,6 +387,16 @@ const AssetVault = () => {
     navigate(`/inventory/${assetId}`);
   };
 
+  const stopCardClick = (e) => {
+    e.stopPropagation();
+  };
+
+  const handleCardKeyDown = (e, assetId) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    handleOpenDetails(assetId);
+  };
+
   const handleShareAsset = (asset) => {
     const shareProperty = toSharePayload(asset);
     if (!shareProperty) return;
@@ -602,9 +612,13 @@ const AssetVault = () => {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               key={asset._id}
-              className="group bg-white border border-slate-200 rounded-2xl overflow-hidden hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 flex flex-col h-[360px]"
+              role="button"
+              tabIndex={0}
+              onClick={() => handleOpenDetails(asset._id)}
+              onKeyDown={(e) => handleCardKeyDown(e, asset._id)}
+              className="group bg-white border border-slate-200 rounded-2xl overflow-hidden hover:shadow-xl hover:border-emerald-500/30 transition-all duration-300 flex flex-col h-[360px] cursor-pointer"
             >
-              <div className="relative h-40 bg-slate-100 flex items-center justify-center overflow-hidden">
+              <div className="relative h-52 bg-slate-100 flex items-center justify-center overflow-hidden">
                 {asset.images && asset.images.length > 0 ? (
                   <img
                     src={asset.images[0]}
@@ -626,17 +640,47 @@ const AssetVault = () => {
                   </div>
                 )}
 
-                <div
-                  className={`absolute top-3 right-3 px-2 py-1 rounded text-[9px] font-bold uppercase tracking-widest ${statusPillClass(
-                    asset.status,
-                  )}`}
-                >
-                  {asset.status}
+                <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                  {canManage && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        stopCardClick(e);
+                        handleOpenEditModal(asset);
+                      }}
+                      className="p-1.5 rounded-lg bg-white/90 text-slate-600 hover:bg-slate-900 hover:text-white transition-colors"
+                      title="Edit property"
+                    >
+                      <Pencil size={12} />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      stopCardClick(e);
+                      handleShareAsset(asset);
+                    }}
+                    className="p-1.5 rounded-lg bg-white/90 text-cyan-700 hover:bg-cyan-600 hover:text-white transition-colors"
+                    title="Share to chat"
+                  >
+                    <Share2 size={12} />
+                  </button>
+                  <div
+                    className={`px-2 py-1 rounded text-[9px] font-bold uppercase tracking-widest ${statusPillClass(
+                      asset.status,
+                    )}`}
+                  >
+                    {asset.status}
+                  </div>
                 </div>
 
                 {canManage && (
                   <button
-                    onClick={() => handleDeleteAsset(asset._id)}
+                    type="button"
+                    onClick={(e) => {
+                      stopCardClick(e);
+                      handleDeleteAsset(asset._id);
+                    }}
                     disabled={deletingId === asset._id}
                     className="absolute top-3 left-3 p-1.5 rounded-lg bg-white/90 text-red-500 hover:bg-red-500 hover:text-white transition-colors disabled:opacity-50"
                   >
@@ -673,6 +717,7 @@ const AssetVault = () => {
                         value={toApiStatus(asset.status)}
                         disabled={updatingStatusId === asset._id}
                         onChange={(e) => handleStatusChange(asset._id, e.target.value)}
+                        onClick={stopCardClick}
                         className="mt-3 w-full h-9 px-3 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 focus:outline-none focus:border-emerald-500"
                       >
                         {STATUS_UPDATE_OPTIONS.map((statusOption) => (
@@ -681,26 +726,6 @@ const AssetVault = () => {
                           </option>
                         ))}
                       </select>
-                      <button
-                        onClick={() => handleOpenEditModal(asset)}
-                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-colors inline-flex items-center justify-center gap-2"
-                      >
-                        <Pencil size={13} />
-                        Edit Property
-                      </button>
-                      <button
-                        onClick={() => handleShareAsset(asset)}
-                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-cyan-700 hover:bg-cyan-50 transition-colors inline-flex items-center justify-center gap-2"
-                      >
-                        <Share2 size={13} />
-                        Share to Chat
-                      </button>
-                      <button
-                        onClick={() => handleOpenDetails(asset._id)}
-                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-colors"
-                      >
-                        View Details
-                      </button>
                     </>
                   ) : canRequestStatusChange ? (
                     <>
@@ -708,6 +733,7 @@ const AssetVault = () => {
                         value={toApiStatus(asset.status)}
                         disabled={requestingStatusId === asset._id}
                         onChange={(e) => handleStatusChangeRequest(asset._id, e.target.value)}
+                        onClick={stopCardClick}
                         className="mt-3 w-full h-9 px-3 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 focus:outline-none focus:border-emerald-500"
                       >
                         {STATUS_UPDATE_OPTIONS.map((statusOption) => (
@@ -719,38 +745,12 @@ const AssetVault = () => {
                       <div className="mt-2 text-[10px] font-bold uppercase tracking-widest text-emerald-600">
                         Admin approval required
                       </div>
-                      <button
-                        onClick={() => handleShareAsset(asset)}
-                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-cyan-700 hover:bg-cyan-50 transition-colors inline-flex items-center justify-center gap-2"
-                      >
-                        <Share2 size={13} />
-                        Share to Chat
-                      </button>
-                      <button
-                        onClick={() => handleOpenDetails(asset._id)}
-                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-colors"
-                      >
-                        View Details
-                      </button>
                     </>
                   ) : (
                     <>
                       <div className="mt-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                         View-only access
                       </div>
-                      <button
-                        onClick={() => handleShareAsset(asset)}
-                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-cyan-700 hover:bg-cyan-50 transition-colors inline-flex items-center justify-center gap-2"
-                      >
-                        <Share2 size={13} />
-                        Share to Chat
-                      </button>
-                      <button
-                        onClick={() => handleOpenDetails(asset._id)}
-                        className="mt-2 w-full h-9 rounded-lg border border-slate-200 text-xs font-bold uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-colors"
-                      >
-                        View Details
-                      </button>
                     </>
                   )}
                 </div>

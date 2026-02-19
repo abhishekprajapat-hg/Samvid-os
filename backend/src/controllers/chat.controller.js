@@ -172,6 +172,11 @@ exports.markRoomRead = async (req, res) => {
       roomId: req.params.roomId,
     });
 
+    req.app.get("io")?.to(`room:${room._id}`).emit("chat:room:read", {
+      roomId: room._id,
+      userId: req.user._id,
+    });
+
     return res.json({ room });
   } catch (error) {
     return handleControllerError(res, error, "Failed to mark room as read");

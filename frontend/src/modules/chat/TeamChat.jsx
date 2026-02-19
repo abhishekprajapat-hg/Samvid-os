@@ -3,6 +3,8 @@ import { motion as Motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
+  Check,
+  CheckCheck,
   ExternalLink,
   FileText,
   MessageSquare,
@@ -18,6 +20,8 @@ import {
   getConversationMessages,
   getMessengerContacts,
   getMessengerConversations,
+  markMessageDelivered,
+  markMessageSeen,
   sendDirectMessage,
 } from "../../services/chatService";
 import { createChatSocket } from "../../services/chatSocket";
@@ -245,6 +249,77 @@ const findConversationByContact = (conversations, contactId) =>
     (conversation.participants || []).some((participant) => String(participant._id) === String(contactId)),
   );
 
+const toId = (value) => String(value || "").trim();
+
+const hasUserAck = (rows, userId) => {
+  const normalizedUserId = toId(userId);
+  if (!normalizedUserId || !Array.isArray(rows)) return false;
+
+  return rows.some((row) => {
+    const rowUserId = toId(row?.user || row?._id || row);
+    return rowUserId === normalizedUserId;
+  });
+};
+
+const hasOtherUserAck = (rows, currentUserId) => {
+  const normalizedCurrentUserId = toId(currentUserId);
+  if (!Array.isArray(rows)) return false;
+
+  return rows.some((row) => {
+    const rowUserId = toId(row?.user || row?._id || row);
+    return Boolean(rowUserId) && rowUserId !== normalizedCurrentUserId;
+  });
+};
+
+const withAckUser = (rows, userId) => {
+  const normalizedUserId = toId(userId);
+  if (!normalizedUserId) return Array.isArray(rows) ? rows : [];
+  if (hasUserAck(rows, normalizedUserId)) return Array.isArray(rows) ? rows : [];
+
+  const next = Array.isArray(rows) ? [...rows] : [];
+  next.push({ user: normalizedUserId, at: new Date().toISOString() });
+  return next;
+};
+
+const isMessageForConversation = (message, conversationId) => {
+  const messageConversationId = toId(message?.room || message?.conversation);
+  const targetConversationId = toId(conversationId);
+  if (!targetConversationId) return false;
+  if (!messageConversationId) return true;
+  return messageConversationId === targetConversationId;
+};
+
+const getOutgoingMessageStatus = (message, currentUserId) => {
+  if (hasOtherUserAck(message?.seenBy, currentUserId)) return "seen";
+  if (hasOtherUserAck(message?.deliveredTo, currentUserId)) return "delivered";
+  return "sent";
+};
+
+const applyRoomReadToMessages = ({ rows, roomId, readerUserId, currentUserId }) => {
+  if (!Array.isArray(rows)) return [];
+  const normalizedRoomId = toId(roomId);
+  const normalizedReaderUserId = toId(readerUserId);
+  const normalizedCurrentUserId = toId(currentUserId);
+  if (!normalizedRoomId || !normalizedReaderUserId) return rows;
+
+  return rows.map((message) => {
+    if (!isMessageForConversation(message, normalizedRoomId)) return message;
+
+    const senderId = toId(message?.sender?._id || message?.sender);
+    if (!senderId || senderId !== normalizedCurrentUserId) return message;
+    if (normalizedReaderUserId === normalizedCurrentUserId) return message;
+
+    return {
+      ...message,
+      deliveredTo: withAckUser(message?.deliveredTo, normalizedReaderUserId),
+      seenBy: withAckUser(message?.seenBy, normalizedReaderUserId),
+    };
+  });
+};
+
+const isDocumentVisible = () =>
+  typeof document === "undefined" || document.visibilityState === "visible";
+
 const extractIncomingMessageEvent = (payload = {}) => {
   const message = payload?.message || null;
   const conversation = payload?.conversation || payload?.room || null;
@@ -277,6 +352,8 @@ const TeamChat = ({ theme = "light" }) => {
   const bottomRef = useRef(null);
   const mediaInputRef = useRef(null);
   const seenSocketMessageIdsRef = useRef(new Set());
+  const deliveredReceiptIdsRef = useRef(new Set());
+  const seenReceiptIdsRef = useRef(new Set());
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -307,17 +384,104 @@ const TeamChat = ({ theme = "light" }) => {
     selectedConversationRef.current = selectedConversationId;
   }, [selectedConversationId]);
 
+  const emitConversationRead = useCallback(
+    async (conversationId, options = {}) => {
+      const id = toId(conversationId);
+      if (!id) return;
+
+      const allowHttpFallback = options.allowHttpFallback !== false;
+      await markConversationRead(id, { persist: false }).catch(() => null);
+
+      const socket = socketRef.current;
+      if (socket?.connected) {
+        const ack = await new Promise((resolve) => {
+          socket.emit("chat:room:read", { roomId: id }, (response) => {
+            resolve(response || {});
+          });
+        });
+
+        if (ack?.ok) {
+          if (ack.room?._id) {
+            setConversations((prev) => upsertConversation(prev, ack.room));
+          }
+          return;
+        }
+      }
+
+      if (allowHttpFallback) {
+        await markConversationRead(id).catch(() => null);
+      }
+    },
+    [markConversationRead],
+  );
+
+  const emitMessageReceipt = useCallback(async (messageId, mode = "delivered") => {
+    const id = toId(messageId);
+    if (!id) return;
+
+    const isSeenMode = mode === "seen";
+    const cache = isSeenMode ? seenReceiptIdsRef.current : deliveredReceiptIdsRef.current;
+    if (cache.has(id)) return;
+    cache.add(id);
+
+    const socket = socketRef.current;
+    const socketEvent = isSeenMode ? "chat:message:seen" : "chat:message:delivered";
+    const fallbackApiCall = isSeenMode ? markMessageSeen : markMessageDelivered;
+
+    try {
+      if (socket?.connected) {
+        const ack = await new Promise((resolve) => {
+          socket.emit(socketEvent, { messageId: id }, (response) => {
+            resolve(response || {});
+          });
+        });
+
+        if (!ack?.ok) {
+          throw new Error(ack?.error || `Failed to mark message ${mode}`);
+        }
+
+        const updatedMessage = ack?.message || null;
+        if (updatedMessage && isMessageForConversation(updatedMessage, selectedConversationRef.current)) {
+          setMessages((prev) => mergeMessages(prev, [updatedMessage]));
+        }
+        return;
+      }
+
+      const updatedMessage = await fallbackApiCall(id);
+      if (updatedMessage && isMessageForConversation(updatedMessage, selectedConversationRef.current)) {
+        setMessages((prev) => mergeMessages(prev, [updatedMessage]));
+      }
+    } catch {
+      cache.delete(id);
+    }
+  }, []);
+
   useEffect(() => {
     setActiveConversationId(selectedConversationId || "");
 
     if (selectedConversationId) {
-      markConversationRead(selectedConversationId).catch(() => null);
+      emitConversationRead(selectedConversationId).catch(() => null);
     }
 
     return () => {
       setActiveConversationId("");
     };
-  }, [markConversationRead, selectedConversationId, setActiveConversationId]);
+  }, [emitConversationRead, selectedConversationId, setActiveConversationId]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!selectedConversationRef.current) return;
+      emitConversationRead(selectedConversationRef.current, { allowHttpFallback: false }).catch(() => null);
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [emitConversationRead]);
 
   useEffect(() => {
     if (chatOpenReadSyncRef.current) return;
@@ -451,6 +615,27 @@ const TeamChat = ({ theme = "light" }) => {
   }, [messages]);
 
   useEffect(() => {
+    if (!selectedConversationId || !messages.length) return;
+
+    const visible = isDocumentVisible();
+    messages.forEach((message) => {
+      const messageId = toId(message?._id);
+      const senderId = toId(message?.sender?._id || message?.sender);
+      if (!messageId || !senderId) return;
+      if (senderId === currentUser.id) return;
+      if (!isMessageForConversation(message, selectedConversationId)) return;
+
+      if (visible) {
+        if (!hasUserAck(message?.seenBy, currentUser.id)) {
+          emitMessageReceipt(messageId, "seen").catch(() => null);
+        }
+      } else if (!hasUserAck(message?.deliveredTo, currentUser.id)) {
+        emitMessageReceipt(messageId, "delivered").catch(() => null);
+      }
+    });
+  }, [currentUser.id, emitMessageReceipt, messages, selectedConversationId]);
+
+  useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return undefined;
 
@@ -459,6 +644,9 @@ const TeamChat = ({ theme = "light" }) => {
 
     const onConnect = () => {
       setSocketConnected(true);
+      if (selectedConversationRef.current) {
+        emitConversationRead(selectedConversationRef.current, { allowHttpFallback: false }).catch(() => null);
+      }
     };
 
     const onDisconnect = () => {
@@ -504,13 +692,54 @@ const TeamChat = ({ theme = "light" }) => {
         setSelectedContactId("");
       }
 
-      if (String(selectedConversationRef.current) === conversationId) {
+      const activeConversationId = toId(selectedConversationRef.current);
+      const isActiveConversation = activeConversationId === conversationId;
+      const senderId = toId(message?.sender?._id || message?.sender);
+      const isIncoming = Boolean(senderId) && senderId !== currentUser.id;
+
+      if (isActiveConversation) {
         setMessages((prev) => mergeMessages(prev, [message]));
-        const senderId = String(message?.sender?._id || "");
-        if (senderId && senderId !== currentUser.id) {
-          markConversationRead(conversationId).catch(() => null);
+
+        if (isIncoming) {
+          const shouldMarkSeen = isDocumentVisible();
+          emitMessageReceipt(messageId, shouldMarkSeen ? "seen" : "delivered").catch(() => null);
+          if (shouldMarkSeen) {
+            emitConversationRead(conversationId, { allowHttpFallback: false }).catch(() => null);
+          }
         }
+      } else if (isIncoming) {
+        emitMessageReceipt(messageId, "delivered").catch(() => null);
       }
+    };
+
+    const onMessageDelivered = (payload = {}) => {
+      const updatedMessage = payload?.message || null;
+      if (!updatedMessage?._id) return;
+      if (!isMessageForConversation(updatedMessage, selectedConversationRef.current)) return;
+      setMessages((prev) => mergeMessages(prev, [updatedMessage]));
+    };
+
+    const onMessageSeen = (payload = {}) => {
+      const updatedMessage = payload?.message || null;
+      if (!updatedMessage?._id) return;
+      if (!isMessageForConversation(updatedMessage, selectedConversationRef.current)) return;
+      setMessages((prev) => mergeMessages(prev, [updatedMessage]));
+    };
+
+    const onRoomRead = (payload = {}) => {
+      const roomId = toId(payload?.roomId);
+      const readerUserId = toId(payload?.userId);
+      if (!roomId || !readerUserId) return;
+      if (toId(selectedConversationRef.current) !== roomId) return;
+
+      setMessages((prev) =>
+        applyRoomReadToMessages({
+          rows: prev,
+          roomId,
+          readerUserId,
+          currentUserId: currentUser.id,
+        }),
+      );
     };
 
     socket.on("connect", onConnect);
@@ -518,6 +747,9 @@ const TeamChat = ({ theme = "light" }) => {
     socket.on("connect_error", onConnectError);
     socket.on("messenger:message:new", onNewMessage);
     socket.on("chat:message:new", onNewMessage);
+    socket.on("chat:message:delivered", onMessageDelivered);
+    socket.on("chat:message:seen", onMessageSeen);
+    socket.on("chat:room:read", onRoomRead);
 
     return () => {
       socket.off("connect", onConnect);
@@ -525,11 +757,14 @@ const TeamChat = ({ theme = "light" }) => {
       socket.off("connect_error", onConnectError);
       socket.off("messenger:message:new", onNewMessage);
       socket.off("chat:message:new", onNewMessage);
+      socket.off("chat:message:delivered", onMessageDelivered);
+      socket.off("chat:message:seen", onMessageSeen);
+      socket.off("chat:room:read", onRoomRead);
       socket.disconnect();
       socketRef.current = null;
       setSocketConnected(false);
     };
-  }, [currentUser.id, markConversationRead]);
+  }, [currentUser.id, emitConversationRead, emitMessageReceipt]);
 
   const timeline = useMemo(() => {
     let lastDayKey = "";
@@ -984,6 +1219,7 @@ const TeamChat = ({ theme = "light" }) => {
             ) : (
               timeline.map(({ message, showDayBreak, dayLabel }) => {
                 const mine = String(message.sender?._id || "") === currentUser.id;
+                const outgoingStatus = mine ? getOutgoingMessageStatus(message, currentUser.id) : "";
                 const sharedProperty = isPropertyMessage(message)
                   ? sanitizeSharePayload(message.sharedProperty)
                   : null;
@@ -1015,9 +1251,25 @@ const TeamChat = ({ theme = "light" }) => {
                           <p className={`text-xs font-semibold ${mine ? (isDark ? "text-cyan-200" : "text-cyan-700") : (isDark ? "text-slate-300" : "text-slate-600")}`}>
                             {mine ? "You" : message.sender?.name || "Unknown"}
                           </p>
-                          <p className={`text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                            {toLocalTime(message.createdAt)}
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <p className={`text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {toLocalTime(message.createdAt)}
+                            </p>
+                            {mine && (
+                              <span
+                                title={outgoingStatus}
+                                className={`inline-flex items-center ${
+                                  outgoingStatus === "seen"
+                                    ? isDark ? "text-cyan-200" : "text-cyan-700"
+                                    : isDark
+                                      ? "text-slate-400"
+                                      : "text-slate-500"
+                                }`}
+                              >
+                                {outgoingStatus === "sent" ? <Check size={11} /> : <CheckCheck size={11} />}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         {sharedProperty && (
                           <div className={`mb-2 overflow-hidden rounded-xl border ${isDark ? "border-slate-700 bg-slate-900/90" : "border-slate-200 bg-white"}`}>

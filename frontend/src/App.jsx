@@ -9,7 +9,6 @@ import { ChatNotificationProvider } from "./context/chatNotificationProvider";
    LAZY IMPORTS
 ======================= */
 const Navbar = lazy(() => import("./components/layout/Navbar"));
-const WarpField = lazy(() => import("./components/background/WarpField"));
 const Login = lazy(() => import("./components/auth/Login"));
 
 const ManagerDashboard = lazy(() => import("./modules/manager/ManagerDashboard"));
@@ -46,7 +45,6 @@ export default function App() {
   const navigate = useNavigate();
 
   const isPublicPage = location.pathname.startsWith("/portal");
-  const showWarpField = !isPublicPage && location.pathname !== "/";
   const isChatPage = location.pathname === "/chat";
 
   useEffect(() => {
@@ -132,12 +130,6 @@ export default function App() {
 
   return (
     <div className={`flex relative bg-void overflow-x-hidden ${isChatPage ? "h-screen overflow-hidden" : "min-h-screen"}`}>
-
-      {showWarpField && (
-        <Suspense fallback={null}>
-          <WarpField />
-        </Suspense>
-      )}
 
       <ChatNotificationProvider enabled={isLoggedIn && !isPublicPage}>
         <ErrorBoundary>

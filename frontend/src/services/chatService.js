@@ -28,6 +28,22 @@ export const markConversationRead = async (conversationId) => {
   return res.data?.room || null;
 };
 
+export const markMessageDelivered = async (messageId) => {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+
+  const res = await api.patch(`/chat/messages/${id}/delivered`);
+  return res.data?.message || null;
+};
+
+export const markMessageSeen = async (messageId) => {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+
+  const res = await api.patch(`/chat/messages/${id}/seen`);
+  return res.data?.message || null;
+};
+
 export const sendDirectMessage = async ({
   text,
   conversationId,

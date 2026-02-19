@@ -245,12 +245,12 @@ const InventoryDetails = () => {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white overflow-hidden">
-          <div className="h-72 bg-slate-100 flex items-center justify-center">
+          <div className="h-80 sm:h-96 xl:h-[32rem] bg-slate-100 flex items-center justify-center">
             {activeImage ? (
               <img src={activeImage} alt={pageTitle} className="w-full h-full object-cover" />
             ) : (
               <div className="text-slate-300 flex flex-col items-center">
-                <ImageIcon size={42} />
+                <ImageIcon size={52} />
                 <span className="text-xs font-bold uppercase mt-2">No Image</span>
               </div>
             )}
