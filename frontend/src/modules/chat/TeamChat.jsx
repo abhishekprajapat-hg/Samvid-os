@@ -245,6 +245,20 @@ const findConversationByContact = (conversations, contactId) =>
     (conversation.participants || []).some((participant) => String(participant._id) === String(contactId)),
   );
 
+const extractIncomingMessageEvent = (payload = {}) => {
+  const message = payload?.message || null;
+  const conversation = payload?.conversation || payload?.room || null;
+  const conversationId = String(
+    conversation?._id || message?.conversation || message?.room || "",
+  );
+
+  return {
+    conversation,
+    conversationId,
+    message,
+  };
+};
+
 const TeamChat = ({ theme = "light" }) => {
   const isDark = theme === "dark";
   const location = useLocation();
@@ -262,6 +276,7 @@ const TeamChat = ({ theme = "light" }) => {
   const chatOpenReadSyncRef = useRef(false);
   const bottomRef = useRef(null);
   const mediaInputRef = useRef(null);
+  const seenSocketMessageIdsRef = useRef(new Set());
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -454,21 +469,46 @@ const TeamChat = ({ theme = "light" }) => {
       setSocketConnected(false);
     };
 
-    const onNewMessage = ({ conversation, message }) => {
-      if (!conversation?._id || !message?._id) return;
+    const onNewMessage = (payload = {}) => {
+      const { conversation, conversationId, message } = extractIncomingMessageEvent(payload);
+      const messageId = String(message?._id || "");
+      if (!conversationId || !messageId) return;
 
-      setConversations((prev) => upsertConversation(prev, conversation));
+      if (seenSocketMessageIdsRef.current.has(messageId)) {
+        return;
+      }
+      seenSocketMessageIdsRef.current.add(messageId);
+      if (seenSocketMessageIdsRef.current.size > 2000) {
+        seenSocketMessageIdsRef.current.clear();
+      }
+
+      if (conversation?._id) {
+        setConversations((prev) => upsertConversation(prev, conversation));
+      } else {
+        setConversations((prev) => {
+          const existing = prev.find((row) => String(row?._id) === conversationId);
+          if (!existing) return prev;
+
+          const patched = {
+            ...existing,
+            lastMessage: String(message?.text || "").trim() || existing.lastMessage || "",
+            lastMessageAt: message?.createdAt || existing.lastMessageAt || existing.updatedAt,
+            updatedAt: message?.createdAt || existing.updatedAt,
+          };
+          return upsertConversation(prev, patched);
+        });
+      }
 
       if (!selectedConversationRef.current) {
-        setSelectedConversationId(conversation._id);
+        setSelectedConversationId(conversationId);
         setSelectedContactId("");
       }
 
-      if (String(selectedConversationRef.current) === String(conversation._id)) {
+      if (String(selectedConversationRef.current) === conversationId) {
         setMessages((prev) => mergeMessages(prev, [message]));
         const senderId = String(message?.sender?._id || "");
         if (senderId && senderId !== currentUser.id) {
-          markConversationRead(conversation._id).catch(() => null);
+          markConversationRead(conversationId).catch(() => null);
         }
       }
     };
@@ -477,12 +517,14 @@ const TeamChat = ({ theme = "light" }) => {
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
     socket.on("messenger:message:new", onNewMessage);
+    socket.on("chat:message:new", onNewMessage);
 
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
       socket.off("messenger:message:new", onNewMessage);
+      socket.off("chat:message:new", onNewMessage);
       socket.disconnect();
       socketRef.current = null;
       setSocketConnected(false);

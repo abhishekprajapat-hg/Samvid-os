@@ -46,6 +46,19 @@ const normalizeUnreadMapFromConversations = (conversations) => {
   }, {});
 };
 
+const extractIncomingMessageEvent = (payload = {}) => {
+  const message = payload?.message || null;
+  const conversation = payload?.conversation || payload?.room || null;
+  const conversationId = String(
+    conversation?._id || message?.conversation || message?.room || "",
+  );
+
+  return {
+    message,
+    conversationId,
+  };
+};
+
 export const ChatNotificationProvider = ({ children, enabled = true }) => {
   const [unreadByConversation, setUnreadByConversation] = useState({});
   const [recentNotifications, setRecentNotifications] = useState([]);
@@ -180,7 +193,8 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
       markConversationReadLocal(roomId);
     };
 
-    const onNewMessage = ({ conversation, message } = {}) => {
+    const onNewMessage = (payload = {}) => {
+      const { conversationId, message } = extractIncomingMessageEvent(payload);
       const messageId = String(message?._id || "");
       if (!messageId) return;
 
@@ -192,9 +206,6 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
         seenMessageIdsRef.current.clear();
       }
 
-      const conversationId = String(
-        conversation?._id || message?.conversation || message?.room || "",
-      );
       if (!conversationId) return;
 
       const senderId = String(message?.sender?._id || "");
@@ -248,6 +259,7 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
     socket.on("messenger:message:new", onNewMessage);
+    socket.on("chat:message:new", onNewMessage);
     socket.on("chat:room:read", onRoomRead);
 
     return () => {
@@ -256,6 +268,7 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
       socket.off("messenger:message:new", onNewMessage);
+      socket.off("chat:message:new", onNewMessage);
       socket.off("chat:room:read", onRoomRead);
       socket.disconnect();
       setSocketConnected(false);
