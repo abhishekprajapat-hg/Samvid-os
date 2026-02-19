@@ -129,7 +129,7 @@ export default function App() {
   }
 
   return (
-    <div className={`flex relative bg-void overflow-x-hidden ${isChatPage ? "h-screen overflow-hidden" : "min-h-screen"}`}>
+    <div className={`flex relative bg-void overflow-x-hidden ${isChatPage ? "h-dvh overflow-hidden" : "min-h-screen"}`}>
 
       <ChatNotificationProvider enabled={isLoggedIn && !isPublicPage}>
         <ErrorBoundary>
@@ -175,7 +175,7 @@ export default function App() {
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className={`flex w-full ${isChatPage ? "h-screen overflow-hidden" : "min-h-screen"}`}
+                  className={`flex w-full ${isChatPage ? "h-dvh overflow-hidden" : "min-h-screen"}`}
                 >
                   {!isPublicPage && (
                     <>
@@ -191,7 +191,7 @@ export default function App() {
                   <main
                     className={
                       isChatPage
-                        ? "relative h-full min-h-0 flex-1 overflow-hidden pt-16 app-page-bg"
+                        ? "relative min-h-0 flex-1 overflow-hidden pt-16 app-page-bg"
                         : "relative min-h-0 flex-1 pt-16 overflow-y-auto app-page-bg"
                     }
                   >

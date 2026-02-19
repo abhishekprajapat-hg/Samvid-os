@@ -1376,7 +1376,10 @@ const TeamChat = ({ theme = "light" }) => {
           </div>
           </div>
 
-          <form onSubmit={handleSend} className={`border-t px-3 py-2.5 sm:px-4 ${isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white"}`}>
+          <form
+            onSubmit={handleSend}
+            className={`border-t px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] sm:px-4 ${isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white"}`}
+          >
             {queuedShare && (
               <div className={`mb-3 rounded-xl border p-2.5 ${isDark ? "border-cyan-400/25 bg-cyan-500/10" : "border-cyan-200 bg-cyan-50/80"}`}>
                 <div className="flex items-start gap-2.5">
