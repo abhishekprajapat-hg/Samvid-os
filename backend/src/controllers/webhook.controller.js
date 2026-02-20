@@ -1,6 +1,7 @@
 const axios = require("axios");
 const Lead = require("../models/Lead");
 const { autoAssignLead } = require("../services/leadAssignment.service");
+const logger = require("../config/logger");
 
 const META_GRAPH_VERSION = String(process.env.META_GRAPH_VERSION || "v24.0").trim();
 
@@ -77,7 +78,7 @@ exports.verifyWebhook = (req, res) => {
   const challenge = req.query["hub.challenge"];
 
   if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("Webhook verified");
+    logger.info({ message: "Webhook verified" });
     return res.status(200).send(challenge);
   }
 
@@ -88,7 +89,7 @@ exports.handleWebhook = async (req, res) => {
   try {
     const accessToken = String(process.env.META_ACCESS_TOKEN || "").trim();
     if (!accessToken) {
-      console.error("META_ACCESS_TOKEN is missing");
+      logger.error({ message: "META_ACCESS_TOKEN is missing" });
       return res.status(500).json({ message: "Server not configured for meta leads" });
     }
 
@@ -120,14 +121,20 @@ exports.handleWebhook = async (req, res) => {
 
         if (!phone) {
           invalidCount += 1;
-          console.log(`Meta lead skipped (missing phone) leadId=${event.leadId}`);
+          logger.info({
+            leadId: event.leadId,
+            message: "Meta lead skipped due to missing phone",
+          });
           continue;
         }
 
         const existing = await Lead.findOne({ phone });
         if (existing) {
           duplicateCount += 1;
-          console.log(`Duplicate lead skipped (phone: ${phone})`);
+          logger.info({
+            phone,
+            message: "Duplicate meta lead skipped",
+          });
           continue;
         }
 
@@ -146,19 +153,21 @@ exports.handleWebhook = async (req, res) => {
         const assignment = await autoAssignLead({ lead, requester: null });
         createdCount += 1;
 
-        console.log(
-          assignment.assigned
-            ? assignment.manager
-              ? `Lead auto assigned to ${assignment.executive.name} under manager ${assignment.manager.name}`
-              : `Lead auto assigned to ${assignment.executive.name} (${assignment.mode})`
-            : "No active executive available, lead left unassigned",
-        );
+        logger.info({
+          leadId: lead._id,
+          assigned: assignment.assigned,
+          mode: assignment.mode || null,
+          executiveId: assignment.executive?._id || null,
+          managerId: assignment.manager?._id || null,
+          message: "Meta lead processed",
+        });
       } catch (leadError) {
         failedCount += 1;
-        console.error(
-          `Failed to process meta lead ${event.leadId}:`,
-          leadError.response?.data || leadError.message,
-        );
+        logger.error({
+          leadId: event.leadId,
+          error: leadError.response?.data || leadError.message,
+          message: "Failed to process meta lead",
+        });
       }
     }
 
@@ -171,7 +180,10 @@ exports.handleWebhook = async (req, res) => {
       failed: failedCount,
     });
   } catch (error) {
-    console.error("Webhook error:", error.response?.data || error.message);
+    logger.error({
+      error: error.response?.data || error.message,
+      message: "Webhook processing failed",
+    });
     return res.sendStatus(500);
   }
 };

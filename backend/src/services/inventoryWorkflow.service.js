@@ -145,7 +145,9 @@ const ensureManagerExistsInCompany = async ({ managerId, companyId }) => {
     role: USER_ROLES.MANAGER,
     isActive: true,
     companyId,
-  }).select("_id name role companyId");
+  })
+    .select("_id name role companyId")
+    .lean();
 
   if (!manager) {
     throw createHttpError(403, "Manager is inactive or does not belong to your company");
@@ -311,16 +313,23 @@ const applyInventoryPopulates = (query) =>
     .populate("teamId", "name role companyId")
     .populate("createdBy", "name role companyId")
     .populate("approvedBy", "name role companyId")
-    .populate("updatedBy", "name role companyId");
+    .populate("updatedBy", "name role companyId")
+    .lean();
 
 const applyRequestPopulates = (query) =>
   query
     .populate("requestedBy", "name role parentId companyId")
     .populate("reviewedBy", "name role companyId")
     .populate("teamId", "name role companyId")
-    .populate("inventoryId");
+    .populate("inventoryId")
+    .lean();
 
-const getInventoryList = async ({ user, filters = {} }) => {
+const getInventoryList = async ({
+  user,
+  filters = {},
+  pagination = null,
+  selectFields = "",
+}) => {
   const scope = getInventoryScopeQueryForUser(user);
   const query = { ...scope };
 
@@ -340,9 +349,31 @@ const getInventoryList = async ({ user, filters = {} }) => {
     }
   }
 
-  return applyInventoryPopulates(
+  const inventoryQuery = applyInventoryPopulates(
     Inventory.find(query).sort({ updatedAt: -1, createdAt: -1 }),
   );
+
+  if (selectFields) {
+    inventoryQuery.select(selectFields);
+  }
+
+  if (pagination?.enabled) {
+    inventoryQuery.skip(pagination.skip).limit(pagination.limit);
+  }
+
+  if (!pagination?.enabled) {
+    return inventoryQuery;
+  }
+
+  const [rows, totalCount] = await Promise.all([
+    inventoryQuery,
+    Inventory.countDocuments(query),
+  ]);
+
+  return {
+    rows,
+    totalCount,
+  };
 };
 
 const getInventoryById = async ({ user, inventoryId }) => {
@@ -499,6 +530,7 @@ const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
   const companyId = getCompanyIdForUser(user);
   const createdRows = [];
   const failedRows = [];
+  const validatedTeamIds = new Set();
 
   for (let index = 0; index < payload.length; index += 1) {
     const row = payload[index];
@@ -510,11 +542,13 @@ const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
       });
 
       const teamId = row?.teamId || null;
-      if (teamId) {
+      const teamIdKey = teamId ? String(teamId) : "";
+      if (teamId && !validatedTeamIds.has(teamIdKey)) {
         await ensureManagerExistsInCompany({
           managerId: teamId,
           companyId,
         });
+        validatedTeamIds.add(teamIdKey);
       }
 
       const created = await Inventory.create({
@@ -608,7 +642,9 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
   const inventory = await Inventory.findOne({
     _id: inventoryId,
     companyId,
-  }).select("_id status");
+  })
+    .select("_id status")
+    .lean();
 
   if (!inventory) {
     throw createHttpError(404, "Inventory not found");

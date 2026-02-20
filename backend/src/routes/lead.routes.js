@@ -3,12 +3,14 @@ const router = express.Router();
 
 const leadController = require("../controllers/lead.controller");
 const authMiddleware = require("../middleware/auth.middleware");
+const { writeLimiter } = require("../middleware/rateLimit.middleware");
 
 // ======================================
 // CREATE LEAD (All logged in users)
 // ======================================
 router.post(
   "/",
+  writeLimiter,
   authMiddleware.protect,
   leadController.createLead
 );
@@ -36,6 +38,7 @@ router.get(
 // ======================================
 router.patch(
   "/:leadId/assign",
+  writeLimiter,
   authMiddleware.protect,
   authMiddleware.checkRole(["ADMIN", "MANAGER"]),
   leadController.assignLead
@@ -46,6 +49,7 @@ router.patch(
 // ======================================
 router.patch(
   "/:leadId/status",
+  writeLimiter,
   authMiddleware.protect,
   leadController.updateLeadStatus
 );

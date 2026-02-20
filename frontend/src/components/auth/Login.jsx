@@ -22,9 +22,14 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
         portal,
       });
 
-      const { token, user } = res.data;
+      const { token, refreshToken, user } = res.data;
 
       localStorage.setItem("token", token);
+      if (refreshToken) {
+        localStorage.setItem("refreshToken", refreshToken);
+      } else {
+        localStorage.removeItem("refreshToken");
+      }
       localStorage.setItem("role", user.role);
       localStorage.setItem("user", JSON.stringify(user));
 

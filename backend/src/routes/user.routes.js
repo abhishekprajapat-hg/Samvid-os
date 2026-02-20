@@ -3,6 +3,7 @@ const router = express.Router();
 
 const userController = require("../controllers/user.controller");
 const authMiddleware = require("../middleware/auth.middleware");
+const { writeLimiter } = require("../middleware/rateLimit.middleware");
 
 router.get(
   "/",
@@ -12,6 +13,7 @@ router.get(
 
 router.post(
   "/create",
+  writeLimiter,
   authMiddleware.protect,
   userController.createUserByRole
 );
@@ -36,12 +38,14 @@ router.get(
 
 router.post(
   "/rebalance-executives",
+  writeLimiter,
   authMiddleware.protect,
   userController.rebalanceExecutives
 );
 
 router.delete(
   "/:userId",
+  writeLimiter,
   authMiddleware.protect,
   userController.deleteUser
 );

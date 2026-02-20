@@ -1,12 +1,32 @@
 const User = require("../models/User");
 const Lead = require("../models/Lead");
+const logger = require("../config/logger");
 const {
   EXECUTIVE_ROLES,
   redistributePipelineLeads,
 } = require("../services/leadAssignment.service");
+const {
+  parsePagination,
+  buildPaginationMeta,
+  parseFieldSelection,
+} = require("../utils/queryOptions");
 
 const LOCATION_ALLOWED_ROLES = ["FIELD_EXECUTIVE", "EXECUTIVE"];
 const LOCATION_VIEWER_ROLES = ["ADMIN", "MANAGER", "FIELD_EXECUTIVE"];
+const USER_SELECTABLE_FIELDS = [
+  "_id",
+  "name",
+  "email",
+  "phone",
+  "role",
+  "companyId",
+  "parentId",
+  "isActive",
+  "lastAssignedAt",
+  "liveLocation",
+  "createdAt",
+  "updatedAt",
+];
 
 const toFiniteNumber = (value) => {
   const parsed = Number(value);
@@ -37,7 +57,10 @@ const findLeastLoadedManager = async (companyId) => {
     role: "MANAGER",
     isActive: true,
     companyId,
-  }).sort({ createdAt: 1 });
+  })
+    .select("_id createdAt")
+    .sort({ createdAt: 1 })
+    .lean();
 
   if (!managers.length) return null;
 
@@ -99,18 +122,58 @@ exports.getUsers = async (req, res) => {
       query = { ...companyScope, _id: req.user._id };
     }
 
-    const users = await User.find(query)
-      .select("-password")
+    const pagination = parsePagination(req.query, {
+      defaultLimit: Number.parseInt(process.env.USERS_PAGE_LIMIT, 10) || 50,
+      maxLimit: Number.parseInt(process.env.USERS_PAGE_MAX_LIMIT, 10) || 200,
+    });
+    const selectedFields = parseFieldSelection(
+      req.query?.fields,
+      USER_SELECTABLE_FIELDS,
+    );
+
+    const usersQuery = User.find(query)
       .populate("parentId", "name role")
       .sort({ createdAt: -1 });
 
-    res.json({
+    if (selectedFields) {
+      usersQuery.select(selectedFields);
+    }
+
+    if (pagination.enabled) {
+      usersQuery.skip(pagination.skip).limit(pagination.limit);
+    }
+
+    const resolvedUsersQuery = usersQuery.lean();
+
+    if (!pagination.enabled) {
+      const users = await resolvedUsersQuery;
+      return res.json({
+        count: users.length,
+        users,
+      });
+    }
+
+    const [users, totalCount] = await Promise.all([
+      resolvedUsersQuery,
+      User.countDocuments(query),
+    ]);
+
+    return res.json({
       count: users.length,
       users,
+      pagination: buildPaginationMeta({
+        page: pagination.page,
+        limit: pagination.limit,
+        totalCount,
+      }),
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getUsers failed",
+    });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -129,7 +192,7 @@ exports.createUserByRole = async (req, res) => {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email }).select("_id").lean();
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
     }
@@ -146,7 +209,9 @@ exports.createUserByRole = async (req, res) => {
           role: "MANAGER",
           isActive: true,
           companyId: req.user.companyId,
-        });
+        })
+          .select("_id")
+          .lean();
 
         if (!manager) {
           return res.status(400).json({ message: "Invalid managerId" });
@@ -186,8 +251,12 @@ exports.createUserByRole = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "createUserByRole failed",
+    });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -205,7 +274,10 @@ exports.rebalanceExecutives = async (req, res) => {
       role: "MANAGER",
       isActive: true,
       companyId: req.user.companyId,
-    }).sort({ createdAt: 1 });
+    })
+      .select("_id name createdAt")
+      .sort({ createdAt: 1 })
+      .lean();
 
     if (!managers.length) {
       return res.status(400).json({ message: "No active manager found" });
@@ -215,7 +287,10 @@ exports.rebalanceExecutives = async (req, res) => {
       role: { $in: EXECUTIVE_ROLES },
       isActive: true,
       companyId: req.user.companyId,
-    }).sort({ createdAt: 1 });
+    })
+      .select("_id name parentId createdAt")
+      .sort({ createdAt: 1 })
+      .lean();
 
     if (!executives.length) {
       return res.json({ message: "No active executive found", updated: 0 });
@@ -260,12 +335,16 @@ exports.rebalanceExecutives = async (req, res) => {
       },
     ]);
 
+    const rowByManagerId = new Map(
+      distribution.map((item) => [String(item._id), Number(item.count || 0)]),
+    );
+
     const distributionByManager = managers.map((manager) => {
-      const row = distribution.find((d) => String(d._id) === String(manager._id));
+      const count = rowByManagerId.get(String(manager._id)) || 0;
       return {
         managerId: manager._id,
         managerName: manager.name,
-        executives: row ? row.count : 0,
+        executives: count,
       };
     });
 
@@ -288,10 +367,18 @@ exports.rebalanceExecutives = async (req, res) => {
       },
     ]);
 
+    const leadRowByExecutiveId = new Map(
+      executiveLeadDistribution.map((item) => [
+        String(item._id),
+        {
+          totalLeads: Number(item.totalLeads || 0),
+          convertedLeads: Number(item.convertedLeads || 0),
+        },
+      ]),
+    );
+
     const leadDistributionByExecutive = executives.map((executive) => {
-      const row = executiveLeadDistribution.find(
-        (d) => String(d._id) === String(executive._id),
-      );
+      const row = leadRowByExecutiveId.get(String(executive._id)) || null;
 
       return {
         executiveId: executive._id,
@@ -309,8 +396,12 @@ exports.rebalanceExecutives = async (req, res) => {
       leadDistribution: leadDistributionByExecutive,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "rebalanceExecutives failed",
+    });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -329,7 +420,9 @@ exports.deleteUser = async (req, res) => {
     const user = await User.findOne({
       _id: userId,
       companyId: req.user.companyId,
-    });
+    })
+      .select("_id role")
+      .lean();
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
@@ -353,12 +446,16 @@ exports.deleteUser = async (req, res) => {
       { $set: { assignedTo: null } },
     );
 
-    await User.deleteOne({ _id: user._id });
+    await User.deleteOne({ _id: userId });
 
     res.json({ message: "User deleted successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "deleteUser failed",
+    });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -369,15 +466,21 @@ exports.getMyTeam = async (req, res) => {
       parentId: req.user._id,
       isActive: true,
       companyId: req.user.companyId,
-    }).select("-password");
+    })
+      .select("-password")
+      .lean();
 
     res.json({
       count: users.length,
       team: users,
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getMyTeam failed",
+    });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
@@ -420,6 +523,7 @@ exports.updateMyLocation = async (req, res) => {
       {
         new: true,
         select: "_id name role liveLocation",
+        lean: true,
       },
     );
 
@@ -432,7 +536,11 @@ exports.updateMyLocation = async (req, res) => {
       user: updatedUser,
     });
   } catch (error) {
-    console.error(error);
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "updateMyLocation failed",
+    });
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -464,9 +572,29 @@ exports.getFieldExecutiveLocations = async (req, res) => {
       query._id = req.user._id;
     }
 
-    const users = await User.find(query)
+    const pagination = parsePagination(req.query, {
+      defaultLimit: Number.parseInt(process.env.FIELD_LOCATION_PAGE_LIMIT, 10) || 100,
+      maxLimit: Number.parseInt(process.env.FIELD_LOCATION_PAGE_MAX_LIMIT, 10) || 300,
+    });
+    const selectedFields = parseFieldSelection(
+      req.query?.fields,
+      USER_SELECTABLE_FIELDS,
+    );
+
+    const usersQuery = User.find(query)
       .select("name email phone role parentId isActive lastAssignedAt liveLocation")
       .sort({ name: 1 });
+
+    if (selectedFields) {
+      usersQuery.select(selectedFields);
+    }
+
+    if (pagination.enabled) {
+      usersQuery.skip(pagination.skip).limit(pagination.limit);
+    }
+
+    const resolvedUsersQuery = usersQuery.lean();
+    const users = await resolvedUsersQuery;
 
     const rows = users.map((user) => {
       const location = user.liveLocation || null;
@@ -487,13 +615,32 @@ exports.getFieldExecutiveLocations = async (req, res) => {
       };
     });
 
+    if (!pagination.enabled) {
+      return res.json({
+        count: rows.length,
+        staleMinutes,
+        users: rows,
+      });
+    }
+
+    const totalCount = await User.countDocuments(query);
+
     return res.json({
       count: rows.length,
       staleMinutes,
       users: rows,
+      pagination: buildPaginationMeta({
+        page: pagination.page,
+        limit: pagination.limit,
+        totalCount,
+      }),
     });
   } catch (error) {
-    console.error(error);
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getFieldExecutiveLocations failed",
+    });
     return res.status(500).json({ message: "Server error" });
   }
 };

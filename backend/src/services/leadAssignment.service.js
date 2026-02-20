@@ -277,7 +277,8 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
     isActive: true,
   })
     .select("_id name role parentId isActive createdAt lastAssignedAt")
-    .sort({ createdAt: 1 });
+    .sort({ createdAt: 1 })
+    .lean();
 
   if (!activeExecutives.length) {
     await createNoAssignmentActivity(lead._id, actorId, "no active executive available");
@@ -327,7 +328,8 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
     isActive: true,
   })
     .select("_id name createdAt lastAssignedAt")
-    .sort({ createdAt: 1 });
+    .sort({ createdAt: 1 })
+    .lean();
 
   const managerMap = new Map(managers.map((manager) => [toId(manager._id), manager]));
 
@@ -376,7 +378,8 @@ const redistributePipelineLeads = async ({ executiveIds = null } = {}) => {
 
   const executives = await User.find(query)
     .select("_id createdAt lastAssignedAt")
-    .sort({ createdAt: 1 });
+    .sort({ createdAt: 1 })
+    .lean();
 
   if (!executives.length) {
     return {
@@ -391,7 +394,8 @@ const redistributePipelineLeads = async ({ executiveIds = null } = {}) => {
     status: { $in: PIPELINE_STATUSES },
   })
     .select("_id assignedTo createdAt")
-    .sort({ createdAt: 1 });
+    .sort({ createdAt: 1 })
+    .lean();
 
   if (!pipelineLeads.length) {
     return {

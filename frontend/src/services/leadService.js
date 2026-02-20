@@ -1,12 +1,12 @@
 import api from "./api";
 
-export const getLeadPool = async () => {
-  const res = await api.get("/leads");
+export const getLeadPool = async (params = {}) => {
+  const res = await api.get("/leads", { params });
   return res.data;
 };
 
-export const getAllLeads = async () => {
-  const res = await api.get("/leads");
+export const getAllLeads = async (params = {}) => {
+  const res = await api.get("/leads", { params });
   return res.data?.leads || [];
 };
 
@@ -25,7 +25,22 @@ export const assignLead = async (leadId, executiveId) => {
   return res.data?.lead;
 };
 
-export const getLeadActivity = async (leadId) => {
-  const res = await api.get(`/leads/${leadId}/activity`);
+export const getLeadActivity = async (leadId, params = {}, options = {}) => {
+  const res = await api.get(`/leads/${leadId}/activity`, { params });
+  if (options.withMeta) {
+    return {
+      activities: res.data?.activities || [],
+      pagination: res.data?.pagination || null,
+    };
+  }
+
   return res.data?.activities || [];
+};
+
+export const getLeadActivityWithMeta = async (leadId, params = {}) => {
+  const res = await api.get(`/leads/${leadId}/activity`, { params });
+  return {
+    activities: res.data?.activities || [],
+    pagination: res.data?.pagination || null,
+  };
 };

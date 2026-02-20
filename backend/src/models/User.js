@@ -86,6 +86,10 @@ const userSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
+userSchema.index({ companyId: 1, role: 1, isActive: 1, createdAt: 1 });
+userSchema.index({ companyId: 1, parentId: 1, role: 1, isActive: 1 });
+userSchema.index({ companyId: 1, role: 1, "liveLocation.updatedAt": -1 });
+
 userSchema.pre("save", async function () {
   if (!this.isModified("password")) return;
 

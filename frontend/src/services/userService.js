@@ -1,7 +1,7 @@
 import api from "./api";
 
-export const getUsers = async () => {
-  const res = await api.get("/users");
+export const getUsers = async (params = {}) => {
+  const res = await api.get("/users", { params });
   return res.data;
 };
 
@@ -28,4 +28,13 @@ export const updateMyLiveLocation = async (payload) => {
 export const getFieldExecutiveLocations = async (params = {}) => {
   const res = await api.get("/users/field-locations", { params });
   return res.data?.users || [];
+};
+
+export const getFieldExecutiveLocationsWithMeta = async (params = {}) => {
+  const res = await api.get("/users/field-locations", { params });
+  return {
+    users: res.data?.users || [],
+    pagination: res.data?.pagination || null,
+    staleMinutes: res.data?.staleMinutes || null,
+  };
 };

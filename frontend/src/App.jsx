@@ -205,8 +205,19 @@ export default function App() {
   }, [userRole, theme]);
 
   /* 🔥 Logout */
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const refreshToken = localStorage.getItem("refreshToken");
+
+    try {
+      await api.post("/auth/logout", {
+        refreshToken: refreshToken || undefined,
+      });
+    } catch {
+      // Logout should always clear local session, even if network call fails.
+    }
+
     localStorage.removeItem("token");
+    localStorage.removeItem("refreshToken");
     localStorage.removeItem("role");
     localStorage.removeItem("user");
     delete api.defaults.headers.common["Authorization"];

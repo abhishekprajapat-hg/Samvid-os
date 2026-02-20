@@ -5,6 +5,15 @@ export const getInventoryAssets = async (params = {}) => {
   return res.data?.assets || [];
 };
 
+export const getInventoryAssetsWithMeta = async (params = {}) => {
+  const res = await api.get("/inventory", { params });
+  return {
+    assets: res.data?.assets || [],
+    inventory: res.data?.inventory || [],
+    pagination: res.data?.pagination || null,
+  };
+};
+
 export const getInventoryAssetById = async (assetId) => {
   const res = await api.get(`/inventory/${assetId}`);
   return {

@@ -1,8 +1,25 @@
 const mongoose = require("mongoose");
 const User = require("../models/User");
 const generateToken = require("../utils/generateToken");
+const logger = require("../config/logger");
+const {
+  issueAuthTokens,
+  rotateRefreshToken,
+  revokeRefreshToken,
+  revokeAllUserRefreshTokens,
+} = require("../services/authToken.service");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
+const resolveClientIp = (req) =>
+  String(
+    req.headers["x-forwarded-for"]
+    || req.ip
+    || req.connection?.remoteAddress
+    || "",
+  )
+    .split(",")[0]
+    .trim();
 
 const resolveCompanyContextForLogin = async (user) => {
   if (user.companyId) return user.companyId;
@@ -41,6 +58,22 @@ const resolveCompanyContextForLogin = async (user) => {
 
   return null;
 };
+
+const toAuthResponse = ({ user, tokenBundle }) => ({
+  message: "Login successful",
+  token: tokenBundle.token,
+  accessToken: tokenBundle.accessToken,
+  refreshToken: tokenBundle.refreshToken,
+  user: {
+    id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    companyId: user.companyId,
+    parentId: user.parentId || null,
+    partnerCode: user.partnerCode || null,
+  },
+});
 
 exports.login = async (req, res) => {
   try {
@@ -85,23 +118,96 @@ exports.login = async (req, res) => {
       });
     }
 
-    const token = generateToken(user);
+    const tokenBundle = await issueAuthTokens({
+      user,
+      ip: resolveClientIp(req),
+      userAgent: req.headers["user-agent"] || "",
+    });
 
+    return res.json(toAuthResponse({ user, tokenBundle }));
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "Login failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.refresh = async (req, res) => {
+  try {
+    const rawRefreshToken = String(req.body?.refreshToken || "").trim();
+    if (!rawRefreshToken) {
+      return res.status(400).json({ message: "refreshToken is required" });
+    }
+
+    const rotated = await rotateRefreshToken({
+      rawRefreshToken,
+      ip: resolveClientIp(req),
+      userAgent: req.headers["user-agent"] || "",
+    });
+
+    if (!rotated?.userId) {
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    const user = await User.findById(rotated.userId).select(
+      "_id name email role companyId parentId partnerCode isActive",
+    );
+
+    if (!user || !user.isActive) {
+      return res.status(401).json({ message: "User not found or inactive" });
+    }
+
+    const accessToken = generateToken(user);
     return res.json({
-      message: "Login successful",
-      token,
+      token: accessToken,
+      accessToken,
+      refreshToken: rotated.refreshToken,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
-        companyId: user.companyId,
+        companyId: user.companyId || null,
         parentId: user.parentId || null,
         partnerCode: user.partnerCode || null,
       },
     });
   } catch (error) {
-    console.error("LOGIN ERROR:", error);
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "Token refresh failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.logout = async (req, res) => {
+  try {
+    const rawRefreshToken = String(req.body?.refreshToken || "").trim();
+
+    if (rawRefreshToken) {
+      await revokeRefreshToken({
+        rawRefreshToken,
+        ip: resolveClientIp(req),
+      });
+    } else if (req.user?._id) {
+      await revokeAllUserRefreshTokens({
+        userId: req.user._id,
+        ip: resolveClientIp(req),
+      });
+    }
+
+    return res.json({ message: "Logout successful" });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "Logout failed",
+    });
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -120,7 +226,11 @@ exports.getMe = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("GETME ERROR:", error);
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "GetMe failed",
+    });
     return res.status(500).json({ message: "Server error" });
   }
 };

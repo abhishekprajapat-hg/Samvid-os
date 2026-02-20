@@ -7,8 +7,32 @@ const {
   bulkCreateInventoryDirect,
   getInventoryActivities,
 } = require("../services/inventoryWorkflow.service");
+const logger = require("../config/logger");
+const {
+  parsePagination,
+  buildPaginationMeta,
+  parseFieldSelection,
+} = require("../utils/queryOptions");
 
 const FE_ROLE = "FIELD_EXECUTIVE";
+const INVENTORY_SELECTABLE_FIELDS = [
+  "_id",
+  "companyId",
+  "projectName",
+  "towerName",
+  "unitNumber",
+  "price",
+  "status",
+  "location",
+  "images",
+  "documents",
+  "teamId",
+  "createdBy",
+  "approvedBy",
+  "updatedBy",
+  "createdAt",
+  "updatedAt",
+];
 
 const toLegacyStatus = (status) => {
   if (status === "Blocked") return "Reserved";
@@ -70,12 +94,17 @@ const toRoleBasedInventory = (inventory, role) => {
   return inventory;
 };
 
-const handleControllerError = (res, error, fallbackMessage) => {
+const handleControllerError = (req, res, error, fallbackMessage) => {
   const statusCode = error.statusCode || 500;
   const message = statusCode >= 500 ? fallbackMessage : error.message;
 
   if (statusCode >= 500) {
-    console.error(fallbackMessage, error);
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      details: error.stack || null,
+      message: fallbackMessage,
+    });
   }
 
   return res.status(statusCode).json({ message });
@@ -83,23 +112,51 @@ const handleControllerError = (res, error, fallbackMessage) => {
 
 exports.getInventory = async (req, res) => {
   try {
-    const inventory = await getInventoryList({
+    const pagination = parsePagination(req.query, {
+      defaultLimit: Number.parseInt(process.env.INVENTORY_PAGE_LIMIT, 10) || 50,
+      maxLimit: Number.parseInt(process.env.INVENTORY_PAGE_MAX_LIMIT, 10) || 200,
+    });
+    const selectFields = parseFieldSelection(
+      req.query?.fields,
+      INVENTORY_SELECTABLE_FIELDS,
+    );
+
+    const inventoryResult = await getInventoryList({
       user: req.user,
       filters: {
         status: req.query?.status,
         search: req.query?.search,
       },
+      pagination,
+      selectFields,
     });
-    const visibleInventory = inventory.map((row) => toRoleBasedInventory(row, req.user.role));
+
+    const rows = pagination.enabled ? inventoryResult.rows : inventoryResult;
+    const totalCount = pagination.enabled ? inventoryResult.totalCount : rows.length;
+
+    const visibleInventory = rows.map((row) => toRoleBasedInventory(row, req.user.role));
     const assets = visibleInventory.map((row) => toLegacyAsset(row, req.user.role));
+
+    if (!pagination.enabled) {
+      return res.json({
+        count: assets.length,
+        assets,
+        inventory: visibleInventory,
+      });
+    }
 
     return res.json({
       count: assets.length,
       assets,
       inventory: visibleInventory,
+      pagination: buildPaginationMeta({
+        page: pagination.page,
+        limit: pagination.limit,
+        totalCount,
+      }),
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to load inventory");
+    return handleControllerError(req, res, error, "Failed to load inventory");
   }
 };
 
@@ -114,7 +171,7 @@ exports.getInventoryById = async (req, res) => {
 
     return res.json({ asset, inventory: visibleInventory });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to load inventory item");
+    return handleControllerError(req, res, error, "Failed to load inventory item");
   }
 };
 
@@ -132,7 +189,7 @@ exports.createInventory = async (req, res) => {
       inventory,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to create inventory");
+    return handleControllerError(req, res, error, "Failed to create inventory");
   }
 };
 
@@ -151,7 +208,7 @@ exports.updateInventory = async (req, res) => {
       inventory,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to update inventory");
+    return handleControllerError(req, res, error, "Failed to update inventory");
   }
 };
 
@@ -164,7 +221,7 @@ exports.deleteInventory = async (req, res) => {
 
     return res.json({ message: "Inventory deleted successfully" });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to delete inventory");
+    return handleControllerError(req, res, error, "Failed to delete inventory");
   }
 };
 
@@ -180,7 +237,7 @@ exports.bulkUploadInventory = async (req, res) => {
       ...result,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to bulk upload inventory");
+    return handleControllerError(req, res, error, "Failed to bulk upload inventory");
   }
 };
 
@@ -197,7 +254,7 @@ exports.getInventoryActivity = async (req, res) => {
       activities,
     });
   } catch (error) {
-    return handleControllerError(res, error, "Failed to load inventory activity");
+    return handleControllerError(req, res, error, "Failed to load inventory activity");
   }
 };
 

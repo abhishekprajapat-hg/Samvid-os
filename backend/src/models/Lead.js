@@ -75,4 +75,12 @@ const leadSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+leadSchema.index({ createdAt: -1 });
+leadSchema.index({ createdBy: 1, createdAt: -1 });
+leadSchema.index({ assignedTo: 1, createdAt: -1 });
+leadSchema.index({ assignedManager: 1, createdAt: -1 });
+leadSchema.index({ assignedExecutive: 1, createdAt: -1 });
+leadSchema.index({ assignedFieldExecutive: 1, createdAt: -1 });
+leadSchema.index({ nextFollowUp: 1, assignedTo: 1 });
+
 module.exports = mongoose.model("Lead", leadSchema);
