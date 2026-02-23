@@ -35,6 +35,7 @@ const STATUS_UPDATE_OPTIONS = [
   { label: "Reserved", value: "Blocked" },
   { label: "Sold", value: "Sold" },
 ];
+const GEOCODING_SEARCH_ENDPOINT = "https://nominatim.openstreetmap.org/search";
 
 const toApiStatus = (status) => {
   if (status === "Reserved") return "Blocked";
@@ -44,6 +45,8 @@ const toApiStatus = (status) => {
 const DEFAULT_FORM = {
   title: "",
   location: "",
+  locationLat: "",
+  locationLng: "",
   price: "",
   type: "Sale",
   category: "Apartment",
@@ -114,12 +117,51 @@ const REQUEST_FIELD_LABELS = {
   price: "Price",
   status: "Status",
   location: "Location",
+  siteLocation: "Coordinates",
   images: "Images",
   documents: "Documents",
 };
 
+const toCoordinateNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toSiteLocationPayload = ({ lat, lng }) => {
+  const parsedLat = toCoordinateNumber(lat);
+  const parsedLng = toCoordinateNumber(lng);
+  const hasAnyCoordinate = parsedLat !== null || parsedLng !== null;
+
+  if (!hasAnyCoordinate) {
+    return { value: null };
+  }
+
+  if (parsedLat === null || parsedLng === null) {
+    return { error: "Enter both latitude and longitude, or leave both empty" };
+  }
+
+  if (parsedLat < -90 || parsedLat > 90 || parsedLng < -180 || parsedLng > 180) {
+    return { error: "Invalid latitude/longitude range" };
+  }
+
+  return {
+    value: {
+      lat: parsedLat,
+      lng: parsedLng,
+    },
+  };
+};
+
 const formatRequestValue = (key, value) => {
   if (key === "price") return formatCurrency(value);
+  if (key === "siteLocation") {
+    const lat = toCoordinateNumber(value?.lat);
+    const lng = toCoordinateNumber(value?.lng);
+    return lat !== null && lng !== null ? `${lat}, ${lng}` : "-";
+  }
   if (Array.isArray(value)) return `${value.length} item(s)`;
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
@@ -135,6 +177,7 @@ const AssetVault = () => {
   const [modeType, setModeType] = useState("sale");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resolvingLocation, setResolvingLocation] = useState(false);
   const [deletingId, setDeletingId] = useState("");
   const [updatingStatusId, setUpdatingStatusId] = useState("");
   const [requestingStatusId, setRequestingStatusId] = useState("");
@@ -146,6 +189,11 @@ const AssetVault = () => {
   const [success, setSuccess] = useState("");
 
   const [formData, setFormData] = useState(DEFAULT_FORM);
+  const [locationBaseline, setLocationBaseline] = useState({
+    location: "",
+    locationLat: "",
+    locationLng: "",
+  });
 
   const role = localStorage.getItem("role") || "";
   const canManage = role === "ADMIN";
@@ -247,6 +295,11 @@ const AssetVault = () => {
 
   const resetForm = () => {
     setFormData({ ...DEFAULT_FORM });
+    setLocationBaseline({
+      location: "",
+      locationLat: "",
+      locationLng: "",
+    });
   };
 
   const closeFormModal = () => {
@@ -265,11 +318,93 @@ const AssetVault = () => {
     setIsAddModalOpen(true);
   };
 
+  const lookupCoordinatesByLocation = async (rawLocation) => {
+    const query = String(rawLocation || "").trim();
+    if (!query) return null;
+
+    const searchUrl = new URL(GEOCODING_SEARCH_ENDPOINT);
+    searchUrl.search = new URLSearchParams({
+      format: "jsonv2",
+      q: query,
+      limit: "1",
+      addressdetails: "0",
+      countrycodes: "in",
+    }).toString();
+
+    const response = await fetch(searchUrl.toString(), {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Location lookup failed");
+    }
+
+    const rows = await response.json();
+    const first = Array.isArray(rows) ? rows[0] : null;
+    const lat = toCoordinateNumber(first?.lat);
+    const lng = toCoordinateNumber(first?.lon);
+
+    if (lat === null || lng === null) {
+      return null;
+    }
+
+    return {
+      query,
+      lat,
+      lng,
+    };
+  };
+
+  const resolveCoordinatesFromLocation = async (rawLocation) => {
+    const query = String(rawLocation || "").trim();
+    if (!query || resolvingLocation) return;
+
+    try {
+      setResolvingLocation(true);
+      setError("");
+      const resolved = await lookupCoordinatesByLocation(query);
+      if (!resolved) {
+        setError("Location not found. Try entering full address");
+        return;
+      }
+
+      setFormData((prev) => ({
+        ...prev,
+        location: resolved.query,
+        locationLat: String(resolved.lat),
+        locationLng: String(resolved.lng),
+      }));
+      setSuccess("Coordinates auto-filled from location");
+    } catch (lookupError) {
+      setError(toErrorMessage(lookupError, "Unable to fetch coordinates"));
+    } finally {
+      setResolvingLocation(false);
+    }
+  };
+
+  const handleLocationInputKeyDown = (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    resolveCoordinatesFromLocation(e.currentTarget.value);
+  };
+
   const handleSaveAsset = async () => {
     if (!canOpenCreateModal) return;
 
     if (!formData.title.trim() || formData.price === "" || !formData.location.trim()) {
       setError("Title, location and price are required");
+      return;
+    }
+
+    const parsedSiteLocation = toSiteLocationPayload({
+      lat: formData.locationLat,
+      lng: formData.locationLng,
+    });
+
+    if (parsedSiteLocation.error) {
+      setError(parsedSiteLocation.error);
       return;
     }
 
@@ -279,10 +414,18 @@ const AssetVault = () => {
       setSuccess("");
 
       const payload = {
-        ...formData,
         title: formData.title.trim(),
+        location: formData.location.trim(),
         price: Number(formData.price),
+        type: formData.type,
+        category: formData.category,
+        status: formData.status,
+        images: Array.isArray(formData.images) ? formData.images : [],
       };
+
+      if (parsedSiteLocation.value) {
+        payload.siteLocation = parsedSiteLocation.value;
+      }
 
       if (canManage) {
         const createdAsset = await createInventoryAsset(payload);
@@ -304,6 +447,9 @@ const AssetVault = () => {
   const handleOpenEditModal = (asset) => {
     if (!canOpenEditModal || !asset?._id) return;
 
+    const existingSiteLat = toCoordinateNumber(asset?.siteLocation?.lat);
+    const existingSiteLng = toCoordinateNumber(asset?.siteLocation?.lng);
+
     setError("");
     setSuccess("");
     setIsAddModalOpen(false);
@@ -311,6 +457,8 @@ const AssetVault = () => {
     setFormData({
       title: asset.title || "",
       location: asset.location || "",
+      locationLat: existingSiteLat === null ? "" : String(existingSiteLat),
+      locationLng: existingSiteLng === null ? "" : String(existingSiteLng),
       price:
         asset.price === null || asset.price === undefined || Number.isNaN(Number(asset.price))
           ? ""
@@ -319,6 +467,11 @@ const AssetVault = () => {
       category: asset.category || "Apartment",
       status: asset.status || "Available",
       images: Array.isArray(asset.images) ? asset.images : [],
+    });
+    setLocationBaseline({
+      location: asset.location || "",
+      locationLat: existingSiteLat === null ? "" : String(existingSiteLat),
+      locationLng: existingSiteLng === null ? "" : String(existingSiteLng),
     });
     setIsEditModalOpen(true);
   };
@@ -336,11 +489,65 @@ const AssetVault = () => {
       setError("");
       setSuccess("");
 
+      let locationLatInput = formData.locationLat;
+      let locationLngInput = formData.locationLng;
+
+      const currentLocation = formData.location.trim();
+      const baselineLocation = String(locationBaseline.location || "").trim();
+      const locationChanged = currentLocation !== baselineLocation;
+
+      const currentLat = toCoordinateNumber(locationLatInput);
+      const currentLng = toCoordinateNumber(locationLngInput);
+      const baselineLat = toCoordinateNumber(locationBaseline.locationLat);
+      const baselineLng = toCoordinateNumber(locationBaseline.locationLng);
+
+      const hasCompleteCoordinates = currentLat !== null && currentLng !== null;
+      const coordinatesUnchangedFromBaseline =
+        currentLat === baselineLat && currentLng === baselineLng;
+
+      if (locationChanged && (!hasCompleteCoordinates || coordinatesUnchangedFromBaseline)) {
+        setResolvingLocation(true);
+        const resolved = await lookupCoordinatesByLocation(currentLocation);
+        if (!resolved) {
+          setError(
+            "Location changed but coordinates could not be resolved. Use Get Lat/Lng or enter coordinates manually.",
+          );
+          return;
+        }
+
+        locationLatInput = String(resolved.lat);
+        locationLngInput = String(resolved.lng);
+        setFormData((prev) => ({
+          ...prev,
+          location: resolved.query,
+          locationLat: locationLatInput,
+          locationLng: locationLngInput,
+        }));
+      }
+
+      const parsedSiteLocation = toSiteLocationPayload({
+        lat: locationLatInput,
+        lng: locationLngInput,
+      });
+
+      if (parsedSiteLocation.error) {
+        setError(parsedSiteLocation.error);
+        return;
+      }
+
       const payload = {
-        ...formData,
         title: formData.title.trim(),
+        location: formData.location.trim(),
         price: Number(formData.price),
+        type: formData.type,
+        category: formData.category,
+        status: formData.status,
+        images: Array.isArray(formData.images) ? formData.images : [],
       };
+
+      if (parsedSiteLocation.value) {
+        payload.siteLocation = parsedSiteLocation.value;
+      }
 
       if (canManage) {
         const updatedAsset = await updateInventoryAsset(editingAssetId, payload);
@@ -358,6 +565,7 @@ const AssetVault = () => {
       setError(toErrorMessage(updateError, "Failed to update asset"));
     } finally {
       setSaving(false);
+      setResolvingLocation(false);
     }
   };
 
@@ -607,6 +815,7 @@ const AssetVault = () => {
                   ? Object.entries(proposedData).filter(([key]) => REQUEST_FIELD_LABELS[key])
                   : [];
                 const detailLocation = detailSource?.location || "-";
+                const detailCoordinates = formatRequestValue("siteLocation", detailSource?.siteLocation);
                 const detailPrice = formatCurrency(detailSource?.price);
                 const detailStatus = isCreateRequest
                   ? proposedData?.status || "Available"
@@ -641,6 +850,9 @@ const AssetVault = () => {
                         <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-600">
                           <p>
                             <span className="font-semibold text-slate-700">Location:</span> {detailLocation}
+                          </p>
+                          <p>
+                            <span className="font-semibold text-slate-700">Coordinates:</span> {detailCoordinates}
                           </p>
                           <p>
                             <span className="font-semibold text-slate-700">Price:</span> {detailPrice}
@@ -1012,8 +1224,59 @@ const AssetVault = () => {
                       placeholder="Sector 42"
                       value={formData.location}
                       onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      onKeyDown={handleLocationInputKeyDown}
+                      className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
                     />
+                    <button
+                      type="button"
+                      onClick={() => resolveCoordinatesFromLocation(formData.location)}
+                      disabled={resolvingLocation || !formData.location.trim()}
+                      className="mt-2 h-[42px] min-w-[124px] rounded-xl border border-slate-200 bg-white px-3 text-[10px] font-bold uppercase tracking-widest text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                    >
+                      {resolvingLocation ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Loader size={12} className="animate-spin" />
+                          ...
+                        </span>
+                      ) : (
+                        <>
+                          <MapPin size={12} />
+                          Get Lat/Lng
+                        </>
+                      )}
+                    </button>
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      Press Enter to auto-fill coordinates. On edit, Update also auto-refreshes coordinates if address changed.
+                    </p>
+                  </div>
+
+                  <div className="col-span-2 grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Latitude (Optional)
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="28.4595"
+                        value={formData.locationLat}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, locationLat: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Longitude (Optional)
+                      </label>
+                      <input
+                        type="number"
+                        step="any"
+                        placeholder="77.0266"
+                        value={formData.locationLng}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, locationLng: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
                   </div>
 
                   <div>
@@ -1074,17 +1337,17 @@ const AssetVault = () => {
                 </button>
                 <button
                   onClick={isEditModalOpen ? handleUpdateAsset : handleSaveAsset}
-                  disabled={uploading || saving}
+                  disabled={uploading || saving || resolvingLocation}
                   className={`flex-1 py-3 text-white rounded-xl text-xs font-bold uppercase tracking-widest shadow-lg transition-all ${
-                    uploading || saving
+                    uploading || saving || resolvingLocation
                       ? "bg-slate-400 cursor-not-allowed"
                       : "bg-emerald-600 hover:bg-emerald-700"
                   }`}
                 >
-                  {uploading || saving
+                  {uploading || saving || resolvingLocation
                     ? isEditModalOpen
-                      ? "Updating..."
-                      : "Saving..."
+                      ? (resolvingLocation ? "Resolving..." : "Updating...")
+                      : (resolvingLocation ? "Resolving..." : "Saving...")
                     : isEditModalOpen
                       ? canManage
                         ? "Update Asset"
@@ -1103,3 +1366,4 @@ const AssetVault = () => {
 };
 
 export default AssetVault;
+

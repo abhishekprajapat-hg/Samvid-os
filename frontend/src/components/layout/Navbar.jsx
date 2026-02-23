@@ -57,6 +57,7 @@ const MENU_CONFIG = {
   ],
   field_agent: [
     { name: "Route", icon: Map, path: "/" },
+    { name: "My Leads", icon: Users, path: "/my-leads" },
     { name: "Inventory", icon: Building2, path: "/inventory" },
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Field Ops", icon: Navigation, path: "/map" },

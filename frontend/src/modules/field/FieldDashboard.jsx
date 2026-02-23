@@ -8,16 +8,19 @@ import {
   MessageSquare,
   Navigation,
   Package,
+  Users,
 } from "lucide-react";
 import AssetVault from "../inventory/AssetVault";
 import FieldOps from "./FieldOps";
 import TeamChat from "../chat/TeamChat";
 import MasterSchedule from "../calendar/MasterSchedule";
+import LeadsMatrix from "../leads/LeadsMatrix";
 import api from "../../services/api";
 import { toErrorMessage } from "../../utils/errorMessage";
 
 const TABS = [
   { id: "dashboard", label: "Dashboard", icon: LayoutGrid },
+  { id: "leads", label: "My Leads", icon: Users },
   { id: "inventory", label: "Inventory", icon: Package },
   { id: "map", label: "Field Ops", icon: MapPin },
   { id: "chat", label: "Chat", icon: MessageSquare },
@@ -48,20 +51,38 @@ const DEFAULT_TASKS = [
 const FieldDashboard = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [inventoryCount, setInventoryCount] = useState(0);
+  const [leadCount, setLeadCount] = useState(0);
   const [tasks, setTasks] = useState(DEFAULT_TASKS);
 
   useEffect(() => {
-    const fetchInventoryCount = async () => {
-      try {
-        const response = await api.get("/inventory");
-        const rows = response.data?.assets || [];
+    const fetchDashboardData = async () => {
+      const [inventoryResult, leadsResult] = await Promise.allSettled([
+        api.get("/inventory"),
+        api.get("/leads"),
+      ]);
+
+      if (inventoryResult.status === "fulfilled") {
+        const rows = inventoryResult.value.data?.assets || [];
         setInventoryCount(Array.isArray(rows) ? rows.length : 0);
-      } catch (error) {
-        console.error("Field dashboard inventory error:", toErrorMessage(error, "Unknown error"));
+      } else {
+        console.error(
+          "Field dashboard inventory error:",
+          toErrorMessage(inventoryResult.reason, "Unknown error"),
+        );
+      }
+
+      if (leadsResult.status === "fulfilled") {
+        const rows = leadsResult.value.data?.leads || [];
+        setLeadCount(Array.isArray(rows) ? rows.length : 0);
+      } else {
+        console.error(
+          "Field dashboard leads error:",
+          toErrorMessage(leadsResult.reason, "Unknown error"),
+        );
       }
     };
 
-    fetchInventoryCount();
+    fetchDashboardData();
   }, []);
 
   const tabLabel = useMemo(() => {
@@ -83,10 +104,15 @@ const FieldDashboard = () => {
         <FieldOverview
           tasks={tasks}
           inventoryCount={inventoryCount}
+          leadCount={leadCount}
           onCompleteTask={completeTask}
           onOpen={setActiveTab}
         />
       );
+    }
+
+    if (activeTab === "leads") {
+      return <LeadsMatrix />;
     }
 
     if (activeTab === "inventory") {
@@ -109,6 +135,7 @@ const FieldDashboard = () => {
       <FieldOverview
         tasks={tasks}
         inventoryCount={inventoryCount}
+        leadCount={leadCount}
         onCompleteTask={completeTask}
         onOpen={setActiveTab}
       />
@@ -157,6 +184,7 @@ const FieldDashboard = () => {
 const FieldOverview = ({
   tasks,
   inventoryCount,
+  leadCount,
   onCompleteTask,
   onOpen,
 }) => {
@@ -164,7 +192,7 @@ const FieldOverview = ({
 
   return (
     <div className="h-full overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
-      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5">
         <FieldStatCard
           title="Pending Tasks"
           value={pending}
@@ -176,6 +204,12 @@ const FieldOverview = ({
           value={tasks.length - pending}
           hint="Marked done"
           icon={CheckCircle}
+        />
+        <FieldStatCard
+          title="My Leads"
+          value={leadCount}
+          hint="Assigned to me"
+          icon={Users}
         />
         <FieldStatCard
           title="Inventory Access"
@@ -233,6 +267,12 @@ const FieldOverview = ({
         </div>
 
         <div className="space-y-4">
+          <QuickPageCard
+            title="My Leads"
+            subtitle="Open assigned leads and update status"
+            icon={Users}
+            onClick={() => onOpen("leads")}
+          />
           <QuickPageCard
             title="Field Ops Map"
             subtitle="Open live map and active visit panel"

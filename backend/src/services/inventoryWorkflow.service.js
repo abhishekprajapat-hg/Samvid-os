@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Inventory = require("../models/Inventory");
 const InventoryRequest = require("../models/InventoryRequest");
 const InventoryActivity = require("../models/InventoryActivity");
+const Lead = require("../models/Lead");
 const User = require("../models/User");
 const {
   INVENTORY_STATUSES,
@@ -24,6 +25,8 @@ const USER_ROLES = {
 const REQUEST_STATUS_PENDING = "pending";
 const REQUEST_STATUS_APPROVED = "approved";
 const REQUEST_STATUS_REJECTED = "rejected";
+const DEFAULT_SITE_VISIT_RADIUS_METERS =
+  Number.parseInt(process.env.SITE_VISIT_RADIUS_METERS, 10) || 200;
 
 const createHttpError = (statusCode, message) => {
   const error = new Error(message);
@@ -60,6 +63,69 @@ const sanitizePrice = (value) => {
     return null;
   }
   return parsed;
+};
+
+const toFiniteNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeLatitude = (value) => {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null || parsed < -90 || parsed > 90) return null;
+  return parsed;
+};
+
+const normalizeLongitude = (value) => {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null || parsed < -180 || parsed > 180) return null;
+  return parsed;
+};
+
+const buildLeadProjectInterested = (inventory = {}) =>
+  [inventory.projectName, inventory.towerName, inventory.unitNumber]
+    .map((value) => sanitizeString(value))
+    .filter(Boolean)
+    .join(" - ");
+
+const syncLinkedLeadsFromInventory = async (inventory = {}) => {
+  const inventoryId = inventory?._id;
+  if (!inventoryId || !isValidObjectId(inventoryId)) return;
+
+  const lat = normalizeLatitude(inventory?.siteLocation?.lat);
+  const lng = normalizeLongitude(inventory?.siteLocation?.lng);
+  const leadProjectInterested = buildLeadProjectInterested(inventory);
+  const leadCity = sanitizeString(inventory?.location);
+
+  await Lead.updateMany(
+    { inventoryId },
+    {
+      $set: {
+        projectInterested: leadProjectInterested || "",
+        city: leadCity || "",
+        "siteLocation.lat": lat,
+        "siteLocation.lng": lng,
+      },
+    },
+  );
+
+  await Lead.updateMany(
+    {
+      inventoryId,
+      $or: [
+        { "siteLocation.radiusMeters": { $exists: false } },
+        { "siteLocation.radiusMeters": null },
+      ],
+    },
+    {
+      $set: {
+        "siteLocation.radiusMeters": DEFAULT_SITE_VISIT_RADIUS_METERS,
+      },
+    },
+  );
 };
 
 const areValuesEqual = (left, right) =>
@@ -221,6 +287,28 @@ const sanitizeInventoryPayload = ({
     if (!isSafeKey(field)) return;
 
     const value = payload[field];
+
+    if (field === "siteLocation") {
+      if (value === null) {
+        safePayload[field] = { lat: null, lng: null };
+        return;
+      }
+
+      if (typeof value !== "object" || Array.isArray(value)) {
+        throw createHttpError(400, "siteLocation must be an object");
+      }
+
+      const lat = normalizeLatitude(value.lat);
+      const lng = normalizeLongitude(value.lng);
+
+      if (lat === null || lng === null) {
+        throw createHttpError(400, "Valid siteLocation.lat and siteLocation.lng are required");
+      }
+
+      safePayload[field] = { lat, lng };
+      return;
+    }
+
     if (value === undefined || value === null) return;
 
     if (field === "projectName" || field === "towerName" || field === "unitNumber" || field === "location") {
@@ -470,6 +558,7 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
   inventory.updatedBy = user._id;
   inventory.approvedBy = user._id;
   await inventory.save();
+  await syncLinkedLeadsFromInventory(inventory);
 
   await logInventoryActivity({
     companyId,
@@ -647,7 +736,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     companyId,
   })
     .select(
-      "_id projectName towerName unitNumber price status location images documents",
+      "_id projectName towerName unitNumber price status location siteLocation images documents",
     )
     .lean();
 
@@ -835,6 +924,7 @@ const approveRequest = async ({ user, requestId, io }) => {
     inventory.updatedBy = user._id;
     inventory.approvedBy = user._id;
     await inventory.save();
+    await syncLinkedLeadsFromInventory(inventory);
 
     await logInventoryActivity({
       companyId,

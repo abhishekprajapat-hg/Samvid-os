@@ -7,6 +7,17 @@ const leadSchema = new mongoose.Schema(
     email: String,
     city: String,
     projectInterested: String,
+    inventoryId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Inventory",
+      default: null,
+      index: true,
+    },
+    siteLocation: {
+      lat: { type: Number, default: null },
+      lng: { type: Number, default: null },
+      radiusMeters: { type: Number, default: 200 },
+    },
 
     source: {
       type: String,

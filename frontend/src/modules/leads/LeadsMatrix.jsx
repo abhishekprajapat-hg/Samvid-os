@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRef } from "react";
 import {
   Plus,
   Phone,
@@ -14,6 +15,8 @@ import {
   History,
   Save,
   ArrowUpRight,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import {
   getAllLeads,
@@ -21,7 +24,10 @@ import {
   updateLeadStatus,
   assignLead,
   getLeadActivity,
+  getLeadDiary,
+  addLeadDiaryEntry,
 } from "../../services/leadService";
+import { getInventoryAssets } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 
@@ -35,14 +41,24 @@ const LEAD_STATUSES = [
 ];
 
 const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
+const SITE_VISIT_RADIUS_METERS = 200;
 
 const defaultFormData = {
+  inventoryId: "",
   name: "",
   phone: "",
   email: "",
   city: "",
   projectInterested: "",
+  siteLat: "",
+  siteLng: "",
 };
+
+const getInventoryLeadLabel = (inventoryLike = {}) =>
+  [inventoryLike.projectName, inventoryLike.towerName, inventoryLike.unitNumber]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" - ");
 
 const getStatusColor = (status) => {
   switch (status) {
@@ -90,6 +106,61 @@ const formatDate = (value) => {
   });
 };
 
+const toCoordinateNumber = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "string" && value.trim() === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizePhoneDigits = (value) =>
+  String(value || "").replace(/\D/g, "");
+
+const getDialerHref = (phone) => {
+  const digits = normalizePhoneDigits(phone);
+  return digits ? `tel:${digits}` : "";
+};
+
+const getWhatsAppHref = (phone) => {
+  const digits = normalizePhoneDigits(phone);
+  if (!digits) return "";
+
+  const waNumber = digits.length === 10 ? `91${digits}` : digits;
+  return `https://wa.me/${waNumber}`;
+};
+
+const getMailHref = (email) => {
+  const trimmed = String(email || "").trim();
+  return trimmed ? `mailto:${trimmed}` : "";
+};
+
+const getMapsHref = (city) => {
+  const trimmed = String(city || "").trim();
+  return trimmed
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(trimmed)}`
+    : "";
+};
+
+const WhatsAppIcon = ({ size = 13, className = "" }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    className={className}
+    aria-hidden="true"
+  >
+    <path d="M13.601 2.326A7.854 7.854 0 0 0 8.005 0C3.58 0 0 3.577 0 8a7.9 7.9 0 0 0 1.153 4.095L0 16l4.01-1.127A7.9 7.9 0 0 0 8.005 16C12.425 16 16 12.423 16 8a7.85 7.85 0 0 0-2.399-5.674m-5.595 12.34a6.57 6.57 0 0 1-3.335-.908l-.24-.144-2.38.668.672-2.32-.157-.245a6.57 6.57 0 0 1-1.007-3.508c0-3.626 2.957-6.585 6.59-6.585a6.59 6.59 0 0 1 4.659 1.931A6.6 6.6 0 0 1 14.466 8c0 3.626-2.958 6.666-6.46 6.666m3.615-4.955c-.197-.1-1.17-.578-1.353-.645-.182-.065-.315-.1-.448.1-.132.197-.513.645-.627.776-.115.132-.23.149-.428.05-.197-.1-.833-.306-1.587-.977-.586-.52-.982-1.164-1.097-1.361-.115-.198-.012-.305.087-.404.09-.089.197-.23.296-.347.1-.115.132-.197.198-.33.065-.132.033-.248-.017-.347-.05-.1-.448-1.08-.613-1.48-.161-.387-.325-.334-.448-.34q-.182-.007-.396-.007a.76.76 0 0 0-.545.258c-.182.198-.694.678-.694 1.653s.71 1.92.81 2.052c.098.132 1.393 2.124 3.376 2.977.472.203.84.325 1.128.416.474.15.904.129 1.246.078.38-.057 1.17-.48 1.336-.944.164-.463.164-.86.115-.944-.05-.084-.182-.132-.38-.231" />
+  </svg>
+);
+
 const LeadsMatrix = () => {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -103,6 +174,7 @@ const LeadsMatrix = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [savingLead, setSavingLead] = useState(false);
   const [formData, setFormData] = useState(defaultFormData);
+  const [inventoryOptions, setInventoryOptions] = useState([]);
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -112,18 +184,28 @@ const LeadsMatrix = () => {
 
   const [activityLoading, setActivityLoading] = useState(false);
   const [activities, setActivities] = useState([]);
+  const [diaryLoading, setDiaryLoading] = useState(false);
+  const [diaryEntries, setDiaryEntries] = useState([]);
+  const [diaryDraft, setDiaryDraft] = useState("");
+  const [savingDiary, setSavingDiary] = useState(false);
+  const [isDiaryMicSupported, setIsDiaryMicSupported] = useState(false);
+  const [isDiaryListening, setIsDiaryListening] = useState(false);
   const [savingUpdates, setSavingUpdates] = useState(false);
   const [assigning, setAssigning] = useState(false);
 
   const [statusDraft, setStatusDraft] = useState("NEW");
   const [followUpDraft, setFollowUpDraft] = useState("");
   const [executiveDraft, setExecutiveDraft] = useState("");
+  const [siteLatDraft, setSiteLatDraft] = useState("");
+  const [siteLngDraft, setSiteLngDraft] = useState("");
 
   const [executives, setExecutives] = useState([]);
+  const diaryRecognitionRef = useRef(null);
 
   const userRole = localStorage.getItem("role") || "";
   const canAddLead = userRole === "ADMIN" || userRole === "MANAGER";
   const canAssignLead = userRole === "ADMIN" || userRole === "MANAGER";
+  const canConfigureSiteLocation = userRole === "ADMIN" || userRole === "MANAGER";
 
   const fetchLeads = useCallback(async (asRefresh = false) => {
     try {
@@ -164,10 +246,24 @@ const LeadsMatrix = () => {
     }
   }, [canAssignLead]);
 
+  const fetchInventoryOptions = useCallback(async () => {
+    if (!canAddLead) return;
+
+    try {
+      const rows = await getInventoryAssets();
+      setInventoryOptions(Array.isArray(rows) ? rows : []);
+    } catch (fetchError) {
+      const message = toErrorMessage(fetchError, "Failed to load inventory");
+      console.error(`Load inventory for leads failed: ${message}`);
+      setInventoryOptions([]);
+    }
+  }, [canAddLead]);
+
   useEffect(() => {
     fetchLeads();
     fetchExecutives();
-  }, [fetchLeads, fetchExecutives]);
+    fetchInventoryOptions();
+  }, [fetchLeads, fetchExecutives, fetchInventoryOptions]);
 
   useEffect(() => {
     if (success) {
@@ -183,6 +279,80 @@ const LeadsMatrix = () => {
     });
     observer.observe(root, { attributes: true, attributeFilter: ["class"] });
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setIsDiaryMicSupported(false);
+      return undefined;
+    }
+
+    setIsDiaryMicSupported(true);
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = "en-IN";
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsDiaryListening(true);
+    };
+
+    recognition.onend = () => {
+      setIsDiaryListening(false);
+    };
+
+    recognition.onerror = (event) => {
+      const speechError = String(event?.error || "");
+      setIsDiaryListening(false);
+
+      if (speechError === "not-allowed" || speechError === "service-not-allowed") {
+        setError("Microphone permission denied. Please allow mic access in browser.");
+        return;
+      }
+
+      if (speechError === "no-speech") {
+        setError("No speech detected. Try speaking again.");
+        return;
+      }
+
+      setError("Voice-to-text failed. Please try again.");
+    };
+
+    recognition.onresult = (event) => {
+      const chunks = [];
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = String(event.results[index]?.[0]?.transcript || "").trim();
+        if (transcript) {
+          chunks.push(transcript);
+        }
+      }
+
+      if (!chunks.length) return;
+
+      const incomingText = chunks.join(" ");
+      setDiaryDraft((prev) => {
+        const normalizedPrev = String(prev || "").trimEnd();
+        return normalizedPrev ? `${normalizedPrev} ${incomingText}` : incomingText;
+      });
+    };
+
+    diaryRecognitionRef.current = recognition;
+
+    return () => {
+      try {
+        recognition.stop();
+      } catch (_) {
+        // no-op
+      }
+      diaryRecognitionRef.current = null;
+    };
   }, []);
 
   const leadRowClass = isDark
@@ -224,38 +394,107 @@ const LeadsMatrix = () => {
   }, [leads]);
 
   const openLeadDetails = async (lead) => {
+    const leadSiteLat = toCoordinateNumber(lead?.siteLocation?.lat);
+    const leadSiteLng = toCoordinateNumber(lead?.siteLocation?.lng);
+
     setSelectedLead(lead);
     setStatusDraft(lead.status || "NEW");
     setFollowUpDraft(toDateTimeInput(lead.nextFollowUp));
+    setSiteLatDraft(leadSiteLat === null ? "" : String(leadSiteLat));
+    setSiteLngDraft(leadSiteLng === null ? "" : String(leadSiteLng));
     setExecutiveDraft(
       typeof lead.assignedTo === "string"
         ? lead.assignedTo
         : lead.assignedTo?._id || "",
     );
+    setDiaryDraft("");
     setIsDetailsOpen(true);
 
-    try {
-      setActivityLoading(true);
-      const timeline = await getLeadActivity(lead._id);
-      setActivities(Array.isArray(timeline) ? timeline : []);
-    } catch (activityError) {
-      const message = toErrorMessage(activityError, "Failed to load activity");
+    setActivityLoading(true);
+    setDiaryLoading(true);
+    const [timelineResult, diaryResult] = await Promise.allSettled([
+      getLeadActivity(lead._id),
+      getLeadDiary(lead._id),
+    ]);
+
+    if (timelineResult.status === "fulfilled") {
+      setActivities(Array.isArray(timelineResult.value) ? timelineResult.value : []);
+    } else {
+      const message = toErrorMessage(timelineResult.reason, "Failed to load activity");
       console.error(`Load lead activity failed: ${message}`);
       setActivities([]);
-    } finally {
-      setActivityLoading(false);
     }
+
+    if (diaryResult.status === "fulfilled") {
+      setDiaryEntries(Array.isArray(diaryResult.value) ? diaryResult.value : []);
+    } else {
+      const message = toErrorMessage(diaryResult.reason, "Failed to load lead diary");
+      console.error(`Load lead diary failed: ${message}`);
+      setDiaryEntries([]);
+    }
+
+    setActivityLoading(false);
+    setDiaryLoading(false);
   };
 
   const closeDetails = () => {
+    if (diaryRecognitionRef.current && isDiaryListening) {
+      try {
+        diaryRecognitionRef.current.stop();
+      } catch (_) {
+        // no-op
+      }
+    }
     setIsDetailsOpen(false);
     setSelectedLead(null);
     setActivities([]);
+    setDiaryEntries([]);
+    setDiaryDraft("");
+    setSiteLatDraft("");
+    setSiteLngDraft("");
+  };
+
+  const handleInventorySelection = (inventoryId) => {
+    setFormData((prev) => {
+      const selectedInventory = inventoryOptions.find((item) => item._id === inventoryId);
+      if (!selectedInventory) {
+        return {
+          ...prev,
+          inventoryId,
+        };
+      }
+
+      const inventoryProjectLabel = getInventoryLeadLabel(selectedInventory);
+      const inventorySiteLat = toCoordinateNumber(selectedInventory?.siteLocation?.lat);
+      const inventorySiteLng = toCoordinateNumber(selectedInventory?.siteLocation?.lng);
+
+      return {
+        ...prev,
+        inventoryId,
+        projectInterested: inventoryProjectLabel || prev.projectInterested,
+        city: String(selectedInventory.location || "").trim() || prev.city,
+        siteLat: inventorySiteLat === null ? "" : String(inventorySiteLat),
+        siteLng: inventorySiteLng === null ? "" : String(inventorySiteLng),
+      };
+    });
   };
 
   const handleSaveLead = async () => {
     if (!formData.name.trim() || !formData.phone.trim()) {
       setError("Name and phone are required");
+      return;
+    }
+
+    const parsedSiteLat = toCoordinateNumber(formData.siteLat);
+    const parsedSiteLng = toCoordinateNumber(formData.siteLng);
+    const hasAnySiteCoordinate =
+      parsedSiteLat !== null || parsedSiteLng !== null;
+
+    if (
+      hasAnySiteCoordinate
+      && (parsedSiteLat === null || parsedSiteLng === null)
+    ) {
+      setError("Enter valid site latitude and longitude");
       return;
     }
 
@@ -270,6 +509,18 @@ const LeadsMatrix = () => {
         city: formData.city.trim(),
         projectInterested: formData.projectInterested.trim(),
       };
+
+      if (formData.inventoryId) {
+        payload.inventoryId = formData.inventoryId;
+      }
+
+      if (hasAnySiteCoordinate) {
+        payload.siteLocation = {
+          lat: parsedSiteLat,
+          lng: parsedSiteLng,
+          radiusMeters: SITE_VISIT_RADIUS_METERS,
+        };
+      }
 
       const created = await createLead(payload);
 
@@ -298,12 +549,35 @@ const LeadsMatrix = () => {
       setSavingUpdates(true);
       setError("");
 
+      const parsedSiteLat = toCoordinateNumber(siteLatDraft);
+      const parsedSiteLng = toCoordinateNumber(siteLngDraft);
+      const hasAnySiteCoordinate =
+        parsedSiteLat !== null || parsedSiteLng !== null;
+
+      if (
+        canConfigureSiteLocation
+        && hasAnySiteCoordinate
+        && (parsedSiteLat === null || parsedSiteLng === null)
+      ) {
+        setError("Enter valid site latitude and longitude");
+        setSavingUpdates(false);
+        return;
+      }
+
       const payload = {
         status: statusDraft,
       };
 
       if (followUpDraft) {
         payload.nextFollowUp = followUpDraft;
+      }
+
+      if (canConfigureSiteLocation && hasAnySiteCoordinate) {
+        payload.siteLocation = {
+          lat: parsedSiteLat,
+          lng: parsedSiteLng,
+          radiusMeters: SITE_VISIT_RADIUS_METERS,
+        };
       }
 
       const updatedLead = await updateLeadStatus(selectedLead._id, payload);
@@ -356,6 +630,68 @@ const LeadsMatrix = () => {
       setAssigning(false);
     }
   };
+
+  const handleAddDiary = async () => {
+    if (!selectedLead) return;
+
+    const note = diaryDraft.trim();
+    if (!note) {
+      setError("Diary note cannot be empty");
+      return;
+    }
+
+    try {
+      setSavingDiary(true);
+      setError("");
+
+      const createdEntry = await addLeadDiaryEntry(selectedLead._id, note);
+      if (createdEntry) {
+        setDiaryEntries((prev) => [createdEntry, ...prev]);
+      } else {
+        const diary = await getLeadDiary(selectedLead._id);
+        setDiaryEntries(Array.isArray(diary) ? diary : []);
+      }
+
+      const timeline = await getLeadActivity(selectedLead._id);
+      setActivities(Array.isArray(timeline) ? timeline : []);
+      setDiaryDraft("");
+      setSuccess("Diary note added");
+    } catch (saveError) {
+      const message = toErrorMessage(saveError, "Failed to save diary note");
+      console.error(`Save lead diary failed: ${message}`);
+      setError(message);
+    } finally {
+      setSavingDiary(false);
+    }
+  };
+
+  const handleDiaryVoiceToggle = () => {
+    if (!isDiaryMicSupported || !diaryRecognitionRef.current) {
+      setError("Voice-to-text is not supported in this browser.");
+      return;
+    }
+
+    setError("");
+
+    try {
+      if (isDiaryListening) {
+        diaryRecognitionRef.current.stop();
+        return;
+      }
+      diaryRecognitionRef.current.start();
+    } catch (_) {
+      setError("Unable to start microphone. Try again.");
+    }
+  };
+
+  const selectedLeadDialerHref = getDialerHref(selectedLead?.phone);
+  const selectedLeadWhatsAppHref = getWhatsAppHref(selectedLead?.phone);
+  const selectedLeadMailHref = getMailHref(selectedLead?.email);
+  const selectedLeadMapsHref = getMapsHref(selectedLead?.city);
+  const selectedLeadSiteLat = toCoordinateNumber(selectedLead?.siteLocation?.lat);
+  const selectedLeadSiteLng = toCoordinateNumber(selectedLead?.siteLocation?.lng);
+  const selectedLeadInventoryLabel = getInventoryLeadLabel(selectedLead?.inventoryId || {});
+  const selectedLeadInventoryLocation = String(selectedLead?.inventoryId?.location || "").trim();
 
   return (
     <div className="w-full h-full px-4 sm:px-6 lg:px-10 pt-20 md:pt-24 pb-6 flex flex-col bg-slate-50/50 overflow-y-auto custom-scrollbar">
@@ -540,6 +876,23 @@ const LeadsMatrix = () => {
               </div>
 
               <div className="space-y-3">
+                <select
+                  value={formData.inventoryId}
+                  onChange={(e) => handleInventorySelection(e.target.value)}
+                  className="w-full h-10 rounded-lg border border-slate-300 px-3 text-sm"
+                >
+                  <option value="">Select Inventory (optional)</option>
+                  {inventoryOptions.map((inventory) => {
+                    const inventoryLabel = getInventoryLeadLabel(inventory) || "Inventory Unit";
+                    const inventoryLocation = String(inventory.location || "").trim();
+                    return (
+                      <option key={inventory._id} value={inventory._id}>
+                        {inventoryLocation ? `${inventoryLabel} - ${inventoryLocation}` : inventoryLabel}
+                      </option>
+                    );
+                  })}
+                </select>
+
                 {[
                   ["name", "Name"],
                   ["phone", "Phone"],
@@ -557,6 +910,25 @@ const LeadsMatrix = () => {
                     className="w-full h-10 rounded-lg border border-slate-300 px-3 text-sm"
                   />
                 ))}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    placeholder="Site Latitude (optional)"
+                    value={formData.siteLat}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, siteLat: e.target.value }))
+                    }
+                    className="w-full h-10 rounded-lg border border-slate-300 px-3 text-sm"
+                  />
+                  <input
+                    placeholder="Site Longitude (optional)"
+                    value={formData.siteLng}
+                    onChange={(e) =>
+                      setFormData((prev) => ({ ...prev, siteLng: e.target.value }))
+                    }
+                    className="w-full h-10 rounded-lg border border-slate-300 px-3 text-sm"
+                  />
+                </div>
               </div>
 
               <div className="mt-4 flex gap-2">
@@ -610,9 +982,66 @@ const LeadsMatrix = () => {
                 <div className="rounded-xl border border-slate-200 p-3 bg-slate-50">
                   <div className="text-xs uppercase tracking-widest text-slate-400 font-bold">Contact</div>
                   <div className="mt-2 space-y-1 text-sm text-slate-700">
-                    <div className="flex items-center gap-2"><Phone size={13} /> {selectedLead.phone || "-"}</div>
-                    <div className="flex items-center gap-2"><Mail size={13} /> {selectedLead.email || "-"}</div>
-                    <div className="flex items-center gap-2"><User size={13} /> {selectedLead.city || "-"}</div>
+                    <div className="flex items-center gap-2">
+                      <Phone size={13} />
+                      {selectedLeadDialerHref ? (
+                        <a
+                          href={selectedLeadDialerHref}
+                          className="hover:text-emerald-700 hover:underline underline-offset-2"
+                        >
+                          {selectedLead.phone}
+                        </a>
+                      ) : (
+                        <span>-</span>
+                      )}
+                      {selectedLeadWhatsAppHref && (
+                        <a
+                          href={selectedLeadWhatsAppHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label={`Open WhatsApp chat for ${selectedLead.phone}`}
+                          className="ml-1 inline-flex items-center justify-center rounded-full bg-emerald-100 p-1 text-emerald-700 hover:bg-emerald-200"
+                        >
+                          <WhatsAppIcon size={12} />
+                        </a>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Mail size={13} />
+                      {selectedLeadMailHref ? (
+                        <a
+                          href={selectedLeadMailHref}
+                          className="hover:text-emerald-700 hover:underline underline-offset-2 break-all"
+                        >
+                          {selectedLead.email}
+                        </a>
+                      ) : (
+                        <span>-</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <User size={13} />
+                      {selectedLeadMapsHref ? (
+                        <a
+                          href={selectedLeadMapsHref}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:text-emerald-700 hover:underline underline-offset-2"
+                        >
+                          {selectedLead.city}
+                        </a>
+                      ) : (
+                        <span>-</span>
+                      )}
+                    </div>
+                    {selectedLeadInventoryLabel && (
+                      <div className="text-xs text-slate-500 pt-1">
+                        Inventory: {selectedLeadInventoryLabel}
+                        {selectedLeadInventoryLocation
+                          ? ` (${selectedLeadInventoryLocation})`
+                          : ""}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -645,6 +1074,49 @@ const LeadsMatrix = () => {
                       className="mt-1 w-full h-10 rounded-lg border border-slate-300 px-3 text-sm"
                     />
                   </div>
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-2">
+                      Site Location
+                    </div>
+
+                    {canConfigureSiteLocation ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="number"
+                          step="any"
+                          value={siteLatDraft}
+                          onChange={(e) => setSiteLatDraft(e.target.value)}
+                          placeholder="Latitude"
+                          className="w-full h-9 rounded-lg border border-slate-300 px-3 text-sm bg-white"
+                        />
+                        <input
+                          type="number"
+                          step="any"
+                          value={siteLngDraft}
+                          onChange={(e) => setSiteLngDraft(e.target.value)}
+                          placeholder="Longitude"
+                          className="w-full h-9 rounded-lg border border-slate-300 px-3 text-sm bg-white"
+                        />
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-600">
+                        {selectedLeadSiteLat !== null && selectedLeadSiteLng !== null
+                          ? `${selectedLeadSiteLat}, ${selectedLeadSiteLng}`
+                          : "Not configured by admin/manager"}
+                      </div>
+                    )}
+
+                    <div className="mt-2 text-[10px] text-slate-500">
+                      Site visit status is verified within {SITE_VISIT_RADIUS_METERS} meters.
+                    </div>
+                  </div>
+
+                  {userRole === "FIELD_EXECUTIVE" && statusDraft === "SITE_VISIT" && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
+                      SITE_VISIT will be accepted only if your live location is within {SITE_VISIT_RADIUS_METERS} meters of configured site location.
+                    </div>
+                  )}
 
                   <button
                     onClick={handleUpdateLead}
@@ -682,6 +1154,74 @@ const LeadsMatrix = () => {
                     </button>
                   </div>
                 )}
+
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <div className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-2">
+                    Lead Diary
+                  </div>
+
+                  <textarea
+                    value={diaryDraft}
+                    onChange={(e) => setDiaryDraft(e.target.value)}
+                    placeholder="Add conversation notes, visit details, objections, or next step context..."
+                    className="w-full min-h-[84px] rounded-lg border border-slate-300 px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    maxLength={2000}
+                  />
+
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="text-[10px] text-slate-500">
+                      {diaryDraft.length}/2000
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleDiaryVoiceToggle}
+                        disabled={savingDiary || !isDiaryMicSupported}
+                        className="h-9 px-3 rounded-lg border border-slate-300 bg-white text-slate-700 text-xs font-semibold disabled:opacity-60 inline-flex items-center gap-1"
+                      >
+                        {isDiaryListening ? <MicOff size={13} /> : <Mic size={13} />}
+                        {isDiaryListening ? "Stop Mic" : "Voice"}
+                      </button>
+                      <button
+                        onClick={handleAddDiary}
+                        disabled={savingDiary || !diaryDraft.trim()}
+                        className="h-9 px-3 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-60 inline-flex items-center gap-1"
+                      >
+                        {savingDiary ? <Loader size={13} className="animate-spin" /> : <Save size={13} />}
+                        Add Note
+                      </button>
+                    </div>
+                  </div>
+
+                  {!isDiaryMicSupported && (
+                    <div className="mt-2 text-[10px] text-amber-700">
+                      Voice input is not supported in this browser. Use Chrome/Edge for mic dictation.
+                    </div>
+                  )}
+
+                  <div className="mt-3">
+                    {diaryLoading ? (
+                      <div className="h-16 flex items-center justify-center text-slate-400 text-sm gap-2">
+                        <Loader size={14} className="animate-spin" /> Loading diary...
+                      </div>
+                    ) : diaryEntries.length === 0 ? (
+                      <div className="text-sm text-slate-500">No diary notes yet</div>
+                    ) : (
+                      <div className="space-y-2 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
+                        {diaryEntries.map((entry) => (
+                          <div key={entry._id} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                            <div className="text-sm text-slate-800 whitespace-pre-wrap break-words">
+                              {entry.note}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-1">
+                              {formatDate(entry.createdAt)}
+                              {entry.createdBy?.name ? ` - ${entry.createdBy.name}` : ""}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 <div className="rounded-xl border border-slate-200 p-3">
                   <div className="text-xs uppercase tracking-widest text-slate-400 font-bold flex items-center gap-1 mb-2">

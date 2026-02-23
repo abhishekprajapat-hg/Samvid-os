@@ -10,6 +10,7 @@ const INVENTORY_ALLOWED_FIELDS = [
   "price",
   "status",
   "location",
+  "siteLocation",
   "images",
   "documents",
 ];

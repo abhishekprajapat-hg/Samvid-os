@@ -44,3 +44,20 @@ export const getLeadActivityWithMeta = async (leadId, params = {}) => {
     pagination: res.data?.pagination || null,
   };
 };
+
+export const getLeadDiary = async (leadId, params = {}, options = {}) => {
+  const res = await api.get(`/leads/${leadId}/diary`, { params });
+  if (options.withMeta) {
+    return {
+      entries: res.data?.entries || [],
+      pagination: res.data?.pagination || null,
+    };
+  }
+
+  return res.data?.entries || [];
+};
+
+export const addLeadDiaryEntry = async (leadId, note) => {
+  const res = await api.post(`/leads/${leadId}/diary`, { note });
+  return res.data?.entry || null;
+};

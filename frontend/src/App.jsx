@@ -340,7 +340,9 @@ export default function App() {
                       />
                       <Route
                         path="/my-leads"
-                        element={canAccess(["EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+                        element={
+                          canAccess(["EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />
+                        }
                       />
                       <Route
                         path="/inventory"

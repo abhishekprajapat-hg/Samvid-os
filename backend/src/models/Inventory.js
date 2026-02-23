@@ -44,6 +44,16 @@ const inventorySchema = new mongoose.Schema(
       trim: true,
       maxlength: 200,
     },
+    siteLocation: {
+      lat: {
+        type: Number,
+        default: null,
+      },
+      lng: {
+        type: Number,
+        default: null,
+      },
+    },
     images: {
       type: [String],
       default: [],

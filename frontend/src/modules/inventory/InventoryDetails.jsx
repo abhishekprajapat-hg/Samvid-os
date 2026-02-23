@@ -36,6 +36,14 @@ const formatDate = (value) => {
   });
 };
 
+const toCoordinateNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const formatUserRef = (value) => {
   if (!value) return "-";
   if (typeof value === "string") return value;
@@ -137,6 +145,12 @@ const InventoryDetails = () => {
 
   const safeImageIndex = Math.min(activeImageIndex, Math.max(images.length - 1, 0));
   const activeImage = images[safeImageIndex] || "";
+  const inventorySiteLat = toCoordinateNumber(inventory?.siteLocation?.lat ?? asset?.siteLocation?.lat);
+  const inventorySiteLng = toCoordinateNumber(inventory?.siteLocation?.lng ?? asset?.siteLocation?.lng);
+  const inventoryCoordinates =
+    inventorySiteLat !== null && inventorySiteLng !== null
+      ? `${inventorySiteLat}, ${inventorySiteLng}`
+      : "-";
   const sharePayload = useMemo(() => {
     const inventoryId = inventory?._id || asset?._id;
     if (!inventoryId) return null;
@@ -152,6 +166,10 @@ const InventoryDetails = () => {
       inventoryId,
       title,
       location: inventory?.location || asset?.location || "",
+      siteLocation:
+        inventorySiteLat !== null && inventorySiteLng !== null
+          ? { lat: inventorySiteLat, lng: inventorySiteLng }
+          : null,
       price: Number(inventory?.price ?? asset?.price) || 0,
       status: statusValue,
       image: images[0] || "",
@@ -166,6 +184,8 @@ const InventoryDetails = () => {
     inventory?.location,
     inventory?.price,
     inventory?.projectName,
+    inventorySiteLat,
+    inventorySiteLng,
     inventory?.towerName,
     inventory?.unitNumber,
     statusValue,
@@ -283,6 +303,7 @@ const InventoryDetails = () => {
           <FieldRow label="Unit" value={inventory?.unitNumber} />
           <FieldRow label="Price" value={formatPrice(inventory?.price ?? asset?.price)} />
           <FieldRow label="Location" value={inventory?.location || asset?.location} />
+          <FieldRow label="Coordinates" value={inventoryCoordinates} />
           <FieldRow label="Type" value={asset?.type || "Sale"} />
           <FieldRow label="Category" value={asset?.category || "Apartment"} />
         </div>

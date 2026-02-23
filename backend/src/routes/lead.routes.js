@@ -63,4 +63,17 @@ router.get(
   leadController.getLeadActivity
 );
 
+router.get(
+  "/:leadId/diary",
+  authMiddleware.protect,
+  leadController.getLeadDiary
+);
+
+router.post(
+  "/:leadId/diary",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.addLeadDiaryEntry
+);
+
 module.exports = router;
