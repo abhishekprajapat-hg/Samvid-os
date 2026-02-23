@@ -9,14 +9,18 @@ import {
   FileText,
   MessageSquare,
   Paperclip,
+  Phone,
+  PhoneOff,
   RefreshCw,
   Search,
   Share2,
   Send,
   Users,
+  Video,
   X,
 } from "lucide-react";
 import {
+  createDirectRoom,
   getConversationMessages,
   getMessengerContacts,
   getMessengerConversations,
@@ -34,6 +38,12 @@ const roleBadgeClass = (role, isDark) => {
   }
   if (role === "MANAGER") {
     return isDark ? "bg-cyan-500/15 text-cyan-200" : "bg-cyan-100 text-cyan-700";
+  }
+  if (role === "ASSISTANT_MANAGER") {
+    return isDark ? "bg-sky-500/15 text-sky-200" : "bg-sky-100 text-sky-700";
+  }
+  if (role === "TEAM_LEADER") {
+    return isDark ? "bg-indigo-500/15 text-indigo-200" : "bg-indigo-100 text-indigo-700";
   }
   if (role === "FIELD_EXECUTIVE") {
     return isDark ? "bg-violet-500/15 text-violet-200" : "bg-violet-100 text-violet-700";
@@ -85,6 +95,19 @@ const MAX_MEDIA_ATTACHMENTS = 8;
 const MAX_MEDIA_SIZE_BYTES = 25 * 1024 * 1024;
 const TYPING_IDLE_TIMEOUT_MS = 1200;
 const REMOTE_TYPING_TIMEOUT_MS = 3200;
+const CALL_SIGNAL_QUEUE_LIMIT = 60;
+const WEBRTC_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
+
+const CALL_MODES = {
+  AUDIO: "audio",
+  VIDEO: "video",
+};
+
+const CALL_PHASES = {
+  DIALING: "dialing",
+  CONNECTING: "connecting",
+  ACTIVE: "active",
+};
 
 const detectMediaKind = ({ kind, mimeType = "" } = {}) => {
   const normalized = String(kind || "").trim().toLowerCase();
@@ -336,6 +359,31 @@ const extractIncomingMessageEvent = (payload = {}) => {
   };
 };
 
+const normalizeCallMode = (value) => {
+  const mode = toId(value).toLowerCase();
+  return mode === CALL_MODES.VIDEO ? CALL_MODES.VIDEO : CALL_MODES.AUDIO;
+};
+
+const buildCallId = () => {
+  if (typeof globalThis?.crypto?.randomUUID === "function") {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const getCallMediaConstraints = (mode) => ({
+  audio: true,
+  video: normalizeCallMode(mode) === CALL_MODES.VIDEO,
+});
+
+const normalizeCallReason = (reason) => {
+  const value = toId(reason).toLowerCase();
+  if (value === "busy") return "User is busy on another call";
+  if (value === "disconnected") return "Call ended due to network disconnect";
+  if (value === "rejected") return "Call was declined";
+  return "Call ended";
+};
+
 const updateTypingUsers = (prev, { roomId, userId, isTyping }) => {
   const normalizedRoomId = toId(roomId);
   const normalizedUserId = toId(userId);
@@ -384,6 +432,14 @@ const TeamChat = ({ theme = "light" }) => {
   const seenSocketMessageIdsRef = useRef(new Set());
   const deliveredReceiptIdsRef = useRef(new Set());
   const seenReceiptIdsRef = useRef(new Set());
+  const peerConnectionRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+  const queuedSignalsByCallRef = useRef(new Map());
+  const activeCallRef = useRef(null);
+  const incomingCallRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -403,6 +459,9 @@ const TeamChat = ({ theme = "light" }) => {
   const [queuedShare, setQueuedShare] = useState(null);
   const [queuedMedia, setQueuedMedia] = useState([]);
   const [chatSearch, setChatSearch] = useState("");
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [activeCall, setActiveCall] = useState(null);
+  const [callError, setCallError] = useState("");
 
   useEffect(() => {
     const host = document.querySelector("main.app-page-bg");
@@ -414,6 +473,14 @@ const TeamChat = ({ theme = "light" }) => {
   useEffect(() => {
     selectedConversationRef.current = selectedConversationId;
   }, [selectedConversationId]);
+
+  useEffect(() => {
+    activeCallRef.current = activeCall;
+  }, [activeCall]);
+
+  useEffect(() => {
+    incomingCallRef.current = incomingCall;
+  }, [incomingCall]);
 
   const emitConversationRead = useCallback(
     async (conversationId, options = {}) => {
@@ -486,6 +553,248 @@ const TeamChat = ({ theme = "light" }) => {
       cache.delete(id);
     }
   }, []);
+
+  const queueCallSignal = useCallback((callId, signal) => {
+    const normalizedCallId = toId(callId);
+    if (!normalizedCallId || !signal || typeof signal !== "object") return;
+
+    const store = queuedSignalsByCallRef.current;
+    const current = Array.isArray(store.get(normalizedCallId))
+      ? store.get(normalizedCallId)
+      : [];
+    current.push(signal);
+    if (current.length > CALL_SIGNAL_QUEUE_LIMIT) {
+      current.shift();
+    }
+    store.set(normalizedCallId, current);
+  }, []);
+
+  const consumeQueuedCallSignals = useCallback((callId) => {
+    const normalizedCallId = toId(callId);
+    if (!normalizedCallId) return [];
+
+    const store = queuedSignalsByCallRef.current;
+    const list = Array.isArray(store.get(normalizedCallId))
+      ? store.get(normalizedCallId)
+      : [];
+    store.delete(normalizedCallId);
+    return list;
+  }, []);
+
+  const clearQueuedCallSignals = useCallback((callId = "") => {
+    const store = queuedSignalsByCallRef.current;
+    const normalizedCallId = toId(callId);
+    if (normalizedCallId) {
+      store.delete(normalizedCallId);
+      return;
+    }
+    store.clear();
+  }, []);
+
+  const closePeerConnection = useCallback(() => {
+    const peer = peerConnectionRef.current;
+    if (!peer) return;
+
+    peer.onicecandidate = null;
+    peer.ontrack = null;
+    peer.onconnectionstatechange = null;
+    peer.oniceconnectionstatechange = null;
+    peer.close();
+    peerConnectionRef.current = null;
+  }, []);
+
+  const stopMediaTracks = useCallback(() => {
+    const localStream = localStreamRef.current;
+    if (localStream) {
+      localStream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // Ignore track shutdown errors.
+        }
+      });
+    }
+
+    const remoteStream = remoteStreamRef.current;
+    if (remoteStream) {
+      remoteStream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // Ignore track shutdown errors.
+        }
+      });
+    }
+
+    localStreamRef.current = null;
+    remoteStreamRef.current = null;
+
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null;
+    }
+  }, []);
+
+  const clearActiveCallLocally = useCallback((callId = "") => {
+    clearQueuedCallSignals(callId);
+    closePeerConnection();
+    stopMediaTracks();
+    setActiveCall(null);
+    setIncomingCall(null);
+  }, [clearQueuedCallSignals, closePeerConnection, stopMediaTracks]);
+
+  const emitCallAck = useCallback(async (eventName, payload = {}) => {
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      throw new Error("Realtime connection is not available");
+    }
+
+    return new Promise((resolve, reject) => {
+      socket.emit(eventName, payload, (response = {}) => {
+        if (!response?.ok) {
+          reject(new Error(response?.error || `Failed to process ${eventName}`));
+          return;
+        }
+        resolve(response);
+      });
+    });
+  }, []);
+
+  const captureLocalMediaForCall = useCallback(async (mode) => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Browser does not support voice/video calling");
+    }
+
+    stopMediaTracks();
+    const stream = await navigator.mediaDevices.getUserMedia(getCallMediaConstraints(mode));
+    localStreamRef.current = stream;
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+    }
+    return stream;
+  }, [stopMediaTracks]);
+
+  const attachMediaToCallPeer = useCallback((peer, stream) => {
+    if (!peer || !stream) return;
+    stream.getTracks().forEach((track) => {
+      peer.addTrack(track, stream);
+    });
+  }, []);
+
+  const applyCallSignal = useCallback(async ({ callId, roomId, signal }) => {
+    const peer = peerConnectionRef.current;
+    const normalizedCallId = toId(callId);
+    const normalizedRoomId = toId(roomId);
+    if (!peer || !normalizedCallId || !normalizedRoomId || !signal) return;
+
+    if (signal.type === "offer" && signal.sdp) {
+      await peer.setRemoteDescription(new RTCSessionDescription(signal));
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      socketRef.current?.emit("chat:call:signal", {
+        roomId: normalizedRoomId,
+        callId: normalizedCallId,
+        signal: answer,
+      });
+
+      const queuedSignals = consumeQueuedCallSignals(normalizedCallId);
+      for (const queuedSignal of queuedSignals) {
+        if (queuedSignal?.type === "candidate" && queuedSignal?.candidate && peer.remoteDescription) {
+          await peer.addIceCandidate(new RTCIceCandidate(queuedSignal.candidate));
+        }
+      }
+      return;
+    }
+
+    if (signal.type === "answer" && signal.sdp) {
+      await peer.setRemoteDescription(new RTCSessionDescription(signal));
+
+      const queuedSignals = consumeQueuedCallSignals(normalizedCallId);
+      for (const queuedSignal of queuedSignals) {
+        if (queuedSignal?.type === "candidate" && queuedSignal?.candidate && peer.remoteDescription) {
+          await peer.addIceCandidate(new RTCIceCandidate(queuedSignal.candidate));
+        }
+      }
+      return;
+    }
+
+    if (signal.type === "candidate" && signal.candidate) {
+      if (!peer.remoteDescription) {
+        queueCallSignal(normalizedCallId, signal);
+        return;
+      }
+      await peer.addIceCandidate(new RTCIceCandidate(signal.candidate));
+    }
+  }, [consumeQueuedCallSignals, queueCallSignal]);
+
+  const createCallPeerConnection = useCallback((callContext) => {
+    const roomId = toId(callContext?.roomId);
+    const callId = toId(callContext?.callId);
+    if (!roomId || !callId) {
+      throw new Error("Invalid call context");
+    }
+
+    const peer = new RTCPeerConnection({ iceServers: WEBRTC_ICE_SERVERS });
+    peer.onicecandidate = (event) => {
+      if (!event.candidate) return;
+      socketRef.current?.emit("chat:call:signal", {
+        roomId,
+        callId,
+        signal: {
+          type: "candidate",
+          candidate: event.candidate,
+        },
+      });
+    };
+
+    peer.ontrack = (event) => {
+      const [stream] = event.streams || [];
+      if (!stream) return;
+      remoteStreamRef.current = stream;
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = stream;
+      }
+    };
+
+    peer.onconnectionstatechange = () => {
+      if (peer.connectionState === "connected") {
+        setActiveCall((prev) => (prev ? { ...prev, phase: CALL_PHASES.ACTIVE } : prev));
+        setCallError("");
+        return;
+      }
+
+      if (["failed", "disconnected", "closed"].includes(peer.connectionState)) {
+        setCallError("Call connection ended");
+        clearActiveCallLocally(callId);
+      }
+    };
+
+    peerConnectionRef.current = peer;
+    return peer;
+  }, [clearActiveCallLocally]);
+
+  const endActiveCall = useCallback(async (options = {}) => {
+    const notifyRemote = options.notifyRemote !== false;
+    const reason = toId(options.reason) || "ended";
+    const currentCall = activeCallRef.current;
+    if (!currentCall) return;
+
+    if (notifyRemote && socketRef.current?.connected) {
+      try {
+        await emitCallAck("chat:call:end", {
+          roomId: currentCall.roomId,
+          callId: currentCall.callId,
+          reason,
+        });
+      } catch {
+        // Ignore remote end-notification failures; local cleanup still must happen.
+      }
+    }
+
+    clearActiveCallLocally(currentCall.callId);
+  }, [clearActiveCallLocally, emitCallAck]);
 
   useEffect(() => {
     setActiveConversationId(selectedConversationId || "");
@@ -610,6 +919,228 @@ const TeamChat = ({ theme = "light" }) => {
 
   const isActiveContactTyping = activeTypingUsers.length > 0;
 
+  const canUseCalls = useMemo(
+    () =>
+      typeof window !== "undefined"
+      && typeof window.RTCPeerConnection !== "undefined"
+      && typeof navigator !== "undefined"
+      && Boolean(navigator.mediaDevices?.getUserMedia),
+    [],
+  );
+
+  const activeCallPeerName = useMemo(() => {
+    if (activeCall?.peer?.name) return activeCall.peer.name;
+    if (incomingCall?.from?.name) return incomingCall.from.name;
+    return activeContact?.name || "User";
+  }, [activeCall, activeContact, incomingCall]);
+
+  const activeCallLabel = useMemo(() => {
+    if (!activeCall) return "";
+    if (activeCall.phase === CALL_PHASES.DIALING) return "Ringing...";
+    if (activeCall.phase === CALL_PHASES.CONNECTING) return "Connecting...";
+    return "On call";
+  }, [activeCall]);
+
+  const callTimelineOffsetClass = useMemo(() => {
+    if (!activeCall) return "";
+    return activeCall.mode === CALL_MODES.VIDEO ? "pt-64 sm:pt-72" : "pt-28";
+  }, [activeCall]);
+
+  const handleStartCall = useCallback(async (mode = CALL_MODES.AUDIO) => {
+    const normalizedMode = normalizeCallMode(mode);
+    if (!activeContact) {
+      setCallError("Select a contact to start a call");
+      return;
+    }
+
+    if (!canUseCalls) {
+      setCallError("Voice/video calls are not supported in this browser");
+      return;
+    }
+
+    if (activeCallRef.current || incomingCallRef.current) {
+      setCallError("Finish the current call first");
+      return;
+    }
+
+    const socket = socketRef.current;
+    if (!socket?.connected) {
+      setCallError("Realtime connection is not available");
+      return;
+    }
+
+    let roomId = toId(selectedConversationId);
+    if (!roomId) {
+      const recipientId = toId(activeContact?._id || selectedContactId);
+      if (!recipientId) {
+        setCallError("Select a valid contact to start a call");
+        return;
+      }
+
+      try {
+        const room = await createDirectRoom({ recipientId });
+        roomId = toId(room?._id);
+        if (!roomId) {
+          throw new Error("Failed to create conversation for this contact");
+        }
+
+        setConversations((prev) => upsertConversation(prev, room));
+        setSelectedConversationId(roomId);
+        setSelectedContactId("");
+        await loadMessagesForConversation(roomId);
+      } catch (err) {
+        setCallError(toErrorMessage(err, "Failed to open conversation for call"));
+        return;
+      }
+    }
+
+    const callId = buildCallId();
+    const baseCall = {
+      callId,
+      roomId,
+      mode: normalizedMode,
+      phase: CALL_PHASES.DIALING,
+      direction: "outgoing",
+      peer: {
+        _id: toId(activeContact?._id),
+        name: toId(activeContact?.name),
+        role: toId(activeContact?.role),
+      },
+    };
+
+    try {
+      setCallError("");
+      setIncomingCall(null);
+      setActiveCall(baseCall);
+
+      const stream = await captureLocalMediaForCall(normalizedMode);
+      const peer = createCallPeerConnection(baseCall);
+      attachMediaToCallPeer(peer, stream);
+
+      const ack = await emitCallAck("chat:call:initiate", {
+        roomId,
+        mode: normalizedMode,
+        callId,
+      });
+
+      const resolvedCallId = toId(ack?.callId) || callId;
+      const resolvedRoomId = toId(ack?.roomId) || roomId;
+      setActiveCall((prev) =>
+        prev
+          ? {
+              ...prev,
+              callId: resolvedCallId,
+              roomId: resolvedRoomId,
+              phase: CALL_PHASES.CONNECTING,
+            }
+          : prev);
+
+      const offer = await peer.createOffer();
+      await peer.setLocalDescription(offer);
+      socket.emit("chat:call:signal", {
+        roomId: resolvedRoomId,
+        callId: resolvedCallId,
+        signal: offer,
+      });
+    } catch (err) {
+      setCallError(toErrorMessage(err, "Failed to start call"));
+      clearActiveCallLocally(callId);
+    }
+  }, [
+    activeContact,
+    attachMediaToCallPeer,
+    canUseCalls,
+    captureLocalMediaForCall,
+    clearActiveCallLocally,
+    createCallPeerConnection,
+    emitCallAck,
+    selectedConversationId,
+  ]);
+
+  const handleAcceptIncomingCall = useCallback(async () => {
+    const pendingCall = incomingCallRef.current;
+    if (!pendingCall) return;
+
+    if (!canUseCalls) {
+      setCallError("Voice/video calls are not supported in this browser");
+      return;
+    }
+
+    const roomId = toId(pendingCall.roomId);
+    const callId = toId(pendingCall.callId);
+    const mode = normalizeCallMode(pendingCall.mode);
+
+    try {
+      setCallError("");
+      setIncomingCall(null);
+      setActiveCall({
+        callId,
+        roomId,
+        mode,
+        phase: CALL_PHASES.CONNECTING,
+        direction: "incoming",
+        peer: pendingCall.from || null,
+      });
+
+      const stream = await captureLocalMediaForCall(mode);
+      const peer = createCallPeerConnection({ callId, roomId, mode });
+      attachMediaToCallPeer(peer, stream);
+
+      await emitCallAck("chat:call:accept", { roomId, callId });
+
+      const queuedSignals = consumeQueuedCallSignals(callId);
+      for (const signal of queuedSignals) {
+        await applyCallSignal({ callId, roomId, signal });
+      }
+    } catch (err) {
+      setCallError(toErrorMessage(err, "Failed to accept call"));
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("chat:call:reject", {
+          roomId,
+          callId,
+          reason: "rejected",
+        });
+      }
+      clearActiveCallLocally(callId);
+    }
+  }, [
+    applyCallSignal,
+    attachMediaToCallPeer,
+    canUseCalls,
+    captureLocalMediaForCall,
+    clearActiveCallLocally,
+    consumeQueuedCallSignals,
+    createCallPeerConnection,
+    emitCallAck,
+  ]);
+
+  const handleRejectIncomingCall = useCallback(async () => {
+    const pendingCall = incomingCallRef.current;
+    if (!pendingCall) return;
+
+    const roomId = toId(pendingCall.roomId);
+    const callId = toId(pendingCall.callId);
+
+    try {
+      if (socketRef.current?.connected) {
+        await emitCallAck("chat:call:reject", {
+          roomId,
+          callId,
+          reason: "rejected",
+        });
+      }
+    } catch {
+      // Ignore reject-ack failures.
+    } finally {
+      clearQueuedCallSignals(callId);
+      setIncomingCall(null);
+    }
+  }, [clearQueuedCallSignals, emitCallAck]);
+
+  const handleEndCall = useCallback(() => {
+    endActiveCall({ notifyRemote: true, reason: "ended" }).catch(() => null);
+  }, [endActiveCall]);
+
   useEffect(() => {
     const nextRoomId = toId(selectedConversationId);
     const previousTypingState = typingStateRef.current;
@@ -725,6 +1256,15 @@ const TeamChat = ({ theme = "light" }) => {
   }, [messages]);
 
   useEffect(() => {
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current || null;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStreamRef.current || null;
+    }
+  }, [activeCall]);
+
+  useEffect(() => {
     if (!selectedConversationId || !messages.length) return;
 
     const visible = isDocumentVisible();
@@ -766,6 +1306,10 @@ const TeamChat = ({ theme = "light" }) => {
       remoteTypingTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
       remoteTypingTimeoutsRef.current.clear();
       setTypingByRoom({});
+      if (activeCallRef.current || incomingCallRef.current) {
+        setCallError("Call ended due to realtime disconnect");
+      }
+      clearActiveCallLocally();
     };
 
     const onConnectError = () => {
@@ -893,6 +1437,113 @@ const TeamChat = ({ theme = "light" }) => {
       remoteTypingTimeoutsRef.current.set(typingKey, timeoutId);
     };
 
+    const onCallIncoming = (payload = {}) => {
+      const roomId = toId(payload?.roomId || payload?.conversationId);
+      const callId = toId(payload?.callId);
+      const fromUserId = toId(payload?.from?._id || payload?.fromUserId);
+      if (!roomId || !callId || fromUserId === currentUser.id) return;
+
+      if (activeCallRef.current || incomingCallRef.current) {
+        socket.emit("chat:call:reject", {
+          roomId,
+          callId,
+          reason: "busy",
+        });
+        return;
+      }
+
+      setCallError("");
+      setIncomingCall({
+        callId,
+        roomId,
+        mode: normalizeCallMode(payload?.mode),
+        from: payload?.from || null,
+        at: payload?.at || new Date().toISOString(),
+      });
+
+      if (toId(selectedConversationRef.current) !== roomId) {
+        setSelectedConversationId(roomId);
+        setSelectedContactId("");
+      }
+    };
+
+    const onCallAccepted = (payload = {}) => {
+      const callId = toId(payload?.callId);
+      if (!callId) return;
+
+      const currentCall = activeCallRef.current;
+      if (!currentCall || toId(currentCall.callId) !== callId) return;
+
+      setCallError("");
+      setActiveCall((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: CALL_PHASES.CONNECTING,
+            }
+          : prev);
+    };
+
+    const onCallRejected = (payload = {}) => {
+      const callId = toId(payload?.callId);
+      if (!callId) return;
+
+      if (toId(incomingCallRef.current?.callId) === callId) {
+        setIncomingCall(null);
+      }
+
+      if (toId(activeCallRef.current?.callId) !== callId) {
+        clearQueuedCallSignals(callId);
+        return;
+      }
+
+      setCallError(normalizeCallReason(payload?.reason || "rejected"));
+      clearActiveCallLocally(callId);
+    };
+
+    const onCallEnded = (payload = {}) => {
+      const callId = toId(payload?.callId);
+      if (!callId) return;
+
+      if (toId(incomingCallRef.current?.callId) === callId) {
+        setIncomingCall(null);
+      }
+
+      if (toId(activeCallRef.current?.callId) !== callId) {
+        clearQueuedCallSignals(callId);
+        return;
+      }
+
+      setCallError(normalizeCallReason(payload?.reason || "ended"));
+      clearActiveCallLocally(callId);
+    };
+
+    const onCallSignal = (payload = {}) => {
+      const roomId = toId(payload?.roomId || payload?.conversationId);
+      const callId = toId(payload?.callId);
+      const signal = payload?.signal;
+      if (!roomId || !callId || !signal || typeof signal !== "object") return;
+
+      const activeCallId = toId(activeCallRef.current?.callId);
+      const incomingCallId = toId(incomingCallRef.current?.callId);
+
+      if (activeCallId !== callId) {
+        if (incomingCallId === callId) {
+          queueCallSignal(callId, signal);
+        }
+        return;
+      }
+
+      if (!peerConnectionRef.current) {
+        queueCallSignal(callId, signal);
+        return;
+      }
+
+      applyCallSignal({ callId, roomId, signal }).catch(() => {
+        queueCallSignal(callId, signal);
+      });
+    };
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
@@ -902,6 +1553,11 @@ const TeamChat = ({ theme = "light" }) => {
     socket.on("chat:message:seen", onMessageSeen);
     socket.on("chat:room:read", onRoomRead);
     socket.on("chat:typing", onTyping);
+    socket.on("chat:call:incoming", onCallIncoming);
+    socket.on("chat:call:accepted", onCallAccepted);
+    socket.on("chat:call:rejected", onCallRejected);
+    socket.on("chat:call:ended", onCallEnded);
+    socket.on("chat:call:signal", onCallSignal);
 
     return () => {
       socket.off("connect", onConnect);
@@ -913,16 +1569,31 @@ const TeamChat = ({ theme = "light" }) => {
       socket.off("chat:message:seen", onMessageSeen);
       socket.off("chat:room:read", onRoomRead);
       socket.off("chat:typing", onTyping);
+      socket.off("chat:call:incoming", onCallIncoming);
+      socket.off("chat:call:accepted", onCallAccepted);
+      socket.off("chat:call:rejected", onCallRejected);
+      socket.off("chat:call:ended", onCallEnded);
+      socket.off("chat:call:signal", onCallSignal);
       clearLocalTypingStopTimer();
       typingStateRef.current = { roomId: "", isTyping: false };
       remoteTypingTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
       remoteTypingTimeoutsRef.current.clear();
       setTypingByRoom({});
+      clearActiveCallLocally();
       socket.disconnect();
       socketRef.current = null;
       setSocketConnected(false);
     };
-  }, [clearLocalTypingStopTimer, currentUser.id, emitConversationRead, emitMessageReceipt]);
+  }, [
+    applyCallSignal,
+    clearActiveCallLocally,
+    clearLocalTypingStopTimer,
+    clearQueuedCallSignals,
+    currentUser.id,
+    emitConversationRead,
+    emitMessageReceipt,
+    queueCallSignal,
+  ]);
 
   const timeline = useMemo(() => {
     let lastDayKey = "";
@@ -965,6 +1636,15 @@ const TeamChat = ({ theme = "light" }) => {
   };
 
   const handleMobileBack = () => {
+    if (activeCallRef.current) {
+      setCallError("End the current call before leaving this chat");
+      return;
+    }
+
+    if (incomingCallRef.current) {
+      handleRejectIncomingCall().catch(() => null);
+    }
+
     stopLocalTyping(selectedConversationId);
     setSelectedConversationId("");
     setSelectedContactId("");
@@ -1371,9 +2051,52 @@ const TeamChat = ({ theme = "light" }) => {
               </p>
             )}
 
-            <span className={`ml-auto text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              {messages.length} messages
-            </span>
+            <div className="ml-auto flex items-center gap-2">
+              {activeContact && (
+                activeCall ? (
+                  <button
+                    type="button"
+                    onClick={handleEndCall}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-rose-600 text-white transition-colors hover:bg-rose-500"
+                    title="End call"
+                  >
+                    <PhoneOff size={14} />
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleStartCall(CALL_MODES.AUDIO)}
+                      disabled={Boolean(incomingCall)}
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                        isDark
+                          ? "border-slate-700 text-slate-200 hover:border-cyan-400/50 hover:text-cyan-200"
+                          : "border-slate-300 text-slate-600 hover:border-cyan-400 hover:text-cyan-700"
+                      } disabled:cursor-not-allowed disabled:opacity-60`}
+                      title="Start voice call"
+                    >
+                      <Phone size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStartCall(CALL_MODES.VIDEO)}
+                      disabled={Boolean(incomingCall)}
+                      className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                        isDark
+                          ? "border-slate-700 text-slate-200 hover:border-cyan-400/50 hover:text-cyan-200"
+                          : "border-slate-300 text-slate-600 hover:border-cyan-400 hover:text-cyan-700"
+                      } disabled:cursor-not-allowed disabled:opacity-60`}
+                      title="Start video call"
+                    >
+                      <Video size={14} />
+                    </button>
+                  </>
+                )
+              )}
+              <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                {messages.length} messages
+              </span>
+            </div>
           </div>
 
           {error && (
@@ -1384,6 +2107,50 @@ const TeamChat = ({ theme = "light" }) => {
             </div>
           )}
 
+          {callError && (
+            <div className={`mx-3 mt-2 rounded-xl border px-3 py-2 text-xs sm:mx-4 ${
+              isDark ? "border-rose-500/35 bg-rose-500/10 text-rose-100" : "border-rose-300 bg-rose-50 text-rose-700"
+            }`}>
+              {callError}
+            </div>
+          )}
+
+          {incomingCall && (
+            <div className={`mx-3 mt-2 rounded-xl border px-3 py-2 sm:mx-4 ${
+              isDark ? "border-cyan-400/30 bg-cyan-500/10" : "border-cyan-300 bg-cyan-50"
+            }`}>
+              <div className="flex items-center gap-3">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${
+                  isDark ? "bg-slate-900 text-cyan-200" : "bg-white text-cyan-700"
+                }`}>
+                  {incomingCall.mode === CALL_MODES.VIDEO ? <Video size={16} /> : <Phone size={16} />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                    {incomingCall?.from?.name || "Incoming call"}
+                  </p>
+                  <p className={`text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                    {incomingCall.mode === CALL_MODES.VIDEO ? "Video call" : "Voice call"} incoming
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAcceptIncomingCall}
+                  className="inline-flex h-8 items-center justify-center rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white hover:bg-emerald-500"
+                >
+                  Accept
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRejectIncomingCall}
+                  className="inline-flex h-8 items-center justify-center rounded-lg bg-rose-600 px-3 text-xs font-semibold text-white hover:bg-rose-500"
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className={`relative min-h-0 flex-1 overflow-hidden ${isDark ? "bg-slate-950/45" : "bg-slate-50"}`}>
             <div className={`pointer-events-none absolute inset-0 opacity-45 ${
               isDark
@@ -1391,8 +2158,54 @@ const TeamChat = ({ theme = "light" }) => {
                 : "bg-[radial-gradient(circle_at_25%_20%,rgba(6,182,212,0.13),transparent_45%),radial-gradient(circle_at_85%_0%,rgba(56,189,248,0.12),transparent_35%),linear-gradient(45deg,rgba(226,232,240,0.6)_25%,transparent_25%,transparent_50%,rgba(226,232,240,0.6)_50%,rgba(226,232,240,0.6)_75%,transparent_75%,transparent)] bg-[length:220px_220px]"
             }`}
             />
+            {activeCall && (
+              <div className={`absolute left-3 right-3 top-3 z-20 overflow-hidden rounded-2xl border sm:left-5 sm:right-5 ${
+                isDark ? "border-cyan-400/25 bg-slate-900/95" : "border-cyan-300 bg-white/95"
+              }`}>
+                <div className="flex items-center justify-between gap-3 border-b px-3 py-2.5 sm:px-4">
+                  <div className="min-w-0">
+                    <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                      {activeCallPeerName}
+                    </p>
+                    <p className={`text-xs ${isDark ? "text-slate-400" : "text-slate-600"}`}>
+                      {activeCall.mode === CALL_MODES.VIDEO ? "Video call" : "Voice call"} | {activeCallLabel}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleEndCall}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-600 text-white hover:bg-rose-500"
+                    title="End call"
+                  >
+                    <PhoneOff size={14} />
+                  </button>
+                </div>
+                {activeCall.mode === CALL_MODES.VIDEO ? (
+                  <div className={`relative h-56 sm:h-64 ${isDark ? "bg-slate-950" : "bg-slate-100"}`}>
+                    <video
+                      ref={remoteVideoRef}
+                      autoPlay
+                      playsInline
+                      className="h-full w-full bg-black object-cover"
+                    />
+                    <video
+                      ref={localVideoRef}
+                      autoPlay
+                      muted
+                      playsInline
+                      className="absolute bottom-2 right-2 h-24 w-32 rounded-lg border border-white/40 bg-black object-cover shadow-lg"
+                    />
+                  </div>
+                ) : (
+                  <div className={`flex items-center gap-2 px-3 py-3 text-sm sm:px-4 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                    <Phone size={14} />
+                    <span>Microphone call in progress. Keep this chat open.</span>
+                  </div>
+                )}
+              </div>
+            )}
 
-            <div className="relative h-full min-h-0 space-y-3 overflow-y-auto px-3 py-4 sm:px-5 custom-scrollbar">
+            <div className={`relative h-full min-h-0 space-y-3 overflow-y-auto px-3 py-4 sm:px-5 custom-scrollbar ${callTimelineOffsetClass}`}>
             {messagesLoading ? (
               <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 Loading messages...

@@ -1,9 +1,17 @@
 const Lead = require("../models/Lead");
 const User = require("../models/User");
 const LeadActivity = require("../models/leadActivity.model");
+const {
+  USER_ROLES,
+  EXECUTIVE_ROLES,
+  MANAGEMENT_ROLES,
+  isManagementRole,
+} = require("../constants/role.constants");
+const {
+  getAncestorByRoles,
+  getDescendantExecutiveIds,
+} = require("./hierarchy.service");
 
-const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
-const MANAGER_ROLE = "MANAGER";
 const PIPELINE_STATUSES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"];
 
 const DEFAULT_MAX_ACTIVE_LEADS = 120;
@@ -56,7 +64,7 @@ const compareExecutiveCandidates = (left, right) => {
   return toId(left.executive._id).localeCompare(toId(right.executive._id));
 };
 
-const compareManagers = (left, right) => {
+const compareLeaders = (left, right) => {
   if (left.candidate.metric.score !== right.candidate.metric.score) {
     return left.candidate.metric.score - right.candidate.metric.score;
   }
@@ -85,12 +93,12 @@ const buildAssignmentAction = ({ mode, executive, manager }) => {
     return `Self assigned by ${executive.name}`;
   }
 
-  if (mode === "MANAGER_TEAM") {
-    return `Auto assigned to ${executive.name} from manager team`;
+  if (mode === "LEADER_TEAM") {
+    return `Auto assigned to ${executive.name} from reporting team`;
   }
 
-  if (mode === "MANAGER_HIERARCHY") {
-    return `Auto assigned to ${executive.name} under manager ${manager.name}`;
+  if (mode === "LEADER_HIERARCHY") {
+    return `Auto assigned to ${executive.name} under ${manager.name}`;
   }
 
   return `Auto assigned to ${executive.name} (global fallback)`;
@@ -170,31 +178,31 @@ const rankExecutiveCandidates = (executives, metricMap) =>
     .filter(({ metric }) => !metric.atCapacity)
     .sort(compareExecutiveCandidates);
 
-const selectManagerCandidate = (managers, candidates) => {
-  if (!managers.length || !candidates.length) return null;
+const selectLeaderCandidate = (leaders, candidates) => {
+  if (!leaders.length || !candidates.length) return null;
 
-  const candidatesByManager = new Map();
+  const candidatesByLeader = new Map();
 
   candidates.forEach((candidate) => {
-    const managerId = toId(candidate.executive.parentId);
-    if (!managerId) return;
+    const leaderId = toId(candidate.executive.parentId);
+    if (!leaderId) return;
 
-    const existing = candidatesByManager.get(managerId) || [];
+    const existing = candidatesByLeader.get(leaderId) || [];
     existing.push(candidate);
-    candidatesByManager.set(managerId, existing);
+    candidatesByLeader.set(leaderId, existing);
   });
 
-  const managerCandidates = managers
-    .map((manager) => ({
-      manager,
-      candidate: (candidatesByManager.get(toId(manager._id)) || [])[0] || null,
+  const leaderCandidates = leaders
+    .map((leader) => ({
+      manager: leader,
+      candidate: (candidatesByLeader.get(toId(leader._id)) || [])[0] || null,
     }))
     .filter((row) => row.candidate);
 
-  if (!managerCandidates.length) return null;
+  if (!leaderCandidates.length) return null;
 
-  managerCandidates.sort(compareManagers);
-  return managerCandidates[0];
+  leaderCandidates.sort(compareLeaders);
+  return leaderCandidates[0];
 };
 
 const persistAssignment = async ({
@@ -205,9 +213,15 @@ const persistAssignment = async ({
   performedBy,
 }) => {
   const now = new Date();
-  const inferredManagerId = manager?._id || executive?.parentId || null;
-  const isFieldExecutive = executive?.role === "FIELD_EXECUTIVE";
-  const isExecutive = executive?.role === "EXECUTIVE";
+  const topManager = await getAncestorByRoles({
+    user: executive,
+    targetRoles: [USER_ROLES.MANAGER],
+    companyId: executive?.companyId || null,
+    select: "_id role parentId companyId isActive",
+  });
+  const inferredManagerId = topManager?._id || manager?._id || executive?.parentId || null;
+  const isFieldExecutive = executive?.role === USER_ROLES.FIELD_EXECUTIVE;
+  const isExecutive = executive?.role === USER_ROLES.EXECUTIVE;
 
   lead.assignedTo = executive._id;
   lead.assignedManager = inferredManagerId;
@@ -272,11 +286,16 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
     };
   }
 
-  const activeExecutives = await User.find({
+  const executiveQuery = {
     role: { $in: EXECUTIVE_ROLES },
     isActive: true,
-  })
-    .select("_id name role parentId isActive createdAt lastAssignedAt")
+  };
+  if (requester?.companyId) {
+    executiveQuery.companyId = requester.companyId;
+  }
+
+  const activeExecutives = await User.find(executiveQuery)
+    .select("_id name role parentId companyId isActive createdAt lastAssignedAt")
     .sort({ createdAt: 1 })
     .lean();
 
@@ -309,36 +328,51 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
   let selectedManager = null;
   let mode = "GLOBAL_FALLBACK";
 
-  if (requester?.role === MANAGER_ROLE && requester?.isActive) {
-    const managerId = toId(requester._id);
+  if (requester?.isActive && isManagementRole(requester?.role)) {
+    const teamExecutiveIds = await getDescendantExecutiveIds({
+      rootUserId: requester._id,
+      companyId: requester.companyId || null,
+    });
+    const teamExecutiveIdSet = new Set(teamExecutiveIds.map(toId));
     const teamCandidate =
-      rankedCandidates.find(
-        ({ executive }) => toId(executive.parentId) === managerId,
+      rankedCandidates.find(({ executive }) =>
+        teamExecutiveIdSet.has(toId(executive._id)),
       ) || null;
 
     if (teamCandidate) {
       selected = teamCandidate;
       selectedManager = requester;
-      mode = "MANAGER_TEAM";
+      mode = "LEADER_TEAM";
     }
   }
 
-  const managers = await User.find({
-    role: MANAGER_ROLE,
-    isActive: true,
-  })
-    .select("_id name createdAt lastAssignedAt")
-    .sort({ createdAt: 1 })
-    .lean();
+  const leaderIds = [
+    ...new Set(
+      rankedCandidates
+        .map(({ executive }) => toId(executive.parentId))
+        .filter(Boolean),
+    ),
+  ];
+  const leaders = leaderIds.length
+    ? await User.find({
+      _id: { $in: leaderIds },
+      role: { $in: MANAGEMENT_ROLES },
+      isActive: true,
+      ...(requester?.companyId ? { companyId: requester.companyId } : {}),
+    })
+      .select("_id name role createdAt lastAssignedAt")
+      .sort({ createdAt: 1 })
+      .lean()
+    : [];
 
-  const managerMap = new Map(managers.map((manager) => [toId(manager._id), manager]));
+  const managerMap = new Map(leaders.map((leader) => [toId(leader._id), leader]));
 
   if (!selected) {
-    const hierarchySelection = selectManagerCandidate(managers, rankedCandidates);
+    const hierarchySelection = selectLeaderCandidate(leaders, rankedCandidates);
     if (hierarchySelection) {
       selected = hierarchySelection.candidate;
       selectedManager = hierarchySelection.manager;
-      mode = "MANAGER_HIERARCHY";
+      mode = "LEADER_HIERARCHY";
     }
   }
 

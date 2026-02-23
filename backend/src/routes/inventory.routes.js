@@ -8,14 +8,21 @@ const { writeLimiter } = require("../middleware/rateLimit.middleware");
 
 router.use(authMiddleware.protect);
 router.use(
-  authMiddleware.checkRole(["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE"]),
+  authMiddleware.checkRole([
+    "ADMIN",
+    "MANAGER",
+    "ASSISTANT_MANAGER",
+    "TEAM_LEADER",
+    "EXECUTIVE",
+    "FIELD_EXECUTIVE",
+  ]),
 );
 router.use(companyMiddleware.requireCompanyContext);
 
 router.get("/", inventoryController.getInventory);
 router.get(
   "/:id/activity",
-  authMiddleware.checkRole(["ADMIN", "MANAGER"]),
+  authMiddleware.checkRole(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]),
   inventoryController.getInventoryActivity,
 );
 router.get("/:id", inventoryController.getInventoryById);

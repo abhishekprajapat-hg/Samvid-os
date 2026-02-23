@@ -29,14 +29,14 @@ router.post(
 
 router.get(
   "/pending",
-  authMiddleware.checkRole(["ADMIN", "MANAGER"]),
+  authMiddleware.checkRole(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]),
   inventoryApprovalController.getPending,
 );
 
 router.patch(
   "/:id/pre-approve",
   writeLimiter,
-  authMiddleware.checkRole(["MANAGER"]),
+  authMiddleware.checkRole(["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]),
   inventoryApprovalController.preApprove,
 );
 
@@ -57,7 +57,14 @@ router.patch(
 // Legacy aliases
 router.get(
   "/my",
-  authMiddleware.checkRole(["FIELD_EXECUTIVE", "EXECUTIVE", "MANAGER", "ADMIN"]),
+  authMiddleware.checkRole([
+    "FIELD_EXECUTIVE",
+    "EXECUTIVE",
+    "TEAM_LEADER",
+    "ASSISTANT_MANAGER",
+    "MANAGER",
+    "ADMIN",
+  ]),
   inventoryRequestController.getMyInventoryRequests,
 );
 

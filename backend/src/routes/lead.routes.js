@@ -40,8 +40,29 @@ router.patch(
   "/:leadId/assign",
   writeLimiter,
   authMiddleware.protect,
-  authMiddleware.checkRole(["ADMIN", "MANAGER"]),
+  authMiddleware.checkRole(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]),
   leadController.assignLead
+);
+
+router.patch(
+  "/:leadId/properties",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.addRelatedPropertyToLead
+);
+
+router.patch(
+  "/:leadId/properties/:inventoryId/select",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.selectRelatedPropertyForLead
+);
+
+router.delete(
+  "/:leadId/properties/:inventoryId",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.removeRelatedPropertyFromLead
 );
 
 // ======================================

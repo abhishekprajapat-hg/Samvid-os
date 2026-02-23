@@ -1,6 +1,6 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Plus,
   Phone,
@@ -17,12 +17,17 @@ import {
   ArrowUpRight,
   Mic,
   MicOff,
+  Eye,
+  Trash2,
 } from "lucide-react";
 import {
   getAllLeads,
   createLead,
   updateLeadStatus,
   assignLead,
+  addLeadRelatedProperty,
+  selectLeadRelatedProperty,
+  removeLeadRelatedProperty,
   getLeadActivity,
   getLeadDiary,
   addLeadDiaryEntry,
@@ -41,6 +46,7 @@ const LEAD_STATUSES = [
 ];
 
 const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
+const MANAGEMENT_ROLES = ["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"];
 const SITE_VISIT_RADIUS_METERS = 200;
 
 const defaultFormData = {
@@ -59,6 +65,31 @@ const getInventoryLeadLabel = (inventoryLike = {}) =>
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(" - ");
+
+const toObjectIdString = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value._id) return String(value._id);
+  return String(value);
+};
+
+const getLeadRelatedInventories = (lead = {}) => {
+  const merged = [];
+  const seen = new Set();
+  const pushUnique = (value) => {
+    const id = toObjectIdString(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    merged.push(value);
+  };
+
+  pushUnique(lead?.inventoryId);
+  if (Array.isArray(lead?.relatedInventoryIds)) {
+    lead.relatedInventoryIds.forEach((row) => pushUnique(row));
+  }
+
+  return merged;
+};
 
 const getStatusColor = (status) => {
   switch (status) {
@@ -162,6 +193,7 @@ const WhatsAppIcon = ({ size = 13, className = "" }) => (
 );
 
 const LeadsMatrix = () => {
+  const navigate = useNavigate();
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -192,20 +224,26 @@ const LeadsMatrix = () => {
   const [isDiaryListening, setIsDiaryListening] = useState(false);
   const [savingUpdates, setSavingUpdates] = useState(false);
   const [assigning, setAssigning] = useState(false);
+  const [linkingProperty, setLinkingProperty] = useState(false);
+  const [propertyActionInventoryId, setPropertyActionInventoryId] = useState("");
+  const [propertyActionType, setPropertyActionType] = useState("");
 
   const [statusDraft, setStatusDraft] = useState("NEW");
   const [followUpDraft, setFollowUpDraft] = useState("");
   const [executiveDraft, setExecutiveDraft] = useState("");
   const [siteLatDraft, setSiteLatDraft] = useState("");
   const [siteLngDraft, setSiteLngDraft] = useState("");
+  const [relatedInventoryDraft, setRelatedInventoryDraft] = useState("");
 
   const [executives, setExecutives] = useState([]);
   const diaryRecognitionRef = useRef(null);
 
   const userRole = localStorage.getItem("role") || "";
-  const canAddLead = userRole === "ADMIN" || userRole === "MANAGER";
-  const canAssignLead = userRole === "ADMIN" || userRole === "MANAGER";
-  const canConfigureSiteLocation = userRole === "ADMIN" || userRole === "MANAGER";
+  const canAddLead = userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
+  const canAssignLead = userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
+  const canManageLeadProperties = userRole !== "CHANNEL_PARTNER";
+  const canConfigureSiteLocation =
+    userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
 
   const fetchLeads = useCallback(async (asRefresh = false) => {
     try {
@@ -247,7 +285,7 @@ const LeadsMatrix = () => {
   }, [canAssignLead]);
 
   const fetchInventoryOptions = useCallback(async () => {
-    if (!canAddLead) return;
+    if (!canManageLeadProperties) return;
 
     try {
       const rows = await getInventoryAssets();
@@ -257,7 +295,7 @@ const LeadsMatrix = () => {
       console.error(`Load inventory for leads failed: ${message}`);
       setInventoryOptions([]);
     }
-  }, [canAddLead]);
+  }, [canManageLeadProperties]);
 
   useEffect(() => {
     fetchLeads();
@@ -280,6 +318,30 @@ const LeadsMatrix = () => {
     observer.observe(root, { attributes: true, attributeFilter: ["class"] });
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!selectedLead) {
+      if (relatedInventoryDraft !== "") {
+        setRelatedInventoryDraft("");
+      }
+      return;
+    }
+
+    const linkedIds = new Set(
+      getLeadRelatedInventories(selectedLead).map((row) => toObjectIdString(row)),
+    );
+    const available = inventoryOptions.filter(
+      (inventory) => !linkedIds.has(String(inventory?._id || "")),
+    );
+
+    const draftExists = available.some(
+      (inventory) => String(inventory?._id || "") === String(relatedInventoryDraft || ""),
+    );
+
+    if (!draftExists && relatedInventoryDraft !== "") {
+      setRelatedInventoryDraft("");
+    }
+  }, [selectedLead, inventoryOptions, relatedInventoryDraft]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -364,10 +426,24 @@ const LeadsMatrix = () => {
 
     return leads.filter((lead) => {
       const statusMatch = statusFilter === "ALL" || lead.status === statusFilter;
+      const relatedInventorySearchValue = getLeadRelatedInventories(lead)
+        .map((inventory) => {
+          const inventoryLabel = getInventoryLeadLabel(inventory);
+          const inventoryLocation = String(inventory?.location || "").trim();
+          return `${inventoryLabel} ${inventoryLocation}`.trim();
+        })
+        .join(" ");
 
       const searchMatch =
         !normalized ||
-        [lead.name, lead.phone, lead.email, lead.city, lead.projectInterested]
+        [
+          lead.name,
+          lead.phone,
+          lead.email,
+          lead.city,
+          lead.projectInterested,
+          relatedInventorySearchValue,
+        ]
           .map((value) => String(value || "").toLowerCase())
           .some((value) => value.includes(normalized));
 
@@ -407,6 +483,7 @@ const LeadsMatrix = () => {
         ? lead.assignedTo
         : lead.assignedTo?._id || "",
     );
+    setRelatedInventoryDraft("");
     setDiaryDraft("");
     setIsDetailsOpen(true);
 
@@ -452,6 +529,21 @@ const LeadsMatrix = () => {
     setDiaryDraft("");
     setSiteLatDraft("");
     setSiteLngDraft("");
+    setRelatedInventoryDraft("");
+  };
+
+  const applyUpdatedLeadState = (updatedLead) => {
+    if (!updatedLead) return;
+
+    setLeads((prev) =>
+      prev.map((lead) => (lead._id === updatedLead._id ? updatedLead : lead)),
+    );
+    setSelectedLead(updatedLead);
+
+    const nextSiteLat = toCoordinateNumber(updatedLead?.siteLocation?.lat);
+    const nextSiteLng = toCoordinateNumber(updatedLead?.siteLocation?.lng);
+    setSiteLatDraft(nextSiteLat === null ? "" : String(nextSiteLat));
+    setSiteLngDraft(nextSiteLng === null ? "" : String(nextSiteLng));
   };
 
   const handleInventorySelection = (inventoryId) => {
@@ -631,6 +723,126 @@ const LeadsMatrix = () => {
     }
   };
 
+  const handleLinkPropertyToLead = async (inventoryIdOverride = "") => {
+    const inventoryId = String(inventoryIdOverride || relatedInventoryDraft || "").trim();
+    if (!selectedLead || !inventoryId) return;
+
+    try {
+      setLinkingProperty(true);
+      setError("");
+
+      const updatedLead = await addLeadRelatedProperty(
+        selectedLead._id,
+        inventoryId,
+      );
+
+      if (!updatedLead) {
+        await fetchLeads(true);
+        setSuccess("Property linked");
+        return;
+      }
+
+      applyUpdatedLeadState(updatedLead);
+      setRelatedInventoryDraft("");
+      setSuccess("Property linked");
+    } catch (linkError) {
+      const message = toErrorMessage(linkError, "Failed to link property");
+      console.error(`Link property failed: ${message}`);
+      setError(message);
+    } finally {
+      setLinkingProperty(false);
+    }
+  };
+
+  const handleSelectRelatedProperty = async (
+    inventoryId,
+    options = {},
+  ) => {
+    const resolvedInventoryId = String(inventoryId || "").trim();
+    if (!selectedLead || !resolvedInventoryId) return false;
+    const { showSuccess = true } = options;
+
+    try {
+      setPropertyActionType("select");
+      setPropertyActionInventoryId(resolvedInventoryId);
+      setError("");
+
+      const updatedLead = await selectLeadRelatedProperty(
+        selectedLead._id,
+        resolvedInventoryId,
+      );
+
+      if (!updatedLead) {
+        await fetchLeads(true);
+        if (showSuccess) {
+          setSuccess("Property selected");
+        }
+        return false;
+      }
+
+      applyUpdatedLeadState(updatedLead);
+      if (showSuccess) {
+        setSuccess("Property selected");
+      }
+      return true;
+    } catch (selectError) {
+      const message = toErrorMessage(selectError, "Failed to select property");
+      console.error(`Select related property failed: ${message}`);
+      setError(message);
+      return false;
+    } finally {
+      setPropertyActionType("");
+      setPropertyActionInventoryId("");
+    }
+  };
+
+  const handleOpenRelatedProperty = async (inventoryId) => {
+    const resolvedInventoryId = String(inventoryId || "").trim();
+    if (!resolvedInventoryId) return;
+
+    await handleSelectRelatedProperty(resolvedInventoryId, {
+      showSuccess: false,
+    });
+
+    navigate(`/inventory/${resolvedInventoryId}`);
+  };
+
+  const handleRemoveRelatedProperty = async (inventoryId) => {
+    const resolvedInventoryId = String(inventoryId || "").trim();
+    if (!selectedLead || !resolvedInventoryId) return;
+
+    const confirmed = window.confirm("Remove this property from lead?");
+    if (!confirmed) return;
+
+    try {
+      setPropertyActionType("remove");
+      setPropertyActionInventoryId(resolvedInventoryId);
+      setError("");
+
+      const updatedLead = await removeLeadRelatedProperty(
+        selectedLead._id,
+        resolvedInventoryId,
+      );
+
+      if (!updatedLead) {
+        await fetchLeads(true);
+        setSuccess("Property removed");
+        return;
+      }
+
+      applyUpdatedLeadState(updatedLead);
+      setRelatedInventoryDraft("");
+      setSuccess("Property removed");
+    } catch (removeError) {
+      const message = toErrorMessage(removeError, "Failed to remove property");
+      console.error(`Remove related property failed: ${message}`);
+      setError(message);
+    } finally {
+      setPropertyActionType("");
+      setPropertyActionInventoryId("");
+    }
+  };
+
   const handleAddDiary = async () => {
     if (!selectedLead) return;
 
@@ -690,8 +902,14 @@ const LeadsMatrix = () => {
   const selectedLeadMapsHref = getMapsHref(selectedLead?.city);
   const selectedLeadSiteLat = toCoordinateNumber(selectedLead?.siteLocation?.lat);
   const selectedLeadSiteLng = toCoordinateNumber(selectedLead?.siteLocation?.lng);
-  const selectedLeadInventoryLabel = getInventoryLeadLabel(selectedLead?.inventoryId || {});
-  const selectedLeadInventoryLocation = String(selectedLead?.inventoryId?.location || "").trim();
+  const selectedLeadRelatedInventories = getLeadRelatedInventories(selectedLead);
+  const selectedLeadActiveInventoryId = toObjectIdString(selectedLead?.inventoryId);
+  const selectedLeadRelatedInventoryIds = new Set(
+    selectedLeadRelatedInventories.map((row) => toObjectIdString(row)),
+  );
+  const availableRelatedInventoryOptions = inventoryOptions.filter(
+    (inventory) => !selectedLeadRelatedInventoryIds.has(String(inventory?._id || "")),
+  );
 
   return (
     <div className="w-full h-full px-4 sm:px-6 lg:px-10 pt-20 md:pt-24 pb-6 flex flex-col bg-slate-50/50 overflow-y-auto custom-scrollbar">
@@ -1034,14 +1252,141 @@ const LeadsMatrix = () => {
                         <span>-</span>
                       )}
                     </div>
-                    {selectedLeadInventoryLabel && (
-                      <div className="text-xs text-slate-500 pt-1">
-                        Inventory: {selectedLeadInventoryLabel}
-                        {selectedLeadInventoryLocation
-                          ? ` (${selectedLeadInventoryLocation})`
-                          : ""}
+                    <div className="pt-2">
+                      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">
+                        Related Properties
                       </div>
-                    )}
+
+                      {selectedLeadRelatedInventories.length === 0 ? (
+                        <div className="text-xs text-slate-500">
+                          No property linked yet
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {selectedLeadRelatedInventories.map((inventory) => {
+                            const inventoryId = toObjectIdString(inventory);
+                            const inventoryLabel = getInventoryLeadLabel(inventory);
+                            const inventoryLocation = String(inventory?.location || "").trim();
+                            const fallbackLabel = inventoryId
+                              ? `Inventory ${inventoryId.slice(-6)}`
+                              : "Inventory";
+                            const isActiveProperty =
+                              String(selectedLeadActiveInventoryId || "") === String(inventoryId || "");
+                            const isSelectingThisProperty =
+                              propertyActionType === "select"
+                              && String(propertyActionInventoryId || "") === String(inventoryId || "");
+                            const isRemovingThisProperty =
+                              propertyActionType === "remove"
+                              && String(propertyActionInventoryId || "") === String(inventoryId || "");
+
+                            return (
+                              <div
+                                key={inventoryId || fallbackLabel}
+                                onClick={() => {
+                                  if (!inventoryId || isSelectingThisProperty || isRemovingThisProperty) {
+                                    return;
+                                  }
+                                  handleSelectRelatedProperty(inventoryId);
+                                }}
+                                className={`rounded-lg border px-2 py-1 text-xs ${
+                                  isActiveProperty
+                                    ? "border-emerald-300 bg-emerald-50/60"
+                                    : "border-slate-200 bg-white hover:border-emerald-200"
+                                } ${
+                                  inventoryId && !isSelectingThisProperty && !isRemovingThisProperty
+                                    ? "cursor-pointer"
+                                    : ""
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="font-semibold text-slate-700 break-words">
+                                      {inventoryLabel || fallbackLabel}
+                                      {inventoryLocation ? ` (${inventoryLocation})` : ""}
+                                    </div>
+                                    {isActiveProperty && (
+                                      <div className="text-[10px] text-emerald-700">
+                                        Active property for site coordinates
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {canManageLeadProperties && inventoryId && (
+                                    <div className="flex items-center gap-1">
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          handleOpenRelatedProperty(inventoryId);
+                                        }}
+                                        disabled={isSelectingThisProperty || isRemovingThisProperty}
+                                        className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-300 bg-white text-slate-600 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                        title="Open property details"
+                                      >
+                                        {isSelectingThisProperty ? (
+                                          <Loader size={12} className="animate-spin" />
+                                        ) : (
+                                          <Eye size={12} />
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          handleRemoveRelatedProperty(inventoryId);
+                                        }}
+                                        disabled={isRemovingThisProperty || isSelectingThisProperty}
+                                        className="inline-flex h-6 w-6 items-center justify-center rounded border border-slate-300 bg-white text-slate-600 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-60"
+                                        title="Delete property from lead"
+                                      >
+                                        {isRemovingThisProperty ? (
+                                          <Loader size={12} className="animate-spin" />
+                                        ) : (
+                                          <Trash2 size={12} />
+                                        )}
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {canManageLeadProperties && (
+                        <div className="mt-2 space-y-1">
+                          <select
+                            value={relatedInventoryDraft}
+                            onChange={(e) => {
+                              const selectedInventoryId = String(e.target.value || "");
+                              setRelatedInventoryDraft(selectedInventoryId);
+                              if (selectedInventoryId) {
+                                handleLinkPropertyToLead(selectedInventoryId);
+                              }
+                            }}
+                            disabled={linkingProperty}
+                            className="h-9 flex-1 rounded-lg border border-slate-300 bg-white px-2 text-xs"
+                          >
+                            <option value="">
+                              {linkingProperty ? "Linking property..." : "Select property to link (auto-add)"}
+                            </option>
+                            {availableRelatedInventoryOptions.map((inventory) => {
+                              const inventoryLabel = getInventoryLeadLabel(inventory) || "Inventory Unit";
+                              const inventoryLocation = String(inventory.location || "").trim();
+                              return (
+                                <option key={inventory._id} value={inventory._id}>
+                                  {inventoryLocation
+                                    ? `${inventoryLabel} - ${inventoryLocation}`
+                                    : inventoryLabel}
+                                </option>
+                              );
+                            })}
+                          </select>
+            
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 

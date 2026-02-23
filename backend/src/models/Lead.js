@@ -13,6 +13,12 @@ const leadSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    relatedInventoryIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Inventory",
+      },
+    ],
     siteLocation: {
       lat: { type: Number, default: null },
       lng: { type: Number, default: null },
@@ -93,5 +99,6 @@ leadSchema.index({ assignedManager: 1, createdAt: -1 });
 leadSchema.index({ assignedExecutive: 1, createdAt: -1 });
 leadSchema.index({ assignedFieldExecutive: 1, createdAt: -1 });
 leadSchema.index({ nextFollowUp: 1, assignedTo: 1 });
+leadSchema.index({ relatedInventoryIds: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Lead", leadSchema);

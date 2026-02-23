@@ -1,5 +1,6 @@
 const {
   USER_ROLES,
+  MANAGEMENT_ROLES,
   EXECUTIVE_ROLES,
   CHAT_ROOM_TYPES,
 } = require("../constants/chat.constants");
@@ -13,7 +14,7 @@ const isExecutiveRole = (role) => EXECUTIVE_ROLES.includes(role);
 
 const isAdminRole = (role) => role === USER_ROLES.ADMIN;
 
-const isManagerRole = (role) => role === USER_ROLES.MANAGER;
+const isManagerRole = (role) => MANAGEMENT_ROLES.includes(role);
 
 const getTeamIdForUser = (user) => {
   if (!user) return "";
@@ -61,7 +62,10 @@ const canInitiateDirectChat = ({ initiator, recipient }) => {
       return { allowed: true, type: CHAT_ROOM_TYPES.DIRECT };
     }
 
-    return { allowed: false, reason: "Manager can chat only with admin, managers, and own team" };
+    return {
+      allowed: false,
+      reason: "Leadership can chat only with admin, leadership peers, and own team",
+    };
   }
 
   if (initiator.role === USER_ROLES.EXECUTIVE) {
@@ -85,7 +89,7 @@ const canInitiateDirectChat = ({ initiator, recipient }) => {
 
     return {
       allowed: false,
-      reason: "Executive can chat with manager, same-team executives, or admin escalation only",
+      reason: "Executive can chat with reporting leader, same-team executives, or admin escalation only",
     };
   }
 
@@ -106,7 +110,7 @@ const canInitiateDirectChat = ({ initiator, recipient }) => {
 
     return {
       allowed: false,
-      reason: "Field Executive can chat with manager or admin escalation only",
+      reason: "Field Executive can chat with reporting leader or admin escalation only",
     };
   }
 
@@ -131,7 +135,7 @@ const buildContactQueryForUser = (user) => {
       ...baseQuery,
       $or: [
         { role: USER_ROLES.ADMIN },
-        { role: USER_ROLES.MANAGER },
+        { role: { $in: MANAGEMENT_ROLES } },
         { role: { $in: EXECUTIVE_ROLES }, parentId: user._id },
       ],
     };
@@ -150,7 +154,7 @@ const buildContactQueryForUser = (user) => {
     };
 
     if (managerId) {
-      query.$or.push({ role: USER_ROLES.MANAGER, _id: user.parentId });
+      query.$or.push({ role: { $in: MANAGEMENT_ROLES }, _id: user.parentId });
     }
 
     return query;
@@ -163,7 +167,7 @@ const buildContactQueryForUser = (user) => {
     };
 
     if (managerId) {
-      query.$or.push({ role: USER_ROLES.MANAGER, _id: user.parentId });
+      query.$or.push({ role: { $in: MANAGEMENT_ROLES }, _id: user.parentId });
     }
 
     return query;

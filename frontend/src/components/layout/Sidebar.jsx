@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
     LayoutGrid, Users, Building2, Map, LogOut,
     PieChart, Settings, ClipboardList, Calendar,
-    Navigation, ShieldCheck, Briefcase, Hexagon, Moon, Sun, MessageSquare
+    Navigation, ShieldCheck, Briefcase, Hexagon, Moon, Sun, MessageSquare, UserCircle2
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -18,6 +18,7 @@ const MENU_CONFIG = {
         { name: 'Empire', icon: Building2, path: '/inventory' },
         { name: 'Field Ops', icon: Map, path: '/map' },
         { name: 'Targets', icon: PieChart, path: '/targets' },
+        { name: 'Profile', icon: UserCircle2, path: '/profile' },
         { name: 'Access', icon: ShieldCheck, path: '/admin/users' },
         { name: 'System', icon: Settings, path: '/settings' },
     ],
@@ -29,6 +30,8 @@ const MENU_CONFIG = {
         { name: 'Inventory', icon: Building2, path: '/inventory' },
         { name: 'Field Ops', icon: Map, path: '/map' },
         { name: 'Reports', icon: ClipboardList, path: '/reports' },
+        { name: 'Targets', icon: PieChart, path: '/targets' },
+        { name: 'Profile', icon: UserCircle2, path: '/profile' },
         { name: 'System', icon: Settings, path: '/settings' },
     ],
     executive: [
@@ -38,6 +41,7 @@ const MENU_CONFIG = {
         { name: 'Chat', icon: MessageSquare, path: '/chat' },
         { name: 'Schedule', icon: Calendar, path: '/calendar' },
         { name: 'Targets', icon: PieChart, path: '/targets' },
+        { name: 'Profile', icon: UserCircle2, path: '/profile' },
     ],
     field_agent: [
         { name: 'Route', icon: Map, path: '/' },
@@ -46,6 +50,11 @@ const MENU_CONFIG = {
         { name: 'Chat', icon: MessageSquare, path: '/chat' },
         { name: 'Field Ops', icon: Navigation, path: '/map' },
         { name: 'Schedule', icon: Calendar, path: '/calendar' },
+        { name: 'Targets', icon: PieChart, path: '/targets' },
+        { name: 'Profile', icon: UserCircle2, path: '/profile' },
+    ],
+    partner: [
+        { name: 'Profile', icon: UserCircle2, path: '/profile' },
     ]
 };
 
@@ -54,8 +63,11 @@ const Sidebar = ({ userRole = 'manager', onLogout, theme = "light", onToggleThem
     const roleKeyMap = {
         ADMIN: "admin",
         MANAGER: "manager",
+        ASSISTANT_MANAGER: "manager",
+        TEAM_LEADER: "manager",
         EXECUTIVE: "executive",
         FIELD_EXECUTIVE: "field_agent",
+        CHANNEL_PARTNER: "partner",
     };
     const normalizedRole = roleKeyMap[userRole] || "manager";
     const currentMenu = MENU_CONFIG[normalizedRole] || MENU_CONFIG.manager;

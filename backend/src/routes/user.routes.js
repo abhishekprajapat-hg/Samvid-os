@@ -24,6 +24,25 @@ router.get(
   userController.getMyTeam
 );
 
+router.get(
+  "/profile",
+  authMiddleware.protect,
+  userController.getMyProfile
+);
+
+router.get(
+  "/:userId/profile",
+  authMiddleware.protect,
+  userController.getUserProfileForAdmin
+);
+
+router.patch(
+  "/profile",
+  writeLimiter,
+  authMiddleware.protect,
+  userController.updateMyProfile
+);
+
 router.patch(
   "/location",
   authMiddleware.protect,

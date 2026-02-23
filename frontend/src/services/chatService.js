@@ -20,6 +20,14 @@ export const getConversationMessages = async ({ conversationId, limit = 80, befo
   return res.data?.messages || [];
 };
 
+export const createDirectRoom = async ({ recipientId } = {}) => {
+  const id = String(recipientId || "").trim();
+  if (!id) return null;
+
+  const res = await api.post("/chat/rooms/direct", { recipientId: id });
+  return res.data?.room || null;
+};
+
 export const markConversationRead = async (conversationId) => {
   const id = String(conversationId || "").trim();
   if (!id) return null;

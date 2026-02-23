@@ -67,6 +67,7 @@ app.use("/api", apiLimiter);
 app.use("/api/leads", require("./routes/lead.routes"));
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/users", require("./routes/user.routes"));
+app.use("/api/targets", require("./routes/target.routes"));
 app.use("/api/inventory", require("./routes/inventory.routes"));
 app.use("/api/inventory-request", require("./routes/inventoryRequest.routes"));
 app.use("/api/webhook", require("./routes/webhook.routes"));

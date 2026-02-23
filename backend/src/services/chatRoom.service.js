@@ -5,6 +5,7 @@ const Lead = require("../models/Lead");
 const User = require("../models/User");
 const {
   USER_ROLES,
+  MANAGEMENT_ROLES,
   EXECUTIVE_ROLES,
   CHAT_ROOM_TYPES,
   CHAT_MESSAGE_TYPES,
@@ -486,14 +487,14 @@ const resolveLeadChatContext = async (leadId) => {
 
   if (!managerId) {
     const managerFromExecutive = byId.get(toObjectIdString(assignedTo?.parentId));
-    if (managerFromExecutive?.role === USER_ROLES.MANAGER) {
+    if (isManagerRole(managerFromExecutive?.role)) {
       managerId = managerFromExecutive._id;
     }
   }
 
   if (!managerId) {
     const creator = byId.get(toObjectIdString(lead.createdBy));
-    if (creator?.role === USER_ROLES.MANAGER) {
+    if (isManagerRole(creator?.role)) {
       managerId = creator._id;
     }
   }
@@ -691,8 +692,8 @@ const createOrGetDirectRoom = async ({ initiator, recipientId }) => {
 };
 
 const ensureGroupCreatorCanCreate = (creator) => {
-  if (![USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(creator.role)) {
-    throw createHttpError(403, "Only Admin or Manager can create group chats");
+  if (!(isAdminRole(creator.role) || isManagerRole(creator.role))) {
+    throw createHttpError(403, "Only admin or leadership roles can create group chats");
   }
 };
 
@@ -732,7 +733,7 @@ const createGroupRoom = async ({ creator, name, participantIds = [], teamId = nu
     participants.map((participant) => [toObjectIdString(participant._id), participant]),
   );
 
-  if (creator.role === USER_ROLES.MANAGER) {
+  if (isManagerRole(creator.role)) {
     finalParticipants.forEach((participantId) => {
       const participant = byId.get(toObjectIdString(participantId));
       const isCreator = toObjectIdString(participant._id) === toObjectIdString(creator._id);
@@ -743,7 +744,7 @@ const createGroupRoom = async ({ creator, name, participantIds = [], teamId = nu
       if (!isCreator && !isOwnTeamMember) {
         throw createHttpError(
           403,
-          "Managers can create groups only with users from their own team",
+          "Leadership can create groups only with users from their own team",
         );
       }
     });
@@ -853,7 +854,7 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
         isActive: true,
         _id: { $ne: creator._id },
         $or: [
-          { _id: cleanTargetTeamId, role: USER_ROLES.MANAGER },
+          { _id: cleanTargetTeamId, role: { $in: MANAGEMENT_ROLES } },
           { parentId: cleanTargetTeamId, role: { $in: EXECUTIVE_ROLES } },
         ],
       })
@@ -870,7 +871,7 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
     if (cleanTargetRole && cleanTargetRole !== BROADCAST_TARGET_ROLES.ALL_USERS) {
       if (
         ![
-          USER_ROLES.MANAGER,
+          ...MANAGEMENT_ROLES,
           USER_ROLES.EXECUTIVE,
           USER_ROLES.FIELD_EXECUTIVE,
         ].includes(cleanTargetRole)
@@ -907,12 +908,12 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
     };
   }
 
-  if (creator.role === USER_ROLES.MANAGER) {
+  if (isManagerRole(creator.role)) {
     if (
       cleanTargetTeamId
       && toObjectIdString(cleanTargetTeamId) !== toObjectIdString(creator._id)
     ) {
-      throw createHttpError(403, "Manager can broadcast only to own team");
+      throw createHttpError(403, "Leadership can broadcast only to own team");
     }
 
     if (
@@ -923,7 +924,7 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
         BROADCAST_TARGET_ROLES.ALL_USERS,
       ].includes(cleanTargetRole)
     ) {
-      throw createHttpError(403, "Manager can target only team executives/field executives");
+      throw createHttpError(403, "Leadership can target only team executives/field executives");
     }
 
     const roleFilter =
@@ -946,7 +947,7 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
     };
   }
 
-  throw createHttpError(403, "Only Admin or Manager can create broadcast messages");
+  throw createHttpError(403, "Only admin or leadership roles can create broadcast messages");
 };
 
 const createBroadcastMessage = async ({

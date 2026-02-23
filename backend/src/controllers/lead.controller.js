@@ -5,9 +5,18 @@ const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
 const logger = require("../config/logger");
 const {
-  EXECUTIVE_ROLES,
   autoAssignLead,
 } = require("../services/leadAssignment.service");
+const {
+  USER_ROLES,
+  EXECUTIVE_ROLES,
+  MANAGEMENT_ROLES,
+  isManagementRole,
+} = require("../constants/role.constants");
+const {
+  getAncestorByRoles,
+  getDescendantExecutiveIds,
+} = require("../services/hierarchy.service");
 const {
   parsePagination,
   buildPaginationMeta,
@@ -24,6 +33,10 @@ const LEAD_POPULATE_FIELDS = [
     path: "inventoryId",
     select: "projectName towerName unitNumber location siteLocation status price",
   },
+  {
+    path: "relatedInventoryIds",
+    select: "projectName towerName unitNumber location siteLocation status price",
+  },
 ];
 
 const LEAD_SELECTABLE_FIELDS = [
@@ -34,6 +47,7 @@ const LEAD_SELECTABLE_FIELDS = [
   "city",
   "projectInterested",
   "inventoryId",
+  "relatedInventoryIds",
   "siteLocation",
   "source",
   "status",
@@ -65,7 +79,7 @@ const LEAD_DIARY_SELECTABLE_FIELDS = [
   "updatedAt",
 ];
 
-const FIELD_EXECUTIVE_ROLE = "FIELD_EXECUTIVE";
+const FIELD_EXECUTIVE_ROLE = USER_ROLES.FIELD_EXECUTIVE;
 const SITE_VISIT_STATUS = "SITE_VISIT";
 const EARTH_RADIUS_METERS = 6371000;
 const DEFAULT_SITE_VISIT_RADIUS_METERS =
@@ -82,6 +96,89 @@ const buildInventoryLeadProjectLabel = (inventory) =>
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(" - ");
+
+const toObjectIdString = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value._id) return String(value._id);
+  return String(value);
+};
+
+const buildLeadRelatedInventoryRefs = (lead = {}) => {
+  const merged = [];
+  const seen = new Set();
+  const pushUnique = (value) => {
+    const id = toObjectIdString(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    merged.push(value);
+  };
+
+  pushUnique(lead?.inventoryId);
+  if (Array.isArray(lead?.relatedInventoryIds)) {
+    lead.relatedInventoryIds.forEach((value) => pushUnique(value));
+  }
+
+  return merged;
+};
+
+const toLeadView = (lead) => {
+  if (!lead) return null;
+
+  return {
+    ...lead,
+    relatedInventoryIds: buildLeadRelatedInventoryRefs(lead),
+  };
+};
+
+const buildCompanyInventoryQuery = ({ inventoryId, companyId }) => {
+  const query = {
+    _id: inventoryId,
+  };
+  if (companyId) {
+    query.companyId = companyId;
+  }
+  return query;
+};
+
+const applyLeadSelectionFromInventory = ({ lead, inventory }) => {
+  if (!lead || !inventory) return;
+
+  const inventoryIdStr = String(inventory._id);
+  const existingIds = buildLeadRelatedInventoryRefs(lead).map((value) =>
+    toObjectIdString(value),
+  );
+
+  if (!existingIds.includes(inventoryIdStr)) {
+    existingIds.push(inventoryIdStr);
+  }
+
+  lead.relatedInventoryIds = existingIds;
+  lead.inventoryId = inventory._id;
+
+  const projectLabel = buildInventoryLeadProjectLabel(inventory);
+  if (projectLabel) {
+    lead.projectInterested = projectLabel;
+  }
+
+  const inventoryLocation = String(inventory.location || "").trim();
+  if (inventoryLocation) {
+    lead.city = inventoryLocation;
+  }
+
+  const inventoryLat = normalizeLatitude(inventory?.siteLocation?.lat);
+  const inventoryLng = normalizeLongitude(inventory?.siteLocation?.lng);
+  if (inventoryLat !== null && inventoryLng !== null) {
+    const existingRadius =
+      normalizeRadiusMeters(lead?.siteLocation?.radiusMeters)
+      || DEFAULT_SITE_VISIT_RADIUS_METERS;
+    lead.siteLocation = {
+      lat: inventoryLat,
+      lng: inventoryLng,
+      radiusMeters: existingRadius,
+    };
+  }
+};
 
 const toFiniteNumber = (value) => {
   if (value === null || value === undefined) {
@@ -198,23 +295,23 @@ const resolveLiveLocationForVerification = (user) => {
   };
 };
 
-const getLeadViewById = (leadId) =>
-  Lead.findById(leadId).populate(LEAD_POPULATE_FIELDS).lean();
+const getLeadViewById = async (leadId) => {
+  const row = await Lead.findById(leadId).populate(LEAD_POPULATE_FIELDS).lean();
+  return toLeadView(row);
+};
+
+const getExecutiveIdsForLeader = async (user) => getDescendantExecutiveIds({
+  rootUserId: user?._id,
+  companyId: user?.companyId || null,
+});
 
 const buildLeadQueryForUser = async (user) => {
-  if (user.role === "ADMIN") {
+  if (user.role === USER_ROLES.ADMIN) {
     return {};
   }
 
-  if (user.role === "MANAGER") {
-    const executives = await User.find({
-      parentId: user._id,
-      role: { $in: EXECUTIVE_ROLES },
-    })
-      .select("_id")
-      .lean();
-
-    const execIds = executives.map((item) => item._id);
+  if (isManagementRole(user.role)) {
+    const execIds = await getExecutiveIdsForLeader(user);
     return {
       $or: [
         { createdBy: user._id },
@@ -228,6 +325,10 @@ const buildLeadQueryForUser = async (user) => {
     return {
       $or: [{ assignedTo: user._id }, { assignedTo: null }],
     };
+  }
+
+  if (user.role === USER_ROLES.CHANNEL_PARTNER) {
+    return { createdBy: user._id };
   }
 
   return null;
@@ -334,6 +435,7 @@ exports.createLead = async (req, res) => {
 
     if (inventory) {
       createPayload.inventoryId = inventory._id;
+      createPayload.relatedInventoryIds = [inventory._id];
     }
 
     if (parsedSiteLocation.provided) {
@@ -398,14 +500,15 @@ exports.getAllLeads = async (req, res) => {
     });
 
     if (!pagination.enabled) {
-      const leads = await leadQuery;
+      const leads = (await leadQuery).map((lead) => toLeadView(lead));
       return res.json({ leads });
     }
 
-    const [leads, totalCount] = await Promise.all([
+    const [leadRows, totalCount] = await Promise.all([
       leadQuery,
       Lead.countDocuments(query),
     ]);
+    const leads = leadRows.map((lead) => toLeadView(lead));
 
     return res.json({
       leads,
@@ -440,16 +543,9 @@ exports.assignLead = async (req, res) => {
       return res.status(400).json({ message: "Invalid executive" });
     }
 
-    if (req.user.role === "MANAGER") {
-      const teamExecutives = await User.find({
-        parentId: req.user._id,
-        role: { $in: EXECUTIVE_ROLES },
-      })
-        .select("_id")
-        .lean();
-
+    if (isManagementRole(req.user.role) && req.user.role !== USER_ROLES.ADMIN) {
       const teamExecutiveIds = new Set(
-        teamExecutives.map((item) => String(item._id)),
+        (await getExecutiveIdsForLeader(req.user)).map((item) => String(item)),
       );
 
       const targetExecutiveId = String(executive._id);
@@ -459,7 +555,7 @@ exports.assignLead = async (req, res) => {
 
       if (!teamExecutiveIds.has(targetExecutiveId)) {
         return res.status(403).json({
-          message: "Managers can assign leads only to their own executives",
+          message: "Leads can be assigned only to your team executives",
         });
       }
 
@@ -475,11 +571,18 @@ exports.assignLead = async (req, res) => {
       }
     }
 
+    const topManager = await getAncestorByRoles({
+      user: executive,
+      targetRoles: [USER_ROLES.MANAGER],
+      companyId: executive.companyId || null,
+      select: "_id role parentId companyId isActive",
+    });
+
     lead.assignedTo = executive._id;
-    lead.assignedManager = executive.parentId || null;
-    lead.assignedExecutive = executive.role === "EXECUTIVE" ? executive._id : null;
+    lead.assignedManager = topManager?._id || executive.parentId || null;
+    lead.assignedExecutive = executive.role === USER_ROLES.EXECUTIVE ? executive._id : null;
     lead.assignedFieldExecutive =
-      executive.role === "FIELD_EXECUTIVE" ? executive._id : null;
+      executive.role === USER_ROLES.FIELD_EXECUTIVE ? executive._id : null;
     await lead.save();
 
     await User.updateOne(
@@ -509,6 +612,254 @@ exports.assignLead = async (req, res) => {
   }
 };
 
+exports.addRelatedPropertyToLead = async (req, res) => {
+  try {
+    if (req.user.role === USER_ROLES.CHANNEL_PARTNER) {
+      return res.status(403).json({
+        message: "Channel partners are not allowed to link properties",
+      });
+    }
+
+    const { leadId } = req.params;
+    const rawInventoryId = String(req.body?.inventoryId || "").trim();
+
+    if (!isValidObjectId(leadId)) {
+      return res.status(400).json({ message: "Invalid lead id" });
+    }
+    if (!isValidObjectId(rawInventoryId)) {
+      return res.status(400).json({ message: "Valid inventoryId is required" });
+    }
+
+    const accessibleLead = await findAccessibleLeadById({
+      leadId,
+      user: req.user,
+    });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const inventory = await Inventory.findOne(
+      buildCompanyInventoryQuery({
+        inventoryId: rawInventoryId,
+        companyId: req.user.companyId,
+      }),
+    )
+      .select("_id projectName towerName unitNumber location siteLocation")
+      .lean();
+    if (!inventory) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    const lead = await Lead.findById(leadId);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const existingIds = buildLeadRelatedInventoryRefs(lead).map((value) =>
+      toObjectIdString(value),
+    );
+    const inventoryIdStr = String(inventory._id);
+
+    if (existingIds.includes(inventoryIdStr)) {
+      const populatedLead = await getLeadViewById(lead._id);
+      return res.json({
+        message: "Property already linked to this lead",
+        lead: populatedLead,
+      });
+    }
+
+    applyLeadSelectionFromInventory({
+      lead,
+      inventory,
+    });
+
+    await lead.save();
+
+    await LeadActivity.create({
+      lead: lead._id,
+      action: `Property linked: ${buildInventoryLeadProjectLabel(inventory) || inventoryIdStr}`,
+      performedBy: req.user._id,
+    });
+
+    const populatedLead = await getLeadViewById(lead._id);
+
+    return res.json({
+      message: "Property linked to lead",
+      lead: populatedLead,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "addRelatedPropertyToLead failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.selectRelatedPropertyForLead = async (req, res) => {
+  try {
+    if (req.user.role === USER_ROLES.CHANNEL_PARTNER) {
+      return res.status(403).json({
+        message: "Channel partners are not allowed to select lead properties",
+      });
+    }
+
+    const { leadId, inventoryId } = req.params;
+    if (!isValidObjectId(leadId) || !isValidObjectId(inventoryId)) {
+      return res.status(400).json({ message: "Invalid lead or inventory id" });
+    }
+
+    const accessibleLead = await findAccessibleLeadById({
+      leadId,
+      user: req.user,
+    });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const inventory = await Inventory.findOne(
+      buildCompanyInventoryQuery({
+        inventoryId,
+        companyId: req.user.companyId,
+      }),
+    )
+      .select("_id projectName towerName unitNumber location siteLocation")
+      .lean();
+    if (!inventory) {
+      return res.status(404).json({ message: "Inventory not found" });
+    }
+
+    const lead = await Lead.findById(leadId);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    applyLeadSelectionFromInventory({
+      lead,
+      inventory,
+    });
+    await lead.save();
+
+    await LeadActivity.create({
+      lead: lead._id,
+      action: `Property selected for site location: ${buildInventoryLeadProjectLabel(inventory) || String(inventory._id)}`,
+      performedBy: req.user._id,
+    });
+
+    const populatedLead = await getLeadViewById(lead._id);
+    return res.json({
+      message: "Property selected",
+      lead: populatedLead,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "selectRelatedPropertyForLead failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.removeRelatedPropertyFromLead = async (req, res) => {
+  try {
+    if (req.user.role === USER_ROLES.CHANNEL_PARTNER) {
+      return res.status(403).json({
+        message: "Channel partners are not allowed to unlink lead properties",
+      });
+    }
+
+    const { leadId, inventoryId } = req.params;
+    if (!isValidObjectId(leadId) || !isValidObjectId(inventoryId)) {
+      return res.status(400).json({ message: "Invalid lead or inventory id" });
+    }
+
+    const accessibleLead = await findAccessibleLeadById({
+      leadId,
+      user: req.user,
+    });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const lead = await Lead.findById(leadId);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const existingIds = buildLeadRelatedInventoryRefs(lead).map((value) =>
+      toObjectIdString(value),
+    );
+    const targetInventoryId = String(inventoryId);
+
+    if (!existingIds.includes(targetInventoryId)) {
+      const populatedLead = await getLeadViewById(lead._id);
+      return res.json({
+        message: "Property is already not linked",
+        lead: populatedLead,
+      });
+    }
+
+    const nextIds = existingIds.filter((id) => id !== targetInventoryId);
+    lead.relatedInventoryIds = nextIds;
+
+    if (!nextIds.length) {
+      lead.inventoryId = null;
+      lead.siteLocation = {
+        lat: null,
+        lng: null,
+        radiusMeters:
+          normalizeRadiusMeters(lead?.siteLocation?.radiusMeters)
+          || DEFAULT_SITE_VISIT_RADIUS_METERS,
+      };
+    } else {
+      const currentPrimary = toObjectIdString(lead.inventoryId);
+      if (!currentPrimary || currentPrimary === targetInventoryId) {
+        const fallbackInventoryId = nextIds[0];
+        const fallbackInventory = await Inventory.findOne(
+          buildCompanyInventoryQuery({
+            inventoryId: fallbackInventoryId,
+            companyId: req.user.companyId,
+          }),
+        )
+          .select("_id projectName towerName unitNumber location siteLocation")
+          .lean();
+
+        if (fallbackInventory) {
+          applyLeadSelectionFromInventory({
+            lead,
+            inventory: fallbackInventory,
+          });
+        } else {
+          lead.inventoryId = null;
+        }
+      }
+    }
+
+    await lead.save();
+
+    await LeadActivity.create({
+      lead: lead._id,
+      action: `Property removed from lead: ${targetInventoryId}`,
+      performedBy: req.user._id,
+    });
+
+    const populatedLead = await getLeadViewById(lead._id);
+    return res.json({
+      message: "Property removed",
+      lead: populatedLead,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "removeRelatedPropertyFromLead failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.updateLeadStatus = async (req, res) => {
   try {
     const { leadId } = req.params;
@@ -530,10 +881,10 @@ exports.updateLeadStatus = async (req, res) => {
 
     if (
       parsedSiteLocation.provided
-      && !["ADMIN", "MANAGER"].includes(req.user.role)
+      && ![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES].includes(req.user.role)
     ) {
       return res.status(403).json({
-        message: "Only admin or manager can configure site coordinates",
+        message: "Only admin or leadership roles can configure site coordinates",
       });
     }
 
@@ -713,14 +1064,15 @@ exports.getTodayFollowUps = async (req, res) => {
 
     const leadsQuery = queryBuilder.lean();
     if (!pagination.enabled) {
-      const leads = await leadsQuery;
+      const leads = (await leadsQuery).map((lead) => toLeadView(lead));
       return res.json({ leads });
     }
 
-    const [leads, totalCount] = await Promise.all([
+    const [leadRows, totalCount] = await Promise.all([
       leadsQuery,
       Lead.countDocuments(query),
     ]);
+    const leads = leadRows.map((lead) => toLeadView(lead));
 
     return res.json({
       leads,

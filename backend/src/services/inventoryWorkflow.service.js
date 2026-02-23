@@ -5,6 +5,12 @@ const InventoryActivity = require("../models/InventoryActivity");
 const Lead = require("../models/Lead");
 const User = require("../models/User");
 const {
+  USER_ROLES,
+  EXECUTIVE_ROLES,
+  MANAGEMENT_ROLES,
+  isManagementRole,
+} = require("../constants/role.constants");
+const {
   INVENTORY_STATUSES,
   INVENTORY_ALLOWED_FIELDS,
   INVENTORY_REQUIRED_CREATE_FIELDS,
@@ -14,13 +20,6 @@ const {
   notifyRequestCreated,
   notifyRequestReviewed,
 } = require("./inventoryNotification.service");
-
-const USER_ROLES = {
-  ADMIN: "ADMIN",
-  MANAGER: "MANAGER",
-  EXECUTIVE: "EXECUTIVE",
-  FIELD_EXECUTIVE: "FIELD_EXECUTIVE",
-};
 
 const REQUEST_STATUS_PENDING = "pending";
 const REQUEST_STATUS_APPROVED = "approved";
@@ -206,12 +205,12 @@ const getCompanyIdForUser = (user) => {
 const ensureManagerExistsInCompany = async ({ managerId, companyId }) => {
   if (!managerId) return null;
   if (!isValidObjectId(managerId)) {
-    throw createHttpError(400, "Invalid manager id");
+    throw createHttpError(400, "Invalid team id");
   }
 
   const manager = await User.findOne({
     _id: managerId,
-    role: USER_ROLES.MANAGER,
+    role: { $in: MANAGEMENT_ROLES },
     isActive: true,
     companyId,
   })
@@ -219,7 +218,7 @@ const ensureManagerExistsInCompany = async ({ managerId, companyId }) => {
     .lean();
 
   if (!manager) {
-    throw createHttpError(403, "Manager is inactive or does not belong to your company");
+    throw createHttpError(403, "Team owner is inactive or does not belong to your company");
   }
 
   return manager;
@@ -227,8 +226,8 @@ const ensureManagerExistsInCompany = async ({ managerId, companyId }) => {
 
 const getTeamIdForUser = (user) => {
   if (!user) return null;
-  if (user.role === USER_ROLES.MANAGER) return user._id;
-  if ([USER_ROLES.EXECUTIVE, USER_ROLES.FIELD_EXECUTIVE].includes(user.role)) {
+  if (isManagementRole(user.role)) return user._id;
+  if (EXECUTIVE_ROLES.includes(user.role)) {
     return user.parentId || null;
   }
   return null;
@@ -366,7 +365,7 @@ const getInventoryScopeQueryForUser = (user) => {
   if (
     [
       USER_ROLES.ADMIN,
-      USER_ROLES.MANAGER,
+      ...MANAGEMENT_ROLES,
       USER_ROLES.EXECUTIVE,
       USER_ROLES.FIELD_EXECUTIVE,
     ].includes(user.role)
@@ -804,7 +803,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
 };
 
 const getPendingRequests = async ({ user }) => {
-  if (![USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(user.role)) {
+  if (![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES].includes(user.role)) {
     throw createHttpError(403, "Access denied");
   }
 
@@ -814,7 +813,7 @@ const getPendingRequests = async ({ user }) => {
     companyId,
   };
 
-  if (user.role === USER_ROLES.MANAGER) {
+  if (isManagementRole(user.role)) {
     query.teamId = user._id;
   }
 
@@ -824,8 +823,8 @@ const getPendingRequests = async ({ user }) => {
 };
 
 const preApproveRequestByManager = async ({ user, requestId }) => {
-  if (user.role !== USER_ROLES.MANAGER) {
-    throw createHttpError(403, "Only MANAGER can pre-approve requests");
+  if (!isManagementRole(user.role)) {
+    throw createHttpError(403, "Only leadership roles can pre-approve requests");
   }
 
   if (!isValidObjectId(requestId)) {
@@ -1011,8 +1010,8 @@ const getMyRequests = async ({ user }) => {
 };
 
 const getInventoryActivities = async ({ user, inventoryId, limit = 100 }) => {
-  if (![USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(user.role)) {
-    throw createHttpError(403, "Only ADMIN/MANAGER can view activity logs");
+  if (![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES].includes(user.role)) {
+    throw createHttpError(403, "Only admin/leadership roles can view activity logs");
   }
 
   if (!isValidObjectId(inventoryId)) {

@@ -74,7 +74,12 @@ const InventoryDetails = () => {
   const navigate = useNavigate();
   const role = localStorage.getItem("role") || "";
   const isFieldExecutive = role === "FIELD_EXECUTIVE";
-  const canViewActivity = role === "ADMIN" || role === "MANAGER";
+  const canViewActivity = [
+    "ADMIN",
+    "MANAGER",
+    "ASSISTANT_MANAGER",
+    "TEAM_LEADER",
+  ].includes(role);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

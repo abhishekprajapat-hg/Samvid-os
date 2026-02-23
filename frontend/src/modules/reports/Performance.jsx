@@ -1,154 +1,523 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useMemo, useState } from "react";
 import {
-    Target, TrendingUp, Award, Calendar,
-    ArrowUpRight, ChevronDown, CheckCircle, X
-} from 'lucide-react';
-import api from '../../services/api';
-import { toErrorMessage } from '../../utils/errorMessage';
+  AlertCircle,
+  Calendar,
+  CheckCircle,
+  Loader2,
+  MapPin,
+  RefreshCw,
+  Send,
+  Target,
+  TrendingUp,
+  Users,
+} from "lucide-react";
+import { assignHierarchyTarget, getMyTargets } from "../../services/targetService";
+import { toErrorMessage } from "../../utils/errorMessage";
+
+const formatNumber = (value) => Number(value || 0).toLocaleString("en-IN");
+const formatCurrency = (value) => `Rs ${formatNumber(value)}`;
+
+const getCurrentMonthKey = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
+
+const clampPercent = (value) => {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return 0;
+  if (numeric < 0) return 0;
+  if (numeric > 100) return 100;
+  return Math.round(numeric * 10) / 10;
+};
+
+const safeTarget = (row) => ({
+  leadsTarget: Number(row?.leadsTarget || 0),
+  revenueTarget: Number(row?.revenueTarget || 0),
+  siteVisitTarget: Number(row?.siteVisitTarget || 0),
+  achievements: {
+    leadsAchieved: Number(row?.achievements?.leadsAchieved || 0),
+    revenueAchieved: Number(row?.achievements?.revenueAchieved || 0),
+    siteVisitsAchieved: Number(row?.achievements?.siteVisitsAchieved || 0),
+    closedDealsAchieved: Number(row?.achievements?.closedDealsAchieved || 0),
+  },
+  progress: {
+    leadsPercent: clampPercent(row?.progress?.leadsPercent),
+    revenuePercent: clampPercent(row?.progress?.revenuePercent),
+    siteVisitPercent: clampPercent(row?.progress?.siteVisitPercent),
+  },
+});
+
+const MetricCard = ({
+  title,
+  subtitle,
+  icon: Icon,
+  target,
+  achieved,
+  percent,
+  formatValue,
+}) => (
+  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="mb-4 flex items-start justify-between gap-3">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          {title}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">{subtitle}</p>
+      </div>
+      <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600">
+        <Icon size={15} />
+      </div>
+    </div>
+
+    <div className="text-sm text-slate-700">
+      <span className="font-semibold text-slate-900">{formatValue(achieved)}</span>
+      <span className="text-slate-500"> / {formatValue(target)}</span>
+    </div>
+
+    <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+      <div
+        className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-cyan-500 transition-all duration-300"
+        style={{ width: `${clampPercent(percent)}%` }}
+      />
+    </div>
+    <p className="mt-1 text-right text-xs font-semibold text-emerald-600">
+      {clampPercent(percent)}% achieved
+    </p>
+  </div>
+);
+
+const TargetListItem = ({ row }) => {
+  const stats = safeTarget(row);
+  const assignee = row?.assignedTo || {};
+  const assigner = row?.assignedBy || {};
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">{assignee.name || "Unknown User"}</p>
+          <p className="text-xs text-slate-500">
+            {assignee.roleLabel || assignee.role || "-"} | Assigned by {assigner.name || "-"}
+          </p>
+        </div>
+        <p className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-600">
+          {row?.month || "-"}
+        </p>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-3">
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
+          Leads: {formatNumber(stats.achievements.leadsAchieved)} / {formatNumber(stats.leadsTarget)}
+        </div>
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
+          Site Visits: {formatNumber(stats.achievements.siteVisitsAchieved)} / {formatNumber(stats.siteVisitTarget)}
+        </div>
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
+          Revenue: {formatCurrency(stats.achievements.revenueAchieved)} / {formatCurrency(stats.revenueTarget)}
+        </div>
+      </div>
+
+      {row?.notes ? (
+        <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+          Note: {row.notes}
+        </p>
+      ) : null}
+    </div>
+  );
+};
 
 const Performance = () => {
-    const [loading, setLoading] = useState(true);
-    const [metrics, setMetrics] = useState({
-        totalRevenue: 0,
-        dealsClosed: 0,
-        conversionRate: 0,
-        targetProgress: 0
+  const [month, setMonth] = useState(getCurrentMonthKey());
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [targetState, setTargetState] = useState({
+    month: "",
+    canAssign: false,
+    assignableReports: [],
+    myTarget: null,
+    incoming: [],
+    outgoing: [],
+  });
+  const [assignmentForm, setAssignmentForm] = useState({
+    assignedToId: "",
+    leadsTarget: "",
+    revenueTarget: "",
+    siteVisitTarget: "",
+    notes: "",
+  });
+
+  const loadTargets = async (requestedMonth, { quiet = false } = {}) => {
+    if (quiet) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+    setError("");
+
+    try {
+      const payload = await getMyTargets({ month: requestedMonth });
+      setTargetState({
+        month: payload.month,
+        canAssign: Boolean(payload.canAssign),
+        assignableReports: payload.assignableReports || [],
+        myTarget: payload.myTarget || null,
+        incoming: payload.incoming || [],
+        outgoing: payload.outgoing || [],
+      });
+    } catch (fetchError) {
+      setError(toErrorMessage(fetchError, "Failed to load targets"));
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTargets(month);
+  }, [month]);
+
+  useEffect(() => {
+    if (!targetState.canAssign) return;
+
+    setAssignmentForm((prev) => {
+      const exists = targetState.assignableReports.some(
+        (row) => String(row._id) === String(prev.assignedToId),
+      );
+
+      if (exists) return prev;
+
+      return {
+        ...prev,
+        assignedToId: targetState.assignableReports[0]?._id || "",
+      };
     });
+  }, [targetState.canAssign, targetState.assignableReports]);
 
-    // TARGET SETTINGS (You can make these dynamic later)
-    const MONTHLY_TARGET = 500000; // 5 Lakhs Commission Target
-    const LEADS_TARGET = 20;
+  const myTarget = useMemo(() => safeTarget(targetState.myTarget), [targetState.myTarget]);
+  const hasMyTarget = Boolean(targetState.myTarget);
 
-    useEffect(() => {
-        fetchPerformanceData();
-    }, []);
+  const handleRefresh = () => {
+    loadTargets(month, { quiet: true });
+  };
 
-    const fetchPerformanceData = async () => {
-        try {
-            const resLeads = await api.get('/leads');
-            const leads = resLeads.data?.leads || [];
-            const closedLeads = leads.filter((lead) => lead.status === 'CLOSED');
-            const totalCommission = closedLeads.length * 50000;
+  const handleAssign = async (event) => {
+    event.preventDefault();
+    setSuccessMessage("");
+    setError("");
 
-            // Calculate Conversion %
-            const conversion = leads.length > 0 ? ((closedLeads.length / leads.length) * 100).toFixed(1) : 0;
+    const leadsTarget = Number(assignmentForm.leadsTarget || 0);
+    const revenueTarget = Number(assignmentForm.revenueTarget || 0);
+    const siteVisitTarget = Number(assignmentForm.siteVisitTarget || 0);
 
-            // Calculate Target Progress %
-            const progress = Math.min(((totalCommission / MONTHLY_TARGET) * 100).toFixed(1), 100);
+    if (!assignmentForm.assignedToId) {
+      setError("Please select a reporting user");
+      return;
+    }
 
-            setMetrics({
-                totalRevenue: totalCommission,
-                dealsClosed: closedLeads.length,
-                conversionRate: conversion,
-                targetProgress: progress,
-                totalLeads: leads.length
-            });
+    if (
+      !Number.isFinite(leadsTarget)
+      || !Number.isFinite(revenueTarget)
+      || !Number.isFinite(siteVisitTarget)
+      || leadsTarget < 0
+      || revenueTarget < 0
+      || siteVisitTarget < 0
+    ) {
+      setError("All targets must be valid non-negative numbers");
+      return;
+    }
 
-            setLoading(false);
-        } catch (error) {
-            console.error("Error loading performance:", toErrorMessage(error, "Unknown error"));
-            setLoading(false);
-        }
-    };
+    if (leadsTarget <= 0 && revenueTarget <= 0 && siteVisitTarget <= 0) {
+      setError("At least one target value should be greater than zero");
+      return;
+    }
 
-    return (
-        <div className="w-full h-full px-4 sm:px-6 lg:px-10 pt-20 md:pt-24 pb-8 overflow-y-auto flex flex-col bg-slate-50/50">
+    setSubmitting(true);
+    try {
+      const result = await assignHierarchyTarget({
+        assignedToId: assignmentForm.assignedToId,
+        month,
+        leadsTarget,
+        revenueTarget,
+        siteVisitTarget,
+        notes: assignmentForm.notes,
+      });
+      setSuccessMessage(result.message || "Target assigned successfully");
+      await loadTargets(month, { quiet: true });
+    } catch (assignError) {
+      setError(toErrorMessage(assignError, "Unable to assign target"));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
-            {/* HEADER */}
-            <div className="mb-10">
-                <h1 className="font-display text-2xl sm:text-4xl text-slate-900 tracking-tight">PERFORMANCE <span className="text-emerald-600">INSIGHTS</span></h1>
-                <p className="text-slate-500 mt-2 font-mono text-xs uppercase tracking-widest">Real-time Agent Analytics</p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 h-full pb-10">
-
-                {/* LEFT COLUMN: MAIN TARGETS */}
-                <div className="lg:col-span-8 flex flex-col gap-6 lg:gap-8">
-
-                    {/* 1. REVENUE TARGET CARD */}
-                    <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden">
-                        <div className="flex justify-between items-start mb-6">
-                            <div>
-                                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Monthly Commission Goal</h3>
-                                <div className="text-5xl font-display text-slate-900">
-                                    ₹ {metrics.totalRevenue.toLocaleString()} <span className="text-xl text-slate-300">/ {MONTHLY_TARGET.toLocaleString()}</span>
-                                </div>
-                            </div>
-                            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
-                                <Target size={32} />
-                            </div>
-                        </div>
-
-                        {/* Progress Bar */}
-                        <div className="w-full h-4 bg-slate-100 rounded-full overflow-hidden mb-2">
-                            <motion.div
-                                initial={{ width: 0 }}
-                                animate={{ width: `${metrics.targetProgress}%` }}
-                                transition={{ duration: 1.5, ease: "easeOut" }}
-                                className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 shadow-[0_0_15px_rgba(16,185,129,0.4)]"
-                            />
-                        </div>
-                        <p className="text-right text-xs font-bold text-emerald-600">{metrics.targetProgress}% Achieved</p>
-                    </motion.div>
-
-                    {/* 2. STATS GRID */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-40">
-                            <div className="flex items-center gap-3 text-slate-400 mb-2">
-                                <TrendingUp size={18} />
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Conversion Rate</span>
-                            </div>
-                            <div className="text-4xl font-display text-slate-800">{metrics.conversionRate}%</div>
-                            <div className="text-xs text-slate-400">Based on {metrics.totalLeads} total leads</div>
-                        </div>
-
-                        <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between h-40">
-                            <div className="flex items-center gap-3 text-slate-400 mb-2">
-                                <Award size={18} />
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Deals Closed</span>
-                            </div>
-                            <div className="text-4xl font-display text-emerald-600">{metrics.dealsClosed}</div>
-                            <div className="text-xs text-slate-400">Transactions Completed</div>
-                        </div>
-                    </div>
-
-                </div>
-
-                {/* RIGHT COLUMN: MOTIVATION / FEED */}
-                <div className="lg:col-span-4 flex flex-col h-full">
-                    <div className="bg-slate-900 text-white p-8 rounded-3xl shadow-2xl flex-1 relative overflow-hidden">
-                        <div className="relative z-10">
-                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">System Analysis</h3>
-
-                            <div className="space-y-6">
-                                <div className="flex gap-4">
-                                    <div className="mt-1"><CheckCircle className="text-emerald-400" size={20} /></div>
-                                    <div>
-                                        <h4 className="font-bold text-sm">On Track</h4>
-                                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">You are currently performing within the top 15% of agents for this quarter.</p>
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-4">
-                                    <div className="mt-1"><ArrowUpRight className="text-cyan-400" size={20} /></div>
-                                    <div>
-                                        <h4 className="font-bold text-sm">Recommendation</h4>
-                                        <p className="text-xs text-slate-400 mt-1 leading-relaxed">Focus on closing the "Sharma - Apollo" deal to hit your 5L target.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Decorative Elements */}
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-                        <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
-                    </div>
-                </div>
-
-            </div>
+  return (
+    <div className="h-full w-full overflow-y-auto px-4 pb-8 pt-20 sm:px-6 lg:px-8 md:pt-24">
+      <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="font-display text-2xl text-slate-900 sm:text-3xl">
+            Hierarchy Targets
+          </h1>
+          <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
+            Monthly team and personal performance tracking
+          </p>
         </div>
-    );
+
+        <div className="flex items-center gap-2">
+          <label className="sr-only" htmlFor="target-month">
+            Select month
+          </label>
+          <div className="relative">
+            <Calendar
+              size={14}
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
+            />
+            <input
+              id="target-month"
+              type="month"
+              value={month}
+              onChange={(event) => setMonth(event.target.value)}
+              className="h-10 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={loading || refreshing}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="mb-5 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <AlertCircle size={16} />
+          {error}
+        </div>
+      ) : null}
+
+      {successMessage ? (
+        <div className="mb-5 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <CheckCircle size={16} />
+          {successMessage}
+        </div>
+      ) : null}
+
+      {loading ? (
+        <div className="flex h-44 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500">
+          <Loader2 size={18} className="mr-2 animate-spin" />
+          Loading targets...
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <MetricCard
+              title="Leads Target"
+              subtitle="Assigned leads for selected month"
+              icon={Users}
+              target={myTarget.leadsTarget}
+              achieved={myTarget.achievements.leadsAchieved}
+              percent={myTarget.progress.leadsPercent}
+              formatValue={formatNumber}
+            />
+            <MetricCard
+              title="Site Visits"
+              subtitle="Verified site visit completions"
+              icon={MapPin}
+              target={myTarget.siteVisitTarget}
+              achieved={myTarget.achievements.siteVisitsAchieved}
+              percent={myTarget.progress.siteVisitPercent}
+              formatValue={formatNumber}
+            />
+            <MetricCard
+              title="Revenue Target"
+              subtitle="Converted revenue from closed deals"
+              icon={TrendingUp}
+              target={myTarget.revenueTarget}
+              achieved={myTarget.achievements.revenueAchieved}
+              percent={myTarget.progress.revenuePercent}
+              formatValue={formatCurrency}
+            />
+          </div>
+
+          {!hasMyTarget ? (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              No target is assigned to you for {targetState.month || month} yet.
+            </div>
+          ) : null}
+
+          {targetState.canAssign ? (
+            <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center gap-2">
+                <Target size={16} className="text-emerald-600" />
+                <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700">
+                  Assign Target To Direct Report
+                </h2>
+              </div>
+
+              {targetState.assignableReports.length === 0 ? (
+                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  No direct reporting users available in your next hierarchy level.
+                </p>
+              ) : (
+                <form onSubmit={handleAssign} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      Reporting User
+                      <select
+                        value={assignmentForm.assignedToId}
+                        onChange={(event) =>
+                          setAssignmentForm((prev) => ({
+                            ...prev,
+                            assignedToId: event.target.value,
+                          }))
+                        }
+                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      >
+                        {targetState.assignableReports.map((row) => (
+                          <option key={row._id} value={row._id}>
+                            {row.name} ({row.roleLabel || row.role})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      Leads Target
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={assignmentForm.leadsTarget}
+                        onChange={(event) =>
+                          setAssignmentForm((prev) => ({
+                            ...prev,
+                            leadsTarget: event.target.value,
+                          }))
+                        }
+                        placeholder="0"
+                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      Site Visit Target
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={assignmentForm.siteVisitTarget}
+                        onChange={(event) =>
+                          setAssignmentForm((prev) => ({
+                            ...prev,
+                            siteVisitTarget: event.target.value,
+                          }))
+                        }
+                        placeholder="0"
+                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      />
+                    </label>
+
+                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                      Revenue Target
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={assignmentForm.revenueTarget}
+                        onChange={(event) =>
+                          setAssignmentForm((prev) => ({
+                            ...prev,
+                            revenueTarget: event.target.value,
+                          }))
+                        }
+                        placeholder="0"
+                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
+                    Notes (Optional)
+                    <textarea
+                      value={assignmentForm.notes}
+                      onChange={(event) =>
+                        setAssignmentForm((prev) => ({
+                          ...prev,
+                          notes: event.target.value,
+                        }))
+                      }
+                      rows={3}
+                      maxLength={500}
+                      placeholder="Add context for assignee"
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                    />
+                  </label>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-slate-500">
+                      Target will be saved for {targetState.month || month}.
+                    </p>
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                      Assign Target
+                    </button>
+                  </div>
+                </form>
+              )}
+            </section>
+          ) : null}
+
+          <section className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-slate-700">
+                My Incoming Targets
+              </h3>
+
+              {targetState.incoming.length === 0 ? (
+                <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  No incoming targets for this month.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {targetState.incoming.map((row) => (
+                    <TargetListItem key={row._id} row={row} />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-slate-700">
+                Targets Assigned By Me
+              </h3>
+
+              {targetState.outgoing.length === 0 ? (
+                <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  You have not assigned any targets for this month.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {targetState.outgoing.map((row) => (
+                    <TargetListItem key={row._id} row={row} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
 };
 
 export default Performance;

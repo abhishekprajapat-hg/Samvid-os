@@ -1,18 +1,14 @@
 const ChatConversation = require("../models/ChatConversation");
 const ChatMessage = require("../models/ChatMessage");
 const User = require("../models/User");
+const {
+  USER_ROLES,
+  MANAGEMENT_ROLES,
+  EXECUTIVE_ROLES,
+  ROLE_LABELS,
+} = require("../constants/role.constants");
 
-const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
-const ADMIN_ROLE = "ADMIN";
-const MANAGER_ROLE = "MANAGER";
-
-const ROLE_LABELS = {
-  ADMIN: "Admin",
-  MANAGER: "Manager",
-  EXECUTIVE: "Executive",
-  FIELD_EXECUTIVE: "Field Executive",
-  CHANNEL_PARTNER: "Channel Partner",
-};
+const ADMIN_ROLE = USER_ROLES.ADMIN;
 
 const toPositiveInt = (value, fallback, max) => {
   const parsed = Number.parseInt(value, 10);
@@ -66,16 +62,16 @@ const buildContactCriteria = (user) => {
   if (user.role === ADMIN_ROLE) {
     return {
       isActive: true,
-      role: MANAGER_ROLE,
+      role: { $in: MANAGEMENT_ROLES },
     };
   }
 
-  if (user.role === MANAGER_ROLE) {
+  if (MANAGEMENT_ROLES.includes(user.role)) {
     return {
       isActive: true,
       $or: [
         { role: ADMIN_ROLE },
-        { role: MANAGER_ROLE },
+        { role: { $in: MANAGEMENT_ROLES } },
         { role: { $in: EXECUTIVE_ROLES }, parentId: user._id },
       ],
     };
@@ -89,7 +85,7 @@ const buildContactCriteria = (user) => {
     return {
       isActive: true,
       $or: [
-        { role: MANAGER_ROLE, _id: user.parentId },
+        { role: { $in: MANAGEMENT_ROLES }, _id: user.parentId },
         { role: { $in: EXECUTIVE_ROLES }, parentId: user.parentId },
       ],
     };

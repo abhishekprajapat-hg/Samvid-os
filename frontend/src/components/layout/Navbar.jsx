@@ -19,6 +19,7 @@ import {
   Menu,
   X,
   MessageSquare,
+  UserCircle2,
 } from "lucide-react";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 
@@ -33,6 +34,7 @@ const MENU_CONFIG = {
     { name: "Empire", icon: Building2, path: "/inventory" },
     { name: "Field Ops", icon: Map, path: "/map" },
     { name: "Targets", icon: PieChart, path: "/targets" },
+    { name: "Profile", icon: UserCircle2, path: "/profile" },
     { name: "Access", icon: ShieldCheck, path: "/admin/users" },
     { name: "System", icon: Settings, path: "/settings" },
   ],
@@ -45,6 +47,8 @@ const MENU_CONFIG = {
     { name: "Field Ops", icon: Map, path: "/map" },
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Reports", icon: ClipboardList, path: "/reports" },
+    { name: "Targets", icon: PieChart, path: "/targets" },
+    { name: "Profile", icon: UserCircle2, path: "/profile" },
     { name: "System", icon: Settings, path: "/settings" },
   ],
   executive: [
@@ -54,6 +58,7 @@ const MENU_CONFIG = {
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Schedule", icon: Calendar, path: "/calendar" },
     { name: "Targets", icon: PieChart, path: "/targets" },
+    { name: "Profile", icon: UserCircle2, path: "/profile" },
   ],
   field_agent: [
     { name: "Route", icon: Map, path: "/" },
@@ -62,6 +67,11 @@ const MENU_CONFIG = {
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Field Ops", icon: Navigation, path: "/map" },
     { name: "Schedule", icon: Calendar, path: "/calendar" },
+    { name: "Targets", icon: PieChart, path: "/targets" },
+    { name: "Profile", icon: UserCircle2, path: "/profile" },
+  ],
+  partner: [
+    { name: "Profile", icon: UserCircle2, path: "/profile" },
   ],
 };
 
@@ -73,8 +83,11 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
   const roleKeyMap = {
     ADMIN: "admin",
     MANAGER: "manager",
+    ASSISTANT_MANAGER: "manager",
+    TEAM_LEADER: "manager",
     EXECUTIVE: "executive",
     FIELD_EXECUTIVE: "field_agent",
+    CHANNEL_PARTNER: "partner",
   };
 
   const normalizedRole = roleKeyMap[userRole] || "manager";

@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const { USER_ROLES, EXECUTIVE_ROLES } = require("../constants/role.constants");
 
 const userSchema = new mongoose.Schema(
   {
@@ -31,13 +32,7 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: [
-        "ADMIN",
-        "MANAGER",
-        "EXECUTIVE",
-        "FIELD_EXECUTIVE",
-        "CHANNEL_PARTNER",
-      ],
+      enum: Object.values(USER_ROLES),
       required: true,
     },
 
@@ -102,15 +97,15 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 };
 
 userSchema.methods.isAdmin = function () {
-  return this.role === "ADMIN";
+  return this.role === USER_ROLES.ADMIN;
 };
 
 userSchema.methods.isManager = function () {
-  return this.role === "MANAGER";
+  return this.role === USER_ROLES.MANAGER;
 };
 
 userSchema.methods.isExecutive = function () {
-  return ["EXECUTIVE", "FIELD_EXECUTIVE"].includes(this.role);
+  return EXECUTIVE_ROLES.includes(this.role);
 };
 
 module.exports = mongoose.model("User", userSchema);

@@ -29,6 +29,7 @@ const SystemSettings = lazy(() => import("./modules/admin/SystemSettings"));
 const DataUseNotice = lazy(() => import("./modules/legal/DataUseNotice"));
 const ServiceTermsNotice = lazy(() => import("./modules/legal/ServiceTermsNotice"));
 const Performance = lazy(() => import("./modules/reports/Performance"));
+const UserProfile = lazy(() => import("./modules/profile/UserProfile"));
 
 const EARTH_RADIUS_METERS = 6371000;
 const LOCATION_SYNC_MIN_INTERVAL_MS = 30000;
@@ -46,6 +47,7 @@ const FORCE_LIGHT_ROUTE_PREFIXES = [
   "/data-use-notice",
   "/service-terms",
 ];
+const MANAGEMENT_ROLES = ["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"];
 
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
 
@@ -218,11 +220,15 @@ export default function App() {
       case "ADMIN":
         return <ManagerDashboard theme={theme} />;
       case "MANAGER":
+      case "ASSISTANT_MANAGER":
+      case "TEAM_LEADER":
         return <ManagerDashboard theme={theme} />;
       case "EXECUTIVE":
         return <ExecutiveDashboard />;
       case "FIELD_EXECUTIVE":
         return <FieldDashboard />;
+      case "CHANNEL_PARTNER":
+        return <Navigate to="/profile" />;
       default:
         return <Navigate to="/login" />;
     }
@@ -336,7 +342,7 @@ export default function App() {
                       <Route path="/" element={DashboardByRole} />
                       <Route
                         path="/leads"
-                        element={canAccess(["ADMIN", "MANAGER", "EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/my-leads"
@@ -346,27 +352,27 @@ export default function App() {
                       />
                       <Route
                         path="/inventory"
-                        element={canAccess(["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <AssetVault /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <AssetVault /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/inventory/:id"
-                        element={canAccess(["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <InventoryDetails /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <InventoryDetails /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/finance"
-                        element={canAccess(["ADMIN", "MANAGER"]) ? <FinancialCore /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <FinancialCore /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/map"
-                        element={canAccess(["ADMIN", "MANAGER", "FIELD_EXECUTIVE"]) ? <FieldOps /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "FIELD_EXECUTIVE"]) ? <FieldOps /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/reports"
-                        element={canAccess(["ADMIN", "MANAGER"]) ? <IntelligenceReports /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <IntelligenceReports /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/calendar"
-                        element={canAccess(["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <MasterSchedule /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <MasterSchedule /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/admin/users"
@@ -374,17 +380,31 @@ export default function App() {
                       />
                       <Route
                         path="/settings"
-                        element={canAccess(["ADMIN", "MANAGER"]) ? <SystemSettings /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <SystemSettings /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/targets"
-                        element={canAccess(["ADMIN", "EXECUTIVE"]) ? <Performance /> : <Navigate to="/" />}
+                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <Performance /> : <Navigate to="/" />}
                       />
                       <Route
                         path="/chat"
                         element={
-                          canAccess(["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE"])
+                          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"])
                             ? <TeamChat theme={theme} />
+                            : <Navigate to="/" />
+                        }
+                      />
+                      <Route
+                        path="/profile"
+                        element={
+                          canAccess([
+                            "ADMIN",
+                            ...MANAGEMENT_ROLES,
+                            "EXECUTIVE",
+                            "FIELD_EXECUTIVE",
+                            "CHANNEL_PARTNER",
+                          ])
+                            ? <UserProfile />
                             : <Navigate to="/" />
                         }
                       />

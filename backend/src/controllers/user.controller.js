@@ -1,18 +1,53 @@
 const User = require("../models/User");
 const Lead = require("../models/Lead");
+const Inventory = require("../models/Inventory");
+const LeadActivity = require("../models/leadActivity.model");
+const LeadDiary = require("../models/leadDiary.model");
 const logger = require("../config/logger");
 const {
-  EXECUTIVE_ROLES,
   redistributePipelineLeads,
 } = require("../services/leadAssignment.service");
+const {
+  USER_ROLES,
+  EXECUTIVE_ROLES,
+  MANAGEMENT_ROLES,
+  ROLE_LABELS,
+  getAllowedParentRoles,
+  getAutoParentRoles,
+  isManagementRole,
+} = require("../constants/role.constants");
+const {
+  getDescendantUsers,
+  getDescendantExecutiveIds,
+  getDescendantByRoleCount,
+  getFirstLevelChildrenByRole,
+} = require("../services/hierarchy.service");
 const {
   parsePagination,
   buildPaginationMeta,
   parseFieldSelection,
 } = require("../utils/queryOptions");
 
-const LOCATION_ALLOWED_ROLES = ["FIELD_EXECUTIVE", "EXECUTIVE"];
-const LOCATION_VIEWER_ROLES = ["ADMIN", "MANAGER", "FIELD_EXECUTIVE"];
+const LOCATION_ALLOWED_ROLES = [...EXECUTIVE_ROLES];
+const LOCATION_VIEWER_ROLES = [
+  USER_ROLES.ADMIN,
+  ...MANAGEMENT_ROLES,
+  USER_ROLES.FIELD_EXECUTIVE,
+];
+const LEAD_STATUSES = [
+  "NEW",
+  "CONTACTED",
+  "INTERESTED",
+  "SITE_VISIT",
+  "CLOSED",
+  "LOST",
+];
+const TEAM_HIERARCHY_CHILD_ROLES = {
+  [USER_ROLES.MANAGER]: [USER_ROLES.ASSISTANT_MANAGER],
+  [USER_ROLES.ASSISTANT_MANAGER]: [USER_ROLES.TEAM_LEADER],
+  [USER_ROLES.TEAM_LEADER]: [...EXECUTIVE_ROLES],
+  [USER_ROLES.ADMIN]: [USER_ROLES.MANAGER, USER_ROLES.CHANNEL_PARTNER],
+};
 const USER_SELECTABLE_FIELDS = [
   "_id",
   "name",
@@ -52,51 +87,323 @@ const normalizeOptionalNumber = (value) => {
   return parsed === null ? null : Math.max(0, parsed);
 };
 
-const findLeastLoadedManager = async (companyId) => {
-  const managers = await User.find({
-    role: "MANAGER",
-    isActive: true,
-    companyId,
-  })
-    .select("_id createdAt")
-    .sort({ createdAt: 1 })
-    .lean();
+const sanitizeName = (value) => String(value || "").trim();
+const sanitizePhone = (value) => String(value || "").trim();
+const isValidObjectId = (value) =>
+  /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
 
-  if (!managers.length) return null;
+const getLeadScopeLabel = (role) => {
+  if (role === USER_ROLES.ADMIN) return "Global Leads";
+  if (isManagementRole(role)) return "Team Leads";
+  if (EXECUTIVE_ROLES.includes(role)) return "Assigned Leads";
+  if (role === USER_ROLES.CHANNEL_PARTNER) return "Created Leads";
+  return "Owned Leads";
+};
 
-  const managerIds = managers.map((m) => m._id);
+const buildLeadScopeQuery = async (userDoc) => {
+  if (userDoc.role === USER_ROLES.ADMIN) {
+    return {};
+  }
 
-  const teamCounts = await User.aggregate([
-    {
-      $match: {
-        parentId: { $in: managerIds },
-        role: { $in: EXECUTIVE_ROLES },
-        isActive: true,
-        companyId,
+  if (isManagementRole(userDoc.role)) {
+    const teamExecutiveIds = await getDescendantExecutiveIds({
+      rootUserId: userDoc._id,
+      companyId: userDoc.companyId,
+    });
+    return {
+      assignedTo: { $in: teamExecutiveIds },
+    };
+  }
+
+  if (EXECUTIVE_ROLES.includes(userDoc.role)) {
+    return { assignedTo: userDoc._id };
+  }
+
+  if (userDoc.role === USER_ROLES.CHANNEL_PARTNER) {
+    return { createdBy: userDoc._id };
+  }
+
+  return { createdBy: userDoc._id };
+};
+
+const buildLeadStatusMap = (rows) => {
+  const map = {};
+  LEAD_STATUSES.forEach((status) => {
+    map[status] = 0;
+  });
+
+  rows.forEach((row) => {
+    if (!row?._id || !Object.prototype.hasOwnProperty.call(map, row._id)) return;
+    map[row._id] = Number(row.count || 0);
+  });
+
+  return map;
+};
+
+const buildProfilePerformanceSummary = async (userDoc) => {
+  const leadQuery = await buildLeadScopeQuery(userDoc);
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayEnd = new Date();
+  todayEnd.setHours(23, 59, 59, 999);
+
+  const [totalLeads, statusRows, dueFollowUpsToday, overdueFollowUps, siteVisits, recentLeads, activitiesPerformed, diaryEntriesCreated, directReports] = await Promise.all([
+    Lead.countDocuments(leadQuery),
+    Lead.aggregate([
+      { $match: leadQuery },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 },
+        },
       },
-    },
-    {
-      $group: {
-        _id: "$parentId",
-        count: { $sum: 1 },
-      },
-    },
+    ]),
+    Lead.countDocuments({
+      ...leadQuery,
+      nextFollowUp: { $gte: todayStart, $lte: todayEnd },
+    }),
+    Lead.countDocuments({
+      ...leadQuery,
+      nextFollowUp: { $lt: todayStart },
+      status: { $nin: ["CLOSED", "LOST"] },
+    }),
+    Lead.countDocuments({
+      ...leadQuery,
+      status: "SITE_VISIT",
+    }),
+    Lead.find(leadQuery)
+      .select(
+        "_id name phone city projectInterested status nextFollowUp updatedAt assignedTo createdBy",
+      )
+      .populate("assignedTo", "name role")
+      .populate("createdBy", "name role")
+      .sort({ updatedAt: -1 })
+      .limit(6)
+      .lean(),
+    LeadActivity.countDocuments({ performedBy: userDoc._id }),
+    LeadDiary.countDocuments({ createdBy: userDoc._id }),
+    User.countDocuments({
+      companyId: userDoc.companyId,
+      parentId: userDoc._id,
+      isActive: true,
+    }),
   ]);
 
-  const countMap = new Map(teamCounts.map((row) => [String(row._id), row.count]));
+  const statusBreakdown = buildLeadStatusMap(statusRows);
+  const closedLeads = statusBreakdown.CLOSED || 0;
+  const conversionRate = totalLeads
+    ? Math.round((closedLeads / totalLeads) * 100)
+    : 0;
 
-  let selected = managers[0];
-  let minCount = Number.POSITIVE_INFINITY;
+  return {
+    leadScope: getLeadScopeLabel(userDoc.role),
+    totalLeads,
+    closedLeads,
+    conversionRate,
+    dueFollowUpsToday,
+    overdueFollowUps,
+    siteVisits,
+    directReports,
+    activitiesPerformed,
+    diaryEntriesCreated,
+    statusBreakdown,
+    recentLeads,
+  };
+};
 
-  for (const manager of managers) {
-    const count = countMap.get(String(manager._id)) || 0;
-    if (count < minCount) {
-      minCount = count;
-      selected = manager;
+const toProfileView = (user) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  phone: user.phone || "",
+  role: user.role,
+  companyId: user.companyId || null,
+  parentId: user.parentId || null,
+  partnerCode: user.partnerCode || null,
+  isActive: Boolean(user.isActive),
+  lastAssignedAt: user.lastAssignedAt || null,
+  liveLocation: user.liveLocation || null,
+  createdAt: user.createdAt || null,
+  updatedAt: user.updatedAt || null,
+  manager: user.parentId
+    ? {
+      _id: user.parentId._id || null,
+      name: user.parentId.name || "",
+      email: user.parentId.email || "",
+      phone: user.parentId.phone || "",
+      role: user.parentId.role || "",
+    }
+    : null,
+});
+
+const buildProfileSummary = async (userDoc) => {
+  const role = userDoc.role;
+  const companyId = userDoc.companyId;
+  const userId = userDoc._id;
+
+  if (role === USER_ROLES.ADMIN) {
+    const [
+      users,
+      managers,
+      assistantManagers,
+      teamLeaders,
+      executives,
+      fieldExecutives,
+      leads,
+      inventory,
+    ] = await Promise.all([
+      User.countDocuments({ companyId, isActive: true }),
+      User.countDocuments({ companyId, role: USER_ROLES.MANAGER, isActive: true }),
+      User.countDocuments({
+        companyId,
+        role: USER_ROLES.ASSISTANT_MANAGER,
+        isActive: true,
+      }),
+      User.countDocuments({ companyId, role: USER_ROLES.TEAM_LEADER, isActive: true }),
+      User.countDocuments({ companyId, role: USER_ROLES.EXECUTIVE, isActive: true }),
+      User.countDocuments({
+        companyId,
+        role: USER_ROLES.FIELD_EXECUTIVE,
+        isActive: true,
+      }),
+      Lead.countDocuments({}),
+      Inventory.countDocuments({ companyId }),
+    ]);
+
+    return {
+      users,
+      managers,
+      assistantManagers,
+      teamLeaders,
+      executives,
+      fieldExecutives,
+      leads,
+      inventory,
+    };
+  }
+
+  if (isManagementRole(role)) {
+    const descendantCounts = await getDescendantByRoleCount({
+      rootUserId: userId,
+      companyId,
+      roles: [
+        USER_ROLES.ASSISTANT_MANAGER,
+        USER_ROLES.TEAM_LEADER,
+        USER_ROLES.EXECUTIVE,
+        USER_ROLES.FIELD_EXECUTIVE,
+      ],
+    });
+    const executiveIds = await getDescendantExecutiveIds({
+      rootUserId: userId,
+      companyId,
+    });
+
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const [teamLeads, dueFollowUpsToday] = executiveIds.length
+      ? await Promise.all([
+        Lead.countDocuments({ assignedTo: { $in: executiveIds } }),
+        Lead.countDocuments({
+          assignedTo: { $in: executiveIds },
+          nextFollowUp: { $gte: todayStart, $lte: todayEnd },
+        }),
+      ])
+      : [0, 0];
+
+    const assistantManagers = Number(
+      descendantCounts[USER_ROLES.ASSISTANT_MANAGER] || 0,
+    );
+    const teamLeaders = Number(descendantCounts[USER_ROLES.TEAM_LEADER] || 0);
+    const executives = Number(descendantCounts[USER_ROLES.EXECUTIVE] || 0);
+    const fieldExecutives = Number(
+      descendantCounts[USER_ROLES.FIELD_EXECUTIVE] || 0,
+    );
+
+    return {
+      teamMembers: assistantManagers + teamLeaders + executives + fieldExecutives,
+      assistantManagers,
+      teamLeaders,
+      executives,
+      fieldExecutives,
+      teamLeads,
+      dueFollowUpsToday,
+    };
+  }
+
+  if (EXECUTIVE_ROLES.includes(role)) {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const [assignedLeads, openLeads, closedLeads, dueFollowUpsToday] = await Promise.all([
+      Lead.countDocuments({ assignedTo: userId }),
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: { $in: ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"] },
+      }),
+      Lead.countDocuments({ assignedTo: userId, status: "CLOSED" }),
+      Lead.countDocuments({
+        assignedTo: userId,
+        nextFollowUp: { $gte: todayStart, $lte: todayEnd },
+      }),
+    ]);
+
+    return {
+      assignedLeads,
+      openLeads,
+      closedLeads,
+      dueFollowUpsToday,
+    };
+  }
+
+  if (role === USER_ROLES.CHANNEL_PARTNER) {
+    const [createdLeads, closedLeads] = await Promise.all([
+      Lead.countDocuments({ createdBy: userId }),
+      Lead.countDocuments({ createdBy: userId, status: "CLOSED" }),
+    ]);
+
+    return {
+      createdLeads,
+      closedLeads,
+    };
+  }
+
+  return {};
+};
+
+const findLeastLoadedParentForRole = async ({
+  companyId,
+  role,
+  currentAdminId,
+}) => {
+  const autoParentRoles = getAutoParentRoles(role);
+  if (!autoParentRoles.length) return null;
+
+  if (autoParentRoles.includes(USER_ROLES.ADMIN)) {
+    return currentAdminId
+      ? { _id: currentAdminId, role: USER_ROLES.ADMIN }
+      : null;
+  }
+
+  for (const parentRole of autoParentRoles) {
+    const childRoles = TEAM_HIERARCHY_CHILD_ROLES[parentRole] || [];
+    const candidates = await getFirstLevelChildrenByRole({
+      parentRole,
+      childRoles,
+      companyId,
+    });
+
+    if (candidates.length) {
+      return candidates[0];
     }
   }
 
-  return selected;
+  return null;
 };
 
 exports.getUsers = async (req, res) => {
@@ -108,15 +415,19 @@ exports.getUsers = async (req, res) => {
     const companyScope = { companyId: req.user.companyId };
     let query = {};
 
-    if (req.user.role === "ADMIN") {
+    if (req.user.role === USER_ROLES.ADMIN) {
       query = companyScope;
-    } else if (req.user.role === "MANAGER") {
+    } else if (isManagementRole(req.user.role)) {
+      const descendants = await getDescendantUsers({
+        rootUserId: req.user._id,
+        companyId: req.user.companyId,
+        includeInactive: true,
+        select: "_id role parentId isActive",
+      });
+      const visibleIds = [req.user._id, ...descendants.map((row) => row._id)];
       query = {
         ...companyScope,
-        $or: [
-          { _id: req.user._id },
-          { parentId: req.user._id },
-        ],
+        _id: { $in: visibleIds },
       };
     } else {
       query = { ...companyScope, _id: req.user._id };
@@ -177,12 +488,169 @@ exports.getUsers = async (req, res) => {
   }
 };
 
+exports.getMyProfile = async (req, res) => {
+  try {
+    const profileDoc = await User.findOne({
+      _id: req.user._id,
+      companyId: req.user.companyId,
+    })
+      .populate("parentId", "name email phone role")
+      .lean();
+
+    if (!profileDoc) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const summary = await buildProfileSummary({
+      ...profileDoc,
+      _id: req.user._id,
+      companyId: req.user.companyId,
+      role: req.user.role,
+    });
+
+    return res.json({
+      profile: toProfileView(profileDoc),
+      summary,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getMyProfile failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getUserProfileForAdmin = async (req, res) => {
+  try {
+    if (req.user.role !== USER_ROLES.ADMIN) {
+      return res.status(403).json({ message: "Only ADMIN can view this profile" });
+    }
+
+    const { userId } = req.params;
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    const profileDoc = await User.findOne({
+      _id: userId,
+      companyId: req.user.companyId,
+    })
+      .populate("parentId", "name email phone role")
+      .lean();
+
+    if (!profileDoc) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const profileContext = {
+      ...profileDoc,
+      _id: profileDoc._id,
+      role: profileDoc.role,
+      companyId: profileDoc.companyId || req.user.companyId,
+    };
+
+    const [summary, performance] = await Promise.all([
+      buildProfileSummary(profileContext),
+      buildProfilePerformanceSummary(profileContext),
+    ]);
+
+    return res.json({
+      profile: toProfileView(profileDoc),
+      summary,
+      performance,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getUserProfileForAdmin failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateMyProfile = async (req, res) => {
+  try {
+    const patch = {};
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+      const name = sanitizeName(req.body.name);
+      if (!name || name.length < 2 || name.length > 80) {
+        return res.status(400).json({
+          message: "Name must be between 2 and 80 characters",
+        });
+      }
+      patch.name = name;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "phone")) {
+      const phone = sanitizePhone(req.body.phone);
+      if (phone.length > 25) {
+        return res.status(400).json({
+          message: "Phone cannot exceed 25 characters",
+        });
+      }
+      patch.phone = phone;
+    }
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({
+        message: "No valid profile fields provided",
+      });
+    }
+
+    const updated = await User.findOneAndUpdate(
+      { _id: req.user._id, companyId: req.user.companyId },
+      { $set: patch },
+      {
+        new: true,
+      },
+    )
+      .populate("parentId", "name email phone role")
+      .lean();
+
+    if (!updated) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const summary = await buildProfileSummary({
+      ...updated,
+      _id: req.user._id,
+      companyId: req.user.companyId,
+      role: req.user.role,
+    });
+
+    return res.json({
+      message: "Profile updated",
+      profile: toProfileView(updated),
+      summary,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "updateMyProfile failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 // Hierarchy based user creation
 exports.createUserByRole = async (req, res) => {
   try {
-    const { name, email, phone, password, role, managerId, parentId } = req.body;
+    const {
+      name,
+      email,
+      phone,
+      password,
+      role,
+      managerId,
+      parentId,
+      reportingToId,
+    } = req.body;
 
-    if (req.user.role !== "ADMIN") {
+    if (req.user.role !== USER_ROLES.ADMIN) {
       return res.status(403).json({
         message: "Only ADMIN can create users",
       });
@@ -197,36 +665,61 @@ exports.createUserByRole = async (req, res) => {
       return res.status(400).json({ message: "User already exists" });
     }
 
+    if (!Object.values(USER_ROLES).includes(role)) {
+      return res.status(400).json({
+        message: "Invalid role",
+      });
+    }
+
+    if (role === USER_ROLES.ADMIN) {
+      return res.status(400).json({
+        message: "Admin role cannot be created from this endpoint",
+      });
+    }
+
+    const requestedReportingToId = reportingToId || managerId || parentId || null;
+    const allowedParentRoles = getAllowedParentRoles(role);
     let resolvedParentId = req.user._id;
 
-    if (EXECUTIVE_ROLES.includes(role)) {
-      const requestedManagerId = managerId || parentId;
-      let manager = null;
+    if (allowedParentRoles.length) {
+      let reportingParent = null;
 
-      if (requestedManagerId) {
-        manager = await User.findOne({
-          _id: requestedManagerId,
-          role: "MANAGER",
+      if (requestedReportingToId) {
+        reportingParent = await User.findOne({
+          _id: requestedReportingToId,
+          role: { $in: allowedParentRoles },
           isActive: true,
           companyId: req.user.companyId,
         })
-          .select("_id")
+          .select("_id role")
           .lean();
 
-        if (!manager) {
-          return res.status(400).json({ message: "Invalid managerId" });
+        if (!reportingParent) {
+          const expected = allowedParentRoles
+            .map((parentRole) => ROLE_LABELS[parentRole] || parentRole)
+            .join(" / ");
+          return res.status(400).json({
+            message: `Invalid reportingToId. Expected active ${expected}`,
+          });
         }
       } else {
-        manager = await findLeastLoadedManager(req.user.companyId);
-      }
-
-      if (!manager) {
-        return res.status(400).json({
-          message: "No active manager available for assignment",
+        reportingParent = await findLeastLoadedParentForRole({
+          companyId: req.user.companyId,
+          role,
+          currentAdminId: req.user._id,
         });
       }
 
-      resolvedParentId = manager._id;
+      if (!reportingParent?._id) {
+        const expected = allowedParentRoles
+          .map((parentRole) => ROLE_LABELS[parentRole] || parentRole)
+          .join(" / ");
+        return res.status(400).json({
+          message: `No active ${expected} available for assignment`,
+        });
+      }
+
+      resolvedParentId = reportingParent._id;
     }
 
     const newUser = await User.create({
@@ -262,7 +755,7 @@ exports.createUserByRole = async (req, res) => {
 
 exports.rebalanceExecutives = async (req, res) => {
   try {
-    if (req.user.role !== "ADMIN") {
+    if (req.user.role !== USER_ROLES.ADMIN) {
       return res.status(403).json({ message: "Only ADMIN can rebalance team" });
     }
 
@@ -270,8 +763,8 @@ exports.rebalanceExecutives = async (req, res) => {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const managers = await User.find({
-      role: "MANAGER",
+    const teamLeaders = await User.find({
+      role: USER_ROLES.TEAM_LEADER,
       isActive: true,
       companyId: req.user.companyId,
     })
@@ -279,8 +772,8 @@ exports.rebalanceExecutives = async (req, res) => {
       .sort({ createdAt: 1 })
       .lean();
 
-    if (!managers.length) {
-      return res.status(400).json({ message: "No active manager found" });
+    if (!teamLeaders.length) {
+      return res.status(400).json({ message: "No active team leader found" });
     }
 
     const executives = await User.find({
@@ -298,12 +791,12 @@ exports.rebalanceExecutives = async (req, res) => {
 
     const bulkOps = [];
     for (let i = 0; i < executives.length; i += 1) {
-      const manager = managers[i % managers.length];
-      if (String(executives[i].parentId || "") !== String(manager._id)) {
+      const teamLeader = teamLeaders[i % teamLeaders.length];
+      if (String(executives[i].parentId || "") !== String(teamLeader._id)) {
         bulkOps.push({
           updateOne: {
             filter: { _id: executives[i]._id },
-            update: { $set: { parentId: manager._id } },
+            update: { $set: { parentId: teamLeader._id } },
           },
         });
       }
@@ -322,7 +815,7 @@ exports.rebalanceExecutives = async (req, res) => {
     const distribution = await User.aggregate([
       {
         $match: {
-          parentId: { $in: managers.map((m) => m._id) },
+          parentId: { $in: teamLeaders.map((leader) => leader._id) },
           role: { $in: EXECUTIVE_ROLES },
           isActive: true,
         },
@@ -335,15 +828,15 @@ exports.rebalanceExecutives = async (req, res) => {
       },
     ]);
 
-    const rowByManagerId = new Map(
+    const rowByLeaderId = new Map(
       distribution.map((item) => [String(item._id), Number(item.count || 0)]),
     );
 
-    const distributionByManager = managers.map((manager) => {
-      const count = rowByManagerId.get(String(manager._id)) || 0;
+    const distributionByLeader = teamLeaders.map((leader) => {
+      const count = rowByLeaderId.get(String(leader._id)) || 0;
       return {
-        managerId: manager._id,
-        managerName: manager.name,
+        leaderId: leader._id,
+        leaderName: leader.name,
         executives: count,
       };
     });
@@ -389,10 +882,10 @@ exports.rebalanceExecutives = async (req, res) => {
     });
 
     res.json({
-      message: "Executives and leads rebalanced successfully",
+      message: "Executives and leads rebalanced successfully across team leaders",
       updated: bulkOps.length,
       leadsUpdated: leadRebalance.updated,
-      distribution: distributionByManager,
+      distribution: distributionByLeader,
       leadDistribution: leadDistributionByExecutive,
     });
   } catch (error) {
@@ -407,7 +900,7 @@ exports.rebalanceExecutives = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
   try {
-    if (req.user.role !== "ADMIN") {
+    if (req.user.role !== USER_ROLES.ADMIN) {
       return res.status(403).json({ message: "Only ADMIN can delete users" });
     }
 
@@ -427,16 +920,15 @@ exports.deleteUser = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (user.role === "MANAGER") {
+    if (isManagementRole(user.role)) {
       const hasTeam = await User.exists({
         parentId: user._id,
-        role: { $in: EXECUTIVE_ROLES },
         companyId: req.user.companyId,
       });
 
       if (hasTeam) {
         return res.status(400).json({
-          message: "Manager has active team. Reassign executives before deleting.",
+          message: "User has active direct reports. Reassign team before deleting.",
         });
       }
     }
@@ -549,7 +1041,7 @@ exports.getFieldExecutiveLocations = async (req, res) => {
   try {
     if (!LOCATION_VIEWER_ROLES.includes(req.user.role)) {
       return res.status(403).json({
-        message: "Only admin and managers can view field locations",
+        message: "Only admin and leadership roles can view field locations",
       });
     }
 
@@ -562,13 +1054,22 @@ exports.getFieldExecutiveLocations = async (req, res) => {
 
     const query = {
       companyId: req.user.companyId,
-      role: "FIELD_EXECUTIVE",
+      role: USER_ROLES.FIELD_EXECUTIVE,
       isActive: true,
     };
 
-    if (req.user.role === "MANAGER") {
-      query.parentId = req.user._id;
-    } else if (req.user.role === "FIELD_EXECUTIVE") {
+    if (isManagementRole(req.user.role)) {
+      const descendants = await getDescendantUsers({
+        rootUserId: req.user._id,
+        companyId: req.user.companyId,
+        includeInactive: false,
+        select: "_id role parentId isActive",
+      });
+      const fieldExecutiveIds = descendants
+        .filter((row) => row.role === USER_ROLES.FIELD_EXECUTIVE)
+        .map((row) => row._id);
+      query._id = { $in: fieldExecutiveIds };
+    } else if (req.user.role === USER_ROLES.FIELD_EXECUTIVE) {
       query._id = req.user._id;
     }
 

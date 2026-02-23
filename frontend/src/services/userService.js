@@ -5,6 +5,31 @@ export const getUsers = async (params = {}) => {
   return res.data;
 };
 
+export const getMyProfile = async () => {
+  const res = await api.get("/users/profile");
+  return {
+    profile: res.data?.profile || null,
+    summary: res.data?.summary || {},
+  };
+};
+
+export const getUserProfileById = async (userId) => {
+  const res = await api.get(`/users/${userId}/profile`);
+  return {
+    profile: res.data?.profile || null,
+    summary: res.data?.summary || {},
+    performance: res.data?.performance || {},
+  };
+};
+
+export const updateMyProfile = async (payload) => {
+  const res = await api.patch("/users/profile", payload);
+  return {
+    profile: res.data?.profile || null,
+    summary: res.data?.summary || {},
+  };
+};
+
 export const createUser = async (payload) => {
   const res = await api.post("/users/create", payload);
   return res.data;

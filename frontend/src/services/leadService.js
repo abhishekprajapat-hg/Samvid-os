@@ -25,6 +25,21 @@ export const assignLead = async (leadId, executiveId) => {
   return res.data?.lead;
 };
 
+export const addLeadRelatedProperty = async (leadId, inventoryId) => {
+  const res = await api.patch(`/leads/${leadId}/properties`, { inventoryId });
+  return res.data?.lead || null;
+};
+
+export const selectLeadRelatedProperty = async (leadId, inventoryId) => {
+  const res = await api.patch(`/leads/${leadId}/properties/${inventoryId}/select`);
+  return res.data?.lead || null;
+};
+
+export const removeLeadRelatedProperty = async (leadId, inventoryId) => {
+  const res = await api.delete(`/leads/${leadId}/properties/${inventoryId}`);
+  return res.data?.lead || null;
+};
+
 export const getLeadActivity = async (leadId, params = {}, options = {}) => {
   const res = await api.get(`/leads/${leadId}/activity`, { params });
   if (options.withMeta) {
