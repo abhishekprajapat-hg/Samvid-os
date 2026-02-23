@@ -96,7 +96,26 @@ const MAX_MEDIA_SIZE_BYTES = 25 * 1024 * 1024;
 const TYPING_IDLE_TIMEOUT_MS = 1200;
 const REMOTE_TYPING_TIMEOUT_MS = 3200;
 const CALL_SIGNAL_QUEUE_LIMIT = 60;
-const WEBRTC_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
+
+const DEFAULT_WEBRTC_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
+
+const parseIceServersFromEnv = () => {
+  const raw = String(import.meta.env.VITE_WEBRTC_ICE_SERVERS || "").trim();
+  if (!raw) return DEFAULT_WEBRTC_ICE_SERVERS;
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // Fall back to default STUN config.
+  }
+
+  return DEFAULT_WEBRTC_ICE_SERVERS;
+};
+
+const WEBRTC_ICE_SERVERS = parseIceServersFromEnv();
 
 const CALL_MODES = {
   AUDIO: "audio",
@@ -372,7 +391,11 @@ const buildCallId = () => {
 };
 
 const getCallMediaConstraints = (mode) => ({
-  audio: true,
+  audio: {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  },
   video: normalizeCallMode(mode) === CALL_MODES.VIDEO,
 });
 
@@ -437,6 +460,7 @@ const TeamChat = ({ theme = "light" }) => {
   const remoteStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const queuedSignalsByCallRef = useRef(new Map());
   const activeCallRef = useRef(null);
   const incomingCallRef = useRef(null);
@@ -603,6 +627,24 @@ const TeamChat = ({ theme = "light" }) => {
     peerConnectionRef.current = null;
   }, []);
 
+  const syncRemoteMediaElements = useCallback(() => {
+    const remoteStream = remoteStreamRef.current || null;
+
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+      if (remoteStream) {
+        remoteVideoRef.current.play?.().catch(() => null);
+      }
+    }
+
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      if (remoteStream) {
+        remoteAudioRef.current.play?.().catch(() => null);
+      }
+    }
+  }, []);
+
   const stopMediaTracks = useCallback(() => {
     const localStream = localStreamRef.current;
     if (localStream) {
@@ -634,6 +676,9 @@ const TeamChat = ({ theme = "light" }) => {
     }
     if (remoteVideoRef.current) {
       remoteVideoRef.current.srcObject = null;
+    }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = null;
     }
   }, []);
 
@@ -669,9 +714,13 @@ const TeamChat = ({ theme = "light" }) => {
 
     stopMediaTracks();
     const stream = await navigator.mediaDevices.getUserMedia(getCallMediaConstraints(mode));
+    stream.getTracks().forEach((track) => {
+      track.enabled = true;
+    });
     localStreamRef.current = stream;
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = stream;
+      localVideoRef.current.play?.().catch(() => null);
     }
     return stream;
   }, [stopMediaTracks]);
@@ -751,11 +800,21 @@ const TeamChat = ({ theme = "light" }) => {
 
     peer.ontrack = (event) => {
       const [stream] = event.streams || [];
-      if (!stream) return;
-      remoteStreamRef.current = stream;
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = stream;
+      if (stream) {
+        remoteStreamRef.current = stream;
+      } else if (event.track) {
+        if (!remoteStreamRef.current) {
+          remoteStreamRef.current = new MediaStream();
+        }
+        const alreadyAdded = remoteStreamRef.current
+          .getTracks()
+          .some((track) => track.id === event.track.id);
+        if (!alreadyAdded) {
+          remoteStreamRef.current.addTrack(event.track);
+        }
       }
+
+      syncRemoteMediaElements();
     };
 
     peer.onconnectionstatechange = () => {
@@ -773,7 +832,7 @@ const TeamChat = ({ theme = "light" }) => {
 
     peerConnectionRef.current = peer;
     return peer;
-  }, [clearActiveCallLocally]);
+  }, [clearActiveCallLocally, syncRemoteMediaElements]);
 
   const endActiveCall = useCallback(async (options = {}) => {
     const notifyRemote = options.notifyRemote !== false;
@@ -1258,11 +1317,12 @@ const TeamChat = ({ theme = "light" }) => {
   useEffect(() => {
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = localStreamRef.current || null;
+      if (localStreamRef.current) {
+        localVideoRef.current.play?.().catch(() => null);
+      }
     }
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStreamRef.current || null;
-    }
-  }, [activeCall]);
+    syncRemoteMediaElements();
+  }, [activeCall, syncRemoteMediaElements]);
 
   useEffect(() => {
     if (!selectedConversationId || !messages.length) return;
@@ -2152,6 +2212,9 @@ const TeamChat = ({ theme = "light" }) => {
           )}
 
           <div className={`relative min-h-0 flex-1 overflow-hidden ${isDark ? "bg-slate-950/45" : "bg-slate-50"}`}>
+            {activeCall && (
+              <audio ref={remoteAudioRef} autoPlay playsInline />
+            )}
             <div className={`pointer-events-none absolute inset-0 opacity-45 ${
               isDark
                 ? "bg-[radial-gradient(circle_at_20%_20%,rgba(34,211,238,0.14),transparent_40%),radial-gradient(circle_at_80%_0%,rgba(14,165,233,0.12),transparent_35%),linear-gradient(45deg,rgba(15,23,42,0.75)_25%,transparent_25%,transparent_50%,rgba(15,23,42,0.75)_50%,rgba(15,23,42,0.75)_75%,transparent_75%,transparent)] bg-[length:220px_220px]"
