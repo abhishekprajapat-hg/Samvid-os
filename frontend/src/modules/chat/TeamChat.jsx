@@ -550,19 +550,6 @@ const TeamChat = ({ theme = "light" }) => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
 
-  useEffect(() => {
-    if (incomingCall) {
-      startIncomingRingtone().catch(() => null);
-      return;
-    }
-
-    stopIncomingRingtone();
-  }, [incomingCall, startIncomingRingtone, stopIncomingRingtone]);
-
-  useEffect(() => () => {
-    stopIncomingRingtone();
-  }, [stopIncomingRingtone]);
-
   const emitConversationRead = useCallback(
     async (conversationId, options = {}) => {
       const id = toId(conversationId);
@@ -754,6 +741,19 @@ const TeamChat = ({ theme = "light" }) => {
       playIncomingRingtonePulse(audioContext);
     }, 900);
   }, [playIncomingRingtonePulse, stopIncomingRingtone]);
+
+  useEffect(() => {
+    if (incomingCall) {
+      startIncomingRingtone().catch(() => null);
+      return;
+    }
+
+    stopIncomingRingtone();
+  }, [incomingCall, startIncomingRingtone, stopIncomingRingtone]);
+
+  useEffect(() => () => {
+    stopIncomingRingtone();
+  }, [stopIncomingRingtone]);
 
   const stopMediaTracks = useCallback(() => {
     const localStream = localStreamRef.current;
