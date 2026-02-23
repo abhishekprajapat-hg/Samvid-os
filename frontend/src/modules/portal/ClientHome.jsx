@@ -335,6 +335,26 @@ const ClientHome = () => {
           )}
         </div>
       </section>
+
+      <footer className="relative z-10 border-t border-slate-800 bg-slate-950 py-5">
+        <div className="mx-auto flex w-full max-w-7xl flex-col items-start justify-between gap-3 px-4 text-xs text-slate-400 sm:flex-row sm:items-center sm:px-6">
+          <p>Samvid Legal Center</p>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate("/privacy-policy")}
+              className="font-semibold text-slate-300 hover:text-cyan-200"
+            >
+              Privacy Policy
+            </button>
+            <button
+              onClick={() => navigate("/terms-and-conditions")}
+              className="font-semibold text-slate-300 hover:text-cyan-200"
+            >
+              Terms & Conditions
+            </button>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };

@@ -62,6 +62,9 @@ const sanitizePrice = (value) => {
   return parsed;
 };
 
+const areValuesEqual = (left, right) =>
+  JSON.stringify(left) === JSON.stringify(right);
+
 const normalizeLegacyStatus = (status) => {
   const cleanStatus = sanitizeString(status);
   if (!cleanStatus) return cleanStatus;
@@ -630,7 +633,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
   if (user.role !== USER_ROLES.FIELD_EXECUTIVE) {
     throw createHttpError(
       403,
-      "Only FIELD_EXECUTIVE can submit status change requests",
+      "Only FIELD_EXECUTIVE can submit update requests",
     );
   }
 
@@ -643,7 +646,9 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     _id: inventoryId,
     companyId,
   })
-    .select("_id status")
+    .select(
+      "_id projectName towerName unitNumber price status location images documents",
+    )
     .lean();
 
   if (!inventory) {
@@ -656,18 +661,19 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     mode: "update",
   });
 
-  const changedKeys = Object.keys(proposed);
-  const isStatusOnly = changedKeys.length === 1 && changedKeys[0] === "status";
-  if (!isStatusOnly) {
-    throw createHttpError(
-      403,
-      "Field Executive can request only status change",
-    );
+  const changedKeys = Object.keys(proposed).filter(
+    (key) => !areValuesEqual(proposed[key], inventory[key]),
+  );
+  if (changedKeys.length === 0) {
+    throw createHttpError(400, "No changes detected");
   }
 
-  if (proposed.status === inventory.status) {
-    throw createHttpError(400, "Requested status is same as current status");
-  }
+  const oldValue = {};
+  const newValue = {};
+  changedKeys.forEach((key) => {
+    oldValue[key] = inventory[key];
+    newValue[key] = proposed[key];
+  });
 
   const teamId = getTeamIdForUser(user);
   if (teamId) {
@@ -682,7 +688,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     requestedBy: user._id,
     inventoryId: inventory._id,
     type: "update",
-    proposedData: proposed,
+    proposedData: newValue,
     status: REQUEST_STATUS_PENDING,
     teamId: teamId || null,
   });
@@ -693,8 +699,8 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     changedBy: user._id,
     role: user.role,
     actionType: INVENTORY_ACTIVITY_ACTIONS.REQUEST_CREATED,
-    oldValue: { status: inventory.status },
-    newValue: proposed,
+    oldValue,
+    newValue,
     requestId: request._id,
   });
 
@@ -823,17 +829,6 @@ const approveRequest = async ({ user, requestId, io }) => {
       payload: request.proposedData || request.proposedChanges || {},
       mode: "update",
     });
-
-    if (request.requestedBy?.role === USER_ROLES.FIELD_EXECUTIVE) {
-      const changedKeys = Object.keys(proposed);
-      const isStatusOnly = changedKeys.length === 1 && changedKeys[0] === "status";
-      if (!isStatusOnly) {
-        throw createHttpError(
-          403,
-          "Field Executive requests can update only status",
-        );
-      }
-    }
 
     const diff = pickInventoryDiff(inventory, proposed);
     Object.assign(inventory, proposed);

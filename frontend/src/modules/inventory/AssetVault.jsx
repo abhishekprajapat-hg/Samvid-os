@@ -18,9 +18,11 @@ import {
 import {
   getInventoryAssets,
   createInventoryAsset,
+  createInventoryCreateRequest,
   updateInventoryAsset,
   deleteInventoryAsset,
   requestInventoryStatusChange,
+  requestInventoryUpdateChange,
   getPendingInventoryRequests,
   approveInventoryRequest,
   rejectInventoryRequest,
@@ -79,6 +81,12 @@ const formatPrice = (asset) => {
   return `Rs ${value.toLocaleString("en-IN")}`;
 };
 
+const formatCurrency = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "-";
+  return `Rs ${parsed.toLocaleString("en-IN")}`;
+};
+
 const toSharePayload = (asset) => {
   if (!asset?._id) return null;
   const firstImage = Array.isArray(asset.images) ? asset.images[0] || "" : "";
@@ -91,6 +99,30 @@ const toSharePayload = (asset) => {
     status: asset.status || "",
     image: firstImage,
   };
+};
+
+const getInventoryUnitLabel = (inventoryLike = {}) =>
+  [inventoryLike.projectName, inventoryLike.towerName, inventoryLike.unitNumber]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" - ") || "Inventory Unit";
+
+const REQUEST_FIELD_LABELS = {
+  projectName: "Project",
+  towerName: "Tower",
+  unitNumber: "Unit",
+  price: "Price",
+  status: "Status",
+  location: "Location",
+  images: "Images",
+  documents: "Documents",
+};
+
+const formatRequestValue = (key, value) => {
+  if (key === "price") return formatCurrency(value);
+  if (Array.isArray(value)) return `${value.length} item(s)`;
+  if (value === null || value === undefined || value === "") return "-";
+  return String(value);
 };
 
 const AssetVault = () => {
@@ -117,6 +149,10 @@ const AssetVault = () => {
 
   const role = localStorage.getItem("role") || "";
   const canManage = role === "ADMIN";
+  const canRequestCreate = role === "FIELD_EXECUTIVE";
+  const canOpenCreateModal = canManage || canRequestCreate;
+  const canRequestEdit = role === "FIELD_EXECUTIVE";
+  const canOpenEditModal = canManage || canRequestEdit;
   const canRequestStatusChange = role === "FIELD_EXECUTIVE";
 
   const fetchAssets = useCallback(async () => {
@@ -230,7 +266,7 @@ const AssetVault = () => {
   };
 
   const handleSaveAsset = async () => {
-    if (!canManage) return;
+    if (!canOpenCreateModal) return;
 
     if (!formData.title.trim() || formData.price === "" || !formData.location.trim()) {
       setError("Title, location and price are required");
@@ -248,10 +284,14 @@ const AssetVault = () => {
         price: Number(formData.price),
       };
 
-      const createdAsset = await createInventoryAsset(payload);
-
-      setAssets((prev) => [createdAsset, ...prev]);
-      setSuccess("Asset added to inventory");
+      if (canManage) {
+        const createdAsset = await createInventoryAsset(payload);
+        setAssets((prev) => [createdAsset, ...prev]);
+        setSuccess("Asset added to inventory");
+      } else {
+        await createInventoryCreateRequest(payload);
+        setSuccess("Inventory request submitted for admin approval");
+      }
       closeFormModal();
     } catch (saveError) {
       console.error(`Save asset failed: ${toErrorMessage(saveError, "Unknown error")}`);
@@ -262,7 +302,7 @@ const AssetVault = () => {
   };
 
   const handleOpenEditModal = (asset) => {
-    if (!canManage || !asset?._id) return;
+    if (!canOpenEditModal || !asset?._id) return;
 
     setError("");
     setSuccess("");
@@ -284,7 +324,7 @@ const AssetVault = () => {
   };
 
   const handleUpdateAsset = async () => {
-    if (!canManage || !editingAssetId) return;
+    if (!canOpenEditModal || !editingAssetId) return;
 
     if (!formData.title.trim() || formData.price === "" || !formData.location.trim()) {
       setError("Title, location and price are required");
@@ -302,11 +342,16 @@ const AssetVault = () => {
         price: Number(formData.price),
       };
 
-      const updatedAsset = await updateInventoryAsset(editingAssetId, payload);
-      setAssets((prev) =>
-        prev.map((asset) => (String(asset._id) === String(editingAssetId) ? updatedAsset : asset)),
-      );
-      setSuccess("Asset updated");
+      if (canManage) {
+        const updatedAsset = await updateInventoryAsset(editingAssetId, payload);
+        setAssets((prev) =>
+          prev.map((asset) => (String(asset._id) === String(editingAssetId) ? updatedAsset : asset)),
+        );
+        setSuccess("Asset updated");
+      } else {
+        await requestInventoryUpdateChange(editingAssetId, payload);
+        setSuccess("Edit request submitted for admin approval");
+      }
       closeFormModal();
     } catch (updateError) {
       console.error(`Update asset failed: ${toErrorMessage(updateError, "Unknown error")}`);
@@ -483,12 +528,12 @@ const AssetVault = () => {
             </button>
           </div>
 
-          {canManage && (
+          {canOpenCreateModal && (
             <button
               onClick={openAddModal}
               className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 text-white rounded-full text-xs font-bold uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg"
             >
-              <Plus size={16} /> Add Asset
+              <Plus size={16} /> {canManage ? "Add Asset" : "Add Request"}
             </button>
           )}
         </div>
@@ -549,8 +594,29 @@ const AssetVault = () => {
             <div className="mt-3 space-y-2">
               {pendingRequests.map((request) => {
                 const requestId = String(request._id || "");
-                const currentStatus = request.inventoryId?.status || "-";
-                const requestedStatus = request.proposedData?.status || "-";
+                const isCreateRequest = request.type === "create";
+                const proposedData = request.proposedData || {};
+                const currentInventory = request.inventoryId || {};
+                const inventoryLabel = isCreateRequest
+                  ? getInventoryUnitLabel(proposedData)
+                  : getInventoryUnitLabel(currentInventory);
+                const currentStatus = currentInventory?.status || "-";
+                const requestedStatus = proposedData?.status || "Available";
+                const detailSource = isCreateRequest ? proposedData : currentInventory;
+                const requestedFields = !isCreateRequest
+                  ? Object.entries(proposedData).filter(([key]) => REQUEST_FIELD_LABELS[key])
+                  : [];
+                const detailLocation = detailSource?.location || "-";
+                const detailPrice = formatCurrency(detailSource?.price);
+                const detailStatus = isCreateRequest
+                  ? proposedData?.status || "Available"
+                  : currentStatus;
+                const imageList = Array.isArray(detailSource?.images) ? detailSource.images : [];
+                const documentList = Array.isArray(detailSource?.documents)
+                  ? detailSource.documents
+                  : [];
+                const firstImage = imageList[0] || "";
+                const linkedInventoryId = String(currentInventory?._id || "");
                 const loadingReview = reviewingRequestId === requestId;
 
                 return (
@@ -561,14 +627,78 @@ const AssetVault = () => {
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-bold text-slate-800">
-                          {request.inventoryId?.projectName || "Inventory"} - {request.inventoryId?.towerName || "-"} - {request.inventoryId?.unitNumber || "-"}
+                          {inventoryLabel}
                         </p>
                         <p className="mt-1 text-[11px] text-slate-500">
                           By: {request.requestedBy?.name || "Unknown"} ({request.requestedBy?.role || "-"})
                         </p>
                         <p className="mt-1 text-[11px] font-semibold text-slate-600">
-                          {currentStatus} to {requestedStatus}
+                          {isCreateRequest
+                            ? `New inventory request (${requestedStatus})`
+                            : `${currentStatus} to ${requestedStatus}`}
                         </p>
+
+                        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-600">
+                          <p>
+                            <span className="font-semibold text-slate-700">Location:</span> {detailLocation}
+                          </p>
+                          <p>
+                            <span className="font-semibold text-slate-700">Price:</span> {detailPrice}
+                          </p>
+                          <p>
+                            <span className="font-semibold text-slate-700">Status:</span> {detailStatus}
+                          </p>
+                          <p>
+                            <span className="font-semibold text-slate-700">Images:</span> {imageList.length}
+                          </p>
+                          <p>
+                            <span className="font-semibold text-slate-700">Documents:</span> {documentList.length}
+                          </p>
+                          <p>
+                            <span className="font-semibold text-slate-700">Submitted:</span>{" "}
+                            {new Date(request.createdAt || Date.now()).toLocaleString("en-IN", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            })}
+                          </p>
+                        </div>
+
+                        {firstImage && (
+                          <div className="mt-2">
+                            <img
+                              src={firstImage}
+                              alt={inventoryLabel}
+                              className="h-20 w-28 rounded-md border border-slate-200 object-cover"
+                            />
+                          </div>
+                        )}
+
+                        {!isCreateRequest && requestedFields.length > 0 && (
+                          <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                              Requested Changes
+                            </p>
+                            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                              {requestedFields.map(([key, value]) => (
+                                <p key={`${requestId}-${key}`}>
+                                  <span className="font-semibold text-slate-700">
+                                    {REQUEST_FIELD_LABELS[key] || key}:
+                                  </span>{" "}
+                                  {formatRequestValue(key, value)}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {!isCreateRequest && linkedInventoryId && (
+                          <button
+                            onClick={() => navigate(`/inventory/${linkedInventoryId}`)}
+                            className="mt-2 text-[11px] font-semibold text-cyan-700 hover:text-cyan-800 underline"
+                          >
+                            View full property details
+                          </button>
+                        )}
                       </div>
 
                       <div className="flex gap-2">
@@ -641,7 +771,7 @@ const AssetVault = () => {
                 )}
 
                 <div className="absolute top-3 right-3 flex items-center gap-1.5">
-                  {canManage && (
+                  {canOpenEditModal && (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -649,7 +779,7 @@ const AssetVault = () => {
                         handleOpenEditModal(asset);
                       }}
                       className="p-1.5 rounded-lg bg-white/90 text-slate-600 hover:bg-slate-900 hover:text-white transition-colors"
-                      title="Edit property"
+                      title={canManage ? "Edit property" : "Request edit"}
                     >
                       <Pencil size={12} />
                     </button>
@@ -761,7 +891,7 @@ const AssetVault = () => {
       )}
 
       <AnimatePresence>
-        {(isAddModalOpen || isEditModalOpen) && canManage && (
+        {(isAddModalOpen || isEditModalOpen) && canOpenCreateModal && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -776,7 +906,13 @@ const AssetVault = () => {
             >
               <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
                 <h3 className="font-display text-lg text-slate-900">
-                  {isEditModalOpen ? "Edit Property" : "New Inventory Asset"}
+                  {isEditModalOpen
+                    ? canManage
+                      ? "Edit Property"
+                      : "Request Property Edit"
+                    : canManage
+                      ? "New Inventory Asset"
+                      : "New Inventory Request"}
                 </h3>
                 <button
                   onClick={closeFormModal}
@@ -950,8 +1086,12 @@ const AssetVault = () => {
                       ? "Updating..."
                       : "Saving..."
                     : isEditModalOpen
-                      ? "Update Asset"
-                      : "Save Asset"}
+                      ? canManage
+                        ? "Update Asset"
+                        : "Submit Edit Request"
+                      : canManage
+                        ? "Save Asset"
+                        : "Submit Request"}
                 </button>
               </div>
             </motion.div>

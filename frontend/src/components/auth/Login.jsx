@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { motion } from "framer-motion";
 import { Hexagon, ChevronRight, Lock, ScanFace } from "lucide-react";
+import { Link } from "react-router-dom";
 import api from "../../services/api";
 import { toErrorMessage } from "../../utils/errorMessage";
 
@@ -42,7 +43,7 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
   };
 
   return (
-    <div className="relative w-full min-h-screen px-4 flex items-center justify-center">
+    <div className="relative w-full min-h-screen px-4 flex items-center justify-center bg-slate-50">
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -97,6 +98,24 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
             )}
           </button>
         </form>
+
+        <div className="mt-5 border-t border-slate-200 pt-4 text-center text-[11px] text-slate-500">
+          By continuing, you agree to our{" "}
+          <Link
+            to="/service-terms"
+            className="font-semibold text-slate-700 hover:text-cyan-700"
+          >
+            Terms
+          </Link>{" "}
+          and{" "}
+          <Link
+            to="/data-use-notice"
+            className="font-semibold text-slate-700 hover:text-cyan-700"
+          >
+            Privacy Policy
+          </Link>
+          .
+        </div>
       </motion.div>
     </div>
   );

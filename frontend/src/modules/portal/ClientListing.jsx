@@ -149,6 +149,26 @@ const ClientListing = () => {
 
                 </div>
             </div>
+
+            <footer className="mt-14 border-t border-slate-200 pt-6">
+                <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                    <p>Samvid Legal Center</p>
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={() => navigate('/privacy-policy')}
+                            className="font-semibold text-slate-600 hover:text-emerald-600"
+                        >
+                            Privacy Policy
+                        </button>
+                        <button
+                            onClick={() => navigate('/terms-and-conditions')}
+                            className="font-semibold text-slate-600 hover:text-emerald-600"
+                        >
+                            Terms & Conditions
+                        </button>
+                    </div>
+                </div>
+            </footer>
         </div>
     );
 };

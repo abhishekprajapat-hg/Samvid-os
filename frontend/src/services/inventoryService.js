@@ -32,6 +32,13 @@ export const createInventoryAsset = async (payload) => {
   return res.data?.asset;
 };
 
+export const createInventoryCreateRequest = async (payload) => {
+  const res = await api.post("/inventory-request", {
+    proposedData: payload,
+  });
+  return res.data?.request || null;
+};
+
 export const updateInventoryAsset = async (assetId, payload) => {
   const res = await api.patch(`/inventory/${assetId}`, payload);
   return res.data?.asset;
@@ -44,6 +51,14 @@ export const deleteInventoryAsset = async (assetId) => {
 export const requestInventoryStatusChange = async (assetId, status) => {
   const res = await api.post(`/inventory-request/update/${assetId}`, {
     proposedData: { status },
+  });
+
+  return res.data?.request || null;
+};
+
+export const requestInventoryUpdateChange = async (assetId, proposedData) => {
+  const res = await api.post(`/inventory-request/update/${assetId}`, {
+    proposedData,
   });
 
   return res.data?.request || null;

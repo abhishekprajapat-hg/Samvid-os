@@ -26,13 +26,26 @@ const FieldOps = lazy(() => import("./modules/field/FieldOps"));
 const IntelligenceReports = lazy(() => import("./modules/reports/IntelligenceReports"));
 const MasterSchedule = lazy(() => import("./modules/calendar/MasterSchedule"));
 const SystemSettings = lazy(() => import("./modules/admin/SystemSettings"));
-const ClientHome = lazy(() => import("./modules/portal/ClientHome"));
-const ClientListing = lazy(() => import("./modules/portal/ClientListing"));
+const DataUseNotice = lazy(() => import("./modules/legal/DataUseNotice"));
+const ServiceTermsNotice = lazy(() => import("./modules/legal/ServiceTermsNotice"));
 const Performance = lazy(() => import("./modules/reports/Performance"));
 
 const EARTH_RADIUS_METERS = 6371000;
 const LOCATION_SYNC_MIN_INTERVAL_MS = 30000;
 const LOCATION_SYNC_MIN_DISTANCE_METERS = 30;
+const PUBLIC_ROUTE_PREFIXES = [
+  "/privacy-policy",
+  "/terms-and-conditions",
+  "/data-use-notice",
+  "/service-terms",
+];
+const FORCE_LIGHT_ROUTE_PREFIXES = [
+  "/login",
+  "/privacy-policy",
+  "/terms-and-conditions",
+  "/data-use-notice",
+  "/service-terms",
+];
 
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
 
@@ -70,7 +83,12 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const isPublicPage = location.pathname.startsWith("/portal");
+  const isPublicPage = PUBLIC_ROUTE_PREFIXES.some((prefix) =>
+    location.pathname.startsWith(prefix),
+  );
+  const isForcedLightPage = FORCE_LIGHT_ROUTE_PREFIXES.some((prefix) =>
+    location.pathname.startsWith(prefix),
+  );
   const isChatPage = location.pathname === "/chat";
 
   useEffect(() => {
@@ -108,9 +126,15 @@ export default function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.classList.remove("theme-light", "theme-dark");
-    root.classList.add(theme === "dark" ? "theme-dark" : "theme-light");
+    root.classList.add(
+      isForcedLightPage
+        ? "theme-light"
+        : theme === "dark"
+          ? "theme-dark"
+          : "theme-light",
+    );
     localStorage.setItem("theme", theme);
-  }, [theme]);
+  }, [isForcedLightPage, theme]);
 
   useEffect(() => {
     if (!isLoggedIn || userRole !== "FIELD_EXECUTIVE") return undefined;
@@ -362,8 +386,11 @@ export default function App() {
                             : <Navigate to="/" />
                         }
                       />
-                      <Route path="/portal" element={<ClientHome />} />
-                      <Route path="/portal/listing" element={<ClientListing />} />
+                      <Route path="/privacy-policy" element={<DataUseNotice />} />
+                      <Route path="/terms-and-conditions" element={<ServiceTermsNotice />} />
+                      <Route path="/data-use-notice" element={<DataUseNotice />} />
+                      <Route path="/service-terms" element={<ServiceTermsNotice />} />
+                      <Route path="/portal/*" element={<Navigate to="/" replace />} />
                     </Routes>
                   </main>
                 </motion.div>

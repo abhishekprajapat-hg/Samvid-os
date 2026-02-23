@@ -42,7 +42,7 @@ exports.updateRequest = async (req, res) => {
     });
 
     return res.status(201).json({
-      message: "Inventory status change request submitted",
+      message: "Inventory update request submitted",
       request,
     });
   } catch (error) {
