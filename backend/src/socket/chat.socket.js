@@ -9,6 +9,12 @@ const {
   getRoomByIdForUser,
 } = require("../services/chatRoom.service");
 const { getTeamIdForUser } = require("../services/chatAccess.service");
+const {
+  recordCallInitiated,
+  markCallAccepted,
+  markCallRejected,
+  markCallEnded,
+} = require("../services/chatCall.service");
 
 const CALL_MODES = new Set(["audio", "video"]);
 
@@ -356,6 +362,13 @@ const registerChatSocketHandlers = (io) => {
         const at = new Date().toISOString();
 
         activeCallsById.set(callId, roomId);
+        await recordCallInitiated({
+          callId,
+          room,
+          caller: socket.user,
+          mode,
+          startedAt: new Date(at),
+        }).catch(() => null);
 
         const eventPayload = {
           callId,
@@ -396,6 +409,12 @@ const registerChatSocketHandlers = (io) => {
         const roomId = toId(room?._id);
         const at = new Date().toISOString();
         activeCallsById.set(callId, roomId);
+        await markCallAccepted({
+          callId,
+          roomId,
+          userId: socket.user._id,
+          answeredAt: new Date(at),
+        }).catch(() => null);
 
         const eventPayload = {
           callId,
@@ -436,6 +455,13 @@ const registerChatSocketHandlers = (io) => {
         const reason = toId(payload.reason) || "rejected";
         const at = new Date().toISOString();
         activeCallsById.delete(callId);
+        await markCallRejected({
+          callId,
+          roomId,
+          userId: socket.user._id,
+          reason,
+          endedAt: new Date(at),
+        }).catch(() => null);
 
         const eventPayload = {
           callId,
@@ -477,6 +503,13 @@ const registerChatSocketHandlers = (io) => {
         const reason = toId(payload.reason) || "ended";
         const at = new Date().toISOString();
         activeCallsById.delete(callId);
+        await markCallEnded({
+          callId,
+          roomId,
+          userId: socket.user._id,
+          reason,
+          endedAt: new Date(at),
+        }).catch(() => null);
 
         const eventPayload = {
           callId,
@@ -574,6 +607,14 @@ const registerChatSocketHandlers = (io) => {
 
       const disconnectedAt = new Date().toISOString();
       activeCallsById.forEach((roomId, callId) => {
+        markCallEnded({
+          callId,
+          roomId,
+          userId: socket.user?._id,
+          reason: "disconnected",
+          endedAt: new Date(disconnectedAt),
+        }).catch(() => null);
+
         socket.to(`room:${roomId}`).emit("chat:call:ended", {
           callId,
           roomId,

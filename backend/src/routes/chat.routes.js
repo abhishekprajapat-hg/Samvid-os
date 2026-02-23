@@ -37,6 +37,7 @@ router.get("/broadcasts", broadcastController.getBroadcastRooms);
 router.get("/contacts", chatController.getContacts);
 router.get("/conversations", chatController.getConversations);
 router.get("/conversations/:conversationId/messages", chatController.getConversationMessages);
+router.get("/conversations/:conversationId/calls", chatController.getConversationCalls);
 router.post("/messages", chatMessageLimiter, chatController.sendMessage);
 
 module.exports = router;

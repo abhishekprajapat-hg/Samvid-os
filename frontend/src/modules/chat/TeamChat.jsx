@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import {
   createDirectRoom,
+  getConversationCalls,
   getConversationMessages,
   getMessengerContacts,
   getMessengerConversations,
@@ -407,6 +408,45 @@ const normalizeCallReason = (reason) => {
   return "Call ended";
 };
 
+const formatCallDuration = (seconds) => {
+  const total = Math.max(0, Math.round(Number(seconds || 0)));
+  if (!total) return "0s";
+  const hrs = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+
+  if (hrs > 0) {
+    return `${hrs}h ${mins}m ${secs}s`;
+  }
+  if (mins > 0) {
+    return `${mins}m ${secs}s`;
+  }
+  return `${secs}s`;
+};
+
+const toCallHistoryStatusLabel = (row, currentUserId) => {
+  const status = String(row?.status || "").trim().toLowerCase();
+  const callerId = toId(row?.caller?._id);
+  const isOutgoing = callerId && callerId === toId(currentUserId);
+
+  if (status === "connected" || status === "ended") {
+    return `Completed | ${formatCallDuration(row?.durationSeconds)}`;
+  }
+  if (status === "rejected") {
+    return isOutgoing ? "Rejected by receiver" : "You rejected";
+  }
+  if (status === "missed") {
+    return isOutgoing ? "No answer" : "Missed";
+  }
+  if (status === "failed") {
+    return "Failed";
+  }
+  if (status === "ringing") {
+    return "Ringing";
+  }
+  return "Ended";
+};
+
 const updateTypingUsers = (prev, { roomId, userId, isTyping }) => {
   const normalizedRoomId = toId(roomId);
   const normalizedUserId = toId(userId);
@@ -461,6 +501,8 @@ const TeamChat = ({ theme = "light" }) => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const ringtoneContextRef = useRef(null);
+  const ringtoneIntervalRef = useRef(null);
   const queuedSignalsByCallRef = useRef(new Map());
   const activeCallRef = useRef(null);
   const incomingCallRef = useRef(null);
@@ -478,6 +520,8 @@ const TeamChat = ({ theme = "light" }) => {
   const [selectedConversationId, setSelectedConversationId] = useState("");
   const [selectedContactId, setSelectedContactId] = useState("");
   const [messages, setMessages] = useState([]);
+  const [callHistory, setCallHistory] = useState([]);
+  const [callHistoryLoading, setCallHistoryLoading] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState({});
   const [draft, setDraft] = useState("");
   const [queuedShare, setQueuedShare] = useState(null);
@@ -505,6 +549,19 @@ const TeamChat = ({ theme = "light" }) => {
   useEffect(() => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
+
+  useEffect(() => {
+    if (incomingCall) {
+      startIncomingRingtone().catch(() => null);
+      return;
+    }
+
+    stopIncomingRingtone();
+  }, [incomingCall, startIncomingRingtone, stopIncomingRingtone]);
+
+  useEffect(() => () => {
+    stopIncomingRingtone();
+  }, [stopIncomingRingtone]);
 
   const emitConversationRead = useCallback(
     async (conversationId, options = {}) => {
@@ -645,6 +702,59 @@ const TeamChat = ({ theme = "light" }) => {
     }
   }, []);
 
+  const stopIncomingRingtone = useCallback(() => {
+    if (ringtoneIntervalRef.current) {
+      clearInterval(ringtoneIntervalRef.current);
+      ringtoneIntervalRef.current = null;
+    }
+
+    const audioContext = ringtoneContextRef.current;
+    if (audioContext) {
+      audioContext.close?.().catch(() => null);
+      ringtoneContextRef.current = null;
+    }
+  }, []);
+
+  const playIncomingRingtonePulse = useCallback((audioContext) => {
+    if (!audioContext) return;
+    const now = audioContext.currentTime;
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(890, now);
+
+    gainNode.gain.setValueAtTime(0.0001, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
+    oscillator.start(now);
+    oscillator.stop(now + 0.3);
+  }, []);
+
+  const startIncomingRingtone = useCallback(async () => {
+    stopIncomingRingtone();
+
+    if (typeof window === "undefined") return;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+
+    const audioContext = new AudioContextClass();
+    ringtoneContextRef.current = audioContext;
+
+    if (audioContext.state === "suspended") {
+      await audioContext.resume().catch(() => null);
+    }
+
+    playIncomingRingtonePulse(audioContext);
+    ringtoneIntervalRef.current = setInterval(() => {
+      playIncomingRingtonePulse(audioContext);
+    }, 900);
+  }, [playIncomingRingtonePulse, stopIncomingRingtone]);
+
   const stopMediaTracks = useCallback(() => {
     const localStream = localStreamRef.current;
     if (localStream) {
@@ -683,12 +793,13 @@ const TeamChat = ({ theme = "light" }) => {
   }, []);
 
   const clearActiveCallLocally = useCallback((callId = "") => {
+    stopIncomingRingtone();
     clearQueuedCallSignals(callId);
     closePeerConnection();
     stopMediaTracks();
     setActiveCall(null);
     setIncomingCall(null);
-  }, [clearQueuedCallSignals, closePeerConnection, stopMediaTracks]);
+  }, [clearQueuedCallSignals, closePeerConnection, stopIncomingRingtone, stopMediaTracks]);
 
   const emitCallAck = useCallback(async (eventName, payload = {}) => {
     const socket = socketRef.current;
@@ -1005,6 +1116,47 @@ const TeamChat = ({ theme = "light" }) => {
     return activeCall.mode === CALL_MODES.VIDEO ? "pt-64 sm:pt-72" : "pt-28";
   }, [activeCall]);
 
+  const recentCallHistory = useMemo(
+    () => (Array.isArray(callHistory) ? callHistory.slice(0, 5) : []),
+    [callHistory],
+  );
+
+  const loadCallHistoryForConversation = useCallback(async (conversationId) => {
+    const id = toId(conversationId);
+    if (!id) {
+      setCallHistory([]);
+      return;
+    }
+
+    try {
+      setCallHistoryLoading(true);
+      const rows = await getConversationCalls({ conversationId: id, limit: 12 });
+      setCallHistory(Array.isArray(rows) ? rows : []);
+    } catch {
+      setCallHistory([]);
+    } finally {
+      setCallHistoryLoading(false);
+    }
+  }, []);
+
+  const loadMessagesForConversation = useCallback(async (conversationId) => {
+    if (!conversationId) {
+      setMessages([]);
+      return;
+    }
+
+    try {
+      setMessagesLoading(true);
+      const list = await getConversationMessages({ conversationId, limit: 120 });
+      setMessages(Array.isArray(list) ? list : []);
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to load messages"));
+      setMessages([]);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, []);
+
   const handleStartCall = useCallback(async (mode = CALL_MODES.AUDIO) => {
     const normalizedMode = normalizeCallMode(mode);
     if (!activeContact) {
@@ -1113,6 +1265,8 @@ const TeamChat = ({ theme = "light" }) => {
     clearActiveCallLocally,
     createCallPeerConnection,
     emitCallAck,
+    loadMessagesForConversation,
+    selectedContactId,
     selectedConversationId,
   ]);
 
@@ -1193,12 +1347,20 @@ const TeamChat = ({ theme = "light" }) => {
     } finally {
       clearQueuedCallSignals(callId);
       setIncomingCall(null);
+      loadCallHistoryForConversation(roomId).catch(() => null);
     }
-  }, [clearQueuedCallSignals, emitCallAck]);
+  }, [clearQueuedCallSignals, emitCallAck, loadCallHistoryForConversation]);
 
   const handleEndCall = useCallback(() => {
-    endActiveCall({ notifyRemote: true, reason: "ended" }).catch(() => null);
-  }, [endActiveCall]);
+    const roomId = toId(activeCallRef.current?.roomId || selectedConversationRef.current);
+    endActiveCall({ notifyRemote: true, reason: "ended" })
+      .catch(() => null)
+      .finally(() => {
+        if (roomId) {
+          loadCallHistoryForConversation(roomId).catch(() => null);
+        }
+      });
+  }, [endActiveCall, loadCallHistoryForConversation]);
 
   useEffect(() => {
     const nextRoomId = toId(selectedConversationId);
@@ -1246,24 +1408,6 @@ const TeamChat = ({ theme = "light" }) => {
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.pathname, location.state, navigate]);
 
-  const loadMessagesForConversation = useCallback(async (conversationId) => {
-    if (!conversationId) {
-      setMessages([]);
-      return;
-    }
-
-    try {
-      setMessagesLoading(true);
-      const list = await getConversationMessages({ conversationId, limit: 120 });
-      setMessages(Array.isArray(list) ? list : []);
-    } catch (err) {
-      setError(toErrorMessage(err, "Failed to load messages"));
-      setMessages([]);
-    } finally {
-      setMessagesLoading(false);
-    }
-  }, []);
-
   const loadMessenger = useCallback(async (silent = false) => {
     if (silent) {
       setRefreshing(true);
@@ -1309,6 +1453,10 @@ const TeamChat = ({ theme = "light" }) => {
   useEffect(() => {
     loadMessagesForConversation(selectedConversationId);
   }, [loadMessagesForConversation, selectedConversationId]);
+
+  useEffect(() => {
+    loadCallHistoryForConversation(selectedConversationId);
+  }, [loadCallHistoryForConversation, selectedConversationId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -1547,6 +1695,7 @@ const TeamChat = ({ theme = "light" }) => {
     const onCallRejected = (payload = {}) => {
       const callId = toId(payload?.callId);
       if (!callId) return;
+      const roomId = toId(payload?.roomId || payload?.conversationId || selectedConversationRef.current);
 
       if (toId(incomingCallRef.current?.callId) === callId) {
         setIncomingCall(null);
@@ -1559,11 +1708,15 @@ const TeamChat = ({ theme = "light" }) => {
 
       setCallError(normalizeCallReason(payload?.reason || "rejected"));
       clearActiveCallLocally(callId);
+      if (roomId) {
+        loadCallHistoryForConversation(roomId).catch(() => null);
+      }
     };
 
     const onCallEnded = (payload = {}) => {
       const callId = toId(payload?.callId);
       if (!callId) return;
+      const roomId = toId(payload?.roomId || payload?.conversationId || selectedConversationRef.current);
 
       if (toId(incomingCallRef.current?.callId) === callId) {
         setIncomingCall(null);
@@ -1576,6 +1729,9 @@ const TeamChat = ({ theme = "light" }) => {
 
       setCallError(normalizeCallReason(payload?.reason || "ended"));
       clearActiveCallLocally(callId);
+      if (roomId) {
+        loadCallHistoryForConversation(roomId).catch(() => null);
+      }
     };
 
     const onCallSignal = (payload = {}) => {
@@ -1652,6 +1808,7 @@ const TeamChat = ({ theme = "light" }) => {
     currentUser.id,
     emitConversationRead,
     emitMessageReceipt,
+    loadCallHistoryForConversation,
     queueCallSignal,
   ]);
 
@@ -2269,6 +2426,50 @@ const TeamChat = ({ theme = "light" }) => {
             )}
 
             <div className={`relative h-full min-h-0 space-y-3 overflow-y-auto px-3 py-4 sm:px-5 custom-scrollbar ${callTimelineOffsetClass}`}>
+            {selectedConversationId && (callHistoryLoading || recentCallHistory.length > 0) && (
+              <div className={`mb-2 rounded-2xl border px-3 py-2.5 ${
+                isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white/95"
+              }`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${
+                  isDark ? "text-slate-300" : "text-slate-600"
+                }`}>
+                  Recent Calls
+                </p>
+
+                {callHistoryLoading ? (
+                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Loading call history...
+                  </p>
+                ) : (
+                  <div className="mt-1.5 space-y-1.5">
+                    {recentCallHistory.map((row, index) => {
+                      const rowId = toId(row?._id) || `${toId(row?.callId)}-${index}`;
+                      const modeLabel = normalizeCallMode(row?.mode) === CALL_MODES.VIDEO ? "Video" : "Voice";
+                      return (
+                        <div
+                          key={rowId}
+                          className={`flex items-center justify-between gap-2 rounded-lg border px-2.5 py-1.5 ${
+                            isDark ? "border-slate-700 bg-slate-950/50" : "border-slate-200 bg-slate-50"
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className={`truncate text-xs font-semibold ${isDark ? "text-slate-200" : "text-slate-800"}`}>
+                              {modeLabel} Call
+                            </p>
+                            <p className={`truncate text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {toCallHistoryStatusLabel(row, currentUser.id)}
+                            </p>
+                          </div>
+                          <span className={`shrink-0 text-[10px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                            {toSidebarTime(row?.startedAt || row?.createdAt)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
             {messagesLoading ? (
               <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 Loading messages...
