@@ -198,30 +198,35 @@ const FieldOverview = ({
           value={pending}
           hint="Today route actions"
           icon={ClipboardList}
+          onClick={() => onOpen("calendar")}
         />
         <FieldStatCard
           title="Completed"
           value={tasks.length - pending}
           hint="Marked done"
           icon={CheckCircle}
+          onClick={() => onOpen("calendar")}
         />
         <FieldStatCard
           title="My Leads"
           value={leadCount}
           hint="Assigned to me"
           icon={Users}
+          onClick={() => onOpen("leads")}
         />
         <FieldStatCard
           title="Inventory Access"
           value={inventoryCount}
           hint="Company units visible"
           icon={Package}
+          onClick={() => onOpen("inventory")}
         />
         <FieldStatCard
           title="Live Navigation"
           value="On"
           hint="Map tracking available"
           icon={Navigation}
+          onClick={() => onOpen("map")}
         />
       </div>
 
@@ -303,8 +308,12 @@ const FieldOverview = ({
   );
 };
 
-const FieldStatCard = ({ title, value, hint, icon: Icon }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+const FieldStatCard = ({ title, value, hint, icon: Icon, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
+  >
     <div className="flex items-center justify-between">
       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
         {title}
@@ -315,7 +324,7 @@ const FieldStatCard = ({ title, value, hint, icon: Icon }) => (
     </div>
     <p className="mt-3 font-display text-3xl text-slate-900">{value}</p>
     <p className="mt-1 text-xs text-slate-500">{hint}</p>
-  </div>
+  </button>
 );
 
 const QuickPageCard = ({ title, subtitle, icon: Icon, onClick }) => (

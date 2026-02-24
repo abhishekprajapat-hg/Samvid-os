@@ -116,24 +116,28 @@ const ExecutiveOverview = ({ stats, onOpen }) => (
         value={stats.totalLeads}
         hint="My pipeline"
         icon={Users}
+        onClick={() => onOpen("leads")}
       />
       <StatCard
         title="Deals Closed"
         value={stats.dealsClosed}
         hint="Won opportunities"
         icon={CheckCircle}
+        onClick={() => onOpen("leads")}
       />
       <StatCard
         title="Commission"
         value={`Rs ${(stats.commission / 100000).toFixed(1)}L`}
         hint="Estimated earnings"
         icon={TrendingUp}
+        onClick={() => onOpen("targets")}
       />
       <StatCard
         title="Inventory Access"
         value={stats.inventoryCount}
         hint="Company units"
         icon={Building2}
+        onClick={() => onOpen("inventory")}
       />
     </div>
 
@@ -172,8 +176,12 @@ const ExecutiveOverview = ({ stats, onOpen }) => (
   </div>
 );
 
-const StatCard = ({ title, value, hint, icon: Icon }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+const StatCard = ({ title, value, hint, icon: Icon, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md"
+  >
     <div className="flex items-center justify-between">
       <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
         {title}
@@ -184,7 +192,7 @@ const StatCard = ({ title, value, hint, icon: Icon }) => (
     </div>
     <p className="mt-3 font-display text-3xl text-slate-900">{value}</p>
     <p className="mt-1 text-xs text-slate-500">{hint}</p>
-  </div>
+  </button>
 );
 
 const QuickPageCard = ({ title, subtitle, icon: Icon, onClick }) => (

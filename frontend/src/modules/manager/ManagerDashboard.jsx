@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
   Activity,
   BarChart3,
@@ -18,6 +19,7 @@ import { toErrorMessage } from "../../utils/errorMessage";
 
 const ManagerDashboard = ({ theme = "light" }) => {
   const isDark = theme === "dark";
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stats, setStats] = useState({
@@ -93,6 +95,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
         value: `Rs ${(stats.revenue / 100000).toFixed(2)}L`,
         helper: `${stats.closed} closed x Rs 75k`,
         icon: Activity,
+        to: "/finance",
         tone: isDark ? "text-cyan-200" : "text-cyan-700",
         accent: isDark
           ? "border-cyan-400/30 from-cyan-500/20 to-slate-900/0"
@@ -103,6 +106,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
         value: stats.leads,
         helper: `${derived.activePipeline} still in pipeline`,
         icon: Users,
+        to: "/leads",
         tone: isDark ? "text-violet-200" : "text-violet-700",
         accent: isDark
           ? "border-violet-400/30 from-violet-500/20 to-slate-900/0"
@@ -113,6 +117,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
         value: stats.assets,
         helper: `${derived.conversionPercent}% close efficiency`,
         icon: Building2,
+        to: "/inventory",
         tone: isDark ? "text-emerald-200" : "text-emerald-700",
         accent: isDark
           ? "border-emerald-400/30 from-emerald-500/20 to-slate-900/0"
@@ -129,6 +134,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
         value: stats.negotiation,
         progress: derived.negotiationShare,
         icon: Handshake,
+        to: "/leads",
         bar: "from-cyan-500 to-blue-500",
       },
       {
@@ -136,6 +142,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
         value: stats.visits,
         progress: derived.visitShare,
         icon: MapPin,
+        to: "/calendar",
         bar: "from-violet-500 to-pink-500",
       },
       {
@@ -143,6 +150,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
         value: stats.closed,
         progress: derived.conversionPercent,
         icon: Zap,
+        to: "/leads",
         bar: "from-emerald-500 to-teal-500",
       },
       {
@@ -150,6 +158,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
         value: `${derived.conversionPercent}%`,
         progress: derived.conversionPercent,
         icon: Target,
+        to: "/targets",
         bar: "from-amber-500 to-orange-500",
       },
     ],
@@ -161,14 +170,17 @@ const ManagerDashboard = ({ theme = "light" }) => {
       {
         label: "Active Pipeline",
         value: derived.activePipeline,
+        to: "/leads",
       },
       {
         label: "Visit Intensity",
         value: `${derived.visitShare}%`,
+        to: "/calendar",
       },
       {
         label: "Avg Closed Ticket",
         value: derived.avgTicket ? `Rs ${(derived.avgTicket / 1000).toFixed(1)}k` : "Rs 0",
+        to: "/finance",
       },
     ],
     [derived.activePipeline, derived.avgTicket, derived.visitShare],
@@ -180,18 +192,21 @@ const ManagerDashboard = ({ theme = "light" }) => {
         label: "Negotiation Load",
         value: `${stats.negotiation}/${stats.leads || 0}`,
         progress: derived.negotiationShare,
+        to: "/leads",
         bar: "from-cyan-500 to-blue-500",
       },
       {
         label: "Visit Momentum",
         value: `${stats.visits}/${stats.leads || 0}`,
         progress: derived.visitShare,
+        to: "/calendar",
         bar: "from-violet-500 to-pink-500",
       },
       {
         label: "Close Momentum",
         value: `${stats.closed}/${stats.leads || 0}`,
         progress: derived.conversionPercent,
+        to: "/targets",
         bar: "from-emerald-500 to-teal-500",
       },
     ],
@@ -283,11 +298,13 @@ const ManagerDashboard = ({ theme = "light" }) => {
 
         <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {deckChips.map((chip) => (
-            <div
+            <button
               key={chip.label}
+              type="button"
+              onClick={() => navigate(chip.to)}
               className={`rounded-2xl border px-4 py-3 ${
                 isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50/80"
-              }`}
+              } text-left transition-all hover:-translate-y-0.5 hover:border-cyan-300 hover:shadow-sm`}
             >
               <p className={`text-[10px] uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 {chip.label}
@@ -295,7 +312,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
               <p className={`mt-2 text-2xl font-display ${isDark ? "text-slate-100" : "text-slate-900"}`}>
                 {chip.value}
               </p>
-            </div>
+            </button>
           ))}
         </div>
       </motion.section>
@@ -315,11 +332,13 @@ const ManagerDashboard = ({ theme = "light" }) => {
 
       <motion.section variants={itemMotion} className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-3">
         {kpiCards.map((card) => (
-          <div
+          <button
             key={card.label}
+            type="button"
+            onClick={() => navigate(card.to)}
             className={`group relative overflow-hidden rounded-2xl border bg-gradient-to-br p-5 ${
               isDark ? "bg-slate-900/85" : "bg-white"
-            } ${card.accent}`}
+            } ${card.accent} text-left transition-all hover:-translate-y-0.5 hover:shadow-md`}
           >
             <div className={`pointer-events-none absolute -right-10 -top-10 h-24 w-24 rounded-full blur-2xl ${
               isDark ? "bg-white/10" : "bg-white/60"
@@ -338,7 +357,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
                 {card.helper}
               </p>
             </div>
-          </div>
+          </button>
         ))}
       </motion.section>
 
@@ -359,11 +378,13 @@ const ManagerDashboard = ({ theme = "light" }) => {
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {pipelineCards.map((card) => (
-              <div
+              <button
                 key={card.label}
+                type="button"
+                onClick={() => navigate(card.to)}
                 className={`rounded-xl border p-4 ${
                   isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
-                }`}
+                } text-left transition-all hover:-translate-y-0.5 hover:border-cyan-300 hover:shadow-sm`}
               >
                 <div className="flex items-center justify-between">
                   <p className={`text-[10px] uppercase tracking-[0.18em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -380,7 +401,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
                     style={{ width: `${Math.min(card.progress, 100)}%` }}
                   />
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -401,7 +422,12 @@ const ManagerDashboard = ({ theme = "light" }) => {
 
           <div className="space-y-4">
             {funnelSignals.map((signal) => (
-              <div key={signal.label}>
+              <button
+                key={signal.label}
+                type="button"
+                onClick={() => navigate(signal.to)}
+                className="w-full rounded-xl border border-transparent p-2 text-left transition-colors hover:border-cyan-300/40"
+              >
                 <div className="mb-1 flex items-center justify-between text-xs">
                   <span className={isDark ? "text-slate-300" : "text-slate-600"}>{signal.label}</span>
                   <span className={isDark ? "text-slate-400" : "text-slate-500"}>{signal.value}</span>
@@ -412,7 +438,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
                     style={{ width: `${Math.min(signal.progress, 100)}%` }}
                   />
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </div>
