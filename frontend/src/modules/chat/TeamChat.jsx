@@ -530,6 +530,7 @@ const TeamChat = ({ theme = "light" }) => {
   const [incomingCall, setIncomingCall] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
   const [callError, setCallError] = useState("");
+  const [mobileListMode, setMobileListMode] = useState("chats");
 
   useEffect(() => {
     const host = document.querySelector("main.app-page-bg");
@@ -1498,6 +1499,7 @@ const TeamChat = ({ theme = "light" }) => {
     if (!token) return undefined;
 
     const socket = createChatSocket(token);
+    const remoteTypingTimeouts = remoteTypingTimeoutsRef.current;
     socketRef.current = socket;
 
     const onConnect = () => {
@@ -1511,8 +1513,8 @@ const TeamChat = ({ theme = "light" }) => {
       setSocketConnected(false);
       clearLocalTypingStopTimer();
       typingStateRef.current = { roomId: "", isTyping: false };
-      remoteTypingTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
-      remoteTypingTimeoutsRef.current.clear();
+      remoteTypingTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+      remoteTypingTimeouts.clear();
       setTypingByRoom({});
       if (activeCallRef.current || incomingCallRef.current) {
         setCallError("Call ended due to realtime disconnect");
@@ -1566,10 +1568,10 @@ const TeamChat = ({ theme = "light" }) => {
 
       if (senderId) {
         const typingKey = `${conversationId}:${senderId}`;
-        const existingTypingTimeout = remoteTypingTimeoutsRef.current.get(typingKey);
+        const existingTypingTimeout = remoteTypingTimeouts.get(typingKey);
         if (existingTypingTimeout) {
           clearTimeout(existingTypingTimeout);
-          remoteTypingTimeoutsRef.current.delete(typingKey);
+          remoteTypingTimeouts.delete(typingKey);
         }
         setTypingByRoom((prev) =>
           updateTypingUsers(prev, { roomId: conversationId, userId: senderId, isTyping: false }));
@@ -1627,10 +1629,10 @@ const TeamChat = ({ theme = "light" }) => {
 
       const isTyping = payload?.isTyping !== false;
       const typingKey = `${roomId}:${userId}`;
-      const existingTypingTimeout = remoteTypingTimeoutsRef.current.get(typingKey);
+      const existingTypingTimeout = remoteTypingTimeouts.get(typingKey);
       if (existingTypingTimeout) {
         clearTimeout(existingTypingTimeout);
-        remoteTypingTimeoutsRef.current.delete(typingKey);
+        remoteTypingTimeouts.delete(typingKey);
       }
 
       setTypingByRoom((prev) => updateTypingUsers(prev, { roomId, userId, isTyping }));
@@ -1640,9 +1642,9 @@ const TeamChat = ({ theme = "light" }) => {
       const timeoutId = setTimeout(() => {
         setTypingByRoom((prev) =>
           updateTypingUsers(prev, { roomId, userId, isTyping: false }));
-        remoteTypingTimeoutsRef.current.delete(typingKey);
+        remoteTypingTimeouts.delete(typingKey);
       }, REMOTE_TYPING_TIMEOUT_MS);
-      remoteTypingTimeoutsRef.current.set(typingKey, timeoutId);
+      remoteTypingTimeouts.set(typingKey, timeoutId);
     };
 
     const onCallIncoming = (payload = {}) => {
@@ -1792,8 +1794,8 @@ const TeamChat = ({ theme = "light" }) => {
       socket.off("chat:call:signal", onCallSignal);
       clearLocalTypingStopTimer();
       typingStateRef.current = { roomId: "", isTyping: false };
-      remoteTypingTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
-      remoteTypingTimeoutsRef.current.clear();
+      remoteTypingTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+      remoteTypingTimeouts.clear();
       setTypingByRoom({});
       clearActiveCallLocally();
       socket.disconnect();
@@ -1808,6 +1810,7 @@ const TeamChat = ({ theme = "light" }) => {
     currentUser.id,
     emitConversationRead,
     emitMessageReceipt,
+    loadMessenger,
     loadCallHistoryForConversation,
     queueCallSignal,
   ]);
@@ -1831,6 +1834,7 @@ const TeamChat = ({ theme = "light" }) => {
     const id = String(conversationId);
     setSelectedConversationId(id);
     setSelectedContactId("");
+    setMobileListMode("chats");
     markConversationRead(id, { persist: false }).catch(() => null);
   };
 
@@ -1844,6 +1848,7 @@ const TeamChat = ({ theme = "light" }) => {
 
     setSelectedConversationId("");
     setSelectedContactId(String(contactId));
+    setMobileListMode("contacts");
     setMessages([]);
   };
 
@@ -1865,6 +1870,7 @@ const TeamChat = ({ theme = "light" }) => {
     stopLocalTyping(selectedConversationId);
     setSelectedConversationId("");
     setSelectedContactId("");
+    setMobileListMode("chats");
     setMessages([]);
   };
 
@@ -2016,16 +2022,16 @@ const TeamChat = ({ theme = "light" }) => {
 
   return (
     <div
-      className={`h-full min-h-0 w-full overflow-hidden p-2 sm:p-3 ${isDark ? "bg-slate-950/35" : "bg-slate-100/75"}`}
+      className={`h-[100dvh] min-h-0 w-full overflow-hidden p-0 sm:h-full sm:p-3 ${isDark ? "bg-slate-950/35" : "bg-slate-100/75"}`}
     >
       <Motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`mx-auto grid h-full min-h-0 w-full max-w-[1520px] grid-cols-1 overflow-hidden rounded-2xl border shadow-sm md:grid-cols-[360px_1fr] ${
+        className={`mx-auto grid h-[100dvh] min-h-0 w-full max-w-[1600px] grid-cols-1 overflow-hidden rounded-none border-0 shadow-none sm:h-full sm:rounded-2xl sm:border sm:shadow-sm md:grid-cols-[360px_minmax(0,1fr)] xl:grid-cols-[360px_minmax(0,1fr)_320px] ${
           isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white/90"
         }`}
       >
-        <aside className={`${activeContact ? "hidden md:flex" : "flex"} min-h-0 flex-col overflow-hidden border-r p-3 ${
+        <aside className={`${activeContact ? "hidden md:flex" : "flex"} min-h-0 flex-col overflow-hidden border-b p-2 sm:p-3 md:border-b-0 md:border-r ${
           isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white"
         }`}>
           <div className={`rounded-xl border px-3 py-2.5 ${isDark ? "border-slate-700 bg-slate-950/60" : "border-slate-200 bg-slate-50"}`}>
@@ -2079,6 +2085,41 @@ const TeamChat = ({ theme = "light" }) => {
               />
             </div>
 
+            <div className={`mt-2 grid grid-cols-2 gap-1 rounded-lg p-1 md:hidden ${
+              isDark ? "bg-slate-900/90" : "bg-slate-100"
+            }`}>
+              <button
+                type="button"
+                onClick={() => setMobileListMode("chats")}
+                className={`h-8 rounded-md text-xs font-semibold ${
+                  mobileListMode === "chats"
+                    ? isDark
+                      ? "bg-cyan-500/20 text-cyan-100"
+                      : "bg-white text-cyan-700 shadow-sm"
+                    : isDark
+                      ? "text-slate-300"
+                      : "text-slate-600"
+                }`}
+              >
+                Chats
+              </button>
+              <button
+                type="button"
+                onClick={() => setMobileListMode("contacts")}
+                className={`h-8 rounded-md text-xs font-semibold ${
+                  mobileListMode === "contacts"
+                    ? isDark
+                      ? "bg-cyan-500/20 text-cyan-100"
+                      : "bg-white text-cyan-700 shadow-sm"
+                    : isDark
+                      ? "text-slate-300"
+                      : "text-slate-600"
+                }`}
+              >
+                Contacts
+              </button>
+            </div>
+
             <p className={`mt-2 text-[10px] uppercase tracking-[0.14em] ${
               socketConnected
                 ? isDark
@@ -2092,9 +2133,9 @@ const TeamChat = ({ theme = "light" }) => {
             </p>
           </div>
 
-          <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 custom-scrollbar">
-            <div>
-              <p className={`pb-1 pl-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+          <div className="mt-3 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1 pb-[calc(0.5rem+env(safe-area-inset-bottom))] custom-scrollbar">
+            <div className={mobileListMode === "chats" ? "" : "hidden md:block"}>
+              <p className={`hidden pb-1 pl-1 text-[11px] font-semibold uppercase tracking-[0.14em] md:block ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 Conversations
               </p>
               <div className="space-y-1.5">
@@ -2165,9 +2206,9 @@ const TeamChat = ({ theme = "light" }) => {
             </div>
           </div>
 
-            <div>
+            <div className={mobileListMode === "contacts" ? "" : "hidden md:block"}>
               <div className="mb-1 flex items-center justify-between">
-                <p className={`pb-1 pl-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <p className={`hidden pb-1 pl-1 text-[11px] font-semibold uppercase tracking-[0.14em] md:block ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   Start New Chat
                 </p>
                 <span className={`inline-flex items-center gap-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -2223,7 +2264,7 @@ const TeamChat = ({ theme = "light" }) => {
           </div>
         </aside>
 
-        <section className={`${!activeContact ? "hidden md:flex" : "flex"} min-h-0 min-w-0 flex-col overflow-hidden ${isDark ? "bg-slate-900/65" : "bg-white/90"}`}>
+        <section className={`${!activeContact ? "hidden md:flex" : "flex"} min-h-0 min-w-0 w-full flex-col overflow-hidden ${isDark ? "bg-slate-900/65" : "bg-white/90"}`}>
           <div className={`sticky top-0 z-20 flex items-center gap-2.5 border-b px-3 py-2.5 sm:px-4 ${
             isDark ? "border-slate-700 bg-slate-900/90" : "border-slate-200 bg-white"
           }`}>
@@ -2268,7 +2309,7 @@ const TeamChat = ({ theme = "light" }) => {
               </p>
             )}
 
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex min-w-0 items-center gap-1 sm:gap-2">
               {activeContact && (
                 activeCall ? (
                   <button
@@ -2310,7 +2351,7 @@ const TeamChat = ({ theme = "light" }) => {
                   </>
                 )
               )}
-              <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <span className={`hidden text-xs sm:inline ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 {messages.length} messages
               </span>
             </div>
@@ -2427,7 +2468,7 @@ const TeamChat = ({ theme = "light" }) => {
 
             <div className={`relative h-full min-h-0 space-y-3 overflow-y-auto px-3 py-4 sm:px-5 custom-scrollbar ${callTimelineOffsetClass}`}>
             {selectedConversationId && (callHistoryLoading || recentCallHistory.length > 0) && (
-              <div className={`mb-2 rounded-2xl border px-3 py-2.5 ${
+              <div className={`mb-2 rounded-2xl border px-3 py-2.5 xl:hidden ${
                 isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white/95"
               }`}>
                 <p className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${
@@ -2784,6 +2825,101 @@ const TeamChat = ({ theme = "light" }) => {
             </div>
           </form>
         </section>
+
+        <aside className={`hidden min-h-0 flex-col overflow-hidden border-l p-3 xl:flex ${
+          isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white"
+        }`}>
+          <div className={`rounded-xl border px-3 py-2.5 ${
+            isDark ? "border-slate-700 bg-slate-950/60" : "border-slate-200 bg-slate-50"
+          }`}>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className={`inline-flex items-center gap-1.5 text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                  <Phone size={14} />
+                  Call Logs
+                </p>
+                <p className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  {activeContact ? `Recent calls with ${activeContact.name}` : "Select a chat to view logs"}
+                </p>
+              </div>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                isDark ? "bg-slate-800 text-slate-300" : "bg-slate-200 text-slate-600"
+              }`}>
+                {callHistoryLoading ? "..." : callHistory.length}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 custom-scrollbar">
+            {!activeContact ? (
+              <div className={`rounded-xl border border-dashed px-3 py-4 text-center text-xs ${
+                isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"
+              }`}>
+                Open a conversation to see call logs.
+              </div>
+            ) : callHistoryLoading ? (
+              <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${
+                isDark ? "border-slate-700 bg-slate-950/60 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
+              }`}>
+                <RefreshCw size={12} className="animate-spin" />
+                Loading call logs...
+              </div>
+            ) : callHistory.length === 0 ? (
+              <div className={`rounded-xl border border-dashed px-3 py-4 text-center text-xs ${
+                isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"
+              }`}>
+                No call logs for this conversation.
+              </div>
+            ) : (
+              callHistory.map((row, index) => {
+                const rowId = toId(row?._id) || `${toId(row?.callId)}-${index}`;
+                const mode = normalizeCallMode(row?.mode);
+                const isVideoCall = mode === CALL_MODES.VIDEO;
+                const callerId = toId(row?.caller?._id || row?.caller);
+                const directionLabel =
+                  callerId && callerId === toId(currentUser.id) ? "Outgoing" : "Incoming";
+                const startedAt = row?.startedAt || row?.createdAt || row?.updatedAt;
+                return (
+                  <div
+                    key={rowId}
+                    className={`rounded-xl border p-2.5 ${
+                      isDark ? "border-slate-700 bg-slate-950/60" : "border-slate-200 bg-slate-50/90"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex items-center gap-2">
+                        <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${
+                          isDark ? "bg-slate-800 text-slate-200" : "bg-white text-slate-600"
+                        }`}>
+                          {isVideoCall ? <Video size={13} /> : <Phone size={13} />}
+                        </span>
+                        <div className="min-w-0">
+                          <p className={`truncate text-xs font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                            {isVideoCall ? "Video Call" : "Voice Call"}
+                          </p>
+                          <p className={`truncate text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            {directionLabel}
+                          </p>
+                        </div>
+                      </div>
+                      <span className={`shrink-0 text-[10px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                        {toSidebarTime(startedAt)}
+                      </span>
+                    </div>
+                    <p className={`mt-2 truncate text-[11px] ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                      {toCallHistoryStatusLabel(row, currentUser.id)}
+                    </p>
+                    {startedAt && (
+                      <p className={`mt-1 text-[10px] ${isDark ? "text-slate-500" : "text-slate-500"}`}>
+                        {toDayLabel(startedAt)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </aside>
       </Motion.div>
     </div>
   );

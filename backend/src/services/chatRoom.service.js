@@ -1,4 +1,5 @@
 const ChatRoom = require("../models/ChatRoom");
+const mongoose = require("mongoose");
 const ChatMessage = require("../models/ChatMessage");
 const ChatEscalationLog = require("../models/ChatEscalationLog");
 const Lead = require("../models/Lead");
@@ -32,6 +33,12 @@ const createHttpError = (statusCode, message) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
+};
+
+const ensureObjectId = (value, label) => {
+  if (!mongoose.Types.ObjectId.isValid(value)) {
+    throw createHttpError(400, `Invalid ${label}`);
+  }
 };
 
 const toPositiveInt = (value, fallback, max) => {
@@ -256,23 +263,52 @@ const getUnreadCountForUser = (room, userId) => {
   return Number(row?.count || 0);
 };
 
-const toRoomDto = (room, viewerId = null) => ({
-  _id: room._id,
-  type: room.type,
-  name: room.name || "",
-  participants: (room.participants || []).map((participant) => toUserDto(participant)),
-  createdBy: room.createdBy ? toUserDto(room.createdBy) : null,
-  leadId: room.leadId || null,
-  teamId: room.teamId || null,
-  lastMessage: room.lastMessage || "",
-  lastMessageAt: room.lastMessageAt || room.updatedAt,
-  lastMessageSender: room.lastMessageSender || null,
-  unreadCount: viewerId ? getUnreadCountForUser(room, viewerId) : 0,
-  escalation: room.escalation || null,
-  broadcastTarget: room.broadcastTarget || null,
-  createdAt: room.createdAt,
-  updatedAt: room.updatedAt,
-});
+const getUserClearedAt = (rows, userId) => {
+  const id = toObjectIdString(userId);
+  if (!id || !Array.isArray(rows)) return null;
+  const row = rows.find((item) => toObjectIdString(item.user) === id);
+  if (!row?.at) return null;
+  const marker = new Date(row.at);
+  return Number.isNaN(marker.getTime()) ? null : marker;
+};
+
+const isOnOrBeforeMarker = ({ value, marker }) => {
+  if (!value || !marker) return false;
+  const timestamp = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return false;
+  return timestamp.getTime() <= marker.getTime();
+};
+
+const toRoomDto = (room, viewerId = null) => {
+  const rawLastMessageAt = room.lastMessageAt || room.updatedAt || null;
+  const clearMarker = viewerId ? getUserClearedAt(room.clearedMessagesAt, viewerId) : null;
+  const isLastMessageCleared = isOnOrBeforeMarker({
+    value: rawLastMessageAt,
+    marker: clearMarker,
+  });
+
+  return {
+    _id: room._id,
+    type: room.type,
+    name: room.name || "",
+    participants: (room.participants || []).map((participant) => toUserDto(participant)),
+    createdBy: room.createdBy ? toUserDto(room.createdBy) : null,
+    leadId: room.leadId || null,
+    teamId: room.teamId || null,
+    lastMessage: isLastMessageCleared ? "" : room.lastMessage || "",
+    lastMessageAt: isLastMessageCleared
+      ? clearMarker || room.updatedAt
+      : rawLastMessageAt,
+    lastMessageSender: isLastMessageCleared ? null : room.lastMessageSender || null,
+    unreadCount: viewerId
+      ? (isLastMessageCleared ? 0 : getUnreadCountForUser(room, viewerId))
+      : 0,
+    escalation: room.escalation || null,
+    broadcastTarget: room.broadcastTarget || null,
+    createdAt: room.createdAt,
+    updatedAt: room.updatedAt,
+  };
+};
 
 const toMessageDto = (message) => ({
   _id: message._id,
@@ -1100,12 +1136,22 @@ const getRoomMessages = async ({ user, roomId, limit, before }) => {
   const room = await getRoomByIdForUser({ user, roomId });
   const resolvedLimit = toPositiveInt(limit, 60, 200);
   const query = { room: room._id };
+  const createdAtQuery = {};
+  const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
+
+  if (clearedAt) {
+    createdAtQuery.$gt = clearedAt;
+  }
 
   if (before) {
     const beforeDate = new Date(before);
     if (!Number.isNaN(beforeDate.getTime())) {
-      query.createdAt = { $lt: beforeDate };
+      createdAtQuery.$lt = beforeDate;
     }
+  }
+
+  if (Object.keys(createdAtQuery).length > 0) {
+    query.createdAt = createdAtQuery;
   }
 
   const messages = await applyMessagePopulates(
@@ -1125,12 +1171,18 @@ const markRoomAsRead = async ({ user, roomId }) => {
   resetUnreadCountForUser({ room, userId: user._id });
   await room.save();
 
+  const seenQuery = {
+    room: room._id,
+    sender: { $ne: user._id },
+    "seenBy.user": { $ne: user._id },
+  };
+  const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
+  if (clearedAt) {
+    seenQuery.createdAt = { $gt: clearedAt };
+  }
+
   await ChatMessage.updateMany(
-    {
-      room: room._id,
-      sender: { $ne: user._id },
-      "seenBy.user": { $ne: user._id },
-    },
+    seenQuery,
     {
       $push: { seenBy: { user: user._id, at: new Date() } },
     },
@@ -1141,6 +1193,7 @@ const markRoomAsRead = async ({ user, roomId }) => {
 };
 
 const markMessageDelivered = async ({ user, messageId }) => {
+  ensureObjectId(messageId, "message id");
   const message = await ChatMessage.findById(messageId);
   if (!message) {
     throw createHttpError(404, "Message not found");
@@ -1151,6 +1204,11 @@ const markMessageDelivered = async ({ user, messageId }) => {
     roomId: message.room,
     requireParticipantForSend: true,
   });
+
+  const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
+  if (isOnOrBeforeMarker({ value: message.createdAt, marker: clearedAt })) {
+    throw createHttpError(404, "Message not found");
+  }
 
   const alreadyDelivered = (message.deliveredTo || []).some(
     (row) => toObjectIdString(row.user) === toObjectIdString(user._id),
@@ -1169,6 +1227,7 @@ const markMessageDelivered = async ({ user, messageId }) => {
 };
 
 const markMessageSeen = async ({ user, messageId }) => {
+  ensureObjectId(messageId, "message id");
   const message = await ChatMessage.findById(messageId);
   if (!message) {
     throw createHttpError(404, "Message not found");
@@ -1179,6 +1238,11 @@ const markMessageSeen = async ({ user, messageId }) => {
     roomId: message.room,
     requireParticipantForSend: true,
   });
+
+  const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
+  if (isOnOrBeforeMarker({ value: message.createdAt, marker: clearedAt })) {
+    throw createHttpError(404, "Message not found");
+  }
 
   const seenAt = new Date();
 

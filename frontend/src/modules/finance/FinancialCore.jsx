@@ -19,6 +19,7 @@ const COMMISSION_PER_DEAL = 50000;
 const RANGE_OPTIONS = [
   { key: "30D", label: "Last 30 Days" },
   { key: "THIS_MONTH", label: "This Month" },
+  { key: "CUSTOM", label: "Custom" },
   { key: "ALL", label: "All Time" },
 ];
 
@@ -31,25 +32,98 @@ const PIPELINE_STATUSES = [
   { key: "LOST", label: "Lost" },
 ];
 
+const parseLocalDateInput = (value) => {
+  const raw = String(value || "").trim();
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+
+  if (
+    Number.isNaN(date.getTime())
+    || date.getFullYear() !== year
+    || date.getMonth() !== month - 1
+    || date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+};
+
 const toDate = (value) => {
+  const localDate = parseLocalDateInput(value);
+  if (localDate) return localDate;
+
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const getRangeStart = (rangeKey) => {
+const toDateInputValue = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getDayStart = (value) => {
+  const date = toDate(value);
+  if (!date) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const getDayEnd = (value) => {
+  const date = toDate(value);
+  if (!date) return null;
+  date.setHours(23, 59, 59, 999);
+  return date;
+};
+
+const resolveRangeBounds = ({ rangeKey, customRange }) => {
   const now = new Date();
 
   if (rangeKey === "30D") {
     const start = new Date(now);
-    start.setDate(start.getDate() - 30);
-    return start;
+    start.setDate(start.getDate() - 29);
+    start.setHours(0, 0, 0, 0);
+
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
   }
 
   if (rangeKey === "THIS_MONTH") {
-    return new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+
+    return {
+      start: new Date(now.getFullYear(), now.getMonth(), 1),
+      end,
+    };
   }
 
-  return null;
+  if (rangeKey === "CUSTOM") {
+    return {
+      start: getDayStart(customRange.startDate),
+      end: getDayEnd(customRange.endDate),
+    };
+  }
+
+  return { start: null, end: null };
+};
+
+const getLeadRangeDate = (lead) => {
+  const status = String(lead?.status || "").toUpperCase();
+  if (status === "CLOSED" || status === "LOST") {
+    return toDate(lead?.updatedAt || lead?.createdAt);
+  }
+  return toDate(lead?.createdAt);
 };
 
 const formatCurrency = (value) =>
@@ -71,6 +145,15 @@ const formatDateTime = (value) => {
 const FinancialCore = () => {
   const navigate = useNavigate();
   const [rangeKey, setRangeKey] = useState("30D");
+  const [customRange, setCustomRange] = useState(() => {
+    const now = new Date();
+    const start = new Date(now);
+    start.setDate(start.getDate() - 9);
+    return {
+      startDate: toDateInputValue(start),
+      endDate: toDateInputValue(now),
+    };
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -101,14 +184,17 @@ const FinancialCore = () => {
   }, [loadFinanceData]);
 
   const scopedLeads = useMemo(() => {
-    const start = getRangeStart(rangeKey);
-    if (!start) return leads;
+    const { start, end } = resolveRangeBounds({ rangeKey, customRange });
+    if (!start && !end) return leads;
 
     return leads.filter((lead) => {
-      const createdAt = toDate(lead.createdAt);
-      return createdAt && createdAt >= start;
+      const rangeDate = getLeadRangeDate(lead);
+      if (!rangeDate) return false;
+      if (start && rangeDate < start) return false;
+      if (end && rangeDate > end) return false;
+      return true;
     });
-  }, [leads, rangeKey]);
+  }, [customRange, leads, rangeKey]);
 
   const dashboard = useMemo(() => {
     const statusCount = PIPELINE_STATUSES.reduce((acc, status) => {
@@ -247,6 +333,47 @@ const FinancialCore = () => {
               {range.label}
             </button>
           ))}
+
+          {rangeKey === "CUSTOM" ? (
+            <>
+              <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-600">
+                From
+                <input
+                  type="date"
+                  value={customRange.startDate}
+                  onChange={(event) => {
+                    const nextStart = event.target.value;
+                    setCustomRange((prev) => ({
+                      startDate: nextStart,
+                      endDate:
+                        prev.endDate && nextStart && prev.endDate < nextStart
+                          ? nextStart
+                          : prev.endDate,
+                    }));
+                  }}
+                  className="h-9 bg-transparent text-slate-700 outline-none"
+                />
+              </label>
+              <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-600">
+                To
+                <input
+                  type="date"
+                  value={customRange.endDate}
+                  onChange={(event) => {
+                    const nextEnd = event.target.value;
+                    setCustomRange((prev) => ({
+                      startDate:
+                        prev.startDate && nextEnd && prev.startDate > nextEnd
+                          ? nextEnd
+                          : prev.startDate,
+                      endDate: nextEnd,
+                    }));
+                  }}
+                  className="h-9 bg-transparent text-slate-700 outline-none"
+                />
+              </label>
+            </>
+          ) : null}
 
           <button
             type="button"

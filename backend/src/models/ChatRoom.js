@@ -20,6 +20,21 @@ const unreadCountSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const userClearedAtSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+    },
+    at: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false },
+);
+
 const escalationSchema = new mongoose.Schema(
   {
     isEscalation: {
@@ -133,6 +148,14 @@ const chatRoomSchema = new mongoose.Schema(
     },
     unreadCounts: {
       type: [unreadCountSchema],
+      default: [],
+    },
+    clearedMessagesAt: {
+      type: [userClearedAtSchema],
+      default: [],
+    },
+    clearedCallsAt: {
+      type: [userClearedAtSchema],
       default: [],
     },
     escalation: {

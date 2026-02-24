@@ -10,13 +10,8 @@ const httpLogger = pinoHttp({
   },
   customLogLevel: (_req, res, err) => {
     if (err || res.statusCode >= 500) return "error";
-    if (res.statusCode >= 400) return "warn";
-    return "info";
+    return "silent";
   },
-  customProps: (req, res) => ({
-    requestId: req.requestId || null,
-    statusCode: res.statusCode,
-  }),
 });
 
 module.exports = {

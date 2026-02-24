@@ -1,10 +1,16 @@
-import React, { useState, lazy, Suspense, useMemo, useEffect, useRef } from "react";
+import React, { useState, lazy, Suspense, useMemo, useEffect, useRef, useCallback } from "react";
 import { Routes, Route, useLocation, useNavigate, Navigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import api from "./services/api";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ChatNotificationProvider } from "./context/chatNotificationProvider";
 import { updateMyLiveLocation } from "./services/userService";
+import {
+  applySystemSettingsToDocument,
+  getSessionTimeoutMs,
+  readSystemSettings,
+  SYSTEM_SETTINGS_UPDATED_EVENT,
+} from "./utils/systemSettings";
 
 /* =======================
    LAZY IMPORTS
@@ -71,10 +77,15 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [sessionReady, setSessionReady] = useState(false);
+  const [systemSettingsVersion, setSystemSettingsVersion] = useState(0);
   const [theme, setTheme] = useState(() => {
     const storedTheme = localStorage.getItem("theme");
     return storedTheme === "dark" ? "dark" : "light";
   });
+  const inactivityTimerRef = useRef(null);
+  const sessionTimeoutMsRef = useRef(
+    getSessionTimeoutMs(readSystemSettings().security.sessionTimeoutMinutes),
+  );
   const locationSyncStateRef = useRef({
     inFlight: false,
     lastSentAt: 0,
@@ -137,6 +148,86 @@ export default function App() {
     );
     localStorage.setItem("theme", theme);
   }, [isForcedLightPage, theme]);
+
+  const performInactivityLogout = useCallback(() => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("role");
+    localStorage.removeItem("user");
+    delete api.defaults.headers.common.Authorization;
+    setIsLoggedIn(false);
+    setUserRole(null);
+    navigate("/login");
+  }, [navigate]);
+
+  const resetInactivityTimer = useCallback(() => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+      inactivityTimerRef.current = null;
+    }
+
+    if (!isLoggedIn || isPublicPage) return;
+
+    inactivityTimerRef.current = setTimeout(() => {
+      performInactivityLogout();
+    }, sessionTimeoutMsRef.current);
+  }, [isLoggedIn, isPublicPage, performInactivityLogout]);
+
+  useEffect(() => {
+    const applyRuntimeSystemSettings = () => {
+      const settings = readSystemSettings();
+      sessionTimeoutMsRef.current = getSessionTimeoutMs(settings.security.sessionTimeoutMinutes);
+      applySystemSettingsToDocument(settings);
+      setSystemSettingsVersion((prev) => prev + 1);
+    };
+
+    applyRuntimeSystemSettings();
+    window.addEventListener(SYSTEM_SETTINGS_UPDATED_EVENT, applyRuntimeSystemSettings);
+    window.addEventListener("storage", applyRuntimeSystemSettings);
+
+    return () => {
+      window.removeEventListener(SYSTEM_SETTINGS_UPDATED_EVENT, applyRuntimeSystemSettings);
+      window.removeEventListener("storage", applyRuntimeSystemSettings);
+    };
+  }, []);
+
+  useEffect(() => {
+    resetInactivityTimer();
+  }, [resetInactivityTimer, systemSettingsVersion]);
+
+  useEffect(() => {
+    if (!isLoggedIn || isPublicPage) {
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+        inactivityTimerRef.current = null;
+      }
+      return undefined;
+    }
+
+    const activityEvents = [
+      "click",
+      "keydown",
+      "touchstart",
+      "scroll",
+      "visibilitychange",
+    ];
+
+    const onActivity = () => {
+      if (document.visibilityState && document.visibilityState === "hidden") return;
+      resetInactivityTimer();
+    };
+
+    activityEvents.forEach((eventName) =>
+      window.addEventListener(eventName, onActivity, { passive: true }));
+
+    return () => {
+      activityEvents.forEach((eventName) => window.removeEventListener(eventName, onActivity));
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+        inactivityTimerRef.current = null;
+      }
+    };
+  }, [isLoggedIn, isPublicPage, resetInactivityTimer]);
 
   useEffect(() => {
     if (!isLoggedIn || userRole !== "FIELD_EXECUTIVE") return undefined;

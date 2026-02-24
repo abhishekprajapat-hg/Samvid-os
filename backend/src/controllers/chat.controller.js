@@ -14,7 +14,9 @@ const {
   listEscalationLogs,
   toPositiveInt,
 } = require("../services/chatRoom.service");
-const { listConversationCallHistory } = require("../services/chatCall.service");
+const {
+  listConversationCallHistory,
+} = require("../services/chatCall.service");
 
 const emitRealtimeMessage = (io, payload) => {
   if (!io || !payload?.room || !payload?.message) return;
@@ -45,7 +47,12 @@ const emitRealtimeMessage = (io, payload) => {
 };
 
 const handleControllerError = (res, error, fallbackMessage) => {
-  const statusCode = error.statusCode || 500;
+  const isCastError =
+    error?.name === "CastError"
+    || error?.name === "BSONTypeError"
+    || /cast to objectid/i.test(String(error?.message || ""));
+
+  const statusCode = error.statusCode || (isCastError ? 400 : 500);
   const message = statusCode >= 500 ? fallbackMessage : error.message;
 
   if (statusCode >= 500) {

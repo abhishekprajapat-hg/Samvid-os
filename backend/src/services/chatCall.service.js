@@ -74,6 +74,15 @@ const resolveParticipantsFromRoom = (room, callerId = "") => {
   return participantIds;
 };
 
+const getUserClearedAt = (rows, userId) => {
+  const id = toId(userId);
+  if (!id || !Array.isArray(rows)) return null;
+  const row = rows.find((item) => toId(item?.user) === id);
+  if (!row?.at) return null;
+  const marker = new Date(row.at);
+  return Number.isNaN(marker.getTime()) ? null : marker;
+};
+
 const findCallHistoryRow = async ({ callId, roomId }) => {
   const normalizedCallId = String(callId || "").trim();
   const normalizedRoomId = toId(roomId);
@@ -208,9 +217,13 @@ const listConversationCallHistory = async ({ user, roomId, limit = 30 }) => {
     roomId,
   });
 
-  const rows = await ChatCallHistory.find({
-    room: room._id,
-  })
+  const query = { room: room._id };
+  const clearedAt = getUserClearedAt(room.clearedCallsAt, user._id);
+  if (clearedAt) {
+    query.startedAt = { $gt: clearedAt };
+  }
+
+  const rows = await ChatCallHistory.find(query)
     .sort({ startedAt: -1, createdAt: -1 })
     .limit(toPositiveInt(limit, 30, 200))
     .populate("caller", "name role")
