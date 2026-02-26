@@ -4,6 +4,7 @@ import { Hexagon } from "lucide-react-native";
 import { useAuth } from "../../context/AuthContext";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { AppButton, AppChip, AppInput } from "../../components/common/ui";
+import { colors, radii, spacing } from "../../theme/tokens";
 
 type Portal = "GENERAL" | "ADMIN";
 type LegalDoc = "TERMS" | "PRIVACY" | null;
@@ -129,7 +130,7 @@ export const LoginScreen = () => {
     <View style={styles.root}>
       <View style={styles.card}>
         <View style={styles.logoWrap}>
-          <Hexagon size={28} color="#0f172a" strokeWidth={2.2} />
+          <Hexagon size={30} color={colors.primary} strokeWidth={2.2} />
         </View>
 
         <Text style={styles.title}>{portal === "GENERAL" ? "GENERAL LOGIN" : "ADMIN LOGIN"}</Text>
@@ -222,144 +223,146 @@ export const LoginScreen = () => {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    padding: 24,
-    backgroundColor: "#eef2f7",
+    padding: spacing.xl,
+    backgroundColor: colors.bg,
     justifyContent: "center",
   },
   card: {
-    backgroundColor: "#ffffff",
-    borderRadius: 24,
+    backgroundColor: colors.surface,
+    borderRadius: radii.xl,
     borderWidth: 1,
-    borderColor: "#dbe1ea",
-    padding: 20,
-    shadowColor: "#0f172a",
+    borderColor: colors.border,
+    padding: spacing.lg,
+    shadowColor: colors.text,
     shadowOpacity: 0.08,
-    shadowRadius: 20,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 3,
   },
   logoWrap: {
     alignItems: "center",
-    marginBottom: 8,
+    marginBottom: spacing.xs,
   },
   title: {
     textAlign: "center",
-    marginTop: 4,
-    marginBottom: 16,
-    fontSize: 32,
+    marginBottom: spacing.md,
+    fontSize: 22,
     fontWeight: "800",
-    color: "#0f172a",
-    letterSpacing: 0.6,
+    color: colors.text,
+    letterSpacing: 0.4,
   },
   portalRow: {
     flexDirection: "row",
-    gap: 8,
-    marginBottom: 12,
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   flexChip: {
     flex: 1,
     alignSelf: "stretch",
   },
   input: {
-    height: 50,
-    marginBottom: 12,
-    borderRadius: 14,
-    backgroundColor: "#ffffff",
-    borderColor: "#d5dbe5",
+    height: 48,
+    marginBottom: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
   },
   submitButton: {
-    marginTop: 4,
-    height: 46,
-    borderRadius: 12,
+    marginTop: spacing.xs,
+    height: 48,
+    borderRadius: radii.md,
   },
   divider: {
     height: 1,
-    backgroundColor: "#d9e1ec",
-    marginTop: 18,
-    marginBottom: 12,
+    backgroundColor: colors.border,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
   terms: {
     textAlign: "center",
-    color: "#64748b",
+    color: colors.textMuted,
     fontSize: 12,
     lineHeight: 18,
   },
   termsLink: {
-    color: "#0f172a",
+    color: colors.text,
     fontWeight: "700",
   },
   error: {
-    color: "#b91c1c",
-    marginBottom: 10,
+    color: colors.error,
+    marginBottom: spacing.sm,
     textAlign: "center",
+    fontSize: 12,
+    fontWeight: "600",
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(15, 23, 42, 0.35)",
+    backgroundColor: "rgba(15, 23, 42, 0.42)",
     justifyContent: "center",
-    padding: 12,
+    padding: spacing.md,
   },
   modalCard: {
-    backgroundColor: "#f8fafc",
-    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderRadius: radii.lg,
     borderWidth: 1,
-    borderColor: "#dbe1ea",
+    borderColor: colors.border,
     maxHeight: "92%",
-    padding: 12,
+    padding: spacing.md,
   },
   modalHeader: {
-    flexDirection: "column",
-    alignItems: "stretch",
-    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
   },
   modalTitleWrap: {
-    marginBottom: 10,
+    flex: 1,
   },
   modalKicker: {
     fontSize: 10,
     letterSpacing: 1.8,
-    color: "#64748b",
+    color: colors.textMuted,
     fontWeight: "700",
   },
   modalTitle: {
-    fontSize: 34,
-    lineHeight: 36,
+    fontSize: 28,
+    lineHeight: 30,
     fontWeight: "700",
-    color: "#0f172a",
+    color: colors.text,
   },
   closeBtn: {
-    backgroundColor: "#0f172a",
-    borderRadius: 10,
+    backgroundColor: colors.primary,
+    borderRadius: radii.md,
     paddingVertical: 7,
     paddingHorizontal: 12,
-    alignSelf: "flex-end",
   },
   closeBtnText: {
-    color: "#ffffff",
+    color: colors.primaryText,
     fontWeight: "700",
     fontSize: 12,
   },
   sectionList: {
-    gap: 8,
+    gap: spacing.sm,
     paddingBottom: 6,
   },
   sectionCard: {
-    backgroundColor: "#f8fafc",
+    backgroundColor: colors.surfaceMuted,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 8,
-    padding: 10,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
   },
   sectionHeading: {
     fontSize: 12,
     letterSpacing: 1.5,
-    color: "#334155",
+    color: colors.text,
     fontWeight: "800",
     marginBottom: 6,
   },
   sectionBody: {
     fontSize: 13,
     lineHeight: 19,
-    color: "#475569",
+    color: colors.textMuted,
   },
 });

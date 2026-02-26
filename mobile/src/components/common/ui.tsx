@@ -1,6 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { colors, radii } from "../../theme/tokens";
+import { colors, radii, spacing } from "../../theme/tokens";
 
 export const AppCard = ({ children, style }: { children: React.ReactNode; style?: object }) => (
   <View style={[styles.card, style]}>{children}</View>
@@ -87,14 +87,19 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
-    padding: 12,
+    padding: spacing.md,
+    shadowColor: "#0f172a",
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.06,
+    shadowRadius: 14,
+    elevation: 2,
   },
   button: {
-    height: 42,
+    height: 46,
     borderRadius: radii.md,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.md,
   },
   buttonPrimary: {
     backgroundColor: colors.primary,
@@ -109,20 +114,20 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontWeight: "700",
-    fontSize: 12,
+    fontSize: 13,
   },
   buttonTextPrimary: {
     color: colors.primaryText,
   },
   buttonTextGhost: {
-    color: "#334155",
+    color: colors.text,
   },
   chip: {
     borderWidth: 1,
     borderColor: colors.borderStrong,
-    borderRadius: 16,
-    height: 34,
-    paddingHorizontal: 10,
+    borderRadius: radii.pill,
+    height: 36,
+    paddingHorizontal: spacing.md,
     justifyContent: "center",
     alignSelf: "flex-start",
     backgroundColor: colors.surface,
@@ -132,7 +137,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   chipText: {
-    color: "#334155",
+    color: colors.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
@@ -145,8 +150,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: colors.surface,
     color: colors.text,
-    height: 42,
-    paddingHorizontal: 12,
-    marginBottom: 10,
+    height: 46,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    fontSize: 14,
   },
 });
