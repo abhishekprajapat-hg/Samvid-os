@@ -13,6 +13,8 @@ const toPositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+const isLocalDevOrigin = (origin = "") =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin).trim());
 
 const httpServer = http.createServer(app);
 httpServer.keepAliveTimeout = toPositiveInt(process.env.HTTP_KEEP_ALIVE_TIMEOUT_MS, 65000);
@@ -30,12 +32,30 @@ const configuredOrigins = (process.env.CORS_ORIGIN || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const configuredOriginSet = new Set(configuredOrigins);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: configuredOrigins.length ? configuredOrigins : "*",
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (!configuredOrigins.length) {
+        callback(null, true);
+        return;
+      }
+
+      if (configuredOriginSet.has(origin) || isLocalDevOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, false);
+    },
     methods: ["GET", "POST"],
-    credentials: configuredOrigins.length > 0,
+    credentials: true,
   },
 });
 
