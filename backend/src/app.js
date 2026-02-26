@@ -64,6 +64,7 @@ app.get("/api/metrics", async (req, res) => {
 });
 
 app.use("/api", apiLimiter);
+app.use("/api/client", require("./routes/client.routes"));
 app.use("/api/leads", require("./routes/lead.routes"));
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/users", require("./routes/user.routes"));
