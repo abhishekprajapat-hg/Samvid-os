@@ -10,9 +10,6 @@ const { httpMetricsMiddleware, metricsHandler } = require("./observability/metri
 const app = express();
 app.disable("x-powered-by");
 
-const isLocalDevOrigin = (origin = "") =>
-  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin).trim());
-
 const trustProxyRaw = String(process.env.TRUST_PROXY || "").trim().toLowerCase();
 if (trustProxyRaw) {
   if (trustProxyRaw === "true") {
@@ -29,31 +26,13 @@ const configuredOrigins = (process.env.CORS_ORIGIN || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-const configuredOriginSet = new Set(configuredOrigins);
 
 app.use(helmet());
 app.use(compression({ threshold: 1024 }));
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin) {
-        callback(null, true);
-        return;
-      }
-
-      if (!configuredOrigins.length) {
-        callback(null, true);
-        return;
-      }
-
-      if (configuredOriginSet.has(origin) || isLocalDevOrigin(origin)) {
-        callback(null, true);
-        return;
-      }
-
-      callback(null, false);
-    },
-    credentials: true,
+    origin: configuredOrigins.length ? configuredOrigins : "*",
+    credentials: configuredOrigins.length > 0,
   }),
 );
 app.use(attachRequestId);

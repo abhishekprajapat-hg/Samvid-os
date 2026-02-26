@@ -33,16 +33,6 @@ const initials = (name: string) =>
     .map((part) => part[0]?.toUpperCase() || "")
     .join("");
 
-const roleBadgeStyle = (role?: string) => {
-  const normalized = String(role || "").toUpperCase();
-  if (normalized === "ADMIN") return { backgroundColor: "#ffe4e6", color: "#be123c" };
-  if (normalized === "MANAGER") return { backgroundColor: "#cffafe", color: "#0e7490" };
-  if (normalized === "ASSISTANT_MANAGER") return { backgroundColor: "#e0f2fe", color: "#0369a1" };
-  if (normalized === "TEAM_LEADER") return { backgroundColor: "#e0e7ff", color: "#4338ca" };
-  if (normalized === "FIELD_EXECUTIVE") return { backgroundColor: "#f3e8ff", color: "#7e22ce" };
-  return { backgroundColor: "#dcfce7", color: "#166534" };
-};
-
 export const TeamChatScreen = () => {
   const navigation = useNavigation<any>();
   const { token, user, updateUser } = useAuth();
@@ -366,7 +356,6 @@ export const TeamChatScreen = () => {
               value={search}
               onChangeText={setSearch}
               placeholder="Search chats or contacts"
-              placeholderTextColor="#94a3b8"
             />
           </View>
 
@@ -430,7 +419,7 @@ export const TeamChatScreen = () => {
               {renderAvatar({ name: item.name, avatarUrl: item.avatarUrl || "" })}
               <View style={styles.userBody}>
                 <Text style={styles.userName}>{item.name}</Text>
-                <Text style={[styles.roleBadge, roleBadgeStyle(item.role)]}>{item.role}</Text>
+                <Text style={styles.roleBadge}>{item.role}</Text>
               </View>
             </Pressable>
           ))}
@@ -489,18 +478,13 @@ const styles = StyleSheet.create({
   profileCard: {
     borderWidth: 1,
     borderColor: "#e2e8f0",
-    borderRadius: 16,
+    borderRadius: 12,
     backgroundColor: "#fff",
-    padding: 12,
-    marginBottom: 12,
-    shadowColor: "#0f172a",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
-    shadowRadius: 10,
-    elevation: 2,
+    padding: 10,
+    marginBottom: 10,
   },
   pageContent: {
-    paddingBottom: 20,
+    paddingBottom: 16,
   },
   profileInfo: {
     flexDirection: "row",
@@ -513,7 +497,7 @@ const styles = StyleSheet.create({
   profileTitle: {
     color: "#0f172a",
     fontWeight: "700",
-    fontSize: 14,
+    fontSize: 13,
   },
   profileSubtitle: {
     marginTop: 2,
@@ -521,15 +505,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   profileActions: {
-    marginTop: 12,
+    marginTop: 10,
     flexDirection: "row",
     gap: 8,
   },
   smallBtn: {
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
-    paddingHorizontal: 12,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    paddingHorizontal: 10,
     height: 34,
     alignItems: "center",
     justifyContent: "center",
@@ -561,10 +545,10 @@ const styles = StyleSheet.create({
   searchCard: {
     borderWidth: 1,
     borderColor: "#e2e8f0",
-    borderRadius: 16,
+    borderRadius: 12,
     backgroundColor: "#fff",
-    padding: 12,
-    marginBottom: 12,
+    padding: 10,
+    marginBottom: 10,
   },
   searchHead: {
     flexDirection: "row",
@@ -572,16 +556,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   searchTitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#0f172a",
     fontWeight: "700",
   },
   iconBtn: {
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 10,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#fff",
@@ -592,24 +576,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   searchRow: {
-    marginTop: 10,
+    marginTop: 8,
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    borderRadius: 12,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
     backgroundColor: "#fff",
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    paddingHorizontal: 12,
-    height: 40,
+    paddingHorizontal: 10,
+    height: 38,
   },
   searchInput: {
     flex: 1,
     color: "#0f172a",
-    fontSize: 13,
+    fontSize: 12,
   },
   connection: {
-    marginTop: 10,
+    marginTop: 8,
     alignSelf: "flex-start",
     borderRadius: 999,
     paddingVertical: 4,
@@ -620,8 +604,8 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   connectionOn: {
-    backgroundColor: "#cffafe",
-    color: "#0e7490",
+    backgroundColor: "#dcfce7",
+    color: "#166534",
   },
   connectionOff: {
     backgroundColor: "#fef3c7",
@@ -630,10 +614,10 @@ const styles = StyleSheet.create({
   listCard: {
     borderWidth: 1,
     borderColor: "#e2e8f0",
-    borderRadius: 16,
+    borderRadius: 12,
     backgroundColor: "#fff",
-    padding: 12,
-    marginBottom: 12,
+    padding: 10,
+    marginBottom: 10,
   },
   panelLabel: {
     fontSize: 11,
@@ -647,20 +631,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e5e7eb",
-    borderRadius: 14,
-    padding: 10,
-    marginBottom: 8,
-    gap: 10,
+    borderColor: "#e2e8f0",
+    borderRadius: 12,
+    padding: 8,
+    marginBottom: 6,
+    gap: 8,
     backgroundColor: "#fff",
   },
   avatar: {
-    backgroundColor: "#e0f2fe",
+    backgroundColor: "#e2e8f0",
     alignItems: "center",
     justifyContent: "center",
   },
   avatarText: {
-    color: "#0e7490",
+    color: "#334155",
     fontSize: 10,
     fontWeight: "700",
   },
@@ -670,16 +654,18 @@ const styles = StyleSheet.create({
   userName: {
     color: "#0f172a",
     fontWeight: "700",
-    fontSize: 14,
+    fontSize: 13,
   },
   userSub: {
     marginTop: 2,
     color: "#64748b",
-    fontSize: 12,
+    fontSize: 11,
   },
   roleBadge: {
     marginTop: 3,
     alignSelf: "flex-start",
+    backgroundColor: "#dcfce7",
+    color: "#166534",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -690,7 +676,7 @@ const styles = StyleSheet.create({
   rowTime: {
     color: "#94a3b8",
     fontSize: 10,
-    marginLeft: 4,
+    marginLeft: 6,
   },
   empty: {
     textAlign: "center",
@@ -708,12 +694,12 @@ const styles = StyleSheet.create({
   callCard: {
     width: "100%",
     backgroundColor: "#ffffff",
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "#e2e8f0",
-    padding: 18,
+    padding: 16,
     alignItems: "center",
-    gap: 8,
+    gap: 6,
   },
   callTitle: {
     color: "#0f172a",
@@ -732,7 +718,7 @@ const styles = StyleSheet.create({
   callActions: {
     flexDirection: "row",
     gap: 10,
-    marginTop: 10,
+    marginTop: 8,
   },
   callBtn: {
     minWidth: 110,
@@ -770,10 +756,10 @@ const styles = StyleSheet.create({
   profileModal: {
     width: "100%",
     backgroundColor: "#ffffff",
-    borderRadius: 16,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: "#e2e8f0",
-    padding: 16,
+    padding: 14,
     gap: 10,
   },
   profileModalTitle: {

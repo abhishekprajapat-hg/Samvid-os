@@ -1,6 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { colors, radii, spacing } from "../../theme/tokens";
+import { colors, radii } from "../../theme/tokens";
 
 export const AppCard = ({ children, style }: { children: React.ReactNode; style?: object }) => (
   <View style={[styles.card, style]}>{children}</View>
@@ -87,19 +87,14 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
-    padding: spacing.md,
-    shadowColor: "#0f172a",
-    shadowOffset: { width: 0, height: 5 },
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
-    elevation: 2,
+    padding: 12,
   },
   button: {
-    height: 46,
+    height: 42,
     borderRadius: radii.md,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: 12,
   },
   buttonPrimary: {
     backgroundColor: colors.primary,
@@ -114,20 +109,20 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontWeight: "700",
-    fontSize: 13,
+    fontSize: 12,
   },
   buttonTextPrimary: {
     color: colors.primaryText,
   },
   buttonTextGhost: {
-    color: colors.text,
+    color: "#334155",
   },
   chip: {
     borderWidth: 1,
     borderColor: colors.borderStrong,
-    borderRadius: radii.pill,
-    height: 36,
-    paddingHorizontal: spacing.md,
+    borderRadius: 16,
+    height: 34,
+    paddingHorizontal: 10,
     justifyContent: "center",
     alignSelf: "flex-start",
     backgroundColor: colors.surface,
@@ -137,7 +132,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   chipText: {
-    color: colors.textMuted,
+    color: "#334155",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -150,9 +145,8 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: colors.surface,
     color: colors.text,
-    height: 46,
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-    fontSize: 14,
+    height: 42,
+    paddingHorizontal: 12,
+    marginBottom: 10,
   },
 });
