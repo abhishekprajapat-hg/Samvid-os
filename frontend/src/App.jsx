@@ -54,6 +54,7 @@ const FORCE_LIGHT_ROUTE_PREFIXES = [
   "/service-terms",
 ];
 const MANAGEMENT_ROLES = ["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"];
+const CHAT_REFRESH_FALLBACK_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
 
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
 
@@ -92,6 +93,7 @@ export default function App() {
     lastLat: null,
     lastLng: null,
   });
+  const chatRefreshGuardHandledRef = useRef(false);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -190,6 +192,30 @@ export default function App() {
       window.removeEventListener("storage", applyRuntimeSystemSettings);
     };
   }, []);
+
+  useEffect(() => {
+    if (chatRefreshGuardHandledRef.current) return;
+    if (!sessionReady || !isLoggedIn) return;
+    if (location.pathname !== "/chat") return;
+    if (!CHAT_REFRESH_FALLBACK_ROLES.includes(String(userRole || ""))) return;
+    if (typeof window === "undefined") return;
+
+    const navigationEntry = window.performance
+      ?.getEntriesByType?.("navigation")
+      ?.find?.((entry) => entry && typeof entry.type === "string");
+    const legacyNavigationType = window.performance?.navigation?.type;
+    const isReloadNavigation =
+      navigationEntry?.type === "reload" || legacyNavigationType === 1;
+    if (!isReloadNavigation) return;
+
+    const isMobileViewport =
+      window.matchMedia?.("(max-width: 767px)")?.matches
+      ?? window.innerWidth <= 767;
+    if (!isMobileViewport) return;
+
+    chatRefreshGuardHandledRef.current = true;
+    navigate("/", { replace: true });
+  }, [isLoggedIn, location.pathname, navigate, sessionReady, userRole]);
 
   useEffect(() => {
     resetInactivityTimer();

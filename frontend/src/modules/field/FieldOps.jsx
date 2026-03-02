@@ -1,22 +1,18 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  Activity,
   AlertCircle,
   ArrowUpRight,
   Clock3,
   MapPin,
   RefreshCw,
   Route,
+  Search,
+  Signal,
   Users,
+  X,
 } from "lucide-react";
-import {
-  CircleMarker,
-  MapContainer,
-  Marker,
-  Popup,
-  TileLayer,
-  useMap,
-} from "react-leaflet";
 import { divIcon } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { getAllLeads } from "../../services/leadService";
@@ -28,7 +24,8 @@ import FieldOpsQuickLocateSection from "./components/FieldOpsQuickLocateSection"
 import FieldOpsDispatchQueueSection from "./components/FieldOpsDispatchQueueSection";
 import FieldOpsVisitsSection from "./components/FieldOpsVisitsSection";
 import FieldOpsWorkloadSection from "./components/FieldOpsWorkloadSection";
-import { EmptyState, StatCard } from "./components/FieldOpsShared";
+import FieldOpsMapSection from "./components/FieldOpsMapSection";
+import { StatCard } from "./components/FieldOpsShared";
 
 const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
 const VISIT_STATUS = "SITE_VISIT";
@@ -266,19 +263,6 @@ const mergeUsersWithLocationRows = (users, locationRows) => {
   });
 };
 
-const MapViewportController = ({ target }) => {
-  const map = useMap();
-
-  useEffect(() => {
-    const center = normalizePosition(target?.center);
-    if (!center) return;
-    const nextZoom = Number.isFinite(target.zoom) ? target.zoom : map.getZoom();
-    map.flyTo(center, nextZoom, { duration: 0.6 });
-  }, [map, target]);
-
-  return null;
-};
-
 const FieldOps = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
@@ -289,6 +273,8 @@ const FieldOps = () => {
   const [inventoryAssets, setInventoryAssets] = useState([]);
   const [selectedExecutiveId, setSelectedExecutiveId] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const [mapFocusTarget, setMapFocusTarget] = useState(null);
 
   const focusMapOnPosition = useCallback((position, zoom = 15) => {
@@ -345,6 +331,7 @@ const FieldOps = () => {
         staleMinutes: LOCATION_STALE_MINUTES,
       });
       setUsers((previous) => mergeUsersWithLocationRows(previous, locationRows));
+      setLastSyncedAt(new Date().toISOString());
     } catch {
       // Keep map usable even if live location endpoint is unavailable.
     }
@@ -381,6 +368,7 @@ const FieldOps = () => {
       setLeads(Array.isArray(leadRows) ? leadRows : []);
       setUsers(Array.isArray(mergedUsers) ? mergedUsers : []);
       setInventoryAssets(Array.isArray(inventoryRows) ? inventoryRows : []);
+      setLastSyncedAt(new Date().toISOString());
     } catch (fetchError) {
       setError(toErrorMessage(fetchError, "Failed to load field operations"));
       setLeads([]);
@@ -544,15 +532,115 @@ const FieldOps = () => {
     [inventoryAssets],
   );
 
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+
+  const visibleExecutiveStats = useMemo(() => {
+    if (!trimmedQuery) return dashboard.executiveStats;
+
+    return dashboard.executiveStats.filter((row) => {
+      const executiveText = [
+        row?.executive?.name,
+        row?.executive?.email,
+        row?.executive?.phone,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      if (executiveText.includes(trimmedQuery)) return true;
+
+      return row.assignedRows.some((lead) => {
+        const leadText = [
+          lead?.name,
+          lead?.projectInterested,
+          lead?.city,
+          lead?.phone,
+        ]
+          .join(" ")
+          .toLowerCase();
+        return leadText.includes(trimmedQuery);
+      });
+    });
+  }, [dashboard.executiveStats, trimmedQuery]);
+
+  const visibleMapExecutives = useMemo(() => {
+    const locatable = mapExecutives.filter((row) => Boolean(row.markerPosition));
+    if (!trimmedQuery) return locatable;
+
+    return locatable.filter((row) => {
+      const rowText = [
+        row?.executive?.name,
+        row?.executive?.email,
+        row?.executive?.phone,
+        row?.markerCity,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return rowText.includes(trimmedQuery);
+    });
+  }, [mapExecutives, trimmedQuery]);
+
+  const visibleMapProperties = useMemo(() => {
+    if (!trimmedQuery) return mapProperties;
+
+    return mapProperties.filter((asset) => {
+      const assetText = [
+        asset?.title,
+        asset?.location,
+        asset?.status,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return assetText.includes(trimmedQuery);
+    });
+  }, [mapProperties, trimmedQuery]);
+
+  const visibleDispatchQueue = useMemo(() => {
+    if (!trimmedQuery) return dashboard.unassignedQueue;
+
+    return dashboard.unassignedQueue.filter((lead) => {
+      const leadText = [
+        lead?.name,
+        lead?.projectInterested,
+        lead?.city,
+        lead?.phone,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return leadText.includes(trimmedQuery);
+    });
+  }, [dashboard.unassignedQueue, trimmedQuery]);
+
+  const visibleVisitsTimeline = useMemo(() => {
+    if (!trimmedQuery) return dashboard.visitsTimeline;
+
+    return dashboard.visitsTimeline.filter((lead) => {
+      const leadText = [
+        lead?.name,
+        lead?.projectInterested,
+        lead?.city,
+        lead?.assignedTo?.name,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return leadText.includes(trimmedQuery);
+    });
+  }, [dashboard.visitsTimeline, trimmedQuery]);
+
   const locatableExecutives = useMemo(
-    () => mapExecutives.filter((row) => Boolean(row.markerPosition)),
-    [mapExecutives],
+    () => visibleMapExecutives.filter((row) => Boolean(row.markerPosition)),
+    [visibleMapExecutives],
   );
 
   const mapCenter = useMemo(() => {
+    const applyFilteredMarkers = Boolean(trimmedQuery);
+    const executivesForCenter = applyFilteredMarkers
+      ? visibleMapExecutives
+      : mapExecutives.filter((row) => Boolean(row.markerPosition));
+    const propertiesForCenter = applyFilteredMarkers ? visibleMapProperties : mapProperties;
+
     const allMarkerPositions = [
-      ...mapExecutives.map((row) => row.markerPosition),
-      ...mapProperties.map((row) => row.markerPosition),
+      ...executivesForCenter.map((row) => row.markerPosition),
+      ...propertiesForCenter.map((row) => row.markerPosition),
     ].filter(Boolean);
 
     if (!allMarkerPositions.length) {
@@ -571,7 +659,41 @@ const FieldOps = () => {
       total.lat / allMarkerPositions.length,
       total.lng / allMarkerPositions.length,
     ];
-  }, [mapExecutives, mapProperties]);
+  }, [mapExecutives, mapProperties, trimmedQuery, visibleMapExecutives, visibleMapProperties]);
+
+  const liveTrackedExecutives = useMemo(
+    () =>
+      mapExecutives.filter(
+        (row) => row.markerMode === "live" && row.markerIsFresh !== false,
+      ).length,
+    [mapExecutives],
+  );
+
+  const staleTrackedExecutives = useMemo(
+    () =>
+      mapExecutives.filter(
+        (row) => row.markerMode === "live" && row.markerIsFresh === false,
+      ).length,
+    [mapExecutives],
+  );
+
+  const averageLoad = useMemo(() => {
+    const totalExecutives = dashboard.executiveStats.length;
+    if (!totalExecutives) return 0;
+    const totalAssigned = dashboard.executiveStats.reduce(
+      (sum, row) => sum + Number(row.activeAssigned || 0),
+      0,
+    );
+    return Math.round((totalAssigned / totalExecutives) * 10) / 10;
+  }, [dashboard.executiveStats]);
+
+  const coveragePercent = dashboard.fieldExecutives.length
+    ? Math.round((liveTrackedExecutives / dashboard.fieldExecutives.length) * 100)
+    : 0;
+
+  const visitShare = dashboard.activeLeads.length
+    ? Math.round((dashboard.siteVisitLeads.length / dashboard.activeLeads.length) * 100)
+    : 0;
 
   const handleExecutiveFocus = useCallback((row) => {
     const executiveId = String(row?.executive?._id || "");
@@ -600,233 +722,197 @@ const FieldOps = () => {
   }
 
   return (
-    <div className="w-full h-full px-4 sm:px-6 lg:px-8 py-6 space-y-6 overflow-y-auto custom-scrollbar">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-900">Field Operations</h1>
-          <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
-            Live coordination for visit teams and queue dispatch
-          </p>
-        </div>
+    <div className="w-full h-full overflow-y-auto px-3 py-5 sm:px-6 sm:py-6 lg:px-8 custom-scrollbar">
+      <div className="space-y-5 sm:space-y-6">
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-900 px-4 py-5 sm:px-6">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div>
+                <h1 className="text-xl font-semibold text-white sm:text-2xl">Field Ops Command Center</h1>
+                <p className="mt-1 text-xs uppercase tracking-[0.18em] text-cyan-100/80">
+                  Live coordination for visit teams, dispatch load, and ground coverage
+                </p>
+              </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => loadFieldOps(true)}
-            disabled={refreshing}
-            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-60 inline-flex items-center gap-2"
-          >
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-            Refresh
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/leads")}
-            className="h-9 rounded-lg border border-slate-900 bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-800 inline-flex items-center gap-2"
-          >
-            Open Leads
-            <ArrowUpRight size={14} />
-          </button>
-        </div>
-      </div>
+              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => loadFieldOps(true)}
+                  disabled={refreshing}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/30 bg-white/10 px-3 text-xs font-semibold text-white backdrop-blur hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate("/leads")}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/30 bg-white px-3 text-xs font-semibold text-slate-900 hover:bg-slate-100"
+                >
+                  Open Leads
+                  <ArrowUpRight size={14} />
+                </button>
+              </div>
+            </div>
 
-      {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
-          <AlertCircle size={16} />
-          {error}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          title="Active Field Executives"
-          value={dashboard.fieldExecutives.length}
-          helper="Users available for field assignments"
-          icon={Users}
-        />
-        <StatCard
-          title="Site Visits In Pipeline"
-          value={dashboard.siteVisitLeads.length}
-          helper="Active leads currently at site visit stage"
-          icon={MapPin}
-        />
-        <StatCard
-          title="Overdue Follow-ups"
-          value={dashboard.overdueFollowUps.length}
-          helper="Requires immediate action from field team"
-          icon={Clock3}
-        />
-        <StatCard
-          title="Dispatch Queue"
-          value={dashboard.unassignedQueue.length}
-          helper="Active leads without executive assignment"
-          icon={Route}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.4fr_1fr]">
-        <section className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
-              Executive Coverage Map
-            </h2>
-            <span className="text-xs text-slate-500">
-              {dashboard.fieldExecutives.length} executives | {mapProperties.length} properties with coordinates
-            </span>
+            <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1 text-[11px] font-semibold uppercase tracking-[0.12em] sm:flex-wrap sm:overflow-visible sm:pb-0">
+              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-white/30 bg-white/10 px-2.5 py-1 text-cyan-100">
+                <Signal size={12} />
+                Live tracked: {liveTrackedExecutives}
+              </span>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-white/30 bg-white/10 px-2.5 py-1 text-cyan-100">
+                Coverage: {coveragePercent}%
+              </span>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-white/30 bg-white/10 px-2.5 py-1 text-cyan-100">
+                Visit share: {visitShare}%
+              </span>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-white/30 bg-white/10 px-2.5 py-1 text-cyan-100">
+                Last sync: {formatDateTime(lastSyncedAt)}
+              </span>
+            </div>
           </div>
 
-          {dashboard.executiveStats.length === 0 && mapProperties.length === 0 ? (
-            <EmptyState text="No live executives or property coordinates found for your access scope." />
-          ) : (
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="h-[340px] overflow-hidden rounded-lg border border-slate-200">
-                <MapContainer
-                  center={mapCenter}
-                  zoom={9}
-                  scrollWheelZoom
-                  className="h-full w-full"
-                  attributionControl={false}
-                >
-                  <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-                  <MapViewportController target={mapFocusTarget} />
-                  {mapExecutives.map((row) => {
-                    const id = String(row.executive._id);
-                    const active = id === String(selectedExecutiveId);
-                    if (!row.markerPosition) return null;
-
-                    return (
-                      <CircleMarker
-                        key={id}
-                        center={row.markerPosition}
-                        radius={active ? 11 : 8}
-                        pathOptions={{
-                          color: "#0f172a",
-                          fillColor: active ? "#0f172a" : "#06b6d4",
-                          fillOpacity: active ? 0.95 : 0.78,
-                          weight: active ? 3 : 2,
-                        }}
-                        eventHandlers={{
-                          click: () => {
-                            setSelectedExecutiveId(id);
-                            setSelectedPropertyId("");
-                          },
-                        }}
-                      >
-                        <Popup>
-                          <div className="min-w-[170px]">
-                            <p className="text-sm font-semibold text-slate-900">
-                              {row.executive.name || "Executive"}
-                            </p>
-                            <p className="text-xs text-slate-600">
-                              {row.markerMode === "live"
-                                ? `Live location${row.markerIsFresh ? "" : " (stale)"}`
-                                : `Estimated city: ${row.markerCity}`}
-                            </p>
-                            {row.markerMode === "live" && (
-                              <p className="text-xs text-slate-500">
-                                Updated: {formatDateTime(row.markerUpdatedAt)}
-                              </p>
-                            )}
-                            <p className="mt-1 text-xs text-slate-700">
-                              {row.activeAssigned} active | {row.siteVisits} visits
-                            </p>
-                          </div>
-                        </Popup>
-                      </CircleMarker>
-                    );
-                  })}
-                  {mapProperties.map((asset) => {
-                    const propertyId = String(asset._id || "");
-
-                    return (
-                      <Marker
-                        key={`property-${propertyId}`}
-                        position={asset.markerPosition}
-                        icon={PROPERTY_MARKER_ICON}
-                        eventHandlers={{
-                          click: () => {
-                            if (!asset.markerPosition) return;
-                            handlePropertyFocus(asset);
-                          },
-                        }}
-                      >
-                        <Popup>
-                          <div className="min-w-[190px]">
-                            <p className="text-sm font-semibold text-slate-900">
-                              {asset.title || "Property"}
-                            </p>
-                            <p className="text-xs text-slate-600">
-                              {asset.location || "Location unavailable"}
-                            </p>
-                            <p className="mt-1 text-xs text-slate-700">
-                              Status: {asset.status || "Unknown"}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {asset.markerMode === "exact"
-                                ? "Exact property location"
-                                : "Estimated from location text"}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => openDirectionsForProperty(asset)}
-                              className="mt-2 inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
-                            >
-                              <Route size={12} />
-                              Directions
-                            </button>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    );
-                  })}
-                </MapContainer>
+          <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3 sm:px-6">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative w-full lg:max-w-xl">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search executive, lead, project, city, or property..."
+                  className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-cyan-400"
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    aria-label="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                ) : null}
               </div>
-              <p className="mt-2 text-[11px] text-slate-500">
-                Blue markers are executives. Property icon markers are inventory locations.
-              </p>
+
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+                <span className="rounded-full border border-slate-300 bg-white px-2.5 py-1">
+                  {trimmedQuery
+                    ? `${visibleMapExecutives.length + visibleMapProperties.length + visibleDispatchQueue.length} matched records`
+                    : "Showing full field scope"}
+                </span>
+                {staleTrackedExecutives > 0 ? (
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">
+                    {staleTrackedExecutives} stale live locations
+                  </span>
+                ) : null}
+              </div>
             </div>
-          )}
+          </div>
         </section>
 
-        <FieldOpsTaskQueueSection
-          selectedExecutive={selectedExecutive}
+        {error && (
+          <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <AlertCircle size={16} />
+            {error}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-6">
+          <StatCard
+            title="Active Executives"
+            value={dashboard.fieldExecutives.length}
+            helper="Available for assignments"
+            icon={Users}
+          />
+          <StatCard
+            title="Live Tracked"
+            value={liveTrackedExecutives}
+            helper={`${coveragePercent}% tracking coverage`}
+            icon={Signal}
+          />
+          <StatCard
+            title="Site Visits"
+            value={dashboard.siteVisitLeads.length}
+            helper={`${visitShare}% of active pipeline`}
+            icon={MapPin}
+          />
+          <StatCard
+            title="Overdue Follow-ups"
+            value={dashboard.overdueFollowUps.length}
+            helper="Requires immediate intervention"
+            icon={Clock3}
+          />
+          <StatCard
+            title="Dispatch Queue"
+            value={dashboard.unassignedQueue.length}
+            helper="Unassigned active leads"
+            icon={Route}
+          />
+          <StatCard
+            title="Average Load"
+            value={averageLoad}
+            helper="Active leads per executive"
+            icon={Activity}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.6fr_1fr]">
+          <FieldOpsMapSection
+            mapCenter={mapCenter}
+            mapFocusTarget={mapFocusTarget}
+            mapExecutives={visibleMapExecutives}
+            mapProperties={visibleMapProperties}
+            selectedExecutiveId={selectedExecutiveId}
+            onExecutiveSelect={handleExecutiveFocus}
+            onPropertySelect={handlePropertyFocus}
+            onOpenDirections={openDirectionsForProperty}
+            propertyMarkerIcon={PROPERTY_MARKER_ICON}
+            formatDateTime={formatDateTime}
+          />
+
+          <div className="space-y-5">
+            <FieldOpsQuickLocateSection
+              locatableExecutives={locatableExecutives}
+              selectedExecutiveId={selectedExecutiveId}
+              selectedPropertyId={selectedPropertyId}
+              mapProperties={visibleMapProperties}
+              onExecutiveSelect={handleExecutiveFocus}
+              onPropertySelect={handlePropertyFocus}
+            />
+            <FieldOpsTaskQueueSection
+              selectedExecutive={selectedExecutive}
+              formatDateTime={formatDateTime}
+              getLeadLocationLabel={getLeadLocationLabel}
+              getLiveCoordinates={getLiveCoordinates}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+          <FieldOpsDispatchQueueSection
+            unassignedQueue={visibleDispatchQueue}
+            formatDateTime={formatDateTime}
+            getLeadLocationLabel={getLeadLocationLabel}
+          />
+
+          <FieldOpsVisitsSection
+            visitsTimeline={visibleVisitsTimeline}
+            formatDateTime={formatDateTime}
+            getLeadLocationLabel={getLeadLocationLabel}
+          />
+        </div>
+
+        <FieldOpsWorkloadSection
+          executiveStats={visibleExecutiveStats}
+          selectedExecutiveId={selectedExecutiveId}
+          onExecutiveSelect={handleExecutiveFocus}
           formatDateTime={formatDateTime}
-          getLeadLocationLabel={getLeadLocationLabel}
-          getLiveCoordinates={getLiveCoordinates}
         />
       </div>
-
-      <FieldOpsQuickLocateSection
-        locatableExecutives={locatableExecutives}
-        selectedExecutiveId={selectedExecutiveId}
-        selectedPropertyId={selectedPropertyId}
-        mapProperties={mapProperties}
-        onExecutiveSelect={handleExecutiveFocus}
-        onPropertySelect={handlePropertyFocus}
-      />
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <FieldOpsDispatchQueueSection
-          unassignedQueue={dashboard.unassignedQueue}
-          formatDateTime={formatDateTime}
-          getLeadLocationLabel={getLeadLocationLabel}
-        />
-
-        <FieldOpsVisitsSection
-          visitsTimeline={dashboard.visitsTimeline}
-          formatDateTime={formatDateTime}
-          getLeadLocationLabel={getLeadLocationLabel}
-        />
-      </div>
-
-      <FieldOpsWorkloadSection
-        executiveStats={dashboard.executiveStats}
-        selectedExecutiveId={selectedExecutiveId}
-        onExecutiveSelect={handleExecutiveFocus}
-        formatDateTime={formatDateTime}
-      />
     </div>
   );
 };
