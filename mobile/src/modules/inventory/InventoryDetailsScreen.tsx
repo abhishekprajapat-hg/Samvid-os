@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import { useRoute } from "@react-navigation/native";
 import { getInventoryAssetActivity, getInventoryAssetById, updateInventoryAsset } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
@@ -64,6 +64,9 @@ export const InventoryDetailsScreen = () => {
   const [activities, setActivities] = useState<InventoryActivity[]>([]);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const [reasonModalOpen, setReasonModalOpen] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [reservationReasonDraft, setReservationReasonDraft] = useState("");
   const viewerListRef = useRef<FlatList<string>>(null);
 
   const galleryImages = useMemo(
@@ -110,12 +113,15 @@ export const InventoryDetailsScreen = () => {
     return () => clearTimeout(timer);
   }, [viewerOpen, viewerIndex]);
 
-  const updateStatus = async (status: string) => {
+  const applyStatusUpdate = async (status: string, reservationReason = "") => {
     if (!asset || !canManage) return;
 
     try {
       setSaving(true);
-      const updated = await updateInventoryAsset(asset._id, { status });
+      const updated = await updateInventoryAsset(asset._id, {
+        status,
+        reservationReason: status === "Blocked" ? reservationReason : "",
+      });
       setAsset(updated);
       const latestTimeline = await getInventoryAssetActivity(asset._id, { limit: 60 });
       setActivities(Array.isArray(latestTimeline) ? latestTimeline : []);
@@ -125,6 +131,39 @@ export const InventoryDetailsScreen = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const closeReasonModal = () => {
+    setReasonModalOpen(false);
+    setPendingStatus(null);
+    setReservationReasonDraft("");
+  };
+
+  const updateStatus = async (status: string) => {
+    if (!asset || !canManage) return;
+
+    if (status === "Blocked") {
+      setPendingStatus(status);
+      setReservationReasonDraft(String(asset.reservationReason || "").trim());
+      setReasonModalOpen(true);
+      return;
+    }
+
+    await applyStatusUpdate(status, "");
+  };
+
+  const submitPendingStatus = async () => {
+    const status = pendingStatus;
+    if (!status) return;
+
+    const trimmedReason = reservationReasonDraft.trim();
+    if (!trimmedReason) {
+      setError("Reservation reason is required when status is Reserved");
+      return;
+    }
+
+    closeReasonModal();
+    await applyStatusUpdate(status, trimmedReason);
   };
 
   const openFile = async (url?: string) => {
@@ -164,6 +203,9 @@ export const InventoryDetailsScreen = () => {
         <Text style={styles.meta}>Category: {asset.category || "-"}</Text>
         <Text style={styles.meta}>Type: {asset.type || "-"}</Text>
         <Text style={styles.meta}>Status: {asset.status || "-"}</Text>
+        {(asset.status === "Blocked" || asset.status === "Reserved") && asset.reservationReason ? (
+          <Text style={styles.reasonMeta}>Reserved reason: {asset.reservationReason}</Text>
+        ) : null}
         <Text style={styles.meta}>Price: Rs {Number(asset.price || 0).toLocaleString("en-IN")}</Text>
         <Text style={styles.meta}>Description: {asset.description || "-"}</Text>
 
@@ -247,6 +289,30 @@ export const InventoryDetailsScreen = () => {
         )}
       />
 
+      <Modal visible={reasonModalOpen} animationType="fade" transparent onRequestClose={closeReasonModal}>
+        <View style={styles.viewerOverlay}>
+          <View style={styles.reasonModalCard}>
+            <Text style={styles.section}>Reservation Reason</Text>
+            <Text style={styles.meta}>Please mention why this property is being reserved.</Text>
+            <TextInput
+              style={[styles.reasonInput]}
+              placeholder="Reason for reservation"
+              value={reservationReasonDraft}
+              onChangeText={setReservationReasonDraft}
+              multiline
+            />
+            <View style={styles.rowWrap}>
+              <Pressable style={styles.chip} onPress={closeReasonModal}>
+                <Text style={styles.chipText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.chipActive} onPress={submitPendingStatus}>
+                <Text style={styles.chipTextActive}>Submit</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={viewerOpen} transparent animationType="fade" onRequestClose={() => setViewerOpen(false)}>
         <View style={styles.viewerOverlay}>
           <Pressable style={styles.viewerClose} onPress={() => setViewerOpen(false)}>
@@ -321,6 +387,7 @@ const styles = StyleSheet.create({
   name: { fontSize: 18, fontWeight: "700", color: "#0f172a" },
   section: { marginBottom: 8, color: "#334155", fontWeight: "700" },
   meta: { marginTop: 4, fontSize: 12, color: "#64748b" },
+  reasonMeta: { marginTop: 5, fontSize: 12, color: "#b45309", fontWeight: "600" },
   rowWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sectionInline: {
     marginTop: 10,
@@ -394,6 +461,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#334155",
     fontWeight: "600",
+  },
+  reasonModalCard: {
+    width: "100%",
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    padding: 14,
+  },
+  reasonInput: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 92,
+    backgroundColor: "#fff",
+    textAlignVertical: "top",
   },
   viewerOverlay: {
     flex: 1,

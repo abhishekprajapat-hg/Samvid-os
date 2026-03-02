@@ -7,6 +7,21 @@ const leadSchema = new mongoose.Schema(
     email: String,
     city: String,
     projectInterested: String,
+    metaLeadId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    metaPageId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    metaFormId: {
+      type: String,
+      default: "",
+      trim: true,
+    },
     inventoryId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Inventory",
@@ -100,5 +115,9 @@ leadSchema.index({ assignedExecutive: 1, createdAt: -1 });
 leadSchema.index({ assignedFieldExecutive: 1, createdAt: -1 });
 leadSchema.index({ nextFollowUp: 1, assignedTo: 1 });
 leadSchema.index({ relatedInventoryIds: 1, createdAt: -1 });
+leadSchema.index(
+  { metaLeadId: 1 },
+  { unique: true, partialFilterExpression: { metaLeadId: { $exists: true, $ne: "" } } },
+);
 
 module.exports = mongoose.model("Lead", leadSchema);

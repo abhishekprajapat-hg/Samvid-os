@@ -1,4 +1,5 @@
 const INVENTORY_STATUSES = ["Available", "Blocked", "Sold"];
+const INVENTORY_TYPES = ["Sale", "Rent"];
 
 const INVENTORY_REQUEST_TYPES = ["create", "update"];
 const INVENTORY_REQUEST_STATUSES = ["pending", "approved", "rejected"];
@@ -8,7 +9,10 @@ const INVENTORY_ALLOWED_FIELDS = [
   "towerName",
   "unitNumber",
   "price",
+  "type",
+  "category",
   "status",
+  "reservationReason",
   "location",
   "siteLocation",
   "images",
@@ -36,6 +40,7 @@ const INVENTORY_ACTIVITY_ACTIONS = {
 
 module.exports = {
   INVENTORY_STATUSES,
+  INVENTORY_TYPES,
   INVENTORY_REQUEST_TYPES,
   INVENTORY_REQUEST_STATUSES,
   INVENTORY_ALLOWED_FIELDS,

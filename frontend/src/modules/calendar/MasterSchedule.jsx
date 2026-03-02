@@ -5,12 +5,16 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Loader2,
+  NotebookPen,
+  Save,
   Plus,
   RefreshCw,
   Phone,
   User,
 } from "lucide-react";
 import api from "../../services/api";
+import { addLeadDiaryEntry, getLeadDiary } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -41,6 +45,19 @@ const formatDateTime = (dateValue) => {
   });
 };
 
+const formatDiaryTime = (dateValue) => {
+  const d = new Date(dateValue);
+  if (Number.isNaN(d.getTime())) return "-";
+
+  return d.toLocaleString([], {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
 const buildCalendarCells = (monthDate) => {
   const year = monthDate.getFullYear();
   const month = monthDate.getMonth();
@@ -61,6 +78,11 @@ const MasterSchedule = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [leads, setLeads] = useState([]);
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [diaryLoading, setDiaryLoading] = useState(false);
+  const [diarySaving, setDiarySaving] = useState(false);
+  const [diaryDraft, setDiaryDraft] = useState("");
+  const [diaryEntries, setDiaryEntries] = useState([]);
 
   const [monthCursor, setMonthCursor] = useState(() => {
     const now = new Date();
@@ -130,11 +152,66 @@ const MasterSchedule = () => {
     const items = [...(byDate.get(selectedKey) || [])];
     return items.sort((a, b) => new Date(a.nextFollowUp) - new Date(b.nextFollowUp));
   }, [byDate, selectedKey]);
+  const selectedLead = useMemo(
+    () => selectedDayItems.find((lead) => lead._id === selectedLeadId) || selectedDayItems[0] || null,
+    [selectedDayItems, selectedLeadId],
+  );
+  const selectedDiaryLeadId = String(selectedLead?._id || "");
 
   const monthTitle = monthCursor.toLocaleDateString([], {
     month: "long",
     year: "numeric",
   });
+
+  useEffect(() => {
+    if (!selectedDayItems.length) {
+      setSelectedLeadId("");
+      setDiaryDraft("");
+      setDiaryEntries([]);
+      return;
+    }
+
+    const isSelectedLeadStillVisible = selectedDayItems.some((lead) => lead._id === selectedLeadId);
+    if (!isSelectedLeadStillVisible) {
+      setSelectedLeadId(selectedDayItems[0]._id);
+      setDiaryDraft("");
+    }
+  }, [selectedDayItems, selectedLeadId]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const loadDiary = async () => {
+      if (!selectedDiaryLeadId) {
+        setDiaryEntries([]);
+        setDiaryLoading(false);
+        return;
+      }
+
+      try {
+        setDiaryLoading(true);
+        const entries = await getLeadDiary(selectedDiaryLeadId);
+        if (!isCancelled) {
+          setDiaryEntries(Array.isArray(entries) ? entries : []);
+        }
+      } catch (err) {
+        if (!isCancelled) {
+          setDiaryEntries([]);
+          setError(toErrorMessage(err, "Failed to load lead diary"));
+        }
+      } finally {
+        if (!isCancelled) {
+          setDiaryLoading(false);
+        }
+      }
+    };
+
+    loadDiary();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedDiaryLeadId]);
 
   const handleSchedule = async () => {
     if (!form.leadId || !form.nextFollowUp) {
@@ -175,6 +252,45 @@ const MasterSchedule = () => {
     const now = new Date();
     setSelectedDate(now);
     setMonthCursor(new Date(now.getFullYear(), now.getMonth(), 1));
+  };
+
+  const handleSelectLead = (leadId) => {
+    setSelectedLeadId(leadId);
+    setDiaryDraft("");
+  };
+
+  const handleAddDiary = async () => {
+    if (!selectedDiaryLeadId) {
+      setError("Select a follow-up lead first");
+      return;
+    }
+
+    const note = diaryDraft.trim();
+    if (!note) {
+      setError("Diary note cannot be empty");
+      return;
+    }
+
+    try {
+      setDiarySaving(true);
+      setError("");
+      setSuccess("");
+
+      const createdEntry = await addLeadDiaryEntry(selectedDiaryLeadId, note);
+      if (createdEntry) {
+        setDiaryEntries((prev) => [createdEntry, ...prev]);
+      } else {
+        const entries = await getLeadDiary(selectedDiaryLeadId);
+        setDiaryEntries(Array.isArray(entries) ? entries : []);
+      }
+
+      setDiaryDraft("");
+      setSuccess("Diary note added");
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to save diary note"));
+    } finally {
+      setDiarySaving(false);
+    }
   };
 
   return (
@@ -276,7 +392,7 @@ const MasterSchedule = () => {
           </div>
         </section>
 
-        <section className="grid grid-rows-[auto_1fr] gap-4 min-h-0">
+          <section className="grid grid-rows-[auto_1fr] gap-4 min-h-0">
           <div className={`rounded-2xl border p-4 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
             <h3 className={`text-sm font-bold mb-3 ${isDark ? "text-slate-100" : "text-slate-800"}`}>Schedule Follow-up</h3>
             <div className="space-y-2">
@@ -321,46 +437,131 @@ const MasterSchedule = () => {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-              {loading ? (
-                <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Loading...</div>
-              ) : selectedDayItems.length === 0 ? (
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                {loading ? (
+                  <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Loading...</div>
+                ) : selectedDayItems.length === 0 ? (
                 <div className={`h-full rounded-xl border border-dashed flex flex-col items-center justify-center p-6 text-center ${
                   isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"
                 }`}>
                   <CalendarIcon size={26} className="mb-2 opacity-70" />
                   No follow-ups on this date
                 </div>
-              ) : (
-                selectedDayItems.map((lead, index) => (
-                  <motion.div
-                    key={lead._id}
-                    initial={{ opacity: 0, x: 10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.04 }}
-                    className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white"}`}
-                  >
-                    <div className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>{lead.name}</div>
-                    <div className={`mt-2 text-xs space-y-1 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                      <div className="flex items-center gap-2">
-                        <Clock3 size={12} /> {formatDateTime(lead.nextFollowUp)}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Phone size={12} /> {lead.phone || "-"}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <User size={12} /> {lead.status}
+                ) : (
+                  selectedDayItems.map((lead, index) => {
+                    const isActiveLead = selectedDiaryLeadId === lead._id;
+
+                    return (
+                      <motion.div
+                        key={lead._id}
+                        initial={{ opacity: 0, x: 10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.04 }}
+                        onClick={() => handleSelectLead(lead._id)}
+                        className={`rounded-xl border p-3 cursor-pointer transition-colors ${
+                          isActiveLead
+                            ? (isDark ? "border-cyan-500/50 bg-cyan-500/10" : "border-sky-400 bg-sky-50")
+                            : (isDark ? "border-slate-700 bg-slate-900/85 hover:border-slate-500" : "border-slate-200 bg-white hover:border-slate-300")
+                        }`}
+                      >
+                        <div className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>{lead.name}</div>
+                        <div className={`mt-2 text-xs space-y-1 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                          <div className="flex items-center gap-2">
+                            <Clock3 size={12} /> {formatDateTime(lead.nextFollowUp)}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Phone size={12} /> {lead.phone || "-"}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <User size={12} /> {lead.status}
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })
+                )}
+              </div>
+              <div className={`border-t p-4 space-y-3 ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <NotebookPen size={14} className={isDark ? "text-cyan-300" : "text-sky-700"} />
+                    <span className={`text-sm font-bold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                      Lead Diary
+                    </span>
+                  </div>
+                  {selectedLead && (
+                    <span className={`text-[11px] font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                      {selectedLead.name}
+                    </span>
+                  )}
+                </div>
+
+                {selectedLead ? (
+                  <>
+                    <div className="space-y-2">
+                      <textarea
+                        value={diaryDraft}
+                        onChange={(e) => setDiaryDraft(e.target.value)}
+                        maxLength={2000}
+                        placeholder={`Add diary note for ${selectedLead.name}`}
+                        className={`w-full min-h-[84px] rounded-xl border px-3 py-2 text-sm bg-transparent resize-y ${
+                          isDark ? "border-slate-700 text-slate-100 placeholder:text-slate-500" : "border-slate-300 text-slate-800 placeholder:text-slate-400"
+                        }`}
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {diaryDraft.length}/2000
+                        </span>
+                        <button
+                          onClick={handleAddDiary}
+                          disabled={diarySaving || !diaryDraft.trim()}
+                          className={`h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${
+                            isDark ? "bg-cyan-600 hover:bg-cyan-500 text-white" : "bg-sky-600 hover:bg-sky-500 text-white"
+                          } disabled:opacity-60`}
+                        >
+                          {diarySaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                          {diarySaving ? "Saving..." : "Add Note"}
+                        </button>
                       </div>
                     </div>
-                  </motion.div>
-                ))
-              )}
+
+                    <div className={`rounded-xl border max-h-48 overflow-y-auto custom-scrollbar ${isDark ? "border-slate-700 bg-slate-900/50" : "border-slate-200 bg-slate-50/60"}`}>
+                      {diaryLoading ? (
+                        <div className={`px-3 py-4 text-sm flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                          <Loader2 size={14} className="animate-spin" /> Loading diary...
+                        </div>
+                      ) : diaryEntries.length === 0 ? (
+                        <div className={`px-3 py-4 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          No diary notes yet
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-200/60 dark:divide-slate-700/80">
+                          {diaryEntries.map((entry) => (
+                            <div key={entry._id} className="px-3 py-2.5">
+                              <p className={`text-sm whitespace-pre-wrap break-words ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                                {entry.note}
+                              </p>
+                              <div className={`mt-1 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                                {entry.createdBy?.name || "Unknown"} - {formatDiaryTime(entry.createdAt)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Select a follow-up lead from this day to view diary notes.
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </section>
-      </div>
+          </section>
+        </div>
     </div>
   );
 };
 
 export default MasterSchedule;
+

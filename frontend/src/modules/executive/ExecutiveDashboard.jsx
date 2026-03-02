@@ -14,6 +14,7 @@ import LeadsMatrix from "../leads/LeadsMatrix";
 import TeamChat from "../chat/TeamChat";
 import MasterSchedule from "../calendar/MasterSchedule";
 import Performance from "../reports/Performance";
+import LeadPerformancePanel from "../../components/dashboard/LeadPerformancePanel";
 import api from "../../services/api";
 import { toErrorMessage } from "../../utils/errorMessage";
 
@@ -34,6 +35,7 @@ const ExecutiveDashboard = () => {
     commission: 0,
     inventoryCount: 0,
   });
+  const [leadRows, setLeadRows] = useState([]);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -46,6 +48,7 @@ const ExecutiveDashboard = () => {
         const leads = leadRes.data?.leads || [];
         const inventoryAssets = inventoryRes.data?.assets || [];
         const closedLeads = leads.filter((lead) => lead.status === "CLOSED");
+        setLeadRows(Array.isArray(leads) ? leads : []);
 
         setStats({
           totalLeads: leads.length,
@@ -54,6 +57,7 @@ const ExecutiveDashboard = () => {
           inventoryCount: Array.isArray(inventoryAssets) ? inventoryAssets.length : 0,
         });
       } catch (error) {
+        setLeadRows([]);
         console.error("Executive stats error:", toErrorMessage(error, "Unknown error"));
       }
     };
@@ -68,7 +72,7 @@ const ExecutiveDashboard = () => {
 
   const renderContent = () => {
     if (activeTab === "dashboard") {
-      return <ExecutiveOverview stats={stats} onOpen={setActiveTab} />;
+      return <ExecutiveOverview stats={stats} leads={leadRows} onOpen={setActiveTab} />;
     }
     if (activeTab === "leads") {
       return <LeadsMatrix />;
@@ -86,7 +90,7 @@ const ExecutiveDashboard = () => {
       return <Performance />;
     }
 
-    return <ExecutiveOverview stats={stats} onOpen={setActiveTab} />;
+    return <ExecutiveOverview stats={stats} leads={leadRows} onOpen={setActiveTab} />;
   };
 
   return (
@@ -108,7 +112,7 @@ const ExecutiveDashboard = () => {
   );
 };
 
-const ExecutiveOverview = ({ stats, onOpen }) => (
+const ExecutiveOverview = ({ stats, leads, onOpen }) => (
   <div className="h-full overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
     <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
       <StatCard
@@ -138,6 +142,16 @@ const ExecutiveOverview = ({ stats, onOpen }) => (
         hint="Company units"
         icon={Building2}
         onClick={() => onOpen("inventory")}
+      />
+    </div>
+
+    <div className="mt-6">
+      <LeadPerformancePanel
+        leads={leads}
+        theme="light"
+        accent="emerald"
+        title="Role Performance Graph"
+        subtitle="My lead pipeline movement by stage"
       />
     </div>
 

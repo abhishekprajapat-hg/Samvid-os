@@ -33,9 +33,13 @@ export const deleteInventoryAsset = async (assetId: string) => {
   await api.delete(`/inventory/${assetId}`);
 };
 
-export const requestInventoryStatusChange = async (assetId: string, status: string) => {
+export const requestInventoryStatusChange = async (
+  assetId: string,
+  status: string,
+  reservationReason = "",
+) => {
   const res = await api.post(`/inventory-request/update/${assetId}`, {
-    proposedData: { status },
+    proposedData: { status, reservationReason },
   });
   return res.data?.request || null;
 };

@@ -39,6 +39,7 @@ export interface InventoryAsset {
   type?: string;
   category?: string;
   status?: string;
+  reservationReason?: string;
   amenities?: string[];
   images?: string[];
   documents?: string[];

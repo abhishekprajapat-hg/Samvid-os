@@ -22,7 +22,10 @@ const INVENTORY_SELECTABLE_FIELDS = [
   "towerName",
   "unitNumber",
   "price",
+  "type",
+  "category",
   "status",
+  "reservationReason",
   "location",
   "siteLocation",
   "images",
@@ -40,6 +43,19 @@ const toLegacyStatus = (status) => {
   return status || "Available";
 };
 
+const toLegacyType = (type) => {
+  const cleanType = String(type || "").trim().toLowerCase();
+  if (["rent", "rental", "for rent", "lease", "leasing"].includes(cleanType)) {
+    return "Rent";
+  }
+  return "Sale";
+};
+
+const toLegacyCategory = (category) => {
+  const cleanCategory = String(category || "").trim();
+  return cleanCategory || "Apartment";
+};
+
 const toLegacyAsset = (inventory, role) => {
   if (!inventory) return null;
 
@@ -52,9 +68,10 @@ const toLegacyAsset = (inventory, role) => {
     title: titleParts.join(" - ") || "Inventory Unit",
     location: inventory.location || "",
     price: inventory.price || 0,
-    type: "Sale",
-    category: "Apartment",
+    type: toLegacyType(inventory.type),
+    category: toLegacyCategory(inventory.category),
     status: toLegacyStatus(inventory.status),
+    reservationReason: inventory.reservationReason || "",
     siteLocation: inventory.siteLocation || { lat: null, lng: null },
     images: Array.isArray(inventory.images) ? inventory.images : [],
     documents: Array.isArray(inventory.documents) ? inventory.documents : [],
@@ -81,7 +98,10 @@ const toFieldExecutiveInventoryView = (inventory) => ({
   towerName: inventory.towerName,
   unitNumber: inventory.unitNumber,
   price: inventory.price,
+  type: toLegacyType(inventory.type),
+  category: toLegacyCategory(inventory.category),
   status: inventory.status,
+  reservationReason: inventory.reservationReason || "",
   location: inventory.location,
   siteLocation: inventory.siteLocation || { lat: null, lng: null },
   images: Array.isArray(inventory.images) ? inventory.images : [],
@@ -97,9 +117,36 @@ const toRoleBasedInventory = (inventory, role) => {
   return inventory;
 };
 
+const resolveControllerErrorStatus = (error) => {
+  if (error?.statusCode) return error.statusCode;
+  if (error?.name === "ValidationError" || error?.name === "CastError") return 400;
+  if (error?.code === 11000) return 409;
+  return 500;
+};
+
+const resolveControllerErrorMessage = (error, fallbackMessage, statusCode) => {
+  if (statusCode >= 500) return fallbackMessage;
+
+  if (error?.name === "ValidationError" && error?.errors) {
+    const firstValidationError = Object.values(error.errors)[0];
+    const validationMessage = firstValidationError?.message || "";
+    if (validationMessage) return validationMessage;
+  }
+
+  if (error?.name === "CastError" && error?.path) {
+    return `Invalid ${error.path}`;
+  }
+
+  if (error?.code === 11000) {
+    return "Inventory already exists for the same project, tower and unit";
+  }
+
+  return error?.message || fallbackMessage;
+};
+
 const handleControllerError = (req, res, error, fallbackMessage) => {
-  const statusCode = error.statusCode || 500;
-  const message = statusCode >= 500 ? fallbackMessage : error.message;
+  const statusCode = resolveControllerErrorStatus(error);
+  const message = resolveControllerErrorMessage(error, fallbackMessage, statusCode);
 
   if (statusCode >= 500) {
     logger.error({

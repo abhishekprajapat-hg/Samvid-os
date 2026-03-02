@@ -59,6 +59,7 @@ const EMPTY_FORM = {
   category: "Apartment",
   type: "Sale",
   status: "Available",
+  reservationReason: "",
   price: "",
   description: "",
   customAmenities: "",
@@ -94,10 +95,22 @@ export const AssetVaultScreen = () => {
   const [success, setSuccess] = useState("");
   const [search, setSearch] = useState("");
   const [assets, setAssets] = useState<InventoryAsset[]>([]);
-  const [requests, setRequests] = useState<Array<{ _id: string; inventoryId?: { title?: string }; proposedData?: { status?: string } }>>([]);
+  const [requests, setRequests] = useState<
+    Array<{
+      _id: string;
+      inventoryId?: { title?: string };
+      proposedData?: { status?: string; reservationReason?: string };
+    }>
+  >([]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [reasonModalOpen, setReasonModalOpen] = useState(false);
+  const [reservationReasonDraft, setReservationReasonDraft] = useState("");
+  const [pendingStatusChange, setPendingStatusChange] = useState<{
+    assetId: string;
+    status: string;
+  } | null>(null);
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [pickedImages, setPickedImages] = useState<UploadInput[]>([]);
   const [pickedFiles, setPickedFiles] = useState<UploadInput[]>([]);
@@ -224,13 +237,25 @@ export const AssetVaultScreen = () => {
     setPickedFiles([]);
   };
 
+  const resetPendingStatusChange = () => {
+    setPendingStatusChange(null);
+    setReservationReasonDraft("");
+    setReasonModalOpen(false);
+  };
+
   const createAsset = async () => {
     const title = form.title.trim();
     const location = form.location.trim();
     const price = Number(form.price);
+    const reservationReason = String(form.reservationReason || "").trim();
 
     if (!title || !location || !Number.isFinite(price) || price <= 0) {
       setError("Title, location and valid price are required");
+      return;
+    }
+
+    if (form.status === "Blocked" && !reservationReason) {
+      setError("Reservation reason is required when status is Reserved");
       return;
     }
 
@@ -264,6 +289,7 @@ export const AssetVaultScreen = () => {
         title,
         location,
         price,
+        reservationReason: form.status === "Blocked" ? reservationReason : "",
         description: form.description.trim(),
         images: fallbackImages,
         documents: documentUrls,
@@ -281,19 +307,56 @@ export const AssetVaultScreen = () => {
     }
   };
 
-  const updateStatus = async (assetId: string, status: string) => {
+  const applyStatusChange = async (assetId: string, status: string, reservationReason = "") => {
     try {
       if (canManage) {
-        const updated = await updateInventoryAsset(assetId, { status });
+        const updated = await updateInventoryAsset(assetId, {
+          status,
+          reservationReason: status === "Blocked" ? reservationReason : "",
+        });
         setAssets((prev) => prev.map((asset) => (asset._id === updated._id ? updated : asset)));
         setSuccess("Status updated");
       } else if (canRequestStatusChange) {
-        await requestInventoryStatusChange(assetId, status);
+        await requestInventoryStatusChange(
+          assetId,
+          status,
+          status === "Blocked" ? reservationReason : "",
+        );
         setSuccess("Status change request sent");
       }
     } catch (e) {
       setError(toErrorMessage(e, "Failed to update status"));
     }
+  };
+
+  const updateStatus = async (assetId: string, status: string) => {
+    if (!assetId || !status) return;
+
+    if (status === "Blocked") {
+      setPendingStatusChange({
+        assetId,
+        status,
+      });
+      setReservationReasonDraft("");
+      setReasonModalOpen(true);
+      return;
+    }
+
+    await applyStatusChange(assetId, status, "");
+  };
+
+  const submitPendingStatusChange = async () => {
+    const queued = pendingStatusChange;
+    if (!queued) return;
+
+    const trimmedReason = reservationReasonDraft.trim();
+    if (!trimmedReason) {
+      setError("Reservation reason is required when status is Reserved");
+      return;
+    }
+
+    resetPendingStatusChange();
+    await applyStatusChange(queued.assetId, queued.status, trimmedReason);
   };
 
   const removeAsset = async (assetId: string) => {
@@ -360,6 +423,11 @@ export const AssetVaultScreen = () => {
               <Text style={styles.meta}>
                 {request.inventoryId?.title || "Inventory"} to {request.proposedData?.status || "-"}
               </Text>
+              {request.proposedData?.reservationReason ? (
+                <Text style={styles.reasonMeta}>
+                  Reason: {request.proposedData.reservationReason}
+                </Text>
+              ) : null}
               <View style={styles.requestActions}>
                 <Pressable style={styles.chip} onPress={() => approveRequest(request._id)}>
                   <Text style={styles.chipText}>Approve</Text>
@@ -398,6 +466,9 @@ export const AssetVaultScreen = () => {
               <Text style={styles.meta}>{item.location || "-"} | {item.category || "-"}</Text>
               <Text style={styles.meta}>Rs {Number(item.price || 0).toLocaleString("en-IN")}</Text>
               <Text style={styles.meta}>Photos: {displayImages.length}</Text>
+              {(item.status === "Blocked" || item.status === "Reserved") && item.reservationReason ? (
+                <Text style={styles.reasonMeta}>Reserved reason: {item.reservationReason}</Text>
+              ) : null}
 
               {!!item.amenities?.length ? (
                 <View style={styles.amenityWrap}>
@@ -548,6 +619,35 @@ export const AssetVaultScreen = () => {
         </View>
       </Modal>
 
+      <Modal
+        visible={reasonModalOpen}
+        animationType="fade"
+        transparent
+        onRequestClose={resetPendingStatusChange}
+      >
+        <View style={styles.modalWrap}>
+          <View style={styles.reasonModalCard}>
+            <Text style={styles.modalTitle}>Reservation Reason</Text>
+            <Text style={styles.meta}>Please mention why this property is being reserved.</Text>
+            <TextInput
+              style={[styles.input, styles.reasonInput]}
+              placeholder="Reason for reservation"
+              value={reservationReasonDraft}
+              onChangeText={setReservationReasonDraft}
+              multiline
+            />
+            <View style={styles.modalRow}>
+              <Pressable style={styles.ghostBtn} onPress={resetPendingStatusChange}>
+                <Text>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.primaryBtn} onPress={submitPendingStatusChange}>
+                <Text style={styles.primaryText}>Submit</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </Screen>
   );
 };
@@ -612,6 +712,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     color: "#475569",
+  },
+  reasonMeta: {
+    marginTop: 5,
+    fontSize: 12,
+    color: "#b45309",
+    fontWeight: "600",
   },
   row: {
     marginTop: 10,
@@ -702,6 +808,11 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     maxHeight: "92%",
   },
+  reasonModalCard: {
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 14,
+  },
   modalContent: {
     paddingBottom: 20,
   },
@@ -720,6 +831,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     backgroundColor: "#fff",
     textAlignVertical: "top",
+  },
+  reasonInput: {
+    height: 88,
+    marginTop: 10,
   },
   modalRow: {
     flexDirection: "row",

@@ -4,6 +4,11 @@ const { autoAssignLead } = require("../services/leadAssignment.service");
 const logger = require("../config/logger");
 
 const META_GRAPH_VERSION = String(process.env.META_GRAPH_VERSION || "v24.0").trim();
+const toPositiveInt = (value, fallback) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const META_GRAPH_TIMEOUT_MS = toPositiveInt(process.env.META_GRAPH_TIMEOUT_MS, 10_000);
 
 const normalizeFieldData = (rows = []) => {
   const map = new Map();
@@ -70,6 +75,40 @@ const extractLeadEvents = (body = {}) => {
   return events;
 };
 
+const isDuplicateMetaLeadError = (error) => {
+  if (!error || error.code !== 11000) return false;
+  if (error?.keyPattern?.metaLeadId) return true;
+  return String(error?.message || "").toLowerCase().includes("metaleadid");
+};
+
+const isInvalidMetaLeadError = (error) => {
+  const status = Number(error?.response?.status || 0);
+  const graphCode = Number(error?.response?.data?.error?.code || 0);
+  return status === 400 && (graphCode === 100 || graphCode === 33);
+};
+
+const ensureLeadAssignmentIfMissing = async (leadDoc, event) => {
+  if (!leadDoc) return null;
+
+  const hasAssignee = Boolean(
+    leadDoc.assignedTo || leadDoc.assignedExecutive || leadDoc.assignedFieldExecutive,
+  );
+  if (hasAssignee) return null;
+
+  const assignment = await autoAssignLead({ lead: leadDoc, requester: null });
+  logger.info({
+    leadId: leadDoc._id,
+    metaLeadId: event.leadId,
+    assigned: assignment.assigned,
+    mode: assignment.mode || null,
+    executiveId: assignment.executive?._id || null,
+    managerId: assignment.manager?._id || null,
+    message: "Meta lead assignment retried for existing lead",
+  });
+
+  return assignment;
+};
+
 exports.verifyWebhook = (req, res) => {
   const VERIFY_TOKEN = String(process.env.META_VERIFY_TOKEN || "").trim();
 
@@ -102,6 +141,7 @@ exports.handleWebhook = async (req, res) => {
     let duplicateCount = 0;
     let invalidCount = 0;
     let failedCount = 0;
+    let recoveredAssignments = 0;
     const processedLeadIds = new Set();
 
     for (const event of leadEvents) {
@@ -109,11 +149,15 @@ exports.handleWebhook = async (req, res) => {
       processedLeadIds.add(event.leadId);
 
       try {
-        const response = await axios.get(`https://graph.facebook.com/${META_GRAPH_VERSION}/${event.leadId}`, {
-          params: {
-            access_token: accessToken,
+        const response = await axios.get(
+          `https://graph.facebook.com/${META_GRAPH_VERSION}/${event.leadId}`,
+          {
+            params: {
+              access_token: accessToken,
+            },
+            timeout: META_GRAPH_TIMEOUT_MS,
           },
-        });
+        );
 
         const leadData = response.data || {};
         const normalized = normalizeFieldData(leadData.field_data || []);
@@ -128,12 +172,28 @@ exports.handleWebhook = async (req, res) => {
           continue;
         }
 
-        const existing = await Lead.findOne({ phone });
-        if (existing) {
+        const existingByMetaLeadId = await Lead.findOne({ metaLeadId: event.leadId });
+        if (existingByMetaLeadId) {
+          const recovered = await ensureLeadAssignmentIfMissing(existingByMetaLeadId, event);
+          if (recovered?.assigned) recoveredAssignments += 1;
           duplicateCount += 1;
           logger.info({
+            leadId: existingByMetaLeadId._id,
+            metaLeadId: event.leadId,
             phone,
-            message: "Duplicate meta lead skipped",
+            message: "Duplicate meta lead skipped by metaLeadId",
+          });
+          continue;
+        }
+
+        const existingByPhone = await Lead.findOne({ phone });
+        if (existingByPhone) {
+          duplicateCount += 1;
+          logger.info({
+            leadId: existingByPhone._id,
+            phone,
+            metaLeadId: event.leadId,
+            message: "Duplicate meta lead skipped by phone",
           });
           continue;
         }
@@ -144,6 +204,9 @@ exports.handleWebhook = async (req, res) => {
           email: normalized.email,
           city: normalized.city,
           projectInterested: normalized.projectInterested,
+          metaLeadId: event.leadId,
+          metaPageId: event.pageId,
+          metaFormId: event.formId,
           source: "META",
           status: "NEW",
           assignedTo: null,
@@ -162,6 +225,25 @@ exports.handleWebhook = async (req, res) => {
           message: "Meta lead processed",
         });
       } catch (leadError) {
+        if (isDuplicateMetaLeadError(leadError)) {
+          duplicateCount += 1;
+          logger.info({
+            metaLeadId: event.leadId,
+            message: "Duplicate meta lead skipped due to unique metaLeadId",
+          });
+          continue;
+        }
+
+        if (isInvalidMetaLeadError(leadError)) {
+          invalidCount += 1;
+          logger.warn({
+            leadId: event.leadId,
+            error: leadError.response?.data || leadError.message,
+            message: "Meta lead skipped due to invalid lead ID in Graph API",
+          });
+          continue;
+        }
+
         failedCount += 1;
         logger.error({
           leadId: event.leadId,
@@ -171,14 +253,23 @@ exports.handleWebhook = async (req, res) => {
       }
     }
 
-    return res.status(200).json({
-      message: "Meta lead webhook processed",
+    const responsePayload = {
+      message: failedCount
+        ? "Meta lead webhook partially failed; returning 500 for retry"
+        : "Meta lead webhook processed",
       processed: processedLeadIds.size,
       created: createdCount,
       duplicate: duplicateCount,
       invalid: invalidCount,
       failed: failedCount,
-    });
+      assignmentRecovered: recoveredAssignments,
+    };
+
+    if (failedCount > 0) {
+      return res.status(500).json(responsePayload);
+    }
+
+    return res.status(200).json(responsePayload);
   } catch (error) {
     logger.error({
       error: error.response?.data || error.message,

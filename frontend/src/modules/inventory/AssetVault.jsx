@@ -1,11 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion as Motion, AnimatePresence } from "framer-motion";
 import {
-  Search,
   MapPin,
   Home,
-  Plus,
   Pencil,
   X,
   Loader,
@@ -28,6 +26,11 @@ import {
   rejectInventoryRequest,
 } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import {
+  AssetVaultFilters,
+  AssetVaultToolbar,
+  PendingInventoryRequestsPanel,
+} from "./components/AssetVaultSections";
 
 const STATUS_OPTIONS = ["Available", "Reserved", "Sold"];
 const STATUS_UPDATE_OPTIONS = [
@@ -36,11 +39,71 @@ const STATUS_UPDATE_OPTIONS = [
   { label: "Sold", value: "Sold" },
 ];
 const GEOCODING_SEARCH_ENDPOINT = "https://nominatim.openstreetmap.org/search";
+const LOCATION_SUGGESTION_LIMIT = 6;
+const GOOGLE_MAPS_SCRIPT_ID = "samvid-google-maps-places-script";
+let googleMapsScriptPromise = null;
+
+const loadGoogleMapsPlacesScript = (apiKey) => {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("Google Maps is unavailable"));
+  }
+
+  if (window.google?.maps?.places) {
+    return Promise.resolve(window.google);
+  }
+
+  if (googleMapsScriptPromise) {
+    return googleMapsScriptPromise;
+  }
+
+  googleMapsScriptPromise = new Promise((resolve, reject) => {
+    const rejectWithReset = (message) => {
+      googleMapsScriptPromise = null;
+      reject(new Error(message));
+    };
+
+    const handleLoad = () => {
+      if (window.google?.maps?.places) {
+        resolve(window.google);
+      } else {
+        rejectWithReset("Google Maps Places library failed to load");
+      }
+    };
+
+    const existingScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID);
+    const script = existingScript || document.createElement("script");
+
+    script.addEventListener("load", handleLoad, { once: true });
+    script.addEventListener("error", () => rejectWithReset("Google Maps script failed to load"), {
+      once: true,
+    });
+
+    if (!existingScript) {
+      const params = new URLSearchParams({
+        key: apiKey,
+        libraries: "places",
+        v: "weekly",
+      });
+
+      script.id = GOOGLE_MAPS_SCRIPT_ID;
+      script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    } else if (window.google?.maps) {
+      handleLoad();
+    }
+  });
+
+  return googleMapsScriptPromise;
+};
 
 const toApiStatus = (status) => {
   if (status === "Reserved") return "Blocked";
   return status;
 };
+
+const isReservedStatusValue = (status) => toApiStatus(status) === "Blocked";
 
 const DEFAULT_FORM = {
   title: "",
@@ -51,6 +114,7 @@ const DEFAULT_FORM = {
   type: "Sale",
   category: "Apartment",
   status: "Available",
+  reservationReason: "",
   images: [],
 };
 
@@ -116,6 +180,7 @@ const REQUEST_FIELD_LABELS = {
   unitNumber: "Unit",
   price: "Price",
   status: "Status",
+  reservationReason: "Reservation Reason",
   location: "Location",
   siteLocation: "Coordinates",
   images: "Images",
@@ -169,6 +234,14 @@ const formatRequestValue = (key, value) => {
 
 const AssetVault = () => {
   const navigate = useNavigate();
+  const locationProvider = String(import.meta.env.VITE_LOCATION_PROVIDER || "osm")
+    .trim()
+    .toLowerCase();
+  const googleMapsApiKey = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "").trim();
+  const googlePlacesCountry = String(import.meta.env.VITE_GOOGLE_MAPS_PLACES_COUNTRY || "in")
+    .trim()
+    .toLowerCase();
+  const useGooglePlaces = locationProvider === "google" && Boolean(googleMapsApiKey);
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -189,11 +262,20 @@ const AssetVault = () => {
   const [success, setSuccess] = useState("");
 
   const [formData, setFormData] = useState(DEFAULT_FORM);
+  const [locationSuggestions, setLocationSuggestions] = useState([]);
+  const [loadingLocationSuggestions, setLoadingLocationSuggestions] = useState(false);
+  const [showLocationSuggestions, setShowLocationSuggestions] = useState(false);
+  const [googlePlacesReady, setGooglePlacesReady] = useState(
+    Boolean(useGooglePlaces && typeof window !== "undefined" && window.google?.maps?.places),
+  );
   const [locationBaseline, setLocationBaseline] = useState({
     location: "",
     locationLat: "",
     locationLng: "",
   });
+  const locationSuggestionFetchIdRef = useRef(0);
+  const googleAutocompleteServiceRef = useRef(null);
+  const googleGeocoderRef = useRef(null);
 
   const role = localStorage.getItem("role") || "";
   const canManage = role === "ADMIN";
@@ -228,6 +310,34 @@ const AssetVault = () => {
   useEffect(() => {
     fetchAssets();
   }, [fetchAssets]);
+
+  useEffect(() => {
+    if (!useGooglePlaces || !(isAddModalOpen || isEditModalOpen)) {
+      googleAutocompleteServiceRef.current = null;
+      googleGeocoderRef.current = null;
+      setGooglePlacesReady(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    loadGoogleMapsPlacesScript(googleMapsApiKey)
+      .then((google) => {
+        if (cancelled) return;
+        googleAutocompleteServiceRef.current = new google.maps.places.AutocompleteService();
+        googleGeocoderRef.current = new google.maps.Geocoder();
+        setGooglePlacesReady(true);
+      })
+      .catch((loadError) => {
+        if (cancelled) return;
+        console.error(`Google Places init failed: ${toErrorMessage(loadError, "Unknown error")}`);
+        setGooglePlacesReady(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [googleMapsApiKey, isAddModalOpen, isEditModalOpen, useGooglePlaces]);
 
   const filteredAssets = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -293,8 +403,16 @@ const AssetVault = () => {
     }));
   };
 
+  const clearLocationSuggestionState = () => {
+    locationSuggestionFetchIdRef.current += 1;
+    setLocationSuggestions([]);
+    setLoadingLocationSuggestions(false);
+    setShowLocationSuggestions(false);
+  };
+
   const resetForm = () => {
     setFormData({ ...DEFAULT_FORM });
+    clearLocationSuggestionState();
     setLocationBaseline({
       location: "",
       locationLat: "",
@@ -318,7 +436,7 @@ const AssetVault = () => {
     setIsAddModalOpen(true);
   };
 
-  const lookupCoordinatesByLocation = async (rawLocation) => {
+  const lookupCoordinatesByLocation = useCallback(async (rawLocation) => {
     const query = String(rawLocation || "").trim();
     if (!query) return null;
 
@@ -355,7 +473,206 @@ const AssetVault = () => {
       lat,
       lng,
     };
-  };
+  }, []);
+
+  const lookupLocationSuggestions = useCallback(async (rawLocation) => {
+    const query = String(rawLocation || "").trim();
+    if (!query) return [];
+
+    const searchUrl = new URL(GEOCODING_SEARCH_ENDPOINT);
+    searchUrl.search = new URLSearchParams({
+      format: "jsonv2",
+      q: query,
+      limit: String(LOCATION_SUGGESTION_LIMIT),
+      addressdetails: "1",
+      countrycodes: "in",
+    }).toString();
+
+    const response = await fetch(searchUrl.toString(), {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Location suggestions lookup failed");
+    }
+
+    const rows = await response.json();
+    if (!Array.isArray(rows)) return [];
+
+    const seen = new Set();
+    return rows
+      .map((row) => {
+        const label = String(row?.display_name || row?.name || "").trim();
+        const lat = toCoordinateNumber(row?.lat);
+        const lng = toCoordinateNumber(row?.lon);
+
+        if (!label || lat === null || lng === null) {
+          return null;
+        }
+
+        const dedupeKey = `${label}:${lat}:${lng}`;
+        if (seen.has(dedupeKey)) {
+          return null;
+        }
+
+        seen.add(dedupeKey);
+        return {
+          id: String(row?.place_id || dedupeKey),
+          label,
+          lat,
+          lng,
+        };
+      })
+      .filter(Boolean);
+  }, []);
+
+  const lookupGoogleLocationSuggestions = useCallback((rawLocation) => {
+    if (!useGooglePlaces) return Promise.resolve([]);
+
+    const query = String(rawLocation || "").trim();
+    if (!query) return Promise.resolve([]);
+
+    const service = googleAutocompleteServiceRef.current;
+    const placesStatus = window.google?.maps?.places?.PlacesServiceStatus;
+
+    if (!service || !placesStatus) {
+      return Promise.resolve([]);
+    }
+
+    return new Promise((resolve, reject) => {
+      const request = {
+        input: query,
+        types: ["geocode"],
+      };
+
+      if (googlePlacesCountry) {
+        request.componentRestrictions = { country: googlePlacesCountry };
+      }
+
+      service.getPlacePredictions(request, (predictions, status) => {
+        if (status === placesStatus.ZERO_RESULTS) {
+          resolve([]);
+          return;
+        }
+
+        if (status !== placesStatus.OK || !Array.isArray(predictions)) {
+          reject(new Error("Google location suggestions lookup failed"));
+          return;
+        }
+
+        const rows = predictions
+          .map((prediction) => {
+            const label = String(prediction?.description || "").trim();
+            const placeId = String(prediction?.place_id || "").trim();
+            if (!label || !placeId) return null;
+
+            return {
+              id: placeId,
+              label,
+              placeId,
+            };
+          })
+          .filter(Boolean);
+
+        resolve(rows);
+      });
+    });
+  }, [googlePlacesCountry, useGooglePlaces]);
+
+  const resolveGooglePlaceSuggestion = useCallback((suggestion) => {
+    if (!useGooglePlaces) return Promise.resolve(null);
+
+    const placeId = String(suggestion?.placeId || "").trim();
+    const geocoder = googleGeocoderRef.current;
+    const geocoderStatus = window.google?.maps?.GeocoderStatus;
+
+    if (!placeId || !geocoder || !geocoderStatus) {
+      return Promise.resolve(null);
+    }
+
+    return new Promise((resolve, reject) => {
+      geocoder.geocode({ placeId }, (results, status) => {
+        if (status === geocoderStatus.ZERO_RESULTS) {
+          resolve(null);
+          return;
+        }
+
+        if (status !== geocoderStatus.OK || !Array.isArray(results) || !results[0]) {
+          reject(new Error("Google place details lookup failed"));
+          return;
+        }
+
+        const first = results[0];
+        const lat = toCoordinateNumber(first?.geometry?.location?.lat?.());
+        const lng = toCoordinateNumber(first?.geometry?.location?.lng?.());
+        if (lat === null || lng === null) {
+          resolve(null);
+          return;
+        }
+
+        resolve({
+          id: placeId,
+          placeId,
+          label: String(first.formatted_address || suggestion?.label || "").trim(),
+          lat,
+          lng,
+        });
+      });
+    });
+  }, [useGooglePlaces]);
+
+  const applyLocationSuggestion = useCallback(async (suggestion) => {
+    if (!suggestion) return;
+
+    try {
+      setResolvingLocation(true);
+      setError("");
+
+      let resolvedSuggestion =
+        suggestion.placeId
+          ? await resolveGooglePlaceSuggestion(suggestion)
+          : suggestion;
+      let lat = toCoordinateNumber(resolvedSuggestion?.lat);
+      let lng = toCoordinateNumber(resolvedSuggestion?.lng);
+
+      // If Google place details are unavailable, fall back to OpenStreetMap geocoding.
+      if (!resolvedSuggestion || lat === null || lng === null) {
+        const fallbackQuery = String(suggestion?.label || suggestion?.id || "").trim();
+        const fallback = await lookupCoordinatesByLocation(fallbackQuery);
+        if (fallback) {
+          resolvedSuggestion = {
+            id: suggestion.id || fallback.query,
+            label: suggestion.label || fallback.query,
+            lat: fallback.lat,
+            lng: fallback.lng,
+          };
+          lat = toCoordinateNumber(fallback.lat);
+          lng = toCoordinateNumber(fallback.lng);
+        }
+      }
+
+      if (!resolvedSuggestion || lat === null || lng === null) {
+        setError("Unable to resolve selected location coordinates");
+        return;
+      }
+
+      setFormData((prev) => ({
+        ...prev,
+        location: resolvedSuggestion.label,
+        locationLat: String(lat),
+        locationLng: String(lng),
+      }));
+      setShowLocationSuggestions(false);
+      setLocationSuggestions([]);
+      setSuccess("Location selected and coordinates auto-filled");
+    } catch (applyError) {
+      setError(toErrorMessage(applyError, "Unable to resolve selected location"));
+    } finally {
+      setResolvingLocation(false);
+    }
+  }, [lookupCoordinatesByLocation, resolveGooglePlaceSuggestion]);
 
   const resolveCoordinatesFromLocation = async (rawLocation) => {
     const query = String(rawLocation || "").trim();
@@ -376,6 +693,8 @@ const AssetVault = () => {
         locationLat: String(resolved.lat),
         locationLng: String(resolved.lng),
       }));
+      setShowLocationSuggestions(false);
+      setLocationSuggestions([]);
       setSuccess("Coordinates auto-filled from location");
     } catch (lookupError) {
       setError(toErrorMessage(lookupError, "Unable to fetch coordinates"));
@@ -385,10 +704,72 @@ const AssetVault = () => {
   };
 
   const handleLocationInputKeyDown = (e) => {
+    if (e.key === "Escape") {
+      setShowLocationSuggestions(false);
+      return;
+    }
+
     if (e.key !== "Enter") return;
+
     e.preventDefault();
+    if (showLocationSuggestions && locationSuggestions.length > 0) {
+      void applyLocationSuggestion(locationSuggestions[0]);
+      return;
+    }
+
     resolveCoordinatesFromLocation(e.currentTarget.value);
   };
+
+  useEffect(() => {
+    if (!showLocationSuggestions || !(isAddModalOpen || isEditModalOpen)) return undefined;
+
+    const query = String(formData.location || "").trim();
+    if (query.length < 3) {
+      setLocationSuggestions([]);
+      setLoadingLocationSuggestions(false);
+      return undefined;
+    }
+
+    const fetchId = locationSuggestionFetchIdRef.current + 1;
+    locationSuggestionFetchIdRef.current = fetchId;
+
+    const timer = setTimeout(async () => {
+      try {
+        setLoadingLocationSuggestions(true);
+        let rows = [];
+        if (useGooglePlaces && googlePlacesReady && googleAutocompleteServiceRef.current) {
+          try {
+            rows = await lookupGoogleLocationSuggestions(query);
+          } catch {
+            rows = await lookupLocationSuggestions(query);
+          }
+        } else {
+          rows = await lookupLocationSuggestions(query);
+        }
+
+        if (locationSuggestionFetchIdRef.current !== fetchId) return;
+        setLocationSuggestions(rows);
+      } catch {
+        if (locationSuggestionFetchIdRef.current !== fetchId) return;
+        setLocationSuggestions([]);
+      } finally {
+        if (locationSuggestionFetchIdRef.current === fetchId) {
+          setLoadingLocationSuggestions(false);
+        }
+      }
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [
+    formData.location,
+    isAddModalOpen,
+    isEditModalOpen,
+    useGooglePlaces,
+    googlePlacesReady,
+    lookupGoogleLocationSuggestions,
+    lookupLocationSuggestions,
+    showLocationSuggestions,
+  ]);
 
   const handleSaveAsset = async () => {
     if (!canOpenCreateModal) return;
@@ -408,6 +789,12 @@ const AssetVault = () => {
       return;
     }
 
+    const trimmedReservationReason = String(formData.reservationReason || "").trim();
+    if (isReservedStatusValue(formData.status) && !trimmedReservationReason) {
+      setError("Reservation reason is required when status is Reserved");
+      return;
+    }
+
     try {
       setSaving(true);
       setError("");
@@ -420,6 +807,9 @@ const AssetVault = () => {
         type: formData.type,
         category: formData.category,
         status: formData.status,
+        reservationReason: isReservedStatusValue(formData.status)
+          ? trimmedReservationReason
+          : "",
         images: Array.isArray(formData.images) ? formData.images : [],
       };
 
@@ -452,6 +842,7 @@ const AssetVault = () => {
 
     setError("");
     setSuccess("");
+    clearLocationSuggestionState();
     setIsAddModalOpen(false);
     setEditingAssetId(asset._id);
     setFormData({
@@ -466,6 +857,7 @@ const AssetVault = () => {
       type: asset.type || "Sale",
       category: asset.category || "Apartment",
       status: asset.status || "Available",
+      reservationReason: asset.reservationReason || "",
       images: Array.isArray(asset.images) ? asset.images : [],
     });
     setLocationBaseline({
@@ -535,6 +927,12 @@ const AssetVault = () => {
         return;
       }
 
+      const trimmedReservationReason = String(formData.reservationReason || "").trim();
+      if (isReservedStatusValue(formData.status) && !trimmedReservationReason) {
+        setError("Reservation reason is required when status is Reserved");
+        return;
+      }
+
       const payload = {
         title: formData.title.trim(),
         location: formData.location.trim(),
@@ -542,6 +940,9 @@ const AssetVault = () => {
         type: formData.type,
         category: formData.category,
         status: formData.status,
+        reservationReason: isReservedStatusValue(formData.status)
+          ? trimmedReservationReason
+          : "",
         images: Array.isArray(formData.images) ? formData.images : [],
       };
 
@@ -594,12 +995,30 @@ const AssetVault = () => {
   const handleStatusChange = async (assetId, status) => {
     if (!canManage) return;
 
+    const asset = assets.find((row) => String(row._id) === String(assetId));
+    let reservationReason = "";
+
+    if (status === "Blocked") {
+      const suggestedReason = String(asset?.reservationReason || "").trim();
+      const reasonInput = window.prompt("Reservation reason:", suggestedReason);
+      if (reasonInput === null) return;
+
+      reservationReason = String(reasonInput || "").trim();
+      if (!reservationReason) {
+        setError("Reservation reason is required when status is Reserved");
+        return;
+      }
+    }
+
     try {
       setUpdatingStatusId(assetId);
       setError("");
       setSuccess("");
 
-      const updated = await updateInventoryAsset(assetId, { status });
+      const updated = await updateInventoryAsset(assetId, {
+        status,
+        reservationReason: status === "Blocked" ? reservationReason : "",
+      });
       setAssets((prev) => prev.map((asset) => (asset._id === assetId ? updated : asset)));
       setSuccess("Asset status updated");
     } catch (statusError) {
@@ -620,12 +1039,28 @@ const AssetVault = () => {
       return;
     }
 
+    let reservationReason = "";
+    if (status === "Blocked") {
+      const reasonInput = window.prompt("Reservation reason:");
+      if (reasonInput === null) return;
+
+      reservationReason = String(reasonInput || "").trim();
+      if (!reservationReason) {
+        setError("Reservation reason is required when status is Reserved");
+        return;
+      }
+    }
+
     try {
       setRequestingStatusId(assetId);
       setError("");
       setSuccess("");
 
-      await requestInventoryStatusChange(assetId, status);
+      await requestInventoryStatusChange(
+        assetId,
+        status,
+        status === "Blocked" ? reservationReason : "",
+      );
       setSuccess("Status change request submitted for admin approval");
     } catch (requestError) {
       console.error(`Request status change failed: ${toErrorMessage(requestError, "Unknown error")}`);
@@ -702,76 +1137,21 @@ const AssetVault = () => {
 
   return (
     <div className="w-full h-full px-4 sm:px-6 lg:px-10 pt-20 md:pt-24 pb-8 flex flex-col gap-8 overflow-y-auto custom-scrollbar relative bg-slate-50/50">
-      <div className="flex flex-col xl:flex-row xl:justify-between xl:items-end gap-4 z-10">
-        <div>
-          <h1 className="font-display text-4xl text-slate-800 tracking-widest">
-            ASSET <span className="text-emerald-600">VAULT</span>
-          </h1>
-          <p className="font-mono text-xs mt-2 text-slate-400 tracking-[0.3em] uppercase">
-            Live Inventory Database
-          </p>
-        </div>
+      <AssetVaultToolbar
+        modeType={modeType}
+        onModeChange={setModeType}
+        canOpenCreateModal={canOpenCreateModal}
+        canManage={canManage}
+        onOpenAddModal={openAddModal}
+      />
 
-        <div className="flex flex-wrap gap-3 sm:gap-4 items-center">
-          <div className="bg-slate-200 p-1 rounded-full flex gap-1">
-            <button
-              onClick={() => setModeType("sale")}
-              className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase transition-all ${
-                modeType === "sale"
-                  ? "bg-white shadow-sm text-slate-800"
-                  : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              For Sale
-            </button>
-            <button
-              onClick={() => setModeType("rent")}
-              className={`px-4 py-1.5 rounded-full text-xs font-bold uppercase transition-all ${
-                modeType === "rent"
-                  ? "bg-white shadow-sm text-amber-600"
-                  : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              Rentals
-            </button>
-          </div>
-
-          {canOpenCreateModal && (
-            <button
-              onClick={openAddModal}
-              className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 text-white rounded-full text-xs font-bold uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg"
-            >
-              <Plus size={16} /> {canManage ? "Add Asset" : "Add Request"}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 z-10">
-        <div className="md:col-span-2 relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search title, location, category"
-            className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-          />
-        </div>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-        >
-          <option value="all">All statuses</option>
-          {STATUS_OPTIONS.map((status) => (
-            <option key={status} value={status}>
-              {status}
-            </option>
-          ))}
-        </select>
-      </div>
+      <AssetVaultFilters
+        searchTerm={searchTerm}
+        onSearchChange={setSearchTerm}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        statusOptions={STATUS_OPTIONS}
+      />
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 p-3 text-sm flex items-center gap-2">
@@ -785,158 +1165,18 @@ const AssetVault = () => {
         </div>
       )}
 
-      {canManage && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-bold uppercase tracking-widest text-slate-500">
-              Pending Inventory Requests
-            </p>
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">
-              {pendingRequests.length}
-            </span>
-          </div>
-
-          {pendingRequests.length === 0 ? (
-            <p className="mt-3 text-xs text-slate-400">No pending requests</p>
-          ) : (
-            <div className="mt-3 space-y-2">
-              {pendingRequests.map((request) => {
-                const requestId = String(request._id || "");
-                const isCreateRequest = request.type === "create";
-                const proposedData = request.proposedData || {};
-                const currentInventory = request.inventoryId || {};
-                const inventoryLabel = isCreateRequest
-                  ? getInventoryUnitLabel(proposedData)
-                  : getInventoryUnitLabel(currentInventory);
-                const currentStatus = currentInventory?.status || "-";
-                const requestedStatus = proposedData?.status || "Available";
-                const detailSource = isCreateRequest ? proposedData : currentInventory;
-                const requestedFields = !isCreateRequest
-                  ? Object.entries(proposedData).filter(([key]) => REQUEST_FIELD_LABELS[key])
-                  : [];
-                const detailLocation = detailSource?.location || "-";
-                const detailCoordinates = formatRequestValue("siteLocation", detailSource?.siteLocation);
-                const detailPrice = formatCurrency(detailSource?.price);
-                const detailStatus = isCreateRequest
-                  ? proposedData?.status || "Available"
-                  : currentStatus;
-                const imageList = Array.isArray(detailSource?.images) ? detailSource.images : [];
-                const documentList = Array.isArray(detailSource?.documents)
-                  ? detailSource.documents
-                  : [];
-                const firstImage = imageList[0] || "";
-                const linkedInventoryId = String(currentInventory?._id || "");
-                const loadingReview = reviewingRequestId === requestId;
-
-                return (
-                  <div
-                    key={requestId}
-                    className="rounded-xl border border-slate-200 bg-slate-50 p-3"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-bold text-slate-800">
-                          {inventoryLabel}
-                        </p>
-                        <p className="mt-1 text-[11px] text-slate-500">
-                          By: {request.requestedBy?.name || "Unknown"} ({request.requestedBy?.role || "-"})
-                        </p>
-                        <p className="mt-1 text-[11px] font-semibold text-slate-600">
-                          {isCreateRequest
-                            ? `New inventory request (${requestedStatus})`
-                            : `${currentStatus} to ${requestedStatus}`}
-                        </p>
-
-                        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-600">
-                          <p>
-                            <span className="font-semibold text-slate-700">Location:</span> {detailLocation}
-                          </p>
-                          <p>
-                            <span className="font-semibold text-slate-700">Coordinates:</span> {detailCoordinates}
-                          </p>
-                          <p>
-                            <span className="font-semibold text-slate-700">Price:</span> {detailPrice}
-                          </p>
-                          <p>
-                            <span className="font-semibold text-slate-700">Status:</span> {detailStatus}
-                          </p>
-                          <p>
-                            <span className="font-semibold text-slate-700">Images:</span> {imageList.length}
-                          </p>
-                          <p>
-                            <span className="font-semibold text-slate-700">Documents:</span> {documentList.length}
-                          </p>
-                          <p>
-                            <span className="font-semibold text-slate-700">Submitted:</span>{" "}
-                            {new Date(request.createdAt || Date.now()).toLocaleString("en-IN", {
-                              dateStyle: "medium",
-                              timeStyle: "short",
-                            })}
-                          </p>
-                        </div>
-
-                        {firstImage && (
-                          <div className="mt-2">
-                            <img
-                              src={firstImage}
-                              alt={inventoryLabel}
-                              className="h-20 w-28 rounded-md border border-slate-200 object-cover"
-                            />
-                          </div>
-                        )}
-
-                        {!isCreateRequest && requestedFields.length > 0 && (
-                          <div className="mt-2 rounded-lg border border-slate-200 bg-white p-2">
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                              Requested Changes
-                            </p>
-                            <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                              {requestedFields.map(([key, value]) => (
-                                <p key={`${requestId}-${key}`}>
-                                  <span className="font-semibold text-slate-700">
-                                    {REQUEST_FIELD_LABELS[key] || key}:
-                                  </span>{" "}
-                                  {formatRequestValue(key, value)}
-                                </p>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {!isCreateRequest && linkedInventoryId && (
-                          <button
-                            onClick={() => navigate(`/inventory/${linkedInventoryId}`)}
-                            className="mt-2 text-[11px] font-semibold text-cyan-700 hover:text-cyan-800 underline"
-                          >
-                            View full property details
-                          </button>
-                        )}
-                      </div>
-
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleApproveRequest(requestId)}
-                          disabled={loadingReview}
-                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white hover:bg-emerald-700 disabled:opacity-60"
-                        >
-                          {loadingReview ? "..." : "Approve"}
-                        </button>
-                        <button
-                          onClick={() => handleRejectRequest(requestId)}
-                          disabled={loadingReview}
-                          className="rounded-lg bg-rose-600 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white hover:bg-rose-700 disabled:opacity-60"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      <PendingInventoryRequestsPanel
+        canManage={canManage}
+        pendingRequests={pendingRequests}
+        reviewingRequestId={reviewingRequestId}
+        requestFieldLabels={REQUEST_FIELD_LABELS}
+        getInventoryUnitLabel={getInventoryUnitLabel}
+        formatRequestValue={formatRequestValue}
+        formatCurrency={formatCurrency}
+        onApprove={handleApproveRequest}
+        onReject={handleRejectRequest}
+        onViewInventory={(inventoryId) => navigate(`/inventory/${inventoryId}`)}
+      />
 
       {loading ? (
         <div className="flex items-center justify-center h-64 text-slate-400 gap-2">
@@ -950,7 +1190,7 @@ const AssetVault = () => {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-8 z-0">
           {filteredAssets.map((asset) => (
-            <motion.div
+            <Motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               key={asset._id}
@@ -1043,6 +1283,11 @@ const AssetVault = () => {
                   <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">
                     <MapPin size={12} /> {asset.location || "-"}
                   </div>
+                  {toApiStatus(asset.status) === "Blocked" && asset.reservationReason ? (
+                    <p className="mt-1 text-[11px] text-amber-700 font-semibold">
+                      Reserved reason: {asset.reservationReason}
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="border-t border-slate-100 pt-3">
@@ -1097,20 +1342,20 @@ const AssetVault = () => {
                   )}
                 </div>
               </div>
-            </motion.div>
+            </Motion.div>
           ))}
         </div>
       )}
 
       <AnimatePresence>
         {(isAddModalOpen || isEditModalOpen) && canOpenCreateModal && (
-          <motion.div
+          <Motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
           >
-            <motion.div
+            <Motion.div
               initial={{ scale: 0.95, y: 20 }}
               animate={{ scale: 1, y: 0 }}
               exit={{ scale: 0.95, y: 20 }}
@@ -1219,14 +1464,59 @@ const AssetVault = () => {
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                       Location
                     </label>
-                    <input
-                      type="text"
-                      placeholder="Sector 42"
-                      value={formData.location}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, location: e.target.value }))}
-                      onKeyDown={handleLocationInputKeyDown}
-                      className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Sector 42"
+                        value={formData.location}
+                        onChange={(e) => {
+                          const nextLocation = e.target.value;
+                          setFormData((prev) => ({ ...prev, location: nextLocation }));
+                          setShowLocationSuggestions(Boolean(nextLocation.trim()));
+                        }}
+                        onFocus={() => {
+                          setShowLocationSuggestions(Boolean(String(formData.location || "").trim()));
+                        }}
+                        onBlur={() => {
+                          setTimeout(() => setShowLocationSuggestions(false), 120);
+                        }}
+                        onKeyDown={handleLocationInputKeyDown}
+                        className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500"
+                      />
+
+                      {showLocationSuggestions && (
+                        <div className="absolute z-20 mt-1 w-full rounded-xl border border-slate-200 bg-white shadow-lg max-h-52 overflow-y-auto custom-scrollbar">
+                          {loadingLocationSuggestions ? (
+                            <div className="px-3 py-2 text-xs text-slate-500 flex items-center gap-2">
+                              <Loader size={12} className="animate-spin" />
+                              {useGooglePlaces && googlePlacesReady
+                                ? "Searching Google locations..."
+                                : "Searching locations..."}
+                            </div>
+                          ) : locationSuggestions.length > 0 ? (
+                            locationSuggestions.map((suggestion) => (
+                              <button
+                                key={suggestion.id}
+                                type="button"
+                                onMouseDown={(event) => {
+                                  event.preventDefault();
+                                  void applyLocationSuggestion(suggestion);
+                                }}
+                                className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-emerald-50 border-b last:border-b-0 border-slate-100"
+                              >
+                                {suggestion.label}
+                              </button>
+                            ))
+                          ) : String(formData.location || "").trim().length >= 3 ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">No suggestions found</p>
+                          ) : (
+                            <p className="px-3 py-2 text-xs text-slate-500">
+                              Type at least 3 characters
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     <button
                       type="button"
                       onClick={() => resolveCoordinatesFromLocation(formData.location)}
@@ -1246,7 +1536,9 @@ const AssetVault = () => {
                       )}
                     </button>
                     <p className="mt-1 text-[10px] text-slate-400">
-                      Press Enter to auto-fill coordinates. On edit, Update also auto-refreshes coordinates if address changed.
+                      {useGooglePlaces
+                        ? "Type address for Google-style suggestions. Press Enter to auto-fill coordinates."
+                        : "Type address for free OpenStreetMap suggestions. Press Enter to auto-fill coordinates."}
                     </p>
                   </div>
 
@@ -1325,6 +1617,26 @@ const AssetVault = () => {
                       ))}
                     </select>
                   </div>
+
+                  {isReservedStatusValue(formData.status) ? (
+                    <div className="col-span-2">
+                      <label className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
+                        Reservation Reason *
+                      </label>
+                      <textarea
+                        value={formData.reservationReason}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            reservationReason: e.target.value,
+                          }))
+                        }
+                        placeholder="Mention why this property is reserved"
+                        rows={3}
+                        className="mt-1 w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-amber-500 resize-none"
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
 
@@ -1357,8 +1669,8 @@ const AssetVault = () => {
                         : "Submit Request"}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </Motion.div>
+          </Motion.div>
         )}
       </AnimatePresence>
     </div>
@@ -1366,4 +1678,5 @@ const AssetVault = () => {
 };
 
 export default AssetVault;
+
 

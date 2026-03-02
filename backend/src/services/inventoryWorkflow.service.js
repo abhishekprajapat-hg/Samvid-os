@@ -12,6 +12,7 @@ const {
 } = require("../constants/role.constants");
 const {
   INVENTORY_STATUSES,
+  INVENTORY_TYPES,
   INVENTORY_ALLOWED_FIELDS,
   INVENTORY_REQUIRED_CREATE_FIELDS,
   INVENTORY_ACTIVITY_ACTIONS,
@@ -45,6 +46,8 @@ const sanitizeString = (value) => {
   if (typeof value !== "string") return "";
   return value.trim();
 };
+
+const sanitizeReservationReason = (value) => sanitizeString(value).slice(0, 300);
 
 const sanitizeFileList = (value) => {
   if (!Array.isArray(value)) return [];
@@ -141,6 +144,46 @@ const normalizeLegacyStatus = (status) => {
   return cleanStatus;
 };
 
+const normalizeLegacyType = (type) => {
+  const cleanType = sanitizeString(type);
+  if (!cleanType) return cleanType;
+
+  const normalized = cleanType.toLowerCase();
+  if (["rent", "rental", "for rent", "lease", "leasing"].includes(normalized)) {
+    return "Rent";
+  }
+
+  if (["sale", "sell", "for sale", "resale"].includes(normalized)) {
+    return "Sale";
+  }
+
+  return cleanType;
+};
+
+const normalizeLegacyCategory = (category) => {
+  const cleanCategory = sanitizeString(category);
+  if (!cleanCategory) return cleanCategory;
+
+  const normalized = cleanCategory.toLowerCase();
+  if (["apartment", "apartments", "flat", "flats"].includes(normalized)) {
+    return "Apartment";
+  }
+
+  if (["villa", "villas"].includes(normalized)) {
+    return "Villa";
+  }
+
+  if (["office", "offices", "commercial"].includes(normalized)) {
+    return "Office";
+  }
+
+  if (["plot", "plots", "land"].includes(normalized)) {
+    return "Plot";
+  }
+
+  return cleanCategory;
+};
+
 const deriveStructuredFieldsFromTitle = (title) => {
   const cleanTitle = sanitizeString(title);
   if (!cleanTitle) return {};
@@ -189,6 +232,25 @@ const normalizeLegacyInventoryPayload = (payload = {}) => {
 
   if (Object.prototype.hasOwnProperty.call(normalized, "status")) {
     normalized.status = normalizeLegacyStatus(normalized.status);
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(normalized, "reservationReason")) {
+    const fallbackReason =
+      normalized.statusReason
+      ?? normalized.reserveReason
+      ?? normalized.blockedReason;
+
+    if (fallbackReason !== undefined) {
+      normalized.reservationReason = fallbackReason;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(normalized, "type")) {
+    normalized.type = normalizeLegacyType(normalized.type);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(normalized, "category")) {
+    normalized.category = normalizeLegacyCategory(normalized.category);
   }
 
   return normalized;
@@ -274,6 +336,8 @@ const pickInventoryDiff = (inventoryDoc, patch) => {
 const sanitizeInventoryPayload = ({
   payload,
   mode = "create",
+  currentStatus = "",
+  currentReservationReason = "",
 }) => {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw createHttpError(400, "proposedData must be an object");
@@ -328,12 +392,38 @@ const sanitizeInventoryPayload = ({
       return;
     }
 
+    if (field === "type") {
+      const cleanType = normalizeLegacyType(value);
+      if (!INVENTORY_TYPES.includes(cleanType)) {
+        throw createHttpError(400, "Invalid inventory type");
+      }
+      safePayload[field] = cleanType;
+      return;
+    }
+
+    if (field === "category") {
+      const cleanCategory = normalizeLegacyCategory(value);
+      if (!cleanCategory) {
+        throw createHttpError(400, "category must be a non-empty string");
+      }
+      if (cleanCategory.length > 120) {
+        throw createHttpError(400, "category must be at most 120 characters");
+      }
+      safePayload[field] = cleanCategory;
+      return;
+    }
+
     if (field === "status") {
       const cleanStatus = sanitizeString(value);
       if (!INVENTORY_STATUSES.includes(cleanStatus)) {
         throw createHttpError(400, "Invalid inventory status");
       }
       safePayload[field] = cleanStatus;
+      return;
+    }
+
+    if (field === "reservationReason") {
+      safePayload[field] = sanitizeReservationReason(value);
       return;
     }
 
@@ -352,6 +442,37 @@ const sanitizeInventoryPayload = ({
     if (!safePayload.status) {
       safePayload.status = "Available";
     }
+  }
+
+  const hasStatusPatch = Object.prototype.hasOwnProperty.call(safePayload, "status");
+  const hasReservationReasonPatch = Object.prototype.hasOwnProperty.call(
+    safePayload,
+    "reservationReason",
+  );
+  const effectiveStatus =
+    mode === "create"
+      ? safePayload.status
+      : (hasStatusPatch ? safePayload.status : normalizeLegacyStatus(currentStatus));
+  const effectiveReservationReason = hasReservationReasonPatch
+    ? sanitizeReservationReason(safePayload.reservationReason)
+    : sanitizeReservationReason(currentReservationReason);
+  const shouldValidateBlockedReason =
+    mode === "create"
+    || (mode === "update" && hasStatusPatch && safePayload.status === "Blocked")
+    || (mode === "update" && hasReservationReasonPatch);
+
+  if (effectiveStatus === "Blocked" && shouldValidateBlockedReason) {
+    if (!effectiveReservationReason) {
+      throw createHttpError(400, "reservationReason is required when status is Reserved");
+    }
+
+    if (hasReservationReasonPatch) {
+      safePayload.reservationReason = effectiveReservationReason;
+    }
+  } else if (mode === "create" || hasStatusPatch) {
+    safePayload.reservationReason = "";
+  } else if (hasReservationReasonPatch && effectiveReservationReason) {
+    throw createHttpError(400, "reservationReason can only be set when status is Reserved");
   }
 
   if (mode === "update" && Object.keys(safePayload).length === 0) {
@@ -549,6 +670,8 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
   const patch = sanitizeInventoryPayload({
     payload: normalizedPayload,
     mode: "update",
+    currentStatus: inventory.status,
+    currentReservationReason: inventory.reservationReason,
   });
 
   const diff = pickInventoryDiff(inventory, patch);
@@ -735,7 +858,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     companyId,
   })
     .select(
-      "_id projectName towerName unitNumber price status location siteLocation images documents",
+      "_id projectName towerName unitNumber price type category status reservationReason location siteLocation images documents",
     )
     .lean();
 
@@ -747,6 +870,8 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
   const proposed = sanitizeInventoryPayload({
     payload: normalizedPayload,
     mode: "update",
+    currentStatus: inventory.status,
+    currentReservationReason: inventory.reservationReason,
   });
 
   const changedKeys = Object.keys(proposed).filter(
@@ -916,6 +1041,8 @@ const approveRequest = async ({ user, requestId, io }) => {
     const proposed = sanitizeInventoryPayload({
       payload: request.proposedData || request.proposedChanges || {},
       mode: "update",
+      currentStatus: inventory.status,
+      currentReservationReason: inventory.reservationReason,
     });
 
     const diff = pickInventoryDiff(inventory, proposed);

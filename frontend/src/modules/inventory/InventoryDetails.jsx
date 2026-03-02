@@ -311,6 +311,12 @@ const InventoryDetails = () => {
           <FieldRow label="Coordinates" value={inventoryCoordinates} />
           <FieldRow label="Type" value={asset?.type || "Sale"} />
           <FieldRow label="Category" value={asset?.category || "Apartment"} />
+          {(statusValue === "Blocked" || statusValue === "Reserved") && (
+            <FieldRow
+              label="Reservation Reason"
+              value={inventory?.reservationReason || asset?.reservationReason || "-"}
+            />
+          )}
         </div>
       </div>
 

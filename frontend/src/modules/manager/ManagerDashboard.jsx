@@ -15,7 +15,15 @@ import {
   Zap,
 } from "lucide-react";
 import api from "../../services/api";
+import LeadPerformancePanel from "../../components/dashboard/LeadPerformancePanel";
 import { toErrorMessage } from "../../utils/errorMessage";
+
+const toEntityId = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value._id) return String(value._id);
+  return String(value);
+};
 
 const ManagerDashboard = ({ theme = "light" }) => {
   const isDark = theme === "dark";
@@ -30,19 +38,41 @@ const ManagerDashboard = ({ theme = "light" }) => {
     closed: 0,
     visits: 0,
   });
+  const [leadRows, setLeadRows] = useState([]);
+  const [userRows, setUserRows] = useState([]);
+
+  const currentUser = useMemo(() => {
+    try {
+      const raw = localStorage.getItem("user");
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+  const currentUserId = String(currentUser?.id || currentUser?._id || "");
+  const currentUserRole = String(currentUser?.role || "");
 
   useEffect(() => {
     const fetchRealData = async () => {
       try {
         setError("");
 
-        const [leadsRes, inventoryRes] = await Promise.all([
+        const [leadsRes, inventoryRes, usersRes] = await Promise.all([
           api.get("/leads"),
           api.get("/inventory"),
+          api.get("/users", {
+            params: {
+              pagination: "false",
+              fields: "_id,name,role,parentId,isActive",
+            },
+          }),
         ]);
 
         const leadsData = leadsRes?.data?.leads || [];
         const inventoryAssets = inventoryRes?.data?.assets || [];
+        const usersData = usersRes?.data?.users || [];
+        setLeadRows(Array.isArray(leadsData) ? leadsData : []);
+        setUserRows(Array.isArray(usersData) ? usersData : []);
 
         const closedLeadCount = leadsData.filter((lead) => lead.status === "CLOSED").length;
         const siteVisitCount = leadsData.filter((lead) => lead.status === "SITE_VISIT").length;
@@ -64,6 +94,8 @@ const ManagerDashboard = ({ theme = "light" }) => {
         const message = toErrorMessage(err);
         console.error("Dashboard fetch error:", message);
         setError(message);
+        setLeadRows([]);
+        setUserRows([]);
       } finally {
         setLoading(false);
       }
@@ -87,6 +119,125 @@ const ManagerDashboard = ({ theme = "light" }) => {
       negotiationShare,
     };
   }, [stats]);
+
+  const subordinatePerformance = useMemo(() => {
+    if (!currentUserId || !Array.isArray(userRows) || !userRows.length) {
+      return { title: "", countLabel: "Reports", rows: [] };
+    }
+
+    const activeUsers = userRows.filter((user) => user && user.isActive !== false);
+    const childrenByParent = new Map();
+    const isExecutiveRole = (role) =>
+      role === "EXECUTIVE" || role === "FIELD_EXECUTIVE";
+    const isTeamLeadRole = (role) => role === "TEAM_LEADER";
+
+    activeUsers.forEach((user) => {
+      const parentId = toEntityId(user.parentId);
+      if (!parentId) return;
+      const bucket = childrenByParent.get(parentId) || [];
+      bucket.push(user);
+      childrenByParent.set(parentId, bucket);
+    });
+
+    const leadAssigneeId = (lead) => toEntityId(lead?.assignedTo);
+    const getDirectTeamLeads = (parentId) =>
+      (childrenByParent.get(parentId) || []).filter((child) =>
+        isTeamLeadRole(String(child?.role || "")));
+    const collectExecutiveIdsUnderTeamLead = (teamLeadId) => {
+      const executiveIds = new Set();
+      const visited = new Set([teamLeadId]);
+      const stack = [...(childrenByParent.get(teamLeadId) || [])];
+
+      while (stack.length) {
+        const node = stack.pop();
+        const nodeId = toEntityId(node?._id);
+        if (!nodeId || visited.has(nodeId)) continue;
+        visited.add(nodeId);
+
+        const role = String(node?.role || "");
+        if (isExecutiveRole(role)) {
+          executiveIds.add(nodeId);
+        }
+
+        const children = childrenByParent.get(nodeId) || [];
+        children.forEach((child) => {
+          const childId = toEntityId(child?._id);
+          if (childId && !visited.has(childId)) {
+            stack.push(child);
+          }
+        });
+      }
+
+      return executiveIds;
+    };
+
+    if (currentUserRole === "MANAGER") {
+      const directAssistantManagers = activeUsers.filter((user) => {
+        if (String(user.role || "") !== "ASSISTANT_MANAGER") return false;
+        return toEntityId(user.parentId) === currentUserId;
+      });
+
+      const rows = directAssistantManagers.map((assistantManager) => {
+        const assistantManagerId = toEntityId(assistantManager._id);
+        const directTeamLeads = getDirectTeamLeads(assistantManagerId);
+        const executiveIds = new Set();
+
+        directTeamLeads.forEach((teamLead) => {
+          const teamLeadId = toEntityId(teamLead._id);
+          const scopedExecutiveIds = collectExecutiveIdsUnderTeamLead(teamLeadId);
+          scopedExecutiveIds.forEach((executiveId) => executiveIds.add(executiveId));
+        });
+
+        const scopedLeads = leadRows.filter((lead) => {
+          const assigneeId = leadAssigneeId(lead);
+          return assigneeId && executiveIds.has(assigneeId);
+        });
+
+        return {
+          id: assistantManagerId,
+          name: assistantManager?.name || "Assistant Manager",
+          leads: scopedLeads,
+          subtitle: `Team leaders: ${directTeamLeads.length} | Active executives: ${executiveIds.size}`,
+        };
+      });
+
+      return {
+        title: "Assistant Manager Performance",
+        countLabel: "Direct reports",
+        rows,
+      };
+    }
+
+    if (currentUserRole === "ASSISTANT_MANAGER") {
+      const directTeamLeads = getDirectTeamLeads(currentUserId).sort((left, right) =>
+        String(left?.name || "").localeCompare(String(right?.name || "")),
+      );
+
+      const rows = directTeamLeads.map((teamLead) => {
+        const teamLeadId = toEntityId(teamLead._id);
+        const executiveIds = collectExecutiveIdsUnderTeamLead(teamLeadId);
+        const scopedLeads = leadRows.filter((lead) => {
+          const assigneeId = leadAssigneeId(lead);
+          return assigneeId && executiveIds.has(assigneeId);
+        });
+
+        return {
+          id: teamLeadId,
+          name: teamLead?.name || "Team Leader",
+          leads: scopedLeads,
+          subtitle: `Executives: ${executiveIds.size}`,
+        };
+      });
+
+      return {
+        title: "Team Leader Performance",
+        countLabel: "Team leads",
+        rows,
+      };
+    }
+
+    return { title: "", countLabel: "Reports", rows: [] };
+  }, [currentUserId, currentUserRole, leadRows, userRows]);
 
   const kpiCards = useMemo(
     () => [
@@ -360,6 +511,45 @@ const ManagerDashboard = ({ theme = "light" }) => {
           </button>
         ))}
       </motion.section>
+
+      <motion.div variants={itemMotion} className="mt-6">
+        <LeadPerformancePanel
+          leads={leadRows}
+          theme={theme}
+          accent={isDark ? "violet" : "cyan"}
+          title="Role Performance Graph"
+          subtitle="Live stage distribution for your accessible pipeline"
+        />
+      </motion.div>
+
+      {subordinatePerformance.rows.length > 0 && (
+        <motion.section variants={itemMotion} className="mt-6">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className={`text-lg font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+              {subordinatePerformance.title}
+            </h2>
+            <span className={`text-xs uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              {subordinatePerformance.countLabel}: {subordinatePerformance.rows.length}
+            </span>
+          </div>
+
+          <div className="space-y-4">
+            {subordinatePerformance.rows.map((row) => (
+              <div key={row.id}>
+                <LeadPerformancePanel
+                  leads={row.leads}
+                  theme={theme}
+                  accent={isDark ? "amber" : "emerald"}
+                  compact
+                  defaultWindow={6}
+                  title={row.name}
+                  subtitle={row.subtitle}
+                />
+              </div>
+            ))}
+          </div>
+        </motion.section>
+      )}
 
       <motion.section variants={itemMotion} className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-[1.7fr_1fr]">
         <div
