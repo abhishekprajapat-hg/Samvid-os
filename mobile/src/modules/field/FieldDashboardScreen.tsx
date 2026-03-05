@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
 import api from "../../services/api";
@@ -38,7 +38,9 @@ export const FieldDashboardScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [inventoryCount, setInventoryCount] = useState(0);
+  const [inventoryRows, setInventoryRows] = useState<any[]>([]);
   const [tasks, setTasks] = useState<FieldTask[]>(DEFAULT_TASKS);
+  const [activeBlock, setActiveBlock] = useState<"PENDING" | "COMPLETED" | "INVENTORY" | "NAVIGATION" | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -48,6 +50,7 @@ export const FieldDashboardScreen = () => {
         const res = await api.get("/inventory");
         const rows = res.data?.assets || [];
         setInventoryCount(Array.isArray(rows) ? rows.length : 0);
+        setInventoryRows(Array.isArray(rows) ? rows : []);
       } catch (e) {
         setError(toErrorMessage(e, "Failed to load field data"));
       } finally {
@@ -61,6 +64,8 @@ export const FieldDashboardScreen = () => {
     () => tasks.filter((task) => task.status !== "Done").length,
     [tasks],
   );
+  const pendingTasks = useMemo(() => tasks.filter((task) => task.status !== "Done"), [tasks]);
+  const completedTasks = useMemo(() => tasks.filter((task) => task.status === "Done"), [tasks]);
 
   const completeTask = (taskId: string) => {
     setTasks((prev) =>
@@ -74,10 +79,10 @@ export const FieldDashboardScreen = () => {
     <Screen title="Field Dashboard" subtitle="Daily Execution" loading={loading} error={error}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.metricsGrid}>
-          <StatCard title="Pending Tasks" value={pendingCount} helper="Today route actions" />
-          <StatCard title="Completed" value={tasks.length - pendingCount} helper="Marked done" />
-          <StatCard title="Inventory Access" value={inventoryCount} helper="Company units visible" />
-          <StatCard title="Live Navigation" value="On" helper="Map tracking available" />
+          <StatCard title="Pending Tasks" value={pendingCount} helper="Today route actions" onPress={() => setActiveBlock("PENDING")} />
+          <StatCard title="Completed" value={tasks.length - pendingCount} helper="Marked done" onPress={() => setActiveBlock("COMPLETED")} />
+          <StatCard title="Inventory Access" value={inventoryCount} helper="Company units visible" onPress={() => setActiveBlock("INVENTORY")} />
+          <StatCard title="Live Navigation" value="On" helper="Map tracking available" onPress={() => setActiveBlock("NAVIGATION")} />
         </View>
 
         <View style={styles.tasksCard}>
@@ -131,16 +136,94 @@ export const FieldDashboardScreen = () => {
           />
         </View>
       </ScrollView>
+
+      <Modal visible={Boolean(activeBlock)} transparent animationType="slide" onRequestClose={() => setActiveBlock(null)}>
+        <View style={styles.overlay}>
+          <View style={styles.modalCard}>
+            {activeBlock === "PENDING" ? (
+              <>
+                <Text style={styles.sectionTitle}>Pending Tasks</Text>
+                <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+                  {pendingTasks.length === 0 ? <Text style={styles.taskDetail}>No pending tasks</Text> : pendingTasks.map((task) => (
+                    <View key={task.id} style={[styles.taskRow, styles.taskPending]}>
+                      <View style={styles.taskTextWrap}>
+                        <Text style={styles.taskTitle}>{task.title}</Text>
+                        <Text style={styles.taskDetail}>{task.detail}</Text>
+                      </View>
+                      <Pressable style={styles.checkBtn} onPress={() => completeTask(task.id)}>
+                        <Text style={styles.checkBtnText}>Check In</Text>
+                      </Pressable>
+                    </View>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
+
+            {activeBlock === "COMPLETED" ? (
+              <>
+                <Text style={styles.sectionTitle}>Completed Tasks</Text>
+                <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+                  {completedTasks.length === 0 ? <Text style={styles.taskDetail}>No completed tasks</Text> : completedTasks.map((task) => (
+                    <View key={task.id} style={[styles.taskRow, styles.taskDone]}>
+                      <View style={styles.taskTextWrap}>
+                        <Text style={styles.taskTitle}>{task.title}</Text>
+                        <Text style={styles.taskDetail}>{task.detail}</Text>
+                      </View>
+                      <View style={styles.donePill}>
+                        <Text style={styles.doneText}>Done</Text>
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
+
+            {activeBlock === "INVENTORY" ? (
+              <>
+                <Text style={styles.sectionTitle}>Inventory Access</Text>
+                <Text style={styles.taskDetail}>{inventoryCount} units available</Text>
+                <ScrollView style={styles.modalList} showsVerticalScrollIndicator={false}>
+                  {inventoryRows.slice(0, 20).map((row) => (
+                    <Pressable key={String(row?._id || Math.random())} style={[styles.taskRow, styles.taskPending]} onPress={() => navigation.navigate("Inventory")}>
+                      <View style={styles.taskTextWrap}>
+                        <Text style={styles.taskTitle}>{String(row?.projectName || row?.title || "Inventory Unit")}</Text>
+                        <Text style={styles.taskDetail}>{String(row?.location || "-")}</Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                <Pressable style={styles.checkBtn} onPress={() => { setActiveBlock(null); navigation.navigate("Inventory"); }}>
+                  <Text style={styles.checkBtnText}>Open Inventory</Text>
+                </Pressable>
+              </>
+            ) : null}
+
+            {activeBlock === "NAVIGATION" ? (
+              <>
+                <Text style={styles.sectionTitle}>Live Navigation</Text>
+                <Text style={styles.taskDetail}>Open live map and property/executive tracking.</Text>
+                <Pressable style={styles.checkBtn} onPress={() => { setActiveBlock(null); navigation.navigate("Field Ops"); }}>
+                  <Text style={styles.checkBtnText}>Open Field Ops Map</Text>
+                </Pressable>
+              </>
+            ) : null}
+
+            <Pressable style={styles.closeBtn} onPress={() => setActiveBlock(null)}>
+              <Text style={styles.closeText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 };
 
-const StatCard = ({ title, value, helper }: { title: string; value: string | number; helper: string }) => (
-  <View style={styles.statCard}>
+const StatCard = ({ title, value, helper, onPress }: { title: string; value: string | number; helper: string; onPress?: () => void }) => (
+  <Pressable style={styles.statCard} onPress={onPress}>
     <Text style={styles.statTitle}>{title}</Text>
     <Text style={styles.statValue}>{value}</Text>
     <Text style={styles.statHelper}>{helper}</Text>
-  </View>
+  </Pressable>
 );
 
 const QuickAction = ({
@@ -282,6 +365,37 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontSize: 12,
     color: "#64748b",
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.45)",
+    justifyContent: "flex-end",
+    padding: 12,
+  },
+  modalCard: {
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    padding: 12,
+    maxHeight: "84%",
+  },
+  modalList: {
+    maxHeight: 420,
+    marginTop: 8,
+  },
+  closeBtn: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: "center",
+  },
+  closeText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
   },
 });
 

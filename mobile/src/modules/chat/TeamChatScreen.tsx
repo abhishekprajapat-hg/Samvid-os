@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
   Image,
   Modal,
   Pressable,
@@ -14,7 +12,6 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
-import * as ImagePicker from "expo-image-picker";
 import { Screen } from "../../components/common/Screen";
 import { getMessengerContacts, getMessengerConversations } from "../../services/chatService";
 import { createChatSocket } from "../../services/chatSocket";
@@ -22,7 +19,6 @@ import { useAuth } from "../../context/AuthContext";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { updateCallLog } from "../../services/chatService";
-import { deleteMyProfilePicture, uploadMyProfilePicture } from "../../services/userService";
 import type { ChatContact, ChatConversation } from "../../types";
 
 const initials = (name: string) =>
@@ -35,7 +31,7 @@ const initials = (name: string) =>
 
 export const TeamChatScreen = () => {
   const navigation = useNavigation<any>();
-  const { token, user, updateUser } = useAuth();
+  const { token, user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -43,7 +39,7 @@ export const TeamChatScreen = () => {
   const [search, setSearch] = useState("");
   const [contacts, setContacts] = useState<ChatContact[]>([]);
   const [conversations, setConversations] = useState<ChatConversation[]>([]);
-  const [updatingProfileImage, setUpdatingProfileImage] = useState(false);
+  const [activeTab, setActiveTab] = useState<"CHATS" | "CONTACTS">("CHATS");
   const [incomingCall, setIncomingCall] = useState<{
     callId: string;
     callType: "VOICE" | "VIDEO";
@@ -104,18 +100,21 @@ export const TeamChatScreen = () => {
         );
       });
     });
-    socket.on("messenger:call:incoming", (payload: any) => {
-      const caller = payload?.caller || {};
+    const handleIncomingCall = (payload: any) => {
+      const caller = payload?.caller || payload?.from || {};
       setIncomingCall({
         callId: String(payload?.callId || ""),
-        callType: String(payload?.callType || "VOICE").toUpperCase() === "VIDEO" ? "VIDEO" : "VOICE",
-        conversationId: String(payload?.conversationId || ""),
+        callType: String(payload?.callType || payload?.mode || "VOICE").toUpperCase() === "VIDEO" ? "VIDEO" : "VOICE",
+        conversationId: String(payload?.conversationId || payload?.roomId || ""),
         callerId: String(caller?._id || ""),
         callerName: String(caller?.name || "Unknown"),
         callerRole: String(caller?.role || ""),
-        callerAvatar: String(caller?.profileImageUrl || ""),
+        callerAvatar: String(caller?.avatarUrl || caller?.profileImageUrl || ""),
       });
-    });
+    };
+
+    socket.on("messenger:call:incoming", handleIncomingCall);
+    socket.on("chat:call:incoming", handleIncomingCall);
 
     return () => {
       socket.disconnect();
@@ -179,78 +178,6 @@ export const TeamChatScreen = () => {
     });
   };
 
-  const handlePickProfileImage = async (fromCamera: boolean) => {
-    if (updatingProfileImage) return;
-
-    try {
-      setUpdatingProfileImage(true);
-      const permission = fromCamera
-        ? await ImagePicker.requestCameraPermissionsAsync()
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-      if (!permission.granted) {
-        setError(fromCamera ? "Camera permission is required" : "Gallery permission is required");
-        return;
-      }
-
-      const picked = fromCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            aspect: [1, 1],
-            quality: 0.8,
-          });
-
-      if (picked.canceled || !picked.assets?.length) return;
-
-      const asset = picked.assets[0];
-      const nextUser = await uploadMyProfilePicture({
-        uri: asset.uri,
-        name: asset.fileName || "profile.jpg",
-        mimeType: asset.mimeType || "image/jpeg",
-      });
-
-      if (nextUser?.profileImageUrl) {
-        await updateUser({ profileImageUrl: nextUser.profileImageUrl });
-      }
-      setError("");
-    } catch (e) {
-      setError(toErrorMessage(e, "Failed to update profile picture"));
-    } finally {
-      setUpdatingProfileImage(false);
-    }
-  };
-
-  const handleDeleteProfileImage = async () => {
-    if (updatingProfileImage) return;
-
-    Alert.alert("Delete profile picture", "Remove your current profile picture?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            setUpdatingProfileImage(true);
-            await deleteMyProfilePicture();
-            await updateUser({ profileImageUrl: "" });
-            setError("");
-          } catch (e) {
-            setError(toErrorMessage(e, "Failed to delete profile picture"));
-          } finally {
-            setUpdatingProfileImage(false);
-          }
-        },
-      },
-    ]);
-  };
-
   const renderAvatar = (person: { name?: string; avatarUrl?: string }, size = 28) => {
     if (person?.avatarUrl) {
       return (
@@ -297,57 +224,20 @@ export const TeamChatScreen = () => {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.pageContent}
       >
-        <View style={styles.profileCard}>
-          <Pressable style={styles.profileInfo} onPress={() => setProfileVisible(true)}>
-            {renderAvatar(
-              {
-                name: user?.name || "Me",
-                avatarUrl: user?.profileImageUrl || "",
-              },
-              42,
-            )}
-            <View style={styles.profileTextWrap}>
-              <Text style={styles.profileTitle}>Your Profile Picture</Text>
-              <Text style={styles.profileSubtitle}>Square ratio like WhatsApp DP</Text>
-            </View>
+        <View style={styles.quickTop}>
+          <Pressable style={styles.quickBtn} onPress={() => setProfileVisible(true)}>
+            {renderAvatar({ name: user?.name || "Me", avatarUrl: user?.profileImageUrl || "" }, 24)}
           </Pressable>
-          <View style={styles.profileActions}>
-            <Pressable
-              style={[styles.smallBtn, updatingProfileImage && styles.smallBtnDisabled]}
-              onPress={() => handlePickProfileImage(false)}
-              disabled={updatingProfileImage}
-            >
-              <Text style={styles.smallBtnText}>Upload</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.smallBtn, updatingProfileImage && styles.smallBtnDisabled]}
-              onPress={() => handlePickProfileImage(true)}
-              disabled={updatingProfileImage}
-            >
-              <Text style={styles.smallBtnText}>Camera</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.smallBtnDanger, updatingProfileImage && styles.smallBtnDisabled]}
-              onPress={handleDeleteProfileImage}
-              disabled={updatingProfileImage}
-            >
-              {updatingProfileImage ? (
-                <ActivityIndicator size="small" color="#b91c1c" />
-              ) : (
-                <Text style={styles.smallBtnDangerText}>Delete</Text>
-              )}
-            </Pressable>
-          </View>
+          <Pressable style={styles.quickBtn} onPress={() => load(true)}>
+            <Ionicons name="refresh" size={15} color="#64748b" />
+          </Pressable>
         </View>
 
         <View style={styles.searchCard}>
           <View style={styles.searchHead}>
             <Text style={styles.searchTitle}>Chats</Text>
-            <Pressable style={styles.iconBtn} onPress={() => load(true)}>
-              <Ionicons name="refresh" size={15} color="#64748b" />
-            </Pressable>
+            <Text style={styles.searchMeta}>{conversations.length} conversations</Text>
           </View>
-          <Text style={styles.searchMeta}>{conversations.length} conversations</Text>
 
           <View style={styles.searchRow}>
             <Ionicons name="search" size={14} color="#94a3b8" />
@@ -358,6 +248,14 @@ export const TeamChatScreen = () => {
               placeholder="Search chats or contacts"
             />
           </View>
+          <View style={styles.tabRow}>
+            <Pressable style={[styles.tabBtn, activeTab === "CHATS" && styles.tabBtnActive]} onPress={() => setActiveTab("CHATS")}>
+              <Text style={[styles.tabText, activeTab === "CHATS" && styles.tabTextActive]}>Chats</Text>
+            </Pressable>
+            <Pressable style={[styles.tabBtn, activeTab === "CONTACTS" && styles.tabBtnActive]} onPress={() => setActiveTab("CONTACTS")}>
+              <Text style={[styles.tabText, activeTab === "CONTACTS" && styles.tabTextActive]}>Contacts</Text>
+            </Pressable>
+          </View>
 
           <Text style={[styles.connection, connected ? styles.connectionOn : styles.connectionOff]}>
             {connected ? "Realtime connected" : "Realtime reconnecting"}
@@ -365,9 +263,9 @@ export const TeamChatScreen = () => {
         </View>
 
         <View style={styles.listCard}>
-          <Text style={styles.panelLabel}>Conversations</Text>
-          {filteredConversations.length === 0 ? <Text style={styles.empty}>No conversations</Text> : null}
-          {filteredConversations.map((item) => {
+          <Text style={styles.panelLabel}>{activeTab === "CHATS" ? "Conversations" : "Contacts"}</Text>
+          {activeTab === "CHATS" && filteredConversations.length === 0 ? <Text style={styles.empty}>No conversations</Text> : null}
+          {activeTab === "CHATS" ? filteredConversations.map((item) => {
             const peer = item.participants.find(
               (participant) => String(participant._id) !== String(user?._id || user?.id || ""),
             );
@@ -398,13 +296,9 @@ export const TeamChatScreen = () => {
                 </Text>
               </Pressable>
             );
-          })}
-        </View>
-
-        <View style={styles.listCard}>
-          <Text style={styles.panelLabel}>Start New Chat</Text>
-          {filteredContacts.length === 0 ? <Text style={styles.empty}>No contacts</Text> : null}
-          {filteredContacts.map((item) => (
+          }) : null}
+          {activeTab === "CONTACTS" && filteredContacts.length === 0 ? <Text style={styles.empty}>No contacts</Text> : null}
+          {activeTab === "CONTACTS" ? filteredContacts.map((item) => (
             <Pressable
               key={item._id}
               style={styles.userRow}
@@ -422,7 +316,7 @@ export const TeamChatScreen = () => {
                 <Text style={styles.roleBadge}>{item.role}</Text>
               </View>
             </Pressable>
-          ))}
+          )) : null}
         </View>
       </ScrollView>
 
@@ -464,6 +358,7 @@ export const TeamChatScreen = () => {
               <Text style={styles.profileKey}>Role</Text>
               <Text style={styles.profileVal}>{String(user?.role || "-")}</Text>
             </View>
+            <Text style={styles.profileHint}>Profile photo actions are available in account settings.</Text>
             <Pressable style={styles.profileCloseBtn} onPress={() => setProfileVisible(false)}>
               <Text style={styles.profileCloseText}>Close</Text>
             </Pressable>
@@ -475,6 +370,22 @@ export const TeamChatScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  quickTop: {
+    marginBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  quickBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   profileCard: {
     borderWidth: 1,
     borderColor: "#e2e8f0",
@@ -571,7 +482,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   searchMeta: {
-    marginTop: 2,
     color: "#64748b",
     fontSize: 11,
   },
@@ -591,6 +501,34 @@ const styles = StyleSheet.create({
     flex: 1,
     color: "#0f172a",
     fontSize: 12,
+  },
+  tabRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    backgroundColor: "#f1f5f9",
+    borderRadius: 10,
+    padding: 2,
+    gap: 4,
+  },
+  tabBtn: {
+    flex: 1,
+    height: 30,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabBtnActive: {
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+  },
+  tabText: {
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  tabTextActive: {
+    color: "#0f172a",
   },
   connection: {
     marginTop: 8,
@@ -784,6 +722,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     flex: 1,
     textAlign: "right",
+  },
+  profileHint: {
+    marginTop: 4,
+    color: "#64748b",
+    fontSize: 11,
   },
   profileCloseBtn: {
     marginTop: 8,

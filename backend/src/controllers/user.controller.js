@@ -91,6 +91,7 @@ const normalizeOptionalNumber = (value) => {
 
 const sanitizeName = (value) => String(value || "").trim();
 const sanitizePhone = (value) => String(value || "").trim();
+const sanitizeProfileImageUrl = (value) => String(value || "").trim();
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
 
@@ -219,6 +220,7 @@ const toProfileView = (user) => ({
   name: user.name,
   email: user.email,
   phone: user.phone || "",
+  profileImageUrl: user.profileImageUrl || "",
   role: user.role,
   companyId: user.companyId || null,
   parentId: user.parentId || null,
@@ -595,6 +597,24 @@ exports.updateMyProfile = async (req, res) => {
         });
       }
       patch.phone = phone;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "profileImageUrl")) {
+      const profileImageUrl = sanitizeProfileImageUrl(req.body.profileImageUrl);
+      if (profileImageUrl.length > 1200) {
+        return res.status(400).json({
+          message: "Profile image URL is too long",
+        });
+      }
+      if (
+        profileImageUrl
+        && !/^https?:\/\//i.test(profileImageUrl)
+      ) {
+        return res.status(400).json({
+          message: "Profile image URL must be a valid http/https URL",
+        });
+      }
+      patch.profileImageUrl = profileImageUrl;
     }
 
     if (!Object.keys(patch).length) {
@@ -1017,6 +1037,168 @@ exports.deleteUser = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "deleteUser failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateUserByRole = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    const actorRole = req.user.role;
+    const canEditAsAdmin = actorRole === USER_ROLES.ADMIN;
+    const canEditAsManager = isManagementRole(actorRole);
+    if (!canEditAsAdmin && !canEditAsManager) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
+    const targetUser = await User.findOne({
+      _id: userId,
+      companyId: req.user.companyId,
+    })
+      .select("_id role parentId companyId")
+      .lean();
+    if (!targetUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (targetUser.role === USER_ROLES.ADMIN) {
+      return res.status(403).json({ message: "Admin account cannot be edited from this endpoint" });
+    }
+
+    if (!canEditAsAdmin) {
+      const descendants = await getDescendantUsers({
+        rootUserId: req.user._id,
+        companyId: req.user.companyId,
+        includeInactive: true,
+        select: "_id role parentId isActive",
+      });
+      const allowedIds = new Set(descendants.map((row) => String(row._id)));
+      if (!allowedIds.has(String(targetUser._id))) {
+        return res.status(403).json({ message: "You can edit only users under your hierarchy" });
+      }
+    }
+
+    const patch = {};
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+      const name = sanitizeName(req.body.name);
+      if (!name || name.length < 2 || name.length > 80) {
+        return res.status(400).json({ message: "Name must be between 2 and 80 characters" });
+      }
+      patch.name = name;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "phone")) {
+      const phone = sanitizePhone(req.body.phone);
+      if (phone.length > 25) {
+        return res.status(400).json({ message: "Phone cannot exceed 25 characters" });
+      }
+      patch.phone = phone;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "profileImageUrl")) {
+      const profileImageUrl = sanitizeProfileImageUrl(req.body.profileImageUrl);
+      if (profileImageUrl.length > 1200) {
+        return res.status(400).json({
+          message: "Profile image URL is too long",
+        });
+      }
+      if (
+        profileImageUrl
+        && !/^https?:\/\//i.test(profileImageUrl)
+      ) {
+        return res.status(400).json({
+          message: "Profile image URL must be a valid http/https URL",
+        });
+      }
+      patch.profileImageUrl = profileImageUrl;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "isActive")) {
+      patch.isActive = Boolean(req.body.isActive);
+    }
+
+    if (canEditAsAdmin) {
+      const nextRole = Object.prototype.hasOwnProperty.call(req.body || {}, "role")
+        ? String(req.body.role || "").trim()
+        : targetUser.role;
+
+      if (nextRole && !Object.values(USER_ROLES).includes(nextRole)) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+      if (nextRole === USER_ROLES.ADMIN) {
+        return res.status(400).json({ message: "Cannot assign ADMIN role" });
+      }
+
+      if (nextRole && nextRole !== targetUser.role) {
+        patch.role = nextRole;
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(req.body || {}, "reportingToId")
+        || Object.prototype.hasOwnProperty.call(req.body || {}, "managerId")
+        || Object.prototype.hasOwnProperty.call(req.body || {}, "parentId")
+        || (nextRole && nextRole !== targetUser.role)
+      ) {
+        const allowedParentRoles = getAllowedParentRoles(nextRole || targetUser.role);
+        const requestedReportingToId = String(
+          req.body?.reportingToId || req.body?.managerId || req.body?.parentId || "",
+        ).trim();
+
+        if (allowedParentRoles.length) {
+          const finalParentId = requestedReportingToId || String(targetUser.parentId || "");
+          if (!isValidObjectId(finalParentId)) {
+            return res.status(400).json({ message: "Valid reporting manager is required" });
+          }
+
+          const parent = await User.findOne({
+            _id: finalParentId,
+            companyId: req.user.companyId,
+            role: { $in: allowedParentRoles },
+            isActive: true,
+          })
+            .select("_id role")
+            .lean();
+          if (!parent) {
+            return res.status(400).json({ message: "Invalid reporting manager for selected role" });
+          }
+          patch.parentId = parent._id;
+        } else {
+          patch.parentId = req.user._id;
+        }
+      }
+    }
+
+    if (!Object.keys(patch).length) {
+      return res.status(400).json({ message: "No valid fields provided for update" });
+    }
+
+    const updated = await User.findOneAndUpdate(
+      { _id: userId, companyId: req.user.companyId },
+      { $set: patch },
+      { new: true },
+    )
+      .populate("parentId", "name role")
+      .select("-password")
+      .lean();
+
+    if (!updated) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    return res.json({
+      message: "User updated successfully",
+      user: updated,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "updateUserByRole failed",
     });
     return res.status(500).json({ message: "Server error" });
   }

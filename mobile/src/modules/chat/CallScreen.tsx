@@ -117,6 +117,17 @@ export const CallScreen = () => {
 
   const emitSignal = (signalType: string, signal: any) => {
     if (!socketRef.current || !peerId) return;
+    const outgoingSignalPayload =
+      signalType === "ice-candidate"
+        ? { type: "candidate", candidate: signal?.candidate || signal }
+        : signal;
+
+    socketRef.current.emit("chat:call:signal", {
+      callId,
+      conversationId: conversationId || null,
+      targetUserId: peerId,
+      signal: outgoingSignalPayload,
+    });
     socketRef.current.emit("messenger:call:signal", {
       callId,
       conversationId: conversationId || null,
@@ -192,6 +203,11 @@ export const CallScreen = () => {
         status,
         durationSec,
       });
+      socketRef.current?.emit("chat:call:end", {
+        callId,
+        conversationId: conversationId || null,
+        reason: status === "REJECTED" ? "rejected" : "ended",
+      });
     } catch {}
 
     await teardownMedia();
@@ -200,7 +216,7 @@ export const CallScreen = () => {
 
   useEffect(() => {
     if (!hasWebRtc) {
-      setError("This build does not support calling. Install development build for voice/video call.");
+      setError("Calling is disabled in Expo Go. Install/open dev build and run: npm run android, then npm run start.");
       setLoading(false);
       return;
     }
@@ -296,6 +312,41 @@ export const CallScreen = () => {
           }
         });
 
+        socket.on("chat:call:signal", async (payload: any) => {
+          try {
+            const incomingCallId = String(payload?.callId || "");
+            if (incomingCallId && incomingCallId !== callId) return;
+
+            const fromUserId = String(payload?.fromUserId || payload?.from?._id || "");
+            if (fromUserId && fromUserId !== peerId) return;
+
+            const signal = payload?.signal;
+            if (!pcRef.current || !signal) return;
+
+            if (signal?.type === "offer" || signal?.sdp?.includes?.("a=group:BUNDLE")) {
+              await pcRef.current.setRemoteDescription(new RTCSessionDescriptionCtor(signal));
+              const answer = await pcRef.current.createAnswer();
+              await pcRef.current.setLocalDescription(answer);
+              emitSignal("answer", answer);
+              markConnected();
+              return;
+            }
+
+            if (signal?.type === "answer") {
+              await pcRef.current.setRemoteDescription(new RTCSessionDescriptionCtor(signal));
+              markConnected();
+              return;
+            }
+
+            const candidate = signal?.candidate ? signal : null;
+            if (candidate) {
+              await pcRef.current.addIceCandidate(new RTCIceCandidateCtor(candidate));
+            }
+          } catch {
+            // ignore malformed signal packets
+          }
+        });
+
         socket.on("messenger:call:update", (payload: any) => {
           const incomingCallId = String(payload?.callId || "");
           if (incomingCallId && incomingCallId !== callId) return;
@@ -305,6 +356,18 @@ export const CallScreen = () => {
           }
         });
 
+        socket.on("chat:call:ended", (payload: any) => {
+          const incomingCallId = String(payload?.callId || "");
+          if (incomingCallId && incomingCallId !== callId) return;
+          endCall("ENDED");
+        });
+
+        socket.on("chat:call:rejected", (payload: any) => {
+          const incomingCallId = String(payload?.callId || "");
+          if (incomingCallId && incomingCallId !== callId) return;
+          endCall("REJECTED");
+        });
+
         socket.on("connect", async () => {
           if (incoming) {
             try {
@@ -312,6 +375,10 @@ export const CallScreen = () => {
             } catch {
               // optional on legacy backend
             }
+            socket.emit("chat:call:accept", {
+              callId,
+              conversationId: conversationId || null,
+            });
             socket.emit("messenger:call:update", {
               callId,
               conversationId: conversationId || null,

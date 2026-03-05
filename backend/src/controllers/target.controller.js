@@ -9,16 +9,23 @@ const {
   EXECUTIVE_ROLES,
   isManagementRole,
 } = require("../constants/role.constants");
-const { getDescendantExecutiveIds } = require("../services/hierarchy.service");
+const { getDescendantExecutiveIds, getDescendantUsers } = require("../services/hierarchy.service");
 
 const MONTH_KEY_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DEFAULT_REVENUE_PER_CLOSED =
   Number.parseInt(process.env.TARGET_REVENUE_PER_CLOSED, 10) || 50000;
 
 const TARGET_ASSIGNMENT_FLOW = Object.freeze({
-  [USER_ROLES.ADMIN]: [USER_ROLES.MANAGER],
-  [USER_ROLES.MANAGER]: [USER_ROLES.ASSISTANT_MANAGER],
-  [USER_ROLES.ASSISTANT_MANAGER]: [USER_ROLES.TEAM_LEADER],
+  [USER_ROLES.ADMIN]: [
+    USER_ROLES.MANAGER,
+    USER_ROLES.ASSISTANT_MANAGER,
+    USER_ROLES.TEAM_LEADER,
+    USER_ROLES.EXECUTIVE,
+    USER_ROLES.FIELD_EXECUTIVE,
+    USER_ROLES.CHANNEL_PARTNER,
+  ],
+  [USER_ROLES.MANAGER]: [USER_ROLES.ASSISTANT_MANAGER, USER_ROLES.TEAM_LEADER, USER_ROLES.EXECUTIVE, USER_ROLES.FIELD_EXECUTIVE],
+  [USER_ROLES.ASSISTANT_MANAGER]: [USER_ROLES.TEAM_LEADER, USER_ROLES.EXECUTIVE, USER_ROLES.FIELD_EXECUTIVE],
   [USER_ROLES.TEAM_LEADER]: [USER_ROLES.EXECUTIVE, USER_ROLES.FIELD_EXECUTIVE],
 });
 
@@ -194,6 +201,35 @@ const buildPopulationQuery = (queryBuilder) =>
     .populate("assignedTo", "_id name email role")
     .lean();
 
+const getAssignableUsersForActor = async ({ actor }) => {
+  if (!actor?.companyId) return [];
+
+  if (actor.role === USER_ROLES.ADMIN) {
+    return User.find({
+      companyId: actor.companyId,
+      isActive: true,
+      role: { $ne: USER_ROLES.ADMIN },
+    })
+      .select("_id name email role parentId")
+      .sort({ name: 1 })
+      .lean();
+  }
+
+  if (isManagementRole(actor.role)) {
+    const descendants = await getDescendantUsers({
+      rootUserId: actor._id,
+      companyId: actor.companyId,
+      includeInactive: false,
+      select: "_id name email role parentId companyId isActive",
+    });
+    return descendants
+      .filter((row) => row.role !== USER_ROLES.ADMIN)
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }
+
+  return [];
+};
+
 exports.getMyTargets = async (req, res) => {
   try {
     if (!req.user.companyId) {
@@ -217,10 +253,11 @@ exports.getMyTargets = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const allowedChildRoles = TARGET_ASSIGNMENT_FLOW[me.role] || [];
-    const canAssign = allowedChildRoles.length > 0;
+    const assignableReports = await getAssignableUsersForActor({ actor: me });
+    const allowedChildRoles = [...new Set(assignableReports.map((row) => row.role).filter(Boolean))];
+    const canAssign = assignableReports.length > 0;
 
-    const [incomingRows, outgoingRows, directReports, companyUserRows] = await Promise.all([
+    const [incomingRows, outgoingRows, companyUserRows] = await Promise.all([
       buildPopulationQuery(
         TargetAssignment.find({
           companyId: req.user.companyId,
@@ -237,24 +274,12 @@ exports.getMyTargets = async (req, res) => {
       ),
       User.find({
         companyId: req.user.companyId,
-        parentId: req.user._id,
-        isActive: true,
-      })
-        .select("_id name email role parentId")
-        .sort({ name: 1 })
-        .lean(),
-      User.find({
-        companyId: req.user.companyId,
         isActive: true,
       })
         .select("_id")
         .lean(),
     ]);
     const companyUserIds = companyUserRows.map((row) => row._id);
-
-    const assignableReports = canAssign
-      ? directReports.filter((row) => allowedChildRoles.includes(row.role))
-      : [];
 
     const assigneeIds = [
       ...new Set(
@@ -339,8 +364,19 @@ exports.assignTarget = async (req, res) => {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const allowedChildRoles = TARGET_ASSIGNMENT_FLOW[req.user.role] || [];
-    if (!allowedChildRoles.length) {
+    const actor = await User.findOne({
+      _id: req.user._id,
+      companyId: req.user.companyId,
+      isActive: true,
+    })
+      .select("_id name email role parentId companyId isActive")
+      .lean();
+    if (!actor) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const assignableReports = await getAssignableUsersForActor({ actor });
+    if (!assignableReports.length) {
       return res.status(403).json({
         message: "You are not allowed to assign targets",
       });
@@ -390,18 +426,10 @@ exports.assignTarget = async (req, res) => {
       return res.status(404).json({ message: "Assignee not found" });
     }
 
-    if (!allowedChildRoles.includes(assignee.role)) {
-      const expectedRolesLabel = allowedChildRoles
-        .map((role) => ROLE_LABELS[role] || role)
-        .join(" / ");
-      return res.status(400).json({
-        message: `You can assign targets only to ${expectedRolesLabel}`,
-      });
-    }
-
-    if (String(assignee.parentId || "") !== String(req.user._id || "")) {
+    const assignableIds = new Set(assignableReports.map((row) => String(row._id)));
+    if (!assignableIds.has(String(assignee._id))) {
       return res.status(403).json({
-        message: "Targets can be assigned only to your direct reporting users",
+        message: "You can assign targets only within your allowed hierarchy",
       });
     }
 

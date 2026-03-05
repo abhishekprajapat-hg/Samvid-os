@@ -17,9 +17,10 @@ This folder contains the mobile app conversion of the Samvid web frontend using 
 
 ## Environment variables
 Set in `.env` for Expo:
-- `EXPO_PUBLIC_API_BASE_URL=http://<server>/api/client`
-- `EXPO_PUBLIC_SOCKET_URL=http://<server>`
+- `EXPO_PUBLIC_API_BASE_URL=https://nemnidhi.cloud/api`
+- `EXPO_PUBLIC_SOCKET_URL=https://nemnidhi.cloud`
 - `EXPO_PUBLIC_SOCKET_PATH=/socket.io`
+- Optional local API mode (Expo dev only): `EXPO_PUBLIC_USE_LOCAL_API=true`
 
 ## Run
 ```bash
@@ -27,6 +28,17 @@ cd mobile
 npm install
 npm run start
 ```
+
+## Calling-enabled run (required for audio/video calls)
+- Build and install Android development client (one-time): `npm run android`
+- Start Metro for dev client: `npm run start`
+- Open installed app (not Expo Go), then connect to Metro.
+
+## Expo Go scan + Web
+- Expo Go (no native WebRTC calling): `npm run start:go`
+- Same WiFi LAN mode (dev client): `npm run start:lan`
+- Web (port 19021): `npm run web`
+- Important: scan the QR shown by `expo start` (Metro), not EAS/deployment QR.
 
 ## Current scope
 - Core features are working with real APIs: login, role-based tabs, leads, inventory, chat, users, reports summary.

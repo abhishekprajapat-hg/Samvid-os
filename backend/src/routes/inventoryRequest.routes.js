@@ -13,7 +13,7 @@ router.use(companyMiddleware.requireCompanyContext);
 router.post(
   "/",
   writeLimiter,
-  authMiddleware.checkRole(["FIELD_EXECUTIVE"]),
+  authMiddleware.checkRole(["FIELD_EXECUTIVE", "EXECUTIVE"]),
   companyMiddleware.enforceBodyCompanyMatch("companyId"),
   inventoryRequestController.createRequest,
 );
@@ -22,7 +22,7 @@ router.post(
 router.post(
   "/create",
   writeLimiter,
-  authMiddleware.checkRole(["FIELD_EXECUTIVE"]),
+  authMiddleware.checkRole(["FIELD_EXECUTIVE", "EXECUTIVE"]),
   companyMiddleware.enforceBodyCompanyMatch("companyId"),
   inventoryRequestController.createRequest,
 );

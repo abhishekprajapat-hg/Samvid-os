@@ -1,0 +1,9 @@
+{
+  "name": "samvid-os-workspace",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "web": "powershell -ExecutionPolicy Bypass -File .\\run-mobile-web.ps1",
+    "web:frontend": "powershell -ExecutionPolicy Bypass -File .\\run-web.ps1"
+  }
+}

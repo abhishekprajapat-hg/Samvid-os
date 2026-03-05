@@ -15,6 +15,7 @@ import { LeadDetailsScreen } from "../modules/leads/LeadDetailsScreen";
 import { AssetVaultScreen } from "../modules/inventory/AssetVaultScreen";
 import { InventoryDetailsScreen } from "../modules/inventory/InventoryDetailsScreen";
 import { TeamChatScreen } from "../modules/chat/TeamChatScreen";
+import { SamvidBotScreen } from "../modules/chat/SamvidBotScreen";
 import { ChatConversationScreen } from "../modules/chat/ChatConversationScreen";
 import { CallScreen } from "../modules/chat/CallScreen";
 import { IntelligenceReportsScreen } from "../modules/reports/IntelligenceReportsScreen";
@@ -24,6 +25,9 @@ import { FieldOpsScreen } from "../modules/field/FieldOpsScreen";
 import { TeamManagerScreen } from "../modules/admin/TeamManagerScreen";
 import { SystemSettingsScreen } from "../modules/admin/SystemSettingsScreen";
 import { FinancialCoreScreen } from "../modules/finance/FinancialCoreScreen";
+import { NotificationsScreen } from "../modules/notifications/NotificationsScreen";
+import { ProfileScreen } from "../modules/profile/ProfileScreen";
+import { MoreMenuScreen } from "../modules/more/MoreMenuScreen";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -39,6 +43,9 @@ const getTabIconName = (routeName: string, focused: boolean) => {
     Users: { focused: "person-circle", unfocused: "person-circle-outline" },
     Settings: { focused: "settings", unfocused: "settings-outline" },
     Targets: { focused: "trophy", unfocused: "trophy-outline" },
+    Notifications: { focused: "notifications", unfocused: "notifications-outline" },
+    Profile: { focused: "person", unfocused: "person-outline" },
+    More: { focused: "menu", unfocused: "menu-outline" },
     Calendar: { focused: "calendar", unfocused: "calendar-outline" },
     "Field Ops": { focused: "map", unfocused: "map-outline" },
   };
@@ -69,7 +76,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
     tabBarInactiveTintColor: "#64748b",
   };
 
-  if (role === "ADMIN" || role === "MANAGER") {
+  if (role === "ADMIN" || role === "MANAGER" || role === "ASSISTANT_MANAGER" || role === "TEAM_LEADER") {
     return (
       <Tab.Navigator
         screenOptions={({ route }) => ({
@@ -87,10 +94,10 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
         <Tab.Screen name="Inventory" component={AssetVaultScreen} />
         <Tab.Screen name="Reports" component={IntelligenceReportsScreen} />
+        <Tab.Screen name="Targets" component={PerformanceScreen} />
         <Tab.Screen name="Finance" component={FinancialCoreScreen} />
         <Tab.Screen name="Chat" component={TeamChatScreen} />
-        <Tab.Screen name="Users" component={TeamManagerScreen} />
-        <Tab.Screen name="Settings" component={SystemSettingsScreen} />
+        <Tab.Screen name="More" component={MoreMenuScreen} />
       </Tab.Navigator>
     );
   }
@@ -115,6 +122,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         <Tab.Screen name="Targets" component={PerformanceScreen} />
         <Tab.Screen name="Calendar" component={MasterScheduleScreen} />
         <Tab.Screen name="Chat" component={TeamChatScreen} />
+        <Tab.Screen name="More" component={MoreMenuScreen} />
       </Tab.Navigator>
     );
   }
@@ -133,10 +141,13 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
       })}
     >
       <Tab.Screen name="Dashboard" component={FieldDashboardScreen} />
+      <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
       <Tab.Screen name="Inventory" component={AssetVaultScreen} />
+      <Tab.Screen name="Targets" component={PerformanceScreen} />
       <Tab.Screen name="Field Ops" component={FieldOpsScreen} />
       <Tab.Screen name="Calendar" component={MasterScheduleScreen} />
       <Tab.Screen name="Chat" component={TeamChatScreen} />
+      <Tab.Screen name="More" component={MoreMenuScreen} />
     </Tab.Navigator>
   );
 };
@@ -165,9 +176,39 @@ export const RoleTabs = ({ role }: { role: UserRole }) => (
       options={{ headerShown: false }}
     />
     <Stack.Screen
+      name="Samvid Bot"
+      component={SamvidBotScreen}
+      options={{ title: "Samvid Bot" }}
+    />
+    <Stack.Screen
       name="CallScreen"
       component={CallScreen}
       options={{ headerShown: false }}
+    />
+    <Stack.Screen
+      name="Notifications"
+      component={NotificationsScreen}
+      options={{ title: "Notifications" }}
+    />
+    <Stack.Screen
+      name="Users"
+      component={TeamManagerScreen}
+      options={{ title: "Users" }}
+    />
+    <Stack.Screen
+      name="Profile"
+      component={ProfileScreen}
+      options={{ title: "Profile" }}
+    />
+    <Stack.Screen
+      name="Settings"
+      component={SystemSettingsScreen}
+      options={{ title: "Settings" }}
+    />
+    <Stack.Screen
+      name="Field Ops"
+      component={FieldOpsScreen}
+      options={{ title: "Field Ops" }}
     />
   </Stack.Navigator>
 );

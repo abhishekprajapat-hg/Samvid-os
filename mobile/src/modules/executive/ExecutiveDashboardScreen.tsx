@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
 import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
@@ -16,7 +17,33 @@ const formatDate = (value?: string) => {
   return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 };
 
+const getLeadPendingPaymentRows = (lead: Lead) => {
+  const merged: any[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (row: any) => {
+    const id = String(row?._id || "");
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    merged.push(row);
+  };
+
+  if (lead.inventoryId && typeof lead.inventoryId === "object") {
+    pushUnique(lead.inventoryId);
+  }
+  if (Array.isArray(lead.relatedInventoryIds)) {
+    lead.relatedInventoryIds.forEach((row) => pushUnique(row));
+  }
+
+  return merged
+    .map((row: any) => ({
+      remainingAmount: Number(row?.saleMeta?.remainingAmount || 0),
+      remainingDueDate: String(row?.saleMeta?.remainingDueDate || "").trim(),
+    }))
+    .filter((row) => Number.isFinite(row.remainingAmount) && row.remainingAmount > 0);
+};
+
 export const ExecutiveDashboardScreen = () => {
+  const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
@@ -68,30 +95,45 @@ export const ExecutiveDashboardScreen = () => {
     [leads],
   );
 
+  const openLeads = (params: Record<string, unknown>) => {
+    navigation.navigate("Leads", params);
+  };
+
   return (
     <Screen title="Executive Dashboard" subtitle="My Performance" loading={loading} error={error}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        <View style={styles.hero}>
+        <Pressable style={styles.hero} onPress={() => openLeads({ filterPreset: "PIPELINE" })}>
           <Text style={styles.heroLabel}>PERSONAL TARGET BOARD</Text>
           <Text style={styles.heroTitle}>{summary.closeRate}% Close Rate</Text>
           <Text style={styles.heroSub}>{summary.closed} deals closed from {summary.total} leads</Text>
+        </Pressable>
+
+        <View style={styles.row}>
+          <StatCard label="My Leads" value={summary.total} onPress={() => openLeads({ initialStatus: "ALL" })} />
+          <StatCard label="Active" value={summary.active} onPress={() => openLeads({ filterPreset: "PIPELINE" })} />
         </View>
 
         <View style={styles.row}>
-          <StatCard label="My Leads" value={summary.total} />
-          <StatCard label="Active" value={summary.active} />
+          <StatCard label="Closed" value={summary.closed} onPress={() => openLeads({ initialStatus: "CLOSED" })} />
+          <StatCard
+            label="Commission"
+            value={formatCurrency(summary.commission)}
+            onPress={() =>
+              openLeads({
+                initialStatus: "CLOSED",
+                highlightMetric: "ESTIMATED_REVENUE",
+                estimatedRevenue: summary.commission,
+                closedDeals: summary.closed,
+              })
+            }
+          />
         </View>
 
-        <View style={styles.row}>
-          <StatCard label="Closed" value={summary.closed} />
-          <StatCard label="Commission" value={formatCurrency(summary.commission)} />
-        </View>
-
-        <View style={styles.riskCard}>
+        <Pressable style={styles.riskCard} onPress={() => openLeads({ filterPreset: "DUE_FOLLOWUP" })}>
           <Text style={styles.riskTitle}>Follow-up Risk</Text>
           <Text style={styles.riskValue}>{summary.dueFollowUps}</Text>
           <Text style={styles.riskSub}>follow-ups are overdue</Text>
-        </View>
+        </Pressable>
 
         <View style={styles.listCard}>
           <Text style={styles.listTitle}>Upcoming Follow-ups</Text>
@@ -99,13 +141,22 @@ export const ExecutiveDashboardScreen = () => {
             <Text style={styles.empty}>No scheduled follow-up right now</Text>
           ) : (
             urgentFollowUps.map((lead) => (
-              <View key={lead._id} style={styles.itemRow}>
+              <Pressable
+                key={lead._id}
+                style={styles.itemRow}
+                onPress={() => navigation.navigate("LeadDetails", { leadId: lead._id })}
+              >
                 <View>
                   <Text style={styles.itemName}>{lead.name}</Text>
                   <Text style={styles.itemMeta}>{lead.projectInterested || "-"}</Text>
+                  {getLeadPendingPaymentRows(lead).map((pending, index) => (
+                    <Text key={`${lead._id}-pending-${index}`} style={styles.itemMeta}>
+                      Pending: {formatCurrency(pending.remainingAmount)} | Due: {pending.remainingDueDate || "-"}
+                    </Text>
+                  ))}
                 </View>
                 <Text style={styles.itemDate}>{formatDate(lead.nextFollowUp)}</Text>
-              </View>
+              </Pressable>
             ))
           )}
         </View>
@@ -114,11 +165,11 @@ export const ExecutiveDashboardScreen = () => {
   );
 };
 
-const StatCard = ({ label, value }: { label: string; value: string | number }) => (
-  <View style={styles.statCard}>
+const StatCard = ({ label, value, onPress }: { label: string; value: string | number; onPress?: () => void }) => (
+  <Pressable style={styles.statCard} onPress={onPress} disabled={!onPress}>
     <Text style={styles.statLabel}>{label}</Text>
     <Text style={styles.statValue}>{value}</Text>
-  </View>
+  </Pressable>
 );
 
 const styles = StyleSheet.create({
