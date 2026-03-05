@@ -4,11 +4,66 @@ import { getMessengerConversations, markConversationRead as markConversationRead
 import ChatNotificationContext from "./chatNotificationContext";
 
 const MAX_RECENT_NOTIFICATIONS = 20;
+const MAX_RECENT_ADMIN_REQUESTS = 30;
+const ADMIN_REQUEST_TONE_COOLDOWN_MS = 1200;
+
+let lastAdminRequestToneAt = 0;
+
+const playAdminRequestTone = () => {
+  if (typeof window === "undefined") return;
+
+  const now = Date.now();
+  if (now - lastAdminRequestToneAt < ADMIN_REQUEST_TONE_COOLDOWN_MS) {
+    return;
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) return;
+
+  lastAdminRequestToneAt = now;
+
+  try {
+    const audioContext = new AudioContextCtor();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    const startAt = audioContext.currentTime;
+
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(880, startAt);
+    oscillator.frequency.exponentialRampToValueAtTime(660, startAt + 0.16);
+
+    gainNode.gain.setValueAtTime(0.0001, startAt);
+    gainNode.gain.exponentialRampToValueAtTime(0.18, startAt + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.24);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    oscillator.start(startAt);
+    oscillator.stop(startAt + 0.25);
+
+    oscillator.onended = () => {
+      audioContext.close().catch(() => null);
+    };
+  } catch {
+    // Sound playback can fail due to browser autoplay restrictions.
+  }
+};
 
 const getCurrentUserId = () => {
   try {
     const raw = JSON.parse(localStorage.getItem("user") || "{}");
     return String(raw.id || raw._id || "");
+  } catch {
+    return "";
+  }
+};
+
+const getCurrentUserRole = () => {
+  try {
+    const fromStorage = String(localStorage.getItem("role") || "").trim().toUpperCase();
+    if (fromStorage) return fromStorage;
+    const raw = JSON.parse(localStorage.getItem("user") || "{}");
+    return String(raw.role || "").trim().toUpperCase();
   } catch {
     return "";
   }
@@ -59,9 +114,76 @@ const extractIncomingMessageEvent = (payload = {}) => {
   };
 };
 
+const normalizeAdminRequestEvent = (payload = {}) => {
+  if (!payload || typeof payload !== "object") return null;
+
+  const source = String(payload.source || "").trim().toLowerCase()
+    || (payload.leadId || payload.lead ? "lead" : "inventory");
+
+  if (source === "lead") {
+    const leadId = String(payload.leadId || payload.lead?._id || "");
+    if (!leadId) return null;
+
+    const leadName = String(payload.lead?.name || "").trim() || "Lead";
+    const paymentMode = String(payload.payment?.mode || "").trim();
+    const paymentType = String(payload.payment?.paymentType || "").trim();
+    const createdAt = payload.createdAt || new Date().toISOString();
+    const eventId =
+      String(payload.eventId || "").trim()
+      || `lead-payment:${leadId}:${new Date(createdAt).getTime()}`;
+
+    return {
+      eventId,
+      source: "lead",
+      requestType: "LEAD_PAYMENT_APPROVAL",
+      createdAt,
+      preview: `${leadName} payment request (${paymentMode || "Mode NA"}${paymentType ? `, ${paymentType}` : ""})`,
+      leadId,
+      requestId: "",
+      inventoryId: "",
+      payload,
+    };
+  }
+
+  const requestId = String(payload.requestId || "").trim();
+  if (!requestId) return null;
+  const rawInventoryId =
+    payload.inventoryId
+    || payload.inventory?._id
+    || payload.inventory?.id
+    || payload.inventoryId?._id
+    || payload.request?.inventoryId?._id
+    || payload.request?.inventoryId
+    || "";
+  const inventoryId =
+    typeof rawInventoryId === "object"
+      ? String(rawInventoryId._id || rawInventoryId.id || "").trim()
+      : String(rawInventoryId || "").trim();
+  const inventoryRequestType = String(payload.inventoryRequestType || payload.type || "update")
+    .trim()
+    .toLowerCase();
+  const createdAt = payload.createdAt || new Date().toISOString();
+  const eventId = String(payload.eventId || "").trim() || `inventory:${requestId}`;
+
+  return {
+    eventId,
+    source: "inventory",
+    requestType: "INVENTORY",
+    createdAt,
+    preview: `Inventory ${inventoryRequestType} request raised`,
+    leadId: "",
+    requestId,
+    inventoryId,
+    payload,
+  };
+};
+
 export const ChatNotificationProvider = ({ children, enabled = true }) => {
   const [unreadByConversation, setUnreadByConversation] = useState({});
   const [recentNotifications, setRecentNotifications] = useState([]);
+  const [adminRequestUnread, setAdminRequestUnread] = useState(0);
+  const [recentAdminRequests, setRecentAdminRequests] = useState([]);
+  const [adminRequestPulseAt, setAdminRequestPulseAt] = useState(0);
   const [socketConnected, setSocketConnected] = useState(false);
   const [permission, setPermission] = useState(() => {
     if (typeof window === "undefined" || !("Notification" in window)) {
@@ -72,6 +194,7 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
 
   const activeConversationIdRef = useRef("");
   const seenMessageIdsRef = useRef(new Set());
+  const seenAdminRequestIdsRef = useRef(new Set());
 
   const unreadTotal = useMemo(
     () =>
@@ -130,6 +253,15 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
 
   const clearRecentNotifications = useCallback(() => {
     setRecentNotifications([]);
+  }, []);
+
+  const markAdminRequestsRead = useCallback(() => {
+    setAdminRequestUnread(0);
+  }, []);
+
+  const clearAdminRequestNotifications = useCallback(() => {
+    setAdminRequestUnread(0);
+    setRecentAdminRequests([]);
   }, []);
 
   const requestBrowserPermission = useCallback(async () => {
@@ -255,12 +387,69 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
       }
     };
 
+    const onAdminRequestEvent = (payload = {}) => {
+      if (getCurrentUserRole() !== "ADMIN") return;
+
+      const event = normalizeAdminRequestEvent(payload);
+      if (!event) return;
+
+      const eventId = String(event.eventId || "").trim();
+      if (!eventId) return;
+
+      if (seenAdminRequestIdsRef.current.has(eventId)) {
+        return;
+      }
+
+      seenAdminRequestIdsRef.current.add(eventId);
+      if (seenAdminRequestIdsRef.current.size > 2000) {
+        seenAdminRequestIdsRef.current.clear();
+      }
+
+      setAdminRequestUnread((prev) => prev + 1);
+      setAdminRequestPulseAt(Date.now());
+      setRecentAdminRequests((prev) => [
+        {
+          id: eventId,
+          source: event.source,
+          requestType: event.requestType,
+          preview: event.preview,
+          createdAt: event.createdAt,
+          leadId: event.leadId,
+          requestId: event.requestId,
+          inventoryId: event.inventoryId,
+          payload: event.payload,
+        },
+        ...prev,
+      ].slice(0, MAX_RECENT_ADMIN_REQUESTS));
+
+      playAdminRequestTone();
+
+      if (
+        typeof window !== "undefined"
+        && "Notification" in window
+        && Notification.permission === "granted"
+        && document.hidden
+      ) {
+        try {
+          new Notification("New admin request", {
+            body: event.preview,
+            tag: `admin-request:${eventId}`,
+          });
+        } catch {
+          // ignore browser notification errors
+        }
+      }
+    };
+
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
     socket.on("messenger:message:new", onNewMessage);
     socket.on("chat:message:new", onNewMessage);
     socket.on("chat:room:read", onRoomRead);
+    socket.on("admin:request:new", onAdminRequestEvent);
+    socket.on("lead:payment:request:created", onAdminRequestEvent);
+    socket.on("inventory:request:created", onAdminRequestEvent);
 
     return () => {
       disposed = true;
@@ -270,6 +459,9 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
       socket.off("messenger:message:new", onNewMessage);
       socket.off("chat:message:new", onNewMessage);
       socket.off("chat:room:read", onRoomRead);
+      socket.off("admin:request:new", onAdminRequestEvent);
+      socket.off("lead:payment:request:created", onAdminRequestEvent);
+      socket.off("inventory:request:created", onAdminRequestEvent);
       socket.disconnect();
       setSocketConnected(false);
       setActiveConversationId("");
@@ -281,6 +473,9 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
       unreadByConversation: enabled ? unreadByConversation : {},
       unreadTotal: enabled ? unreadTotal : 0,
       recentNotifications: enabled ? recentNotifications : [],
+      adminRequestUnread: enabled ? adminRequestUnread : 0,
+      recentAdminRequests: enabled ? recentAdminRequests : [],
+      adminRequestPulseAt: enabled ? adminRequestPulseAt : 0,
       socketConnected: enabled ? socketConnected : false,
       permission,
       setActiveConversationId,
@@ -288,6 +483,8 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
       markConversationRead,
       markAllRead,
       clearRecentNotifications,
+      markAdminRequestsRead,
+      clearAdminRequestNotifications,
       requestBrowserPermission,
     }),
     [
@@ -302,6 +499,11 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
       markConversationRead,
       markAllRead,
       clearRecentNotifications,
+      adminRequestUnread,
+      recentAdminRequests,
+      adminRequestPulseAt,
+      markAdminRequestsRead,
+      clearAdminRequestNotifications,
       requestBrowserPermission,
     ],
   );

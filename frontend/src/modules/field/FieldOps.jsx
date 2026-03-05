@@ -27,7 +27,7 @@ import FieldOpsWorkloadSection from "./components/FieldOpsWorkloadSection";
 import FieldOpsMapSection from "./components/FieldOpsMapSection";
 import { StatCard } from "./components/FieldOpsShared";
 
-const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
+const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED"]);
 const VISIT_STATUS = "SITE_VISIT";
 const DEFAULT_MAP_CENTER = [28.6139, 77.209];
 const LOCATION_STALE_MINUTES = 30;

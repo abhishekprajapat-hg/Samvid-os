@@ -8,6 +8,9 @@ export const useChatNotifications = () => {
       unreadByConversation: {},
       unreadTotal: 0,
       recentNotifications: [],
+      adminRequestUnread: 0,
+      recentAdminRequests: [],
+      adminRequestPulseAt: 0,
       socketConnected: false,
       permission: "unsupported",
       setActiveConversationId: () => {},
@@ -15,10 +18,11 @@ export const useChatNotifications = () => {
       markConversationRead: async () => {},
       markAllRead: async () => {},
       clearRecentNotifications: () => {},
+      markAdminRequestsRead: () => {},
+      clearAdminRequestNotifications: () => {},
       requestBrowserPermission: async () => "unsupported",
     };
   }
 
   return context;
 };
-

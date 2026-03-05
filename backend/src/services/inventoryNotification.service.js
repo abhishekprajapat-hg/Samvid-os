@@ -1,6 +1,7 @@
 const USER_ROLES = {
   ADMIN: "ADMIN",
 };
+const ADMIN_REQUEST_EVENT = "admin:request:new";
 
 const emitToRoom = ({ io, room, event, payload }) => {
   if (!io || !room || !event) return;
@@ -14,28 +15,52 @@ const emitToUser = ({ io, userId, event, payload }) => {
 
 const notifyRequestCreated = ({ io, request, companyId, teamId }) => {
   if (!io || !request || !companyId) return;
+  const adminRoom = `company:${companyId}:role:${USER_ROLES.ADMIN}`;
+  const resolvedTeamId = teamId || request.teamId || null;
+  const eventId = `inventory:${request._id}`;
 
   emitToRoom({
     io,
-    room: `company:${companyId}:role:${USER_ROLES.ADMIN}`,
+    room: adminRoom,
     event: "inventory:request:created",
     payload: {
+      eventId,
       requestId: request._id,
       type: request.type,
       status: request.status,
       companyId,
-      teamId: teamId || request.teamId || null,
+      teamId: resolvedTeamId,
       requestedBy: request.requestedBy,
       createdAt: request.createdAt,
     },
   });
 
-  if (teamId || request.teamId) {
+  emitToRoom({
+    io,
+    room: adminRoom,
+    event: ADMIN_REQUEST_EVENT,
+    payload: {
+      eventId,
+      source: "inventory",
+      requestType: "INVENTORY",
+      requestId: request._id,
+      inventoryRequestType: request.type,
+      status: request.status,
+      companyId,
+      teamId: resolvedTeamId,
+      requestedBy: request.requestedBy,
+      createdAt: request.createdAt,
+      message: `New inventory ${String(request.type || "update").toLowerCase()} request`,
+    },
+  });
+
+  if (resolvedTeamId) {
     emitToUser({
       io,
-      userId: teamId || request.teamId,
+      userId: resolvedTeamId,
       event: "inventory:request:created",
       payload: {
+        eventId,
         requestId: request._id,
         type: request.type,
         status: request.status,

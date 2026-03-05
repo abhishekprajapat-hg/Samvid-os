@@ -31,8 +31,8 @@ const LEAD_STAGES = [
   { key: "LOST", label: "Lost" },
 ];
 
-const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
-const QUALIFIED_STATUSES = new Set(["INTERESTED", "SITE_VISIT", "CLOSED"]);
+const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED"]);
+const QUALIFIED_STATUSES = new Set(["INTERESTED", "SITE_VISIT", "REQUESTED", "CLOSED"]);
 
 const parseLocalDateInput = (value) => {
   const raw = String(value || "").trim();

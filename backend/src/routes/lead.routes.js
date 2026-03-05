@@ -33,14 +33,21 @@ router.get(
   leadController.getTodayFollowUps
 );
 
+router.get(
+  "/payment-requests",
+  authMiddleware.protect,
+  authMiddleware.checkRole(["ADMIN"]),
+  leadController.getLeadPaymentRequests
+);
+
 // ======================================
-// ASSIGN LEAD (Admin / Manager only)
+// ASSIGN LEAD (Admin only)
 // ======================================
 router.patch(
   "/:leadId/assign",
   writeLimiter,
   authMiddleware.protect,
-  authMiddleware.checkRole(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]),
+  authMiddleware.checkRole(["ADMIN"]),
   leadController.assignLead
 );
 

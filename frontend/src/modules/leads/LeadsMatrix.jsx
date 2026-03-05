@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   getAllLeads,
   createLead,
@@ -13,31 +13,63 @@ import {
   getLeadDiary,
   addLeadDiaryEntry,
 } from "../../services/leadService";
-import { getInventoryAssets } from "../../services/inventoryService";
+import {
+  getInventoryAssets,
+  requestInventoryUpdateChange,
+  updateInventoryAsset,
+} from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import {
   AddLeadModal,
-  LeadDetailsDrawer,
   LeadsMatrixAlerts,
   LeadsMatrixFilters,
   LeadsMatrixMetrics,
   LeadsMatrixTable,
   LeadsMatrixToolbar,
 } from "./components/LeadsMatrixSections";
+import { LeadDetailsRebuilt } from "./components/LeadDetailsRebuilt";
 
 const LEAD_STATUSES = [
   "NEW",
   "CONTACTED",
   "INTERESTED",
   "SITE_VISIT",
+  "REQUESTED",
   "CLOSED",
   "LOST",
 ];
 
+const LEAD_SORT_OPTIONS = {
+  RECENT: "RECENT",
+  FOLLOW_UP: "FOLLOW_UP",
+  NAME: "NAME",
+};
+
 const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
 const MANAGEMENT_ROLES = ["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"];
 const SITE_VISIT_RADIUS_METERS = 200;
+const DEAL_PAYMENT_MODES = [
+  { value: "UPI", label: "UPI" },
+  { value: "CASH", label: "Cash" },
+  { value: "CHECK", label: "Check / Cheque" },
+  { value: "NET_BANKING_NEFTRTGSIMPS", label: "Net Banking (NEFT/RTGS/IMPS)" },
+];
+const DEAL_PAYMENT_TYPES = [
+  { value: "FULL", label: "Full Payment" },
+  { value: "PARTIAL", label: "Partial Payment" },
+];
+const DEAL_PAYMENT_ADMIN_DECISIONS = [
+  { value: "APPROVED", label: "Approve Payment" },
+  { value: "REJECTED", label: "Reject Payment" },
+];
+const INVENTORY_STATUS_OPTIONS = [
+  { label: "Available", value: "Available" },
+  { label: "Reserved", value: "Blocked" },
+  { label: "Sold", value: "Sold" },
+];
+const INVENTORY_STATUS_REQUEST_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
+const MAX_PAYMENT_NOTE_LENGTH = 1000;
 
 const defaultFormData = {
   inventoryId: "",
@@ -91,6 +123,8 @@ const getStatusColor = (status) => {
       return "bg-emerald-50 text-emerald-700 border-emerald-200";
     case "SITE_VISIT":
       return "bg-violet-50 text-violet-700 border-violet-200";
+    case "REQUESTED":
+      return "bg-orange-50 text-orange-700 border-orange-200";
     case "CLOSED":
       return "bg-slate-900 text-white border-slate-900";
     case "LOST":
@@ -98,6 +132,18 @@ const getStatusColor = (status) => {
     default:
       return "bg-slate-50 text-slate-600 border-slate-200";
   }
+};
+
+const getStatusLabel = (status) =>
+  String(status || "")
+    .toLowerCase()
+    .split("_")
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
+
+const getDateMs = (value) => {
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
 };
 
 const toDateTimeInput = (dateValue) => {
@@ -138,6 +184,26 @@ const toCoordinateNumber = (value) => {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toAmountNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const toInventoryApiStatus = (value) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "Available";
+  if (normalized === "Reserved") return "Blocked";
+  return normalized;
+};
+
+const toInventoryStatusLabel = (value) => {
+  const normalized = toInventoryApiStatus(value);
+  if (normalized === "Blocked") return "Reserved";
+  return normalized;
 };
 
 const normalizePhoneDigits = (value) =>
@@ -184,6 +250,8 @@ const WhatsAppIcon = ({ size = 13, className = "" }) => (
 
 const LeadsMatrix = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { leadId: routeLeadId = "" } = useParams();
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -200,6 +268,8 @@ const LeadsMatrix = () => {
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [sortBy, setSortBy] = useState(LEAD_SORT_OPTIONS.RECENT);
+  const [showDueOnly, setShowDueOnly] = useState(false);
 
   const [selectedLead, setSelectedLead] = useState(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -217,6 +287,7 @@ const LeadsMatrix = () => {
   const [linkingProperty, setLinkingProperty] = useState(false);
   const [propertyActionInventoryId, setPropertyActionInventoryId] = useState("");
   const [propertyActionType, setPropertyActionType] = useState("");
+  const [propertyStatusActionInventoryId, setPropertyStatusActionInventoryId] = useState("");
 
   const [statusDraft, setStatusDraft] = useState("NEW");
   const [followUpDraft, setFollowUpDraft] = useState("");
@@ -224,16 +295,38 @@ const LeadsMatrix = () => {
   const [siteLatDraft, setSiteLatDraft] = useState("");
   const [siteLngDraft, setSiteLngDraft] = useState("");
   const [relatedInventoryDraft, setRelatedInventoryDraft] = useState("");
+  const [paymentModeDraft, setPaymentModeDraft] = useState("");
+  const [paymentTypeDraft, setPaymentTypeDraft] = useState("");
+  const [paymentRemainingDraft, setPaymentRemainingDraft] = useState("");
+  const [paymentReferenceDraft, setPaymentReferenceDraft] = useState("");
+  const [paymentNoteDraft, setPaymentNoteDraft] = useState("");
+  const [paymentApprovalStatusDraft, setPaymentApprovalStatusDraft] = useState("");
+  const [paymentApprovalNoteDraft, setPaymentApprovalNoteDraft] = useState("");
 
   const [executives, setExecutives] = useState([]);
   const diaryRecognitionRef = useRef(null);
 
+  const normalizedRouteLeadId = String(routeLeadId || "").trim();
+  const isRouteDetailsView = Boolean(normalizedRouteLeadId);
+  const currentLeadRouteBase = location.pathname.startsWith("/my-leads")
+    ? "/my-leads"
+    : "/leads";
+
   const userRole = localStorage.getItem("role") || "";
-  const canAddLead = userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
-  const canAssignLead = userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
+  const isExecutiveUser = EXECUTIVE_ROLES.includes(userRole);
+  const canAddLead =
+    userRole === "ADMIN"
+    || MANAGEMENT_ROLES.includes(userRole)
+    || userRole === "CHANNEL_PARTNER";
+  const canAssignLead = userRole === "ADMIN";
   const canManageLeadProperties = userRole !== "CHANNEL_PARTNER";
   const canConfigureSiteLocation =
     userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
+  const canReviewDealPayment = userRole === "ADMIN";
+  const canDirectInventoryStatusUpdate = userRole === "ADMIN";
+  const canRequestInventoryStatusUpdate = INVENTORY_STATUS_REQUEST_ROLES.includes(userRole);
+  const canUpdateRelatedPropertyStatus =
+    canManageLeadProperties && (canDirectInventoryStatusUpdate || canRequestInventoryStatusUpdate);
 
   const fetchLeads = useCallback(async (asRefresh = false) => {
     try {
@@ -407,14 +500,20 @@ const LeadsMatrix = () => {
     };
   }, []);
 
-  const leadRowClass = isDark
-    ? "w-full text-left grid grid-cols-12 gap-4 p-4 rounded-xl border border-slate-700/60 hover:border-cyan-300/35 hover:bg-slate-800/70 items-center transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-400/40"
-    : "w-full text-left grid grid-cols-12 gap-4 p-4 rounded-xl border border-transparent hover:border-slate-200 hover:bg-slate-50 items-center transition-colors focus:outline-none focus:ring-2 focus:ring-slate-300";
+  const statusBreakdown = useMemo(
+    () =>
+      LEAD_STATUSES.reduce(
+        (acc, status) => ({ ...acc, [status]: leads.filter((lead) => lead.status === status).length }),
+        {},
+      ),
+    [leads],
+  );
 
   const filteredLeads = useMemo(() => {
     const normalized = query.trim().toLowerCase();
+    const now = Date.now();
 
-    return leads.filter((lead) => {
+    const filtered = leads.filter((lead) => {
       const statusMatch = statusFilter === "ALL" || lead.status === statusFilter;
       const relatedInventorySearchValue = getLeadRelatedInventories(lead)
         .map((inventory) => {
@@ -432,34 +531,102 @@ const LeadsMatrix = () => {
           lead.email,
           lead.city,
           lead.projectInterested,
+          lead.assignedTo?.name,
           relatedInventorySearchValue,
         ]
           .map((value) => String(value || "").toLowerCase())
           .some((value) => value.includes(normalized));
 
-      return statusMatch && searchMatch;
+      const followUpMs = getDateMs(lead.nextFollowUp);
+      const dueMatch = !showDueOnly || (followUpMs > 0 && followUpMs <= now && !["REQUESTED", "CLOSED", "LOST"].includes(String(lead.status || "")));
+
+      return statusMatch && searchMatch && dueMatch;
     });
-  }, [leads, query, statusFilter]);
+
+    const sorted = [...filtered];
+    if (sortBy === LEAD_SORT_OPTIONS.NAME) {
+      sorted.sort((a, b) => String(a?.name || "").localeCompare(String(b?.name || "")));
+      return sorted;
+    }
+
+    if (sortBy === LEAD_SORT_OPTIONS.FOLLOW_UP) {
+      sorted.sort((a, b) => {
+        const aMs = getDateMs(a?.nextFollowUp);
+        const bMs = getDateMs(b?.nextFollowUp);
+        if (!aMs && !bMs) return 0;
+        if (!aMs) return 1;
+        if (!bMs) return -1;
+        return aMs - bMs;
+      });
+      return sorted;
+    }
+
+    sorted.sort((a, b) => {
+      const aMs = getDateMs(a?.updatedAt || a?.createdAt);
+      const bMs = getDateMs(b?.updatedAt || b?.createdAt);
+      return bMs - aMs;
+    });
+    return sorted;
+  }, [leads, query, showDueOnly, sortBy, statusFilter]);
 
   const metrics = useMemo(() => {
-    const closed = leads.filter((lead) => lead.status === "CLOSED").length;
-    const interested = leads.filter((lead) => lead.status === "INTERESTED").length;
-    const fresh = leads.filter((lead) => lead.status === "NEW").length;
+    const closed = statusBreakdown.CLOSED || 0;
+    const contacted = statusBreakdown.CONTACTED || 0;
+    const interested = statusBreakdown.INTERESTED || 0;
+    const fresh = statusBreakdown.NEW || 0;
     const dueFollowUps = leads.filter((lead) => {
-      if (!lead.nextFollowUp) return false;
-      return new Date(lead.nextFollowUp) <= new Date();
+      const followUpMs = getDateMs(lead.nextFollowUp);
+      return followUpMs > 0 && followUpMs <= Date.now() && !["REQUESTED", "CLOSED", "LOST"].includes(String(lead.status || ""));
     }).length;
 
+    const total = leads.length;
+    const conversionRate = total > 0 ? Math.round((closed / total) * 100) : 0;
+
     return {
-      total: leads.length,
+      total,
       new: fresh,
+      contacted,
       interested,
       closed,
       dueFollowUps,
+      conversionRate,
     };
-  }, [leads]);
+  }, [leads, statusBreakdown]);
 
-  const openLeadDetails = async (lead) => {
+  const handleMetricSelect = useCallback((metricKey) => {
+    switch (metricKey) {
+      case "due":
+        setShowDueOnly(true);
+        setStatusFilter("ALL");
+        break;
+      case "conversion":
+      case "closed":
+        setStatusFilter("CLOSED");
+        setShowDueOnly(false);
+        break;
+      case "interested":
+        setStatusFilter("INTERESTED");
+        setShowDueOnly(false);
+        break;
+      case "contacted":
+        setStatusFilter("CONTACTED");
+        setShowDueOnly(false);
+        break;
+      case "new":
+        setStatusFilter("NEW");
+        setShowDueOnly(false);
+        break;
+      default:
+        setStatusFilter("ALL");
+        setShowDueOnly(false);
+        break;
+    }
+  }, []);
+
+  const openLeadDetails = useCallback(async (lead) => {
+    const resolvedLeadId = String(lead?._id || "").trim();
+    if (!resolvedLeadId) return;
+
     const leadSiteLat = toCoordinateNumber(lead?.siteLocation?.lat);
     const leadSiteLng = toCoordinateNumber(lead?.siteLocation?.lng);
 
@@ -474,14 +641,25 @@ const LeadsMatrix = () => {
         : lead.assignedTo?._id || "",
     );
     setRelatedInventoryDraft("");
+    setPaymentModeDraft(String(lead?.dealPayment?.mode || ""));
+    setPaymentTypeDraft(String(lead?.dealPayment?.paymentType || ""));
+    setPaymentRemainingDraft(
+      lead?.dealPayment?.remainingAmount === null || lead?.dealPayment?.remainingAmount === undefined
+        ? ""
+        : String(lead.dealPayment.remainingAmount),
+    );
+    setPaymentReferenceDraft(String(lead?.dealPayment?.paymentReference || ""));
+    setPaymentNoteDraft(String(lead?.dealPayment?.note || ""));
+    setPaymentApprovalStatusDraft("");
+    setPaymentApprovalNoteDraft(String(lead?.dealPayment?.approvalNote || ""));
     setDiaryDraft("");
     setIsDetailsOpen(true);
 
     setActivityLoading(true);
     setDiaryLoading(true);
     const [timelineResult, diaryResult] = await Promise.allSettled([
-      getLeadActivity(lead._id),
-      getLeadDiary(lead._id),
+      getLeadActivity(resolvedLeadId),
+      getLeadDiary(resolvedLeadId),
     ]);
 
     if (timelineResult.status === "fulfilled") {
@@ -502,9 +680,9 @@ const LeadsMatrix = () => {
 
     setActivityLoading(false);
     setDiaryLoading(false);
-  };
+  }, []);
 
-  const closeDetails = () => {
+  const closeDetails = useCallback(() => {
     if (diaryRecognitionRef.current && isDiaryListening) {
       try {
         diaryRecognitionRef.current.stop();
@@ -520,7 +698,63 @@ const LeadsMatrix = () => {
     setSiteLatDraft("");
     setSiteLngDraft("");
     setRelatedInventoryDraft("");
-  };
+    setPaymentModeDraft("");
+    setPaymentTypeDraft("");
+    setPaymentRemainingDraft("");
+    setPaymentReferenceDraft("");
+    setPaymentNoteDraft("");
+    setPaymentApprovalStatusDraft("");
+    setPaymentApprovalNoteDraft("");
+    if (normalizedRouteLeadId) {
+      navigate(currentLeadRouteBase);
+    }
+  }, [currentLeadRouteBase, isDiaryListening, navigate, normalizedRouteLeadId]);
+
+  const handleOpenLeadDetailsPage = useCallback((lead) => {
+    const resolvedLeadId = String(lead?._id || "").trim();
+    if (!resolvedLeadId) return;
+    navigate(`${currentLeadRouteBase}/${resolvedLeadId}`);
+  }, [currentLeadRouteBase, navigate]);
+
+  useEffect(() => {
+    if (!isRouteDetailsView) {
+      if (isDetailsOpen) {
+        closeDetails();
+      }
+      return;
+    }
+
+    if (loading) return;
+
+    const selectedId = String(selectedLead?._id || "").trim();
+    if (selectedId && selectedId === normalizedRouteLeadId && isDetailsOpen) {
+      return;
+    }
+
+    const targetLead = leads.find(
+      (lead) => String(lead?._id || "").trim() === normalizedRouteLeadId,
+    );
+
+    if (!targetLead) {
+      setError("Lead not found or you do not have access to this lead");
+      setSelectedLead(null);
+      setIsDetailsOpen(false);
+      setActivities([]);
+      setDiaryEntries([]);
+      return;
+    }
+
+    openLeadDetails(targetLead);
+  }, [
+    closeDetails,
+    isDetailsOpen,
+    isRouteDetailsView,
+    leads,
+    loading,
+    normalizedRouteLeadId,
+    openLeadDetails,
+    selectedLead?._id,
+  ]);
 
   const applyUpdatedLeadState = (updatedLead) => {
     if (!updatedLead) return;
@@ -529,12 +763,63 @@ const LeadsMatrix = () => {
       prev.map((lead) => (lead._id === updatedLead._id ? updatedLead : lead)),
     );
     setSelectedLead(updatedLead);
+    setStatusDraft(String(updatedLead.status || "NEW"));
 
     const nextSiteLat = toCoordinateNumber(updatedLead?.siteLocation?.lat);
     const nextSiteLng = toCoordinateNumber(updatedLead?.siteLocation?.lng);
     setSiteLatDraft(nextSiteLat === null ? "" : String(nextSiteLat));
     setSiteLngDraft(nextSiteLng === null ? "" : String(nextSiteLng));
+    setPaymentModeDraft(String(updatedLead?.dealPayment?.mode || ""));
+    setPaymentTypeDraft(String(updatedLead?.dealPayment?.paymentType || ""));
+    setPaymentRemainingDraft(
+      updatedLead?.dealPayment?.remainingAmount === null
+      || updatedLead?.dealPayment?.remainingAmount === undefined
+        ? ""
+        : String(updatedLead.dealPayment.remainingAmount),
+    );
+    setPaymentReferenceDraft(String(updatedLead?.dealPayment?.paymentReference || ""));
+    setPaymentNoteDraft(String(updatedLead?.dealPayment?.note || ""));
+    setPaymentApprovalStatusDraft("");
+    setPaymentApprovalNoteDraft(String(updatedLead?.dealPayment?.approvalNote || ""));
   };
+
+  const mergeInventorySnapshotIntoLead = useCallback((leadRow, updatedInventory) => {
+    if (!leadRow || !updatedInventory?._id) return leadRow;
+
+    const targetId = String(updatedInventory._id);
+    const withFallbackTitle = {
+      ...updatedInventory,
+      title:
+        updatedInventory?.title
+        || getInventoryLeadLabel(updatedInventory)
+        || String(updatedInventory?._id || "").slice(-6),
+      status: toInventoryStatusLabel(updatedInventory?.status),
+    };
+
+    const replaceInventoryRef = (inventoryLike) => {
+      const currentId = toObjectIdString(inventoryLike);
+      if (!currentId || currentId !== targetId) return inventoryLike;
+      if (inventoryLike && typeof inventoryLike === "object") {
+        return {
+          ...inventoryLike,
+          ...withFallbackTitle,
+          status: toInventoryStatusLabel(withFallbackTitle?.status),
+        };
+      }
+      return withFallbackTitle;
+    };
+
+    const next = {
+      ...leadRow,
+      inventoryId: replaceInventoryRef(leadRow.inventoryId),
+    };
+
+    if (Array.isArray(leadRow.relatedInventoryIds)) {
+      next.relatedInventoryIds = leadRow.relatedInventoryIds.map(replaceInventoryRef);
+    }
+
+    return next;
+  }, []);
 
   const handleInventorySelection = (inventoryId) => {
     setFormData((prev) => {
@@ -562,6 +847,8 @@ const LeadsMatrix = () => {
   };
 
   const handleSaveLead = async () => {
+    if (!canAddLead) return;
+
     if (!formData.name.trim() || !formData.phone.trim()) {
       setError("Name and phone are required");
       return;
@@ -635,6 +922,22 @@ const LeadsMatrix = () => {
       const parsedSiteLng = toCoordinateNumber(siteLngDraft);
       const hasAnySiteCoordinate =
         parsedSiteLat !== null || parsedSiteLng !== null;
+      const parsedPaymentRemaining = toAmountNumber(paymentRemainingDraft);
+      const normalizedPaymentMode = String(paymentModeDraft || "").trim().toUpperCase();
+      const normalizedPaymentType = String(paymentTypeDraft || "").trim().toUpperCase();
+      const normalizedApprovalStatus = String(paymentApprovalStatusDraft || "")
+        .trim()
+        .toUpperCase();
+      const trimmedPaymentReference = String(paymentReferenceDraft || "").trim();
+      const trimmedPaymentNote = String(paymentNoteDraft || "").trim();
+      const trimmedApprovalNote = String(paymentApprovalNoteDraft || "").trim();
+      const isClosedFlow =
+        ["CLOSED", "REQUESTED"].includes(statusDraft)
+        || ["CLOSED", "REQUESTED"].includes(String(selectedLead?.status || ""));
+      const isExecutiveClosingDeal =
+        isExecutiveUser
+        && statusDraft === "CLOSED"
+        && String(selectedLead?.status || "") !== "CLOSED";
 
       if (
         canConfigureSiteLocation
@@ -642,6 +945,63 @@ const LeadsMatrix = () => {
         && (parsedSiteLat === null || parsedSiteLng === null)
       ) {
         setError("Enter valid site latitude and longitude");
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (trimmedPaymentNote.length > MAX_PAYMENT_NOTE_LENGTH) {
+        setError(`Payment note can be up to ${MAX_PAYMENT_NOTE_LENGTH} characters only`);
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (trimmedApprovalNote.length > MAX_PAYMENT_NOTE_LENGTH) {
+        setError(`Approval note can be up to ${MAX_PAYMENT_NOTE_LENGTH} characters only`);
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (isExecutiveClosingDeal) {
+        if (!normalizedPaymentMode) {
+          setError("Payment mode is required when closing the deal");
+          setSavingUpdates(false);
+          return;
+        }
+        if (!normalizedPaymentType) {
+          setError("Payment type is required when closing the deal");
+          setSavingUpdates(false);
+          return;
+        }
+      }
+
+      if (
+        isClosedFlow
+        && normalizedPaymentType === "PARTIAL"
+        && (parsedPaymentRemaining === null || parsedPaymentRemaining <= 0)
+      ) {
+        setError("Enter remaining amount greater than 0 for partial payment");
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (
+        isExecutiveUser
+        && isClosedFlow
+        && normalizedPaymentMode
+        && normalizedPaymentMode !== "CASH"
+        && !trimmedPaymentReference
+      ) {
+        setError("UTR / transaction / cheque number is required for non-cash payment");
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (
+        canReviewDealPayment
+        && normalizedApprovalStatus
+        && !["APPROVED", "REJECTED"].includes(normalizedApprovalStatus)
+      ) {
+        setError("Admin decision must be Approve or Reject");
         setSavingUpdates(false);
         return;
       }
@@ -662,6 +1022,47 @@ const LeadsMatrix = () => {
         };
       }
 
+      if (isClosedFlow) {
+        const dealPaymentPayload = {};
+
+        if (normalizedPaymentMode) {
+          dealPaymentPayload.mode = normalizedPaymentMode;
+        }
+
+        if (normalizedPaymentType) {
+          dealPaymentPayload.paymentType = normalizedPaymentType;
+        }
+
+        if (normalizedPaymentType === "FULL") {
+          dealPaymentPayload.remainingAmount = 0;
+        } else if (normalizedPaymentType === "PARTIAL" && parsedPaymentRemaining !== null) {
+          dealPaymentPayload.remainingAmount = parsedPaymentRemaining;
+        }
+
+        if (normalizedPaymentMode === "CASH") {
+          dealPaymentPayload.paymentReference = "";
+        } else if (trimmedPaymentReference) {
+          dealPaymentPayload.paymentReference = trimmedPaymentReference;
+        }
+
+        if (trimmedPaymentNote) {
+          dealPaymentPayload.note = trimmedPaymentNote;
+        }
+
+        if (canReviewDealPayment) {
+          if (normalizedApprovalStatus) {
+            dealPaymentPayload.approvalStatus = normalizedApprovalStatus;
+          }
+          if (trimmedApprovalNote) {
+            dealPaymentPayload.approvalNote = trimmedApprovalNote;
+          }
+        }
+
+        if (Object.keys(dealPaymentPayload).length > 0) {
+          payload.dealPayment = dealPaymentPayload;
+        }
+      }
+
       const updatedLead = await updateLeadStatus(selectedLead._id, payload);
 
       if (!updatedLead) {
@@ -670,10 +1071,7 @@ const LeadsMatrix = () => {
         return;
       }
 
-      setLeads((prev) =>
-        prev.map((lead) => (lead._id === updatedLead._id ? updatedLead : lead)),
-      );
-      setSelectedLead(updatedLead);
+      applyUpdatedLeadState(updatedLead);
       setSuccess("Lead updated");
     } catch (updateError) {
       const message = toErrorMessage(updateError, "Failed to update lead");
@@ -685,7 +1083,7 @@ const LeadsMatrix = () => {
   };
 
   const handleAssignLead = async () => {
-    if (!selectedLead || !executiveDraft) return;
+    if (!canAssignLead || !selectedLead || !executiveDraft) return;
 
     try {
       setAssigning(true);
@@ -833,6 +1231,145 @@ const LeadsMatrix = () => {
     }
   };
 
+  const handleRelatedPropertyStatusChange = async (inventoryId, nextStatus) => {
+    const resolvedInventoryId = String(inventoryId || "").trim();
+    const targetStatus = String(nextStatus || "").trim();
+    if (!selectedLead || !resolvedInventoryId || !targetStatus) return;
+    if (!canUpdateRelatedPropertyStatus) {
+      setError("You do not have access to change property status from lead");
+      return;
+    }
+
+    const linkedInventory = getLeadRelatedInventories(selectedLead).find(
+      (row) => String(toObjectIdString(row)) === resolvedInventoryId,
+    );
+    if (!linkedInventory || typeof linkedInventory !== "object") {
+      setError("Linked property details are unavailable for this lead");
+      return;
+    }
+
+    const currentStatus = toInventoryApiStatus(linkedInventory?.status);
+    if (currentStatus === targetStatus) return;
+
+    const isClosedDealFlow =
+      ["CLOSED", "REQUESTED"].includes(statusDraft)
+      || ["CLOSED", "REQUESTED"].includes(String(selectedLead?.status || ""));
+
+    if (targetStatus === "Sold" && !isClosedDealFlow) {
+      setError("Set lead status to CLOSED or REQUESTED before marking property as Sold");
+      return;
+    }
+
+    const payload = {
+      status: targetStatus,
+      reservationReason: "",
+    };
+
+    if (targetStatus === "Blocked") {
+      const reasonInput = window.prompt("Reservation reason:", String(linkedInventory?.reservationReason || "").trim());
+      if (reasonInput === null) return;
+      const reservationReason = String(reasonInput || "").trim();
+      if (!reservationReason) {
+        setError("Reservation reason is required when status is Reserved");
+        return;
+      }
+      payload.reservationReason = reservationReason;
+    }
+
+    if (targetStatus === "Sold") {
+      const paymentMode = String(paymentModeDraft || selectedLead?.dealPayment?.mode || "")
+        .trim()
+        .toUpperCase();
+      const paymentType = String(paymentTypeDraft || selectedLead?.dealPayment?.paymentType || "")
+        .trim()
+        .toUpperCase();
+      const remainingAmount = toAmountNumber(
+        paymentRemainingDraft !== ""
+          ? paymentRemainingDraft
+          : selectedLead?.dealPayment?.remainingAmount,
+      );
+      const paymentReference = String(
+        paymentReferenceDraft || selectedLead?.dealPayment?.paymentReference || "",
+      ).trim();
+      const paymentNote = String(paymentNoteDraft || selectedLead?.dealPayment?.note || "").trim();
+      const totalAmount = Number(linkedInventory?.price);
+
+      if (!selectedLead?._id) {
+        setError("Lead details unavailable for sold status payload");
+        return;
+      }
+      if (!paymentMode) {
+        setError("Payment mode is required before marking property as Sold");
+        return;
+      }
+      if (!paymentType) {
+        setError("Payment type is required before marking property as Sold");
+        return;
+      }
+      if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+        setError("Property price must be set to mark status as Sold");
+        return;
+      }
+      if (paymentType === "PARTIAL" && (!Number.isFinite(remainingAmount) || remainingAmount <= 0)) {
+        setError("Remaining amount must be greater than 0 for partial payment");
+        return;
+      }
+      if (paymentMode !== "CASH" && !paymentReference) {
+        setError("Payment reference is required for non-cash mode");
+        return;
+      }
+
+      payload.saleDetails = {
+        leadId: selectedLead._id,
+        paymentMode,
+        paymentType,
+        totalAmount,
+        remainingAmount: paymentType === "PARTIAL" ? remainingAmount : 0,
+        paymentReference: paymentMode === "CASH" ? "" : paymentReference,
+        note: paymentNote,
+      };
+    }
+
+    try {
+      setPropertyStatusActionInventoryId(resolvedInventoryId);
+      setError("");
+
+      if (canDirectInventoryStatusUpdate) {
+        const updatedInventory = await updateInventoryAsset(resolvedInventoryId, payload);
+        if (updatedInventory) {
+          setInventoryOptions((previous) =>
+            previous.map((row) =>
+              String(row?._id || "") === String(updatedInventory?._id || "")
+                ? {
+                  ...row,
+                  ...updatedInventory,
+                  status: toInventoryStatusLabel(updatedInventory?.status),
+                }
+                : row),
+          );
+          setSelectedLead((previous) => mergeInventorySnapshotIntoLead(previous, updatedInventory));
+          setLeads((previous) =>
+            previous.map((leadRow) =>
+              String(leadRow?._id || "") === String(selectedLead?._id || "")
+                ? mergeInventorySnapshotIntoLead(leadRow, updatedInventory)
+                : leadRow),
+          );
+        }
+        setSuccess("Property status updated from lead details");
+        return;
+      }
+
+      await requestInventoryUpdateChange(resolvedInventoryId, payload);
+      setSuccess("Property status change request submitted for admin approval");
+    } catch (statusError) {
+      const message = toErrorMessage(statusError, "Failed to update property status");
+      console.error(`Update related property status failed: ${message}`);
+      setError(message);
+    } finally {
+      setPropertyStatusActionInventoryId("");
+    }
+  };
+
   const handleAddDiary = async () => {
     if (!selectedLead) return;
 
@@ -902,38 +1439,96 @@ const LeadsMatrix = () => {
   );
 
   return (
-    <div className="w-full h-full px-4 sm:px-6 lg:px-10 pt-20 md:pt-24 pb-6 flex flex-col bg-slate-50/50 overflow-y-auto custom-scrollbar">
-      <LeadsMatrixToolbar
-        refreshing={refreshing}
-        canAddLead={canAddLead}
-        onRefresh={() => fetchLeads(true)}
-        onOpenAddModal={() => setIsAddModalOpen(true)}
-      />
+    <div
+      className={`relative w-full h-full px-2.5 sm:px-6 lg:px-10 pt-2 sm:pt-8 md:pt-10 pb-6 flex flex-col overflow-x-hidden overflow-y-auto custom-scrollbar ${
+        isDark ? "bg-slate-950" : "bg-slate-50/80"
+      }`}
+    >
+      <div className={`pointer-events-none absolute inset-0 ${
+        isDark
+          ? "bg-[radial-gradient(circle_at_10%_10%,rgba(6,182,212,0.14),transparent_38%),radial-gradient(circle_at_88%_12%,rgba(16,185,129,0.1),transparent_32%)]"
+          : "bg-[radial-gradient(circle_at_12%_8%,rgba(14,165,233,0.1),transparent_40%),radial-gradient(circle_at_86%_10%,rgba(16,185,129,0.12),transparent_34%)]"
+      }`} />
+      <div className={`relative z-10 flex flex-col ${isRouteDetailsView ? "" : "flex-1"}`}>
+        {isRouteDetailsView ? (
+          <>
+            <LeadsMatrixAlerts isDark={isDark} error={error} success={success} />
 
-      <LeadsMatrixAlerts error={error} success={success} />
+            {loading && !selectedLead ? (
+              <div className={`flex min-h-[220px] items-center justify-center rounded-2xl border text-sm ${
+                isDark
+                  ? "border-slate-700 bg-slate-900/75 text-slate-400"
+                  : "border-slate-200 bg-white text-slate-500"
+              }`}>
+                Loading lead details...
+              </div>
+            ) : null}
 
-      <LeadsMatrixMetrics metrics={metrics} />
+            {!loading && !selectedLead ? (
+              <div className={`rounded-2xl border p-4 text-sm ${
+                isDark
+                  ? "border-rose-500/35 bg-rose-500/10 text-rose-100"
+                  : "border-rose-200 bg-rose-50 text-rose-700"
+              }`}>
+                Lead details unavailable. The lead may be deleted or not accessible in your scope.
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <LeadsMatrixToolbar
+              isDark={isDark}
+              refreshing={refreshing}
+              canAddLead={canAddLead}
+              onRefresh={() => fetchLeads(true)}
+              onOpenAddModal={() => setIsAddModalOpen(true)}
+              totalLeads={metrics.total}
+              filteredLeads={filteredLeads.length}
+              dueFollowUps={metrics.dueFollowUps}
+            />
 
-      <LeadsMatrixFilters
-        query={query}
-        onQueryChange={setQuery}
-        statusFilter={statusFilter}
-        onStatusFilterChange={setStatusFilter}
-        leadStatuses={LEAD_STATUSES}
-      />
+            <LeadsMatrixAlerts isDark={isDark} error={error} success={success} />
 
-      <LeadsMatrixTable
-        loading={loading}
-        filteredLeads={filteredLeads}
-        onOpenLeadDetails={openLeadDetails}
-        leadRowClass={leadRowClass}
-        getStatusColor={getStatusColor}
-        formatDate={formatDate}
-      />
+            <LeadsMatrixMetrics
+              isDark={isDark}
+              metrics={metrics}
+              statusFilter={statusFilter}
+              showDueOnly={showDueOnly}
+              onMetricSelect={handleMetricSelect}
+            />
+
+            <LeadsMatrixFilters
+              isDark={isDark}
+              query={query}
+              onQueryChange={setQuery}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              leadStatuses={LEAD_STATUSES}
+              statusBreakdown={statusBreakdown}
+              sortBy={sortBy}
+              onSortByChange={setSortBy}
+              showDueOnly={showDueOnly}
+              onShowDueOnlyChange={setShowDueOnly}
+              getStatusLabel={getStatusLabel}
+            />
+
+            <LeadsMatrixTable
+              isDark={isDark}
+              loading={loading}
+              filteredLeads={filteredLeads}
+              onOpenLeadDetails={handleOpenLeadDetailsPage}
+              getStatusColor={getStatusColor}
+              getStatusLabel={getStatusLabel}
+              formatDate={formatDate}
+            />
+          </>
+        )}
+      </div>
 
       <AnimatePresence>
         {isAddModalOpen && canAddLead && (
           <AddLeadModal
+            isDark={isDark}
             formData={formData}
             setFormData={setFormData}
             inventoryOptions={inventoryOptions}
@@ -947,8 +1542,9 @@ const LeadsMatrix = () => {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isDetailsOpen && selectedLead && (
-          <LeadDetailsDrawer
+        {isRouteDetailsView && isDetailsOpen && selectedLead && (
+          <LeadDetailsRebuilt
+            isDark={isDark}
             selectedLead={selectedLead}
             onClose={closeDetails}
             selectedLeadDialerHref={selectedLeadDialerHref}
@@ -960,9 +1556,16 @@ const LeadsMatrix = () => {
             propertyActionType={propertyActionType}
             propertyActionInventoryId={propertyActionInventoryId}
             canManageLeadProperties={canManageLeadProperties}
+            canUpdateRelatedPropertyStatus={canUpdateRelatedPropertyStatus}
+            propertyStatusActionInventoryId={propertyStatusActionInventoryId}
+            propertyStatusRequiresApproval={!canDirectInventoryStatusUpdate}
+            inventoryStatusOptions={INVENTORY_STATUS_OPTIONS}
+            toInventoryApiStatus={toInventoryApiStatus}
+            toInventoryStatusLabel={toInventoryStatusLabel}
             onSelectRelatedProperty={handleSelectRelatedProperty}
             onOpenRelatedProperty={handleOpenRelatedProperty}
             onRemoveRelatedProperty={handleRemoveRelatedProperty}
+            onUpdateRelatedPropertyStatus={handleRelatedPropertyStatusChange}
             availableRelatedInventoryOptions={availableRelatedInventoryOptions}
             relatedInventoryDraft={relatedInventoryDraft}
             setRelatedInventoryDraft={setRelatedInventoryDraft}
@@ -973,6 +1576,24 @@ const LeadsMatrix = () => {
             setStatusDraft={setStatusDraft}
             followUpDraft={followUpDraft}
             setFollowUpDraft={setFollowUpDraft}
+            dealPaymentModes={DEAL_PAYMENT_MODES}
+            dealPaymentTypes={DEAL_PAYMENT_TYPES}
+            dealPaymentAdminDecisions={DEAL_PAYMENT_ADMIN_DECISIONS}
+            paymentModeDraft={paymentModeDraft}
+            setPaymentModeDraft={setPaymentModeDraft}
+            paymentTypeDraft={paymentTypeDraft}
+            setPaymentTypeDraft={setPaymentTypeDraft}
+            paymentRemainingDraft={paymentRemainingDraft}
+            setPaymentRemainingDraft={setPaymentRemainingDraft}
+            paymentReferenceDraft={paymentReferenceDraft}
+            setPaymentReferenceDraft={setPaymentReferenceDraft}
+            paymentNoteDraft={paymentNoteDraft}
+            setPaymentNoteDraft={setPaymentNoteDraft}
+            paymentApprovalStatusDraft={paymentApprovalStatusDraft}
+            setPaymentApprovalStatusDraft={setPaymentApprovalStatusDraft}
+            paymentApprovalNoteDraft={paymentApprovalNoteDraft}
+            setPaymentApprovalNoteDraft={setPaymentApprovalNoteDraft}
+            canReviewDealPayment={canReviewDealPayment}
             siteLatDraft={siteLatDraft}
             setSiteLatDraft={setSiteLatDraft}
             siteLngDraft={siteLngDraft}

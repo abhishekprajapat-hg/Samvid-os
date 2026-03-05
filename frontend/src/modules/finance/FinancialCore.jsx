@@ -28,6 +28,7 @@ const PIPELINE_STATUSES = [
   { key: "CONTACTED", label: "Contacted" },
   { key: "INTERESTED", label: "Interested" },
   { key: "SITE_VISIT", label: "Site Visit" },
+  { key: "REQUESTED", label: "Requested" },
   { key: "CLOSED", label: "Closed" },
   { key: "LOST", label: "Lost" },
 ];

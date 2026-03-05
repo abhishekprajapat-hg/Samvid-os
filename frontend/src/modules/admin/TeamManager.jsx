@@ -6,6 +6,7 @@ import {
   getUserProfileById,
   getUsers,
   rebalanceExecutives,
+  updateChannelPartnerInventoryAccess,
 } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
@@ -37,7 +38,7 @@ const REPORTING_PARENT_ROLES = {
   FIELD_EXECUTIVE: ["TEAM_LEADER"],
   CHANNEL_PARTNER: ["ADMIN"],
 };
-const LEAD_STATUSES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "CLOSED", "LOST"];
+const LEAD_STATUSES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED", "CLOSED", "LOST"];
 const ROLE_LABELS = {
   ADMIN: "Admin",
   MANAGER: "Manager",
@@ -52,6 +53,7 @@ const STATUS_LABELS = {
   CONTACTED: "Contacted",
   INTERESTED: "Interested",
   SITE_VISIT: "Site Visit",
+  REQUESTED: "Requested",
   CLOSED: "Closed",
   LOST: "Lost",
 };
@@ -138,6 +140,7 @@ const TeamManager = ({ theme = "light" }) => {
   const [formError, setFormError] = useState("");
   const [rebalancing, setRebalancing] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState("");
+  const [inventoryAccessUpdatingUserId, setInventoryAccessUpdatingUserId] = useState("");
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -419,6 +422,41 @@ const TeamManager = ({ theme = "light" }) => {
     }
   };
 
+  const handleToggleChannelPartnerInventoryAccess = async (user) => {
+    if (!isAdmin || user?.role !== "CHANNEL_PARTNER") return;
+
+    try {
+      setError("");
+      setInventoryAccessUpdatingUserId(String(user._id));
+
+      const updatedUser = await updateChannelPartnerInventoryAccess(
+        user._id,
+        !user.canViewInventory,
+      );
+
+      if (!updatedUser) {
+        await loadData();
+        return;
+      }
+
+      setUsers((prev) =>
+        prev.map((row) =>
+          String(row._id) === String(updatedUser._id)
+            ? { ...row, ...updatedUser }
+            : row,
+        ),
+      );
+
+      if (String(selectedUserId) === String(updatedUser._id)) {
+        setSelectedProfile((prev) => (prev ? { ...prev, ...updatedUser } : prev));
+      }
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to update channel partner inventory access"));
+    } finally {
+      setInventoryAccessUpdatingUserId("");
+    }
+  };
+
   const getLeadScopeLabel = (role) => {
     if (role === "ADMIN") return "Global Leads";
     if (MANAGEMENT_ROLES.includes(role)) return "Team Leads";
@@ -428,7 +466,7 @@ const TeamManager = ({ theme = "light" }) => {
 
   if (!isAdmin) {
     return (
-      <div className={`w-full h-full px-4 sm:px-6 md:px-10 pt-20 md:pt-24 pb-8 ${isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"}`}>
+      <div className={`w-full h-full overflow-x-hidden px-4 sm:px-6 md:px-10 pt-20 md:pt-24 pb-8 ${isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"}`}>
         <div className={`rounded-xl border p-4 text-sm ${isDarkTheme ? "border-amber-500/30 bg-amber-500/10 text-amber-300" : "border-amber-300 bg-amber-50 text-amber-700"}`}>
           Access denied. Only ADMIN can manage users.
         </div>
@@ -437,7 +475,7 @@ const TeamManager = ({ theme = "light" }) => {
   }
 
   return (
-    <div className={`w-full h-full px-4 sm:px-6 md:px-10 pt-20 md:pt-24 pb-8 flex flex-col gap-6 overflow-y-auto ${isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"}`}>
+    <div className={`w-full h-full overflow-x-hidden px-4 sm:px-6 md:px-10 pt-20 md:pt-24 pb-8 flex flex-col gap-6 overflow-y-auto custom-scrollbar ${isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"}`}>
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className={`text-3xl font-bold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>Team Access</h1>
@@ -502,6 +540,8 @@ const TeamManager = ({ theme = "light" }) => {
         roleLabels={ROLE_LABELS}
         onOpenUserProfile={handleOpenUserProfile}
         onDeleteUser={handleDeleteUser}
+        onToggleChannelPartnerInventoryAccess={handleToggleChannelPartnerInventoryAccess}
+        inventoryAccessUpdatingUserId={inventoryAccessUpdatingUserId}
         getLeadScopeLabel={getLeadScopeLabel}
       />
 

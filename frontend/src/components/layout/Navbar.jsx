@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { NavLink } from "react-router-dom";
 import {
   Home,
   Users,
@@ -19,9 +19,12 @@ import {
   Menu,
   X,
   MessageSquare,
+  Bell,
   UserCircle2,
+  TerminalSquare,
 } from "lucide-react";
 import { motion as Motion, AnimatePresence } from "framer-motion";
+import { useChatNotifications } from "../../context/useChatNotifications";
 
 const MENU_CONFIG = {
   admin: [
@@ -31,6 +34,8 @@ const MENU_CONFIG = {
     { name: "Finance", icon: PieChart, path: "/finance" },
     { name: "Reports", icon: ClipboardList, path: "/reports" },
     { name: "Chat", icon: MessageSquare, path: "/chat" },
+    { name: "Alerts", icon: Bell, path: "/admin/notifications" },
+    { name: "Console", icon: TerminalSquare, path: "/admin/console" },
     { name: "Empire", icon: Building2, path: "/inventory" },
     { name: "Field Ops", icon: Map, path: "/map" },
     { name: "Targets", icon: PieChart, path: "/targets" },
@@ -77,8 +82,16 @@ const MENU_CONFIG = {
 
 const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const navigate = useNavigate();
+  const { adminRequestUnread } = useChatNotifications();
   const isDark = theme === "dark";
+  const storedUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const canChannelPartnerViewInventory = Boolean(storedUser?.canViewInventory);
 
   const roleKeyMap = {
     ADMIN: "admin",
@@ -91,7 +104,17 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
   };
 
   const normalizedRole = roleKeyMap[userRole] || "manager";
-  const currentMenu = MENU_CONFIG[normalizedRole] || MENU_CONFIG.manager;
+  const partnerMenu = [
+    { name: "Pipeline", icon: Users, path: "/leads" },
+    ...(canChannelPartnerViewInventory
+      ? [{ name: "Inventory", icon: Building2, path: "/inventory" }]
+      : []),
+    { name: "Profile", icon: UserCircle2, path: "/profile" },
+  ];
+  const currentMenu = normalizedRole === "partner"
+    ? partnerMenu
+    : (MENU_CONFIG[normalizedRole] || MENU_CONFIG.manager);
+  const hasAdminAlerts = userRole === "ADMIN" && adminRequestUnread > 0;
 
   const handleCloseMenus = () => {
     setMobileMenuOpen(false);
@@ -141,6 +164,15 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
                     }`}
                   >
                     <item.icon size={18} />
+                    {item.path === "/admin/notifications" && hasAdminAlerts ? (
+                      <span className={`absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center ${
+                        isDark
+                          ? "bg-rose-500 text-white"
+                          : "bg-rose-600 text-white"
+                      }`}>
+                        {adminRequestUnread > 99 ? "99+" : adminRequestUnread}
+                      </span>
+                    ) : null}
                     <span
                       className={`pointer-events-none absolute z-[70] left-1/2 top-[calc(100%+8px)] -translate-x-1/2 px-2.5 py-1 rounded-md text-[10px] font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-100 ${
                         isDark
@@ -222,7 +254,7 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
                   <NavLink key={item.path} to={item.path} onClick={handleCloseMenus}>
                     {({ isActive }) => (
                       <div
-                        className={`h-10 px-3 rounded-xl border text-xs font-semibold tracking-wide flex items-center gap-3 transition-all ${
+                        className={`relative h-10 px-3 rounded-xl border text-xs font-semibold tracking-wide flex items-center gap-3 transition-all ${
                           isActive
                             ? isDark
                               ? "bg-cyan-300/15 border-cyan-200/40 text-cyan-100"
@@ -234,6 +266,15 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
                       >
                         <item.icon size={14} />
                         <span>{item.name}</span>
+                        {item.path === "/admin/notifications" && hasAdminAlerts ? (
+                          <span className={`ml-auto min-w-[18px] h-4 px-1 rounded-full text-[9px] font-bold flex items-center justify-center ${
+                            isDark
+                              ? "bg-rose-500 text-white"
+                              : "bg-rose-600 text-white"
+                          }`}>
+                            {adminRequestUnread > 99 ? "99+" : adminRequestUnread}
+                          </span>
+                        ) : null}
                       </div>
                     )}
                   </NavLink>

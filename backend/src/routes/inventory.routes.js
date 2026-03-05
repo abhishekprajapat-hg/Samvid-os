@@ -15,6 +15,7 @@ router.use(
     "TEAM_LEADER",
     "EXECUTIVE",
     "FIELD_EXECUTIVE",
+    "CHANNEL_PARTNER",
   ]),
 );
 router.use(companyMiddleware.requireCompanyContext);

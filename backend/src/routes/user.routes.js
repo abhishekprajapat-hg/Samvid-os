@@ -37,6 +37,13 @@ router.get(
 );
 
 router.patch(
+  "/:userId/channel-partner/inventory-access",
+  writeLimiter,
+  authMiddleware.protect,
+  userController.updateChannelPartnerInventoryAccess
+);
+
+router.patch(
   "/profile",
   writeLimiter,
   authMiddleware.protect,

@@ -294,7 +294,7 @@ const MasterSchedule = () => {
   };
 
   return (
-    <div className={`w-full h-full px-4 sm:px-6 md:px-10 pt-20 md:pt-24 pb-8 overflow-y-auto ${isDark ? "bg-slate-950/35" : "bg-white/30"}`}>
+	    <div className={`w-full h-full overflow-x-hidden px-4 sm:px-6 md:px-10 pt-20 md:pt-24 pb-8 overflow-y-auto custom-scrollbar ${isDark ? "bg-slate-950/35" : "bg-white/30"}`}>
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4 mb-6">
         <div>
           <h1 className={`text-3xl font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>Master Schedule</h1>
@@ -392,7 +392,7 @@ const MasterSchedule = () => {
           </div>
         </section>
 
-          <section className="grid grid-rows-[auto_1fr] gap-4 min-h-0">
+	          <section className="grid grid-rows-[auto_auto] gap-4 xl:min-h-0 xl:grid-rows-[auto_1fr]">
           <div className={`rounded-2xl border p-4 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
             <h3 className={`text-sm font-bold mb-3 ${isDark ? "text-slate-100" : "text-slate-800"}`}>Schedule Follow-up</h3>
             <div className="space-y-2">
@@ -427,7 +427,7 @@ const MasterSchedule = () => {
             </div>
           </div>
 
-          <div className={`rounded-2xl border min-h-0 flex flex-col ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
+	          <div className={`rounded-2xl border flex flex-col xl:min-h-0 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
             <div className={`p-4 border-b ${isDark ? "border-slate-700" : "border-slate-200"}`}>
               <div className={`text-sm font-bold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
                 {new Date(selectedDate).toLocaleDateString([], { weekday: "long", day: "2-digit", month: "long" })}
@@ -437,7 +437,7 @@ const MasterSchedule = () => {
               </div>
             </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+	              <div className="flex-1 overflow-visible p-4 space-y-3 xl:overflow-y-auto custom-scrollbar">
                 {loading ? (
                   <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Loading...</div>
                 ) : selectedDayItems.length === 0 ? (

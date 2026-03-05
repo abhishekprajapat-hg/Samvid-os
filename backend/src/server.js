@@ -6,8 +6,6 @@ const connectDB = require("./config/db");
 const { registerChatSocketHandlers } = require("./socket/chat.socket");
 const logger = require("./config/logger");
 
-connectDB();
-
 const PORT = process.env.PORT || 5000;
 const toPositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
@@ -42,8 +40,19 @@ const io = new Server(httpServer, {
 app.set("io", io);
 registerChatSocketHandlers(io);
 
-httpServer.listen(PORT, () => {
-  logger.info({ port: PORT, message: "Server started" });
+const bootstrap = async () => {
+  await connectDB();
+  httpServer.listen(PORT, () => {
+    logger.info({ port: PORT, message: "Server started" });
+  });
+};
+
+bootstrap().catch((error) => {
+  logger.error({
+    error: error.message,
+    message: "Server bootstrap failed",
+  });
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (reason) => {

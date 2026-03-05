@@ -5,6 +5,8 @@ import api from "./services/api";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ChatNotificationProvider } from "./context/chatNotificationProvider";
 import { updateMyLiveLocation } from "./services/userService";
+import AdminRequestAlertToast from "./components/layout/AdminRequestAlertToast";
+import AppPageHeader from "./components/layout/AppPageHeader";
 import {
   applySystemSettingsToDocument,
   getSessionTimeoutMs,
@@ -22,6 +24,8 @@ const ManagerDashboard = lazy(() => import("./modules/manager/ManagerDashboard")
 const ExecutiveDashboard = lazy(() => import("./modules/executive/ExecutiveDashboard"));
 const FieldDashboard = lazy(() => import("./modules/field/FieldDashboard"));
 const TeamManager = lazy(() => import("./modules/admin/TeamManager"));
+const AdminNotifications = lazy(() => import("./modules/admin/AdminNotifications"));
+const AdminCommandConsole = lazy(() => import("./modules/admin/AdminCommandConsole"));
 const TeamChat = lazy(() => import("./modules/chat/TeamChat"));
 
 const LeadsMatrix = lazy(() => import("./modules/leads/LeadsMatrix"));
@@ -55,6 +59,153 @@ const FORCE_LIGHT_ROUTE_PREFIXES = [
 ];
 const MANAGEMENT_ROLES = ["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"];
 const CHAT_REFRESH_FALLBACK_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
+const ROLE_LABELS = {
+  ADMIN: "Admin",
+  MANAGER: "Manager",
+  ASSISTANT_MANAGER: "Assistant Manager",
+  TEAM_LEADER: "Team Leader",
+  EXECUTIVE: "Executive",
+  FIELD_EXECUTIVE: "Field Executive",
+  CHANNEL_PARTNER: "Channel Partner",
+};
+
+const resolveHomeHeader = (userRole) => {
+  switch (userRole) {
+    case "ADMIN":
+      return {
+        title: "Admin Command Center",
+        subtitle: "System visibility, alerts and operational controls",
+        scopeLabel: "Home",
+      };
+    case "MANAGER":
+    case "ASSISTANT_MANAGER":
+    case "TEAM_LEADER":
+      return {
+        title: "Management Command Center",
+        subtitle: "Portfolio progress, team activity and execution signals",
+        scopeLabel: "Home",
+      };
+    case "EXECUTIVE":
+      return {
+        title: "Executive Command Center",
+        subtitle: "Lead priorities, pending actions and daily delivery focus",
+        scopeLabel: "My Desk",
+      };
+    case "FIELD_EXECUTIVE":
+      return {
+        title: "Field Command Center",
+        subtitle: "Ground movement, follow-up tasks and site visit execution",
+        scopeLabel: "Route Desk",
+      };
+    default:
+      return {
+        title: "Workspace Command Center",
+        subtitle: "Operational overview and daily execution snapshot",
+        scopeLabel: "Home",
+      };
+  }
+};
+
+const resolvePageHeader = (pathname, userRole) => {
+  if (!pathname) return null;
+  if (pathname === "/") return resolveHomeHeader(userRole);
+
+  if (pathname.startsWith("/leads") || pathname.startsWith("/my-leads")) {
+    return {
+      title: "Leads Command Center",
+      subtitle: "Pipeline tracking, follow-up discipline and conversion flow",
+      scopeLabel: "Pipeline",
+    };
+  }
+
+  if (pathname.startsWith("/inventory")) {
+    return pathname === "/inventory"
+      ? {
+          title: "Inventory Command Center",
+          subtitle: "Asset health, approval flow and portfolio readiness",
+          scopeLabel: "Empire",
+        }
+      : {
+          title: "Property Command Center",
+          subtitle: "Detailed property context, status and execution actions",
+          scopeLabel: "Property Detail",
+        };
+  }
+
+  if (pathname.startsWith("/finance")) {
+    return {
+      title: "Finance Command Center",
+      subtitle: "Revenue posture, collections and financial performance",
+      scopeLabel: "Finance",
+    };
+  }
+
+  if (pathname.startsWith("/reports")) {
+    return {
+      title: "Reports Command Center",
+      subtitle: "Funnel analytics, team performance and business intelligence",
+      scopeLabel: "Reports",
+    };
+  }
+
+  if (pathname.startsWith("/calendar")) {
+    return {
+      title: "Schedule Command Center",
+      subtitle: "Meetings, reminders and execution timeline visibility",
+      scopeLabel: "Schedule",
+    };
+  }
+
+  if (pathname.startsWith("/admin/notifications")) {
+    return {
+      title: "Alerts Command Center",
+      subtitle: "Pending approvals, escalation signals and admin actions",
+      scopeLabel: "Alerts",
+    };
+  }
+
+  if (pathname.startsWith("/admin/users")) {
+    return {
+      title: "Access Command Center",
+      subtitle: "Team permissions, role governance and account controls",
+      scopeLabel: "Access",
+    };
+  }
+
+  if (pathname.startsWith("/admin/console")) {
+    return {
+      title: "Console Command Center",
+      subtitle: "Run commands to inspect platform data and jump across modules",
+      scopeLabel: "Console",
+    };
+  }
+
+  if (pathname.startsWith("/settings")) {
+    return {
+      title: "System Command Center",
+      subtitle: "Platform policy, session controls and runtime configuration",
+      scopeLabel: "System",
+    };
+  }
+
+  if (pathname.startsWith("/targets")) {
+    return {
+      title: "Targets Command Center",
+      subtitle: "Goal pacing, conversion momentum and ownership tracking",
+      scopeLabel: "Targets",
+    };
+  }
+
+  if (pathname.startsWith("/profile")) {
+    return {
+      title: "Profile Command Center",
+      subtitle: "Identity details, account metadata and personal settings",
+      scopeLabel: "Profile",
+    };
+  }
+
+  return null;
+};
 
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
 
@@ -97,6 +248,13 @@ export default function App() {
 
   const location = useLocation();
   const navigate = useNavigate();
+  const authUser = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}");
+    } catch {
+      return {};
+    }
+  })();
 
   const isPublicPage = PUBLIC_ROUTE_PREFIXES.some((prefix) =>
     location.pathname.startsWith(prefix),
@@ -105,9 +263,22 @@ export default function App() {
     location.pathname.startsWith(prefix),
   );
   const isChatPage = location.pathname === "/chat";
+  const canChannelPartnerViewInventory =
+    userRole === "CHANNEL_PARTNER" && Boolean(authUser?.canViewInventory);
+  const shouldLockDocumentScroll = isLoggedIn && !isPublicPage;
+  const pageHeader = useMemo(
+    () => resolvePageHeader(location.pathname, userRole),
+    [location.pathname, userRole],
+  );
+  const showUnifiedHeader = !isPublicPage && !isChatPage && location.pathname !== "/map" && !!pageHeader;
+  const routeViewportClass = shouldLockDocumentScroll
+    ? `min-h-0 flex-1 overflow-hidden ${showUnifiedHeader ? "mt-1.5 sm:mt-2" : ""}`
+    : showUnifiedHeader
+      ? "mt-1.5 sm:mt-2"
+      : "";
 
   useEffect(() => {
-    if (!isChatPage) {
+    if (!shouldLockDocumentScroll) {
       document.body.style.overflowY = "";
       document.documentElement.style.overflowY = "";
       return undefined;
@@ -122,7 +293,7 @@ export default function App() {
       document.body.style.overflowY = previousBodyOverflowY;
       document.documentElement.style.overflowY = previousHtmlOverflowY;
     };
-  }, [isChatPage]);
+  }, [shouldLockDocumentScroll]);
 
   /* 🔥 Restore session after refresh */
   useEffect(() => {
@@ -345,7 +516,7 @@ export default function App() {
       case "FIELD_EXECUTIVE":
         return <FieldDashboard />;
       case "CHANNEL_PARTNER":
-        return <Navigate to="/profile" />;
+        return <Navigate to="/leads" />;
       default:
         return <Navigate to="/login" />;
     }
@@ -435,7 +606,7 @@ export default function App() {
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  className={`flex w-full ${isChatPage ? "h-dvh overflow-hidden" : "min-h-screen"}`}
+                  className={`flex w-full ${shouldLockDocumentScroll ? "h-dvh overflow-hidden" : "min-h-screen"}`}
                 >
                   {!isPublicPage && (
                     <>
@@ -445,92 +616,125 @@ export default function App() {
                         theme={theme}
                         onToggleTheme={toggleTheme}
                       />
+                      <AdminRequestAlertToast userRole={userRole} />
                     </>
                   )}
 
                   <main
                     className={
                       isChatPage
-                        ? "relative min-h-0 flex-1 overflow-hidden pt-16 app-page-bg"
-                        : "relative min-h-0 flex-1 pt-16 overflow-y-auto app-page-bg"
+                        ? "relative min-h-0 flex flex-1 flex-col overflow-hidden pt-16 app-page-bg"
+                        : "relative min-h-0 flex flex-1 flex-col pt-16 overflow-hidden app-page-bg"
                     }
                   >
-                    <Routes>
-                      <Route path="/" element={DashboardByRole} />
-                      <Route
-                        path="/leads"
-                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+                    {showUnifiedHeader ? (
+                      <AppPageHeader
+                        title={pageHeader.title}
+                        subtitle={pageHeader.subtitle}
+                        scopeLabel={pageHeader.scopeLabel}
+                        roleLabel={ROLE_LABELS[userRole] || ""}
                       />
-                      <Route
-                        path="/my-leads"
-                        element={
-                          canAccess(["EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />
-                        }
-                      />
-                      <Route
-                        path="/inventory"
-                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <AssetVault /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/inventory/:id"
-                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <InventoryDetails /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/finance"
-                        element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <FinancialCore /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/map"
-                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "FIELD_EXECUTIVE"]) ? <FieldOps /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/reports"
-                        element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <IntelligenceReports /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/calendar"
-                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <MasterSchedule /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/admin/users"
-                        element={userRole === "ADMIN" ? <TeamManager theme={theme} /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/settings"
-                        element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <SystemSettings /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/targets"
-                        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <Performance /> : <Navigate to="/" />}
-                      />
-                      <Route
-                        path="/chat"
-                        element={
-                          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"])
-                            ? <TeamChat theme={theme} />
-                            : <Navigate to="/" />
-                        }
-                      />
-                      <Route
-                        path="/profile"
-                        element={
-                          canAccess([
-                            "ADMIN",
-                            ...MANAGEMENT_ROLES,
-                            "EXECUTIVE",
-                            "FIELD_EXECUTIVE",
-                            "CHANNEL_PARTNER",
-                          ])
-                            ? <UserProfile />
-                            : <Navigate to="/" />
-                        }
-                      />
-                      <Route path="/privacy-policy" element={<DataUseNotice />} />
-                      <Route path="/terms-and-conditions" element={<ServiceTermsNotice />} />
-                      <Route path="/data-use-notice" element={<DataUseNotice />} />
-                      <Route path="/service-terms" element={<ServiceTermsNotice />} />
-                      <Route path="/portal/*" element={<Navigate to="/" replace />} />
-                    </Routes>
+                    ) : null}
+                    <div className={routeViewportClass}>
+                      <Routes>
+                        <Route path="/" element={DashboardByRole} />
+                        <Route
+                          path="/leads"
+                          element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/leads/:leadId"
+                          element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/my-leads"
+                          element={
+                            canAccess(["EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />
+                          }
+                        />
+                        <Route
+                          path="/my-leads/:leadId"
+                          element={canAccess(["EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/inventory"
+                          element={(
+                            canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
+                            && (userRole !== "CHANNEL_PARTNER" || canChannelPartnerViewInventory)
+                          ) ? <AssetVault /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/inventory/:id"
+                          element={(
+                            canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
+                            && (userRole !== "CHANNEL_PARTNER" || canChannelPartnerViewInventory)
+                          ) ? <InventoryDetails /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/finance"
+                          element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <FinancialCore /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/map"
+                          element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "FIELD_EXECUTIVE"]) ? <FieldOps /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/reports"
+                          element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <IntelligenceReports /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/calendar"
+                          element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <MasterSchedule /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/admin/notifications"
+                          element={userRole === "ADMIN" ? <AdminNotifications /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/admin/users"
+                          element={userRole === "ADMIN" ? <TeamManager theme={theme} /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/admin/console"
+                          element={userRole === "ADMIN" ? <AdminCommandConsole /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/settings"
+                          element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <SystemSettings /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/targets"
+                          element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <Performance /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/chat"
+                          element={
+                            canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"])
+                              ? <TeamChat theme={theme} />
+                              : <Navigate to="/" />
+                          }
+                        />
+                        <Route
+                          path="/profile"
+                          element={
+                            canAccess([
+                              "ADMIN",
+                              ...MANAGEMENT_ROLES,
+                              "EXECUTIVE",
+                              "FIELD_EXECUTIVE",
+                              "CHANNEL_PARTNER",
+                            ])
+                              ? <UserProfile />
+                              : <Navigate to="/" />
+                          }
+                        />
+                        <Route path="/privacy-policy" element={<DataUseNotice />} />
+                        <Route path="/terms-and-conditions" element={<ServiceTermsNotice />} />
+                        <Route path="/data-use-notice" element={<DataUseNotice />} />
+                        <Route path="/service-terms" element={<ServiceTermsNotice />} />
+                        <Route path="/portal/*" element={<Navigate to="/" replace />} />
+                      </Routes>
+                    </div>
                   </main>
                 </motion.div>
               ) : (

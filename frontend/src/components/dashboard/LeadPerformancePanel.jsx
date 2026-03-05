@@ -27,6 +27,12 @@ const STATUS_FLOW = [
     textClass: "text-amber-600",
   },
   {
+    key: "REQUESTED",
+    label: "Requested",
+    color: "from-orange-400 to-amber-500",
+    textClass: "text-orange-600",
+  },
+  {
     key: "CLOSED",
     label: "Closed",
     color: "from-emerald-400 to-teal-500",
@@ -40,7 +46,7 @@ const STATUS_FLOW = [
   },
 ];
 
-const PRIMARY_STAGE_KEYS = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "CLOSED"];
+const PRIMARY_STAGE_KEYS = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED", "CLOSED"];
 
 const TIME_WINDOWS = [
   { value: 6, label: "6W" },
@@ -594,11 +600,11 @@ const LeadPerformancePanel = ({
             isDark ? "border-slate-700 bg-slate-950/55" : "border-slate-200 bg-white/75"
           }`}
         >
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <p className={`text-[11px] uppercase tracking-[0.16em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+          <div className="mb-3 flex flex-col items-start gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+            <p className={`text-[10px] uppercase tracking-[0.14em] sm:text-[11px] sm:tracking-[0.16em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               Weekly Throughput ({windowSize} Weeks)
             </p>
-            <div className="flex items-center gap-2 text-[10px] uppercase">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[9px] uppercase sm:text-[10px]">
               <LegendTag isDark={isDark} color={palette.created} label="Created" />
               <LegendTag isDark={isDark} color={palette.closed} label="Closed" />
               <LegendTag isDark={isDark} color={palette.open} label="Open" />
@@ -677,13 +683,14 @@ const LeadPerformancePanel = ({
           </svg>
 
           <div className="mt-2 grid gap-1" style={{ gridTemplateColumns: `repeat(${Math.max(weeklyTrend.length, 1)}, minmax(0, 1fr))` }}>
-            {weeklyTrend.map((bucket) => (
+            {weeklyTrend.map((bucket, index) => (
               <p
                 key={bucket.label}
-                className={`truncate text-center text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}
+                className={`truncate text-center text-[9px] sm:text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}
                 title={`${bucket.label}: ${bucket.created} created, ${bucket.closed} closed`}
               >
-                {bucket.label}
+                <span className="sm:hidden">{index % 2 === 0 ? bucket.label : ""}</span>
+                <span className="hidden sm:inline">{bucket.label}</span>
               </p>
             ))}
           </div>

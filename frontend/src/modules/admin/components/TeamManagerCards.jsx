@@ -3,7 +3,7 @@ import { motion as Motion } from "framer-motion";
 import { Trash2, UserCheck, Users } from "lucide-react";
 
 export const TeamLeadOverviewCards = ({ globalStats, isDarkTheme }) => (
-  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-3">
     <div className={`rounded-xl border p-4 ${isDarkTheme ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
       <div className={`text-[10px] uppercase tracking-widest font-bold ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
         Total Leads
@@ -43,9 +43,11 @@ export const TeamUserGrid = ({
   roleLabels,
   onOpenUserProfile,
   onDeleteUser,
+  onToggleChannelPartnerInventoryAccess,
+  inventoryAccessUpdatingUserId,
   getLeadScopeLabel,
 }) => (
-  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 pb-8">
+  <div className="grid min-w-0 grid-cols-1 gap-4 pb-8 md:grid-cols-2 xl:grid-cols-3">
     {loading ? (
       <div className={`text-sm ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
         Loading users...
@@ -75,6 +77,8 @@ export const TeamUserGrid = ({
             roleLabels={roleLabels}
             onOpenUserProfile={onOpenUserProfile}
             onDeleteUser={onDeleteUser}
+            onToggleChannelPartnerInventoryAccess={onToggleChannelPartnerInventoryAccess}
+            inventoryAccessUpdatingUserId={inventoryAccessUpdatingUserId}
             leadScopeLabel={getLeadScopeLabel(user.role)}
           />
         );
@@ -94,9 +98,16 @@ const TeamUserCard = ({
   roleLabels,
   onOpenUserProfile,
   onDeleteUser,
+  onToggleChannelPartnerInventoryAccess,
+  inventoryAccessUpdatingUserId,
   leadScopeLabel,
-}) => (
-  <Motion.div
+}) => {
+  const isChannelPartner = user.role === "CHANNEL_PARTNER";
+  const isUpdatingInventoryAccess =
+    String(inventoryAccessUpdatingUserId || "") === String(user._id);
+
+  return (
+    <Motion.div
     key={user._id}
     initial={{ opacity: 0, y: 8 }}
     animate={{ opacity: 1, y: 0 }}
@@ -109,7 +120,7 @@ const TeamUserCard = ({
         onOpenUserProfile(user._id);
       }
     }}
-    className={`rounded-xl border p-4 ${
+    className={`min-w-0 rounded-xl border p-4 ${
       isDarkTheme
         ? "border-slate-700 bg-slate-900/80 shadow-[0_10px_30px_rgba(2,6,23,0.4)]"
         : "border-slate-200 bg-white shadow-sm"
@@ -124,17 +135,17 @@ const TeamUserCard = ({
         ? "hover:border-slate-500 cursor-pointer"
         : "hover:border-slate-300 cursor-pointer"
     }`}
-  >
-    <div className="flex items-start justify-between">
-      <div>
-        <div className={`text-base font-semibold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>
+    >
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0 flex-1">
+        <div className={`break-words text-base font-semibold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>
           {user.name}
         </div>
-        <div className={`text-xs ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
+        <div className={`break-all text-xs ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
           {user.email}
         </div>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="shrink-0 flex items-center gap-2">
         <span
           className={`text-[10px] px-2 py-1 rounded-full font-bold ${
             user.isActive
@@ -169,16 +180,49 @@ const TeamUserCard = ({
     </div>
 
     <div className={`mt-4 space-y-1 text-xs ${isDarkTheme ? "text-slate-300" : "text-slate-600"}`}>
-      <div className="flex items-center gap-2">
+      <div className="min-w-0 flex items-center gap-2">
         <Users size={13} />
-        <span>{roleLabels[user.role] || user.role}</span>
+        <span className="break-words">{roleLabels[user.role] || user.role}</span>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="min-w-0 flex items-center gap-2">
         <UserCheck size={13} />
-        <span>Manager: {user.parentId?.name || "-"}</span>
+        <span className="break-words">Manager: {user.parentId?.name || "-"}</span>
       </div>
-      <div>Phone: {user.phone || "-"}</div>
+      <div className="break-all">Phone: {user.phone || "-"}</div>
     </div>
+
+    {isChannelPartner ? (
+      <div className={`mt-3 flex items-center justify-between gap-2 rounded-lg border px-2 py-2 ${
+        isDarkTheme ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
+      }`}>
+        <div className={`text-[10px] uppercase tracking-wider font-bold ${
+          isDarkTheme ? "text-slate-400" : "text-slate-500"
+        }`}>
+          Inventory Access
+        </div>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggleChannelPartnerInventoryAccess(user);
+          }}
+          disabled={isUpdatingInventoryAccess}
+          className={`rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] disabled:opacity-60 ${
+            user.canViewInventory
+              ? "bg-emerald-100 text-emerald-700"
+              : isDarkTheme
+                ? "bg-slate-800 text-slate-200"
+                : "bg-white text-slate-700"
+          }`}
+        >
+          {isUpdatingInventoryAccess
+            ? "Updating..."
+            : user.canViewInventory
+              ? "Enabled"
+              : "Disabled"}
+        </button>
+      </div>
+    ) : null}
 
     <div className="mt-4 grid grid-cols-3 gap-2">
       <div className={`rounded-lg border px-2 py-2 ${isDarkTheme ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"}`}>
@@ -206,5 +250,6 @@ const TeamUserCard = ({
         </div>
       </div>
     </div>
-  </Motion.div>
-);
+    </Motion.div>
+  );
+};

@@ -53,6 +53,21 @@ const formatUserRef = (value) => {
   return name || role || "-";
 };
 
+const formatSoldPaymentMode = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return "-";
+  if (normalized === "NET_BANKING_NEFTRTGSIMPS") return "Net Banking (NEFT/RTGS/IMPS)";
+  if (normalized === "CHECK") return "Check / Cheque";
+  return normalized;
+};
+
+const formatSoldPaymentType = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "FULL") return "Full Payment";
+  if (normalized === "PARTIAL") return "Partial Payment";
+  return normalized || "-";
+};
+
 const statusClass = (status) => {
   if (status === "Available") return "bg-emerald-100 text-emerald-700";
   if (status === "Blocked" || status === "Reserved") return "bg-amber-100 text-amber-700";
@@ -136,6 +151,17 @@ const InventoryDetails = () => {
   }, [asset?.title, inventory]);
 
   const statusValue = inventory?.status || asset?.status || "Unknown";
+  const saleDetails = inventory?.saleDetails || asset?.saleDetails || null;
+  const soldLeadLabel = (() => {
+    const lead = saleDetails?.leadId;
+    if (!lead) return "-";
+    if (typeof lead === "string") return lead;
+
+    const name = String(lead?.name || "").trim();
+    const phone = String(lead?.phone || "").trim();
+    const fallbackId = String(lead?._id || "").trim();
+    return [name, phone].filter(Boolean).join(" | ") || fallbackId || "-";
+  })();
   const images = useMemo(
     () => (Array.isArray(inventory?.images) && inventory.images.length ? inventory.images : asset?.images || []),
     [asset?.images, inventory?.images],
@@ -316,6 +342,21 @@ const InventoryDetails = () => {
               label="Reservation Reason"
               value={inventory?.reservationReason || asset?.reservationReason || "-"}
             />
+          )}
+          {statusValue === "Sold" && (
+            <>
+              <FieldRow label="Sold To Lead" value={soldLeadLabel} />
+              <FieldRow label="Payment Mode" value={formatSoldPaymentMode(saleDetails?.paymentMode)} />
+              <FieldRow label="Payment Type" value={formatSoldPaymentType(saleDetails?.paymentType)} />
+              <FieldRow label="Total Amount" value={formatPrice(saleDetails?.totalAmount)} />
+              <FieldRow
+                label="Remaining Amount"
+                value={formatPrice(saleDetails?.remainingAmount ?? 0)}
+              />
+              <FieldRow label="Payment Reference" value={saleDetails?.paymentReference || "-"} />
+              <FieldRow label="Sold At" value={formatDate(saleDetails?.soldAt)} />
+              <FieldRow label="Sale Note" value={saleDetails?.note || "-"} />
+            </>
           )}
         </div>
       </div>

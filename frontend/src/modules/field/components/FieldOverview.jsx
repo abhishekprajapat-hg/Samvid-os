@@ -22,7 +22,7 @@ const FieldOverview = ({
   const pending = tasks.filter((task) => task.status !== "Done").length;
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-6 sm:px-6 lg:px-8">
+    <div className="h-full overflow-y-auto custom-scrollbar px-4 py-6 sm:px-6 lg:px-8">
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-5">
         <FieldStatCard
           title="Pending Tasks"

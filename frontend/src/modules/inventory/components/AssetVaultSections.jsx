@@ -179,6 +179,12 @@ export const PendingInventoryRequestsPanel = ({
                       <p>
                         <span className="font-semibold text-slate-700">Status:</span> {detailStatus}
                       </p>
+                      {String(detailStatus || "").toLowerCase() === "sold" && detailSource?.saleDetails ? (
+                        <p className="col-span-2">
+                          <span className="font-semibold text-slate-700">Sold Details:</span>{" "}
+                          {formatRequestValue("saleDetails", detailSource.saleDetails)}
+                        </p>
+                      ) : null}
                       <p>
                         <span className="font-semibold text-slate-700">Images:</span> {imageList.length}
                       </p>

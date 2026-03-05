@@ -86,7 +86,7 @@ const LeadPool = () => {
             {/* Kanban Board */}
             <div className="flex-1 overflow-x-auto pb-4">
                 <div className="flex gap-6 min-w-[1200px] h-full">
-                    {columns.map((col, colIndex) => (
+                    {columns.map((col) => (
                         <div key={col} className="flex-1 min-w-[300px] flex flex-col h-full">
                             {/* Column Header */}
                             <div className="flex justify-between items-center mb-4 px-2">
@@ -100,7 +100,7 @@ const LeadPool = () => {
                             </div>
 
                             {/* Column Drop Zone */}
-                            <div className="flex-1 bg-secondary/5 rounded-[2rem] p-4 border border-secondary/5 shadow-inner overflow-y-auto">
+                            <div className="flex-1 bg-secondary/5 rounded-[2rem] p-4 border border-secondary/5 shadow-inner overflow-y-auto custom-scrollbar">
                                 {leads.filter(l => l.status === col).map((lead, index) => (
                                     <LeadCard key={lead.id} lead={lead} index={index} />
                                 ))}

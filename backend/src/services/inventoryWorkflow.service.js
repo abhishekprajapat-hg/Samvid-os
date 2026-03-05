@@ -13,6 +13,8 @@ const {
 const {
   INVENTORY_STATUSES,
   INVENTORY_TYPES,
+  INVENTORY_SALE_PAYMENT_MODES,
+  INVENTORY_SALE_PAYMENT_TYPES,
   INVENTORY_ALLOWED_FIELDS,
   INVENTORY_REQUIRED_CREATE_FIELDS,
   INVENTORY_ACTIVITY_ACTIONS,
@@ -25,6 +27,8 @@ const {
 const REQUEST_STATUS_PENDING = "pending";
 const REQUEST_STATUS_APPROVED = "approved";
 const REQUEST_STATUS_REJECTED = "rejected";
+const MAX_SALE_PAYMENT_NOTE_LENGTH = 1000;
+const MAX_SALE_PAYMENT_REFERENCE_LENGTH = 120;
 const DEFAULT_SITE_VISIT_RADIUS_METERS =
   Number.parseInt(process.env.SITE_VISIT_RADIUS_METERS, 10) || 200;
 
@@ -48,6 +52,84 @@ const sanitizeString = (value) => {
 };
 
 const sanitizeReservationReason = (value) => sanitizeString(value).slice(0, 300);
+
+const toObjectIdString = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object" && value._id) return String(value._id).trim();
+  return String(value).trim();
+};
+
+const normalizeSalePaymentMode = (value) => sanitizeString(value).toUpperCase();
+const normalizeSalePaymentType = (value) => sanitizeString(value).toUpperCase();
+
+const sanitizeSaleDetails = (value) => {
+  if (value === null) return null;
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw createHttpError(400, "saleDetails must be an object");
+  }
+
+  const leadId = toObjectIdString(value.leadId);
+  if (!leadId || !isValidObjectId(leadId)) {
+    throw createHttpError(400, "saleDetails.leadId must be a valid lead id");
+  }
+
+  const paymentMode = normalizeSalePaymentMode(value.paymentMode);
+  if (!INVENTORY_SALE_PAYMENT_MODES.includes(paymentMode)) {
+    throw createHttpError(
+      400,
+      `saleDetails.paymentMode must be one of: ${INVENTORY_SALE_PAYMENT_MODES.join(", ")}`,
+    );
+  }
+
+  const paymentType = normalizeSalePaymentType(value.paymentType);
+  if (!INVENTORY_SALE_PAYMENT_TYPES.includes(paymentType)) {
+    throw createHttpError(
+      400,
+      `saleDetails.paymentType must be one of: ${INVENTORY_SALE_PAYMENT_TYPES.join(", ")}`,
+    );
+  }
+
+  const totalAmount = toFiniteNumber(value.totalAmount);
+  if (totalAmount === null || totalAmount <= 0) {
+    throw createHttpError(400, "saleDetails.totalAmount must be greater than 0");
+  }
+
+  let remainingAmount = 0;
+  if (paymentType === "PARTIAL") {
+    remainingAmount = toFiniteNumber(value.remainingAmount);
+    if (remainingAmount === null || remainingAmount <= 0) {
+      throw createHttpError(
+        400,
+        "saleDetails.remainingAmount must be greater than 0 for partial payment",
+      );
+    }
+  }
+
+  const paymentReference = sanitizeString(value.paymentReference).slice(0, MAX_SALE_PAYMENT_REFERENCE_LENGTH);
+  if (paymentMode !== "CASH" && !paymentReference) {
+    throw createHttpError(
+      400,
+      "saleDetails.paymentReference is required for non-cash payments",
+    );
+  }
+
+  const note = sanitizeString(value.note).slice(0, MAX_SALE_PAYMENT_NOTE_LENGTH);
+  const soldAtCandidate = value.soldAt ? new Date(value.soldAt) : new Date();
+  const soldAt = Number.isNaN(soldAtCandidate.getTime()) ? new Date() : soldAtCandidate;
+
+  return {
+    leadId,
+    paymentMode,
+    paymentType,
+    totalAmount,
+    remainingAmount,
+    paymentReference: paymentMode === "CASH" ? "" : paymentReference,
+    note,
+    soldAt,
+  };
+};
 
 const sanitizeFileList = (value) => {
   if (!Array.isArray(value)) return [];
@@ -295,6 +377,20 @@ const getTeamIdForUser = (user) => {
   return null;
 };
 
+const ensureSaleDetailsLeadExists = async (saleDetails) => {
+  if (!saleDetails?.leadId) return null;
+
+  const lead = await Lead.findById(saleDetails.leadId)
+    .select("_id name phone status")
+    .lean();
+
+  if (!lead) {
+    throw createHttpError(400, "Selected lead not found for sold property details");
+  }
+
+  return lead;
+};
+
 const resolveDirectCreateTeamId = async ({ user, payload, companyId }) => {
   const requestedTeamId = payload?.teamId || null;
   if (requestedTeamId) {
@@ -338,6 +434,7 @@ const sanitizeInventoryPayload = ({
   mode = "create",
   currentStatus = "",
   currentReservationReason = "",
+  currentSaleDetails = null,
 }) => {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw createHttpError(400, "proposedData must be an object");
@@ -427,6 +524,16 @@ const sanitizeInventoryPayload = ({
       return;
     }
 
+    if (field === "saleDetails") {
+      if (value === null) {
+        safePayload[field] = null;
+        return;
+      }
+
+      safePayload[field] = sanitizeSaleDetails(value);
+      return;
+    }
+
     if (field === "images" || field === "documents") {
       safePayload[field] = sanitizeFileList(value);
     }
@@ -449,6 +556,10 @@ const sanitizeInventoryPayload = ({
     safePayload,
     "reservationReason",
   );
+  const hasSaleDetailsPatch = Object.prototype.hasOwnProperty.call(
+    safePayload,
+    "saleDetails",
+  );
   const effectiveStatus =
     mode === "create"
       ? safePayload.status
@@ -456,10 +567,17 @@ const sanitizeInventoryPayload = ({
   const effectiveReservationReason = hasReservationReasonPatch
     ? sanitizeReservationReason(safePayload.reservationReason)
     : sanitizeReservationReason(currentReservationReason);
+  const effectiveSaleDetails = hasSaleDetailsPatch
+    ? safePayload.saleDetails
+    : (currentSaleDetails || null);
   const shouldValidateBlockedReason =
     mode === "create"
     || (mode === "update" && hasStatusPatch && safePayload.status === "Blocked")
     || (mode === "update" && hasReservationReasonPatch);
+  const shouldRequireSoldDetails =
+    mode === "create"
+    || (mode === "update" && hasStatusPatch && safePayload.status === "Sold")
+    || (mode === "update" && hasSaleDetailsPatch);
 
   if (effectiveStatus === "Blocked" && shouldValidateBlockedReason) {
     if (!effectiveReservationReason) {
@@ -473,6 +591,25 @@ const sanitizeInventoryPayload = ({
     safePayload.reservationReason = "";
   } else if (hasReservationReasonPatch && effectiveReservationReason) {
     throw createHttpError(400, "reservationReason can only be set when status is Reserved");
+  }
+
+  if (effectiveStatus === "Sold") {
+    if (shouldRequireSoldDetails) {
+      if (!effectiveSaleDetails) {
+        throw createHttpError(400, "saleDetails are required when status is Sold");
+      }
+
+      const validatedSaleDetails = sanitizeSaleDetails(effectiveSaleDetails);
+      safePayload.saleDetails = validatedSaleDetails;
+    }
+  } else {
+    if (hasSaleDetailsPatch && effectiveSaleDetails) {
+      throw createHttpError(400, "saleDetails can only be set when status is Sold");
+    }
+
+    if (mode === "create" || hasStatusPatch || hasSaleDetailsPatch) {
+      safePayload.saleDetails = null;
+    }
   }
 
   if (mode === "update" && Object.keys(safePayload).length === 0) {
@@ -491,6 +628,16 @@ const getInventoryScopeQueryForUser = (user) => {
       USER_ROLES.FIELD_EXECUTIVE,
     ].includes(user.role)
   ) {
+    return { companyId: getCompanyIdForUser(user) };
+  }
+
+  if (user.role === USER_ROLES.CHANNEL_PARTNER) {
+    if (!user.canViewInventory) {
+      throw createHttpError(
+        403,
+        "Inventory access is disabled for this channel partner",
+      );
+    }
     return { companyId: getCompanyIdForUser(user) };
   }
 
@@ -525,6 +672,7 @@ const applyInventoryPopulates = (query) =>
     .populate("createdBy", "name role companyId")
     .populate("approvedBy", "name role companyId")
     .populate("updatedBy", "name role companyId")
+    .populate("saleDetails.leadId", "name phone status projectInterested")
     .lean();
 
 const applyRequestPopulates = (query) =>
@@ -618,6 +766,7 @@ const createInventoryDirect = async ({ user, payload }) => {
     payload: normalizedPayload,
     mode: "create",
   });
+  await ensureSaleDetailsLeadExists(proposed.saleDetails);
 
   const teamId = await resolveDirectCreateTeamId({
     user,
@@ -672,7 +821,9 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
     mode: "update",
     currentStatus: inventory.status,
     currentReservationReason: inventory.reservationReason,
+    currentSaleDetails: inventory.saleDetails || null,
   });
+  await ensureSaleDetailsLeadExists(patch.saleDetails);
 
   const diff = pickInventoryDiff(inventory, patch);
 
@@ -754,6 +905,7 @@ const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
         payload: normalizedRow,
         mode: "create",
       });
+      await ensureSaleDetailsLeadExists(proposed.saleDetails);
 
       const teamId = row?.teamId || null;
       const teamIdKey = teamId ? String(teamId) : "";
@@ -812,6 +964,7 @@ const createInventoryCreateRequest = async ({ user, payload, io }) => {
     payload: normalizedPayload,
     mode: "create",
   });
+  await ensureSaleDetailsLeadExists(proposed.saleDetails);
 
   const teamId = getTeamIdForUser(user);
   if (teamId) {
@@ -841,10 +994,10 @@ const createInventoryCreateRequest = async ({ user, payload, io }) => {
 };
 
 const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) => {
-  if (user.role !== USER_ROLES.FIELD_EXECUTIVE) {
+  if (![USER_ROLES.FIELD_EXECUTIVE, USER_ROLES.EXECUTIVE].includes(user.role)) {
     throw createHttpError(
       403,
-      "Only FIELD_EXECUTIVE can submit update requests",
+      "Only EXECUTIVE or FIELD_EXECUTIVE can submit update requests",
     );
   }
 
@@ -858,7 +1011,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     companyId,
   })
     .select(
-      "_id projectName towerName unitNumber price type category status reservationReason location siteLocation images documents",
+      "_id projectName towerName unitNumber price type category status reservationReason saleDetails location siteLocation images documents",
     )
     .lean();
 
@@ -872,7 +1025,9 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     mode: "update",
     currentStatus: inventory.status,
     currentReservationReason: inventory.reservationReason,
+    currentSaleDetails: inventory.saleDetails || null,
   });
+  await ensureSaleDetailsLeadExists(proposed.saleDetails);
 
   const changedKeys = Object.keys(proposed).filter(
     (key) => !areValuesEqual(proposed[key], inventory[key]),
@@ -1002,6 +1157,7 @@ const approveRequest = async ({ user, requestId, io }) => {
       payload: request.proposedData || request.proposedChanges || {},
       mode: "create",
     });
+    await ensureSaleDetailsLeadExists(proposed.saleDetails);
 
     inventory = await Inventory.create({
       ...proposed,
@@ -1043,7 +1199,9 @@ const approveRequest = async ({ user, requestId, io }) => {
       mode: "update",
       currentStatus: inventory.status,
       currentReservationReason: inventory.reservationReason,
+      currentSaleDetails: inventory.saleDetails || null,
     });
+    await ensureSaleDetailsLeadExists(proposed.saleDetails);
 
     const diff = pickInventoryDiff(inventory, proposed);
     Object.assign(inventory, proposed);

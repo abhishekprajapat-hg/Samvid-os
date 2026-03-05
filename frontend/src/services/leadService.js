@@ -10,6 +10,11 @@ export const getAllLeads = async (params = {}) => {
   return res.data?.leads || [];
 };
 
+export const getLeadPaymentRequests = async (params = {}) => {
+  const res = await api.get("/leads/payment-requests", { params });
+  return res.data?.requests || [];
+};
+
 export const createLead = async (payload) => {
   const res = await api.post("/leads", payload);
   return res.data?.lead;

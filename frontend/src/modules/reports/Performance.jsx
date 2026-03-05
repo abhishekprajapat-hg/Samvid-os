@@ -254,7 +254,7 @@ const Performance = () => {
   };
 
   return (
-    <div className="h-full w-full overflow-y-auto px-4 pb-8 pt-20 sm:px-6 lg:px-8 md:pt-24">
+    <div className="h-full w-full overflow-y-auto custom-scrollbar px-4 pb-8 pt-20 sm:px-6 lg:px-8 md:pt-24">
       <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="font-display text-2xl text-slate-900 sm:text-3xl">

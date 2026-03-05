@@ -13,6 +13,7 @@
     "axios": "^1.13.5",
     "clsx": "^2.1.1",
     "framer-motion": "^12.33.0",
+    "jspdf": "^4.2.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^0.563.0",
     "react": "^19.2.0",

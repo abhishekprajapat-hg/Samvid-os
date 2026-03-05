@@ -1,5 +1,12 @@
 const INVENTORY_STATUSES = ["Available", "Blocked", "Sold"];
 const INVENTORY_TYPES = ["Sale", "Rent"];
+const INVENTORY_SALE_PAYMENT_MODES = [
+  "UPI",
+  "CASH",
+  "CHECK",
+  "NET_BANKING_NEFTRTGSIMPS",
+];
+const INVENTORY_SALE_PAYMENT_TYPES = ["FULL", "PARTIAL"];
 
 const INVENTORY_REQUEST_TYPES = ["create", "update"];
 const INVENTORY_REQUEST_STATUSES = ["pending", "approved", "rejected"];
@@ -13,6 +20,7 @@ const INVENTORY_ALLOWED_FIELDS = [
   "category",
   "status",
   "reservationReason",
+  "saleDetails",
   "location",
   "siteLocation",
   "images",
@@ -41,6 +49,8 @@ const INVENTORY_ACTIVITY_ACTIONS = {
 module.exports = {
   INVENTORY_STATUSES,
   INVENTORY_TYPES,
+  INVENTORY_SALE_PAYMENT_MODES,
+  INVENTORY_SALE_PAYMENT_TYPES,
   INVENTORY_REQUEST_TYPES,
   INVENTORY_REQUEST_STATUSES,
   INVENTORY_ALLOWED_FIELDS,

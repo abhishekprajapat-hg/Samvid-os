@@ -45,6 +45,14 @@ export const deleteUser = async (userId) => {
   return res.data;
 };
 
+export const updateChannelPartnerInventoryAccess = async (userId, canViewInventory) => {
+  const res = await api.patch(
+    `/users/${userId}/channel-partner/inventory-access`,
+    { canViewInventory: Boolean(canViewInventory) },
+  );
+  return res.data?.user || null;
+};
+
 export const updateMyLiveLocation = async (payload) => {
   const res = await api.patch("/users/location", payload);
   return res.data?.user;

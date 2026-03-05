@@ -396,7 +396,7 @@ const ManagerDashboard = ({ theme = "light" }) => {
       initial="hidden"
       animate="visible"
       variants={containerMotion}
-      className={`relative h-full w-full overflow-y-auto px-4 pt-20 pb-10 sm:px-6 md:pt-24 lg:px-10 ${
+      className={`relative h-full w-full overflow-y-auto custom-scrollbar px-4 pt-20 pb-10 sm:px-6 md:pt-24 lg:px-10 ${
         isDark ? "bg-slate-950/40" : "bg-slate-50/70"
       }`}
     >

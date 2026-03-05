@@ -25,6 +25,7 @@ import {
   approveInventoryRequest,
   rejectInventoryRequest,
 } from "../../services/inventoryService";
+import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import {
   AssetVaultFilters,
@@ -37,6 +38,16 @@ const STATUS_UPDATE_OPTIONS = [
   { label: "Available", value: "Available" },
   { label: "Reserved", value: "Blocked" },
   { label: "Sold", value: "Sold" },
+];
+const SOLD_PAYMENT_MODE_OPTIONS = [
+  { value: "UPI", label: "UPI" },
+  { value: "CASH", label: "Cash" },
+  { value: "CHECK", label: "Check / Cheque" },
+  { value: "NET_BANKING_NEFTRTGSIMPS", label: "Net Banking (NEFT/RTGS/IMPS)" },
+];
+const SOLD_PAYMENT_TYPE_OPTIONS = [
+  { value: "FULL", label: "Full Payment" },
+  { value: "PARTIAL", label: "Partial Payment" },
 ];
 const GEOCODING_SEARCH_ENDPOINT = "https://nominatim.openstreetmap.org/search";
 const LOCATION_SUGGESTION_LIMIT = 6;
@@ -104,6 +115,11 @@ const toApiStatus = (status) => {
 };
 
 const isReservedStatusValue = (status) => toApiStatus(status) === "Blocked";
+const isSoldStatusValue = (status) => toApiStatus(status) === "Sold";
+const isNonCashPaymentMode = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  return Boolean(normalized) && normalized !== "CASH";
+};
 
 const DEFAULT_FORM = {
   title: "",
@@ -115,6 +131,13 @@ const DEFAULT_FORM = {
   category: "Apartment",
   status: "Available",
   reservationReason: "",
+  saleLeadId: "",
+  salePaymentMode: "",
+  salePaymentType: "",
+  saleTotalAmount: "",
+  saleRemainingAmount: "",
+  salePaymentReference: "",
+  saleNote: "",
   images: [],
 };
 
@@ -154,6 +177,34 @@ const formatCurrency = (value) => {
   return `Rs ${parsed.toLocaleString("en-IN")}`;
 };
 
+const formatSoldPaymentModeLabel = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return "-";
+  if (normalized === "NET_BANKING_NEFTRTGSIMPS") return "Net Banking (NEFT/RTGS/IMPS)";
+  if (normalized === "CHECK") return "Check / Cheque";
+  return normalized;
+};
+
+const formatSoldPaymentTypeLabel = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "FULL") return "Full Payment";
+  if (normalized === "PARTIAL") return "Partial Payment";
+  return normalized || "-";
+};
+
+const formatSoldLeadLabel = (value) => {
+  if (!value) return "-";
+  if (typeof value === "string") return value;
+
+  const name = String(value?.name || "").trim();
+  const phone = String(value?.phone || "").trim();
+  if (name && phone) return `${name} (${phone})`;
+  if (name) return name;
+
+  const id = String(value?._id || "").trim();
+  return id || "-";
+};
+
 const toSharePayload = (asset) => {
   if (!asset?._id) return null;
   const firstImage = Array.isArray(asset.images) ? asset.images[0] || "" : "";
@@ -181,6 +232,7 @@ const REQUEST_FIELD_LABELS = {
   price: "Price",
   status: "Status",
   reservationReason: "Reservation Reason",
+  saleDetails: "Sold Details",
   location: "Location",
   siteLocation: "Coordinates",
   images: "Images",
@@ -227,6 +279,17 @@ const formatRequestValue = (key, value) => {
     const lng = toCoordinateNumber(value?.lng);
     return lat !== null && lng !== null ? `${lat}, ${lng}` : "-";
   }
+  if (key === "saleDetails") {
+    const leadText = formatSoldLeadLabel(value?.leadId);
+    const modeText = formatSoldPaymentModeLabel(value?.paymentMode);
+    const typeText = formatSoldPaymentTypeLabel(value?.paymentType);
+    const totalText = formatCurrency(value?.totalAmount);
+    const remainingText =
+      String(value?.paymentType || "").toUpperCase() === "PARTIAL"
+        ? formatCurrency(value?.remainingAmount)
+        : formatCurrency(0);
+    return `${leadText} | ${modeText} | ${typeText} | Total: ${totalText} | Remaining: ${remainingText}`;
+  }
   if (Array.isArray(value)) return `${value.length} item(s)`;
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
@@ -256,6 +319,8 @@ const AssetVault = () => {
   const [requestingStatusId, setRequestingStatusId] = useState("");
   const [pendingRequests, setPendingRequests] = useState([]);
   const [reviewingRequestId, setReviewingRequestId] = useState("");
+  const [leadOptions, setLeadOptions] = useState([]);
+  const [loadingLeadOptions, setLoadingLeadOptions] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [error, setError] = useState("");
@@ -310,6 +375,52 @@ const AssetVault = () => {
   useEffect(() => {
     fetchAssets();
   }, [fetchAssets]);
+
+  useEffect(() => {
+    if (!canOpenEditModal) {
+      setLeadOptions([]);
+      setLoadingLeadOptions(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadLeadOptions = async () => {
+      try {
+        setLoadingLeadOptions(true);
+        const rows = await getAllLeads();
+        if (cancelled) return;
+
+        const options = Array.isArray(rows)
+          ? rows
+            .map((lead) => ({
+              _id: String(lead?._id || "").trim(),
+              name: String(lead?.name || "").trim(),
+              phone: String(lead?.phone || "").trim(),
+              status: String(lead?.status || "").trim(),
+              projectInterested: String(lead?.projectInterested || "").trim(),
+            }))
+            .filter((lead) => lead._id)
+          : [];
+
+        setLeadOptions(options);
+      } catch {
+        if (!cancelled) {
+          setLeadOptions([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingLeadOptions(false);
+        }
+      }
+    };
+
+    loadLeadOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canOpenEditModal]);
 
   useEffect(() => {
     if (!useGooglePlaces || !(isAddModalOpen || isEditModalOpen)) {
@@ -771,6 +882,71 @@ const AssetVault = () => {
     showLocationSuggestions,
   ]);
 
+  const getLeadOptionLabel = useCallback((lead) => {
+    const name = String(lead?.name || "").trim() || "Lead";
+    const phone = String(lead?.phone || "").trim();
+    const project = String(lead?.projectInterested || "").trim();
+    const status = String(lead?.status || "").trim();
+
+    return [name, phone, status, project].filter(Boolean).join(" | ");
+  }, []);
+
+  const buildSaleDetailsPayload = useCallback(() => {
+    if (!isSoldStatusValue(formData.status)) {
+      return { value: null };
+    }
+
+    const saleLeadId = String(formData.saleLeadId || "").trim();
+    const salePaymentMode = String(formData.salePaymentMode || "").trim().toUpperCase();
+    const salePaymentType = String(formData.salePaymentType || "").trim().toUpperCase();
+    const saleTotalAmount = Number(formData.saleTotalAmount);
+    const saleRemainingAmount =
+      formData.saleRemainingAmount === "" ? null : Number(formData.saleRemainingAmount);
+    const salePaymentReference = String(formData.salePaymentReference || "").trim();
+    const saleNote = String(formData.saleNote || "").trim();
+
+    if (!saleLeadId) {
+      return { error: "Lead selection is required when status is Sold" };
+    }
+
+    if (!salePaymentMode) {
+      return { error: "Payment mode is required when status is Sold" };
+    }
+
+    if (!salePaymentType) {
+      return { error: "Payment type is required when status is Sold" };
+    }
+
+    if (!Number.isFinite(saleTotalAmount) || saleTotalAmount <= 0) {
+      return { error: "Total sold amount must be greater than 0" };
+    }
+
+    let remainingAmount = 0;
+    if (salePaymentType === "PARTIAL") {
+      if (!Number.isFinite(saleRemainingAmount) || saleRemainingAmount <= 0) {
+        return { error: "Remaining amount is required for partial payment" };
+      }
+      remainingAmount = saleRemainingAmount;
+    }
+
+    if (isNonCashPaymentMode(salePaymentMode) && !salePaymentReference) {
+      return { error: "Payment reference is required for non-cash sold payment" };
+    }
+
+    return {
+      value: {
+        leadId: saleLeadId,
+        paymentMode: salePaymentMode,
+        paymentType: salePaymentType,
+        totalAmount: saleTotalAmount,
+        remainingAmount,
+        paymentReference: isNonCashPaymentMode(salePaymentMode) ? salePaymentReference : "",
+        note: saleNote,
+        soldAt: new Date().toISOString(),
+      },
+    };
+  }, [formData]);
+
   const handleSaveAsset = async () => {
     if (!canOpenCreateModal) return;
 
@@ -795,6 +971,12 @@ const AssetVault = () => {
       return;
     }
 
+    const saleDetailsPayload = buildSaleDetailsPayload();
+    if (saleDetailsPayload.error) {
+      setError(saleDetailsPayload.error);
+      return;
+    }
+
     try {
       setSaving(true);
       setError("");
@@ -810,6 +992,7 @@ const AssetVault = () => {
         reservationReason: isReservedStatusValue(formData.status)
           ? trimmedReservationReason
           : "",
+        saleDetails: saleDetailsPayload.value,
         images: Array.isArray(formData.images) ? formData.images : [],
       };
 
@@ -834,8 +1017,12 @@ const AssetVault = () => {
     }
   };
 
-  const handleOpenEditModal = (asset) => {
+  const handleOpenEditModal = (asset, options = {}) => {
     if (!canOpenEditModal || !asset?._id) return;
+
+    const forcedStatus = String(options?.status || "").trim();
+    const resolvedStatus = forcedStatus || asset.status || "Available";
+    const existingSaleDetails = asset?.saleDetails || {};
 
     const existingSiteLat = toCoordinateNumber(asset?.siteLocation?.lat);
     const existingSiteLng = toCoordinateNumber(asset?.siteLocation?.lng);
@@ -856,8 +1043,25 @@ const AssetVault = () => {
           : String(asset.price),
       type: asset.type || "Sale",
       category: asset.category || "Apartment",
-      status: asset.status || "Available",
+      status: resolvedStatus,
       reservationReason: asset.reservationReason || "",
+      saleLeadId: String(existingSaleDetails?.leadId?._id || existingSaleDetails?.leadId || "").trim(),
+      salePaymentMode: String(existingSaleDetails?.paymentMode || "").trim().toUpperCase(),
+      salePaymentType: String(existingSaleDetails?.paymentType || "").trim().toUpperCase(),
+      saleTotalAmount:
+        existingSaleDetails?.totalAmount === null
+        || existingSaleDetails?.totalAmount === undefined
+        || Number.isNaN(Number(existingSaleDetails?.totalAmount))
+          ? ""
+          : String(existingSaleDetails.totalAmount),
+      saleRemainingAmount:
+        existingSaleDetails?.remainingAmount === null
+        || existingSaleDetails?.remainingAmount === undefined
+        || Number.isNaN(Number(existingSaleDetails?.remainingAmount))
+          ? ""
+          : String(existingSaleDetails.remainingAmount),
+      salePaymentReference: String(existingSaleDetails?.paymentReference || "").trim(),
+      saleNote: String(existingSaleDetails?.note || "").trim(),
       images: Array.isArray(asset.images) ? asset.images : [],
     });
     setLocationBaseline({
@@ -933,6 +1137,12 @@ const AssetVault = () => {
         return;
       }
 
+      const saleDetailsPayload = buildSaleDetailsPayload();
+      if (saleDetailsPayload.error) {
+        setError(saleDetailsPayload.error);
+        return;
+      }
+
       const payload = {
         title: formData.title.trim(),
         location: formData.location.trim(),
@@ -943,6 +1153,7 @@ const AssetVault = () => {
         reservationReason: isReservedStatusValue(formData.status)
           ? trimmedReservationReason
           : "",
+        saleDetails: saleDetailsPayload.value,
         images: Array.isArray(formData.images) ? formData.images : [],
       };
 
@@ -996,6 +1207,15 @@ const AssetVault = () => {
     if (!canManage) return;
 
     const asset = assets.find((row) => String(row._id) === String(assetId));
+    if (!asset) return;
+
+    if (status === "Sold") {
+      setError("");
+      handleOpenEditModal(asset, { status: "Sold" });
+      setSuccess("Fill sold payment details and update the property");
+      return;
+    }
+
     let reservationReason = "";
 
     if (status === "Blocked") {
@@ -1036,6 +1256,13 @@ const AssetVault = () => {
     const currentStatus = toApiStatus(asset?.status || "");
     if (!asset || !status || status === currentStatus) {
       setError("Please select a different status");
+      return;
+    }
+
+    if (status === "Sold") {
+      setError("");
+      handleOpenEditModal(asset, { status: "Sold" });
+      setSuccess("Fill sold details and submit request for admin approval");
       return;
     }
 
@@ -1287,6 +1514,16 @@ const AssetVault = () => {
                     <p className="mt-1 text-[11px] text-amber-700 font-semibold">
                       Reserved reason: {asset.reservationReason}
                     </p>
+                  ) : null}
+                  {toApiStatus(asset.status) === "Sold" && asset.saleDetails ? (
+                    <div className="mt-1 text-[11px] text-slate-600">
+                      <p className="font-semibold text-slate-700">
+                        Sold to lead: {formatSoldLeadLabel(asset.saleDetails?.leadId)}
+                      </p>
+                      <p>
+                        {formatSoldPaymentModeLabel(asset.saleDetails?.paymentMode)} | {formatSoldPaymentTypeLabel(asset.saleDetails?.paymentType)}
+                      </p>
+                    </div>
                   ) : null}
                 </div>
 
@@ -1635,6 +1872,148 @@ const AssetVault = () => {
                         rows={3}
                         className="mt-1 w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-amber-500 resize-none"
                       />
+                    </div>
+                  ) : null}
+
+                  {isSoldStatusValue(formData.status) ? (
+                    <div className="col-span-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+                        Sold Details (Mandatory)
+                      </p>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                          Sold To Lead *
+                        </label>
+                        <select
+                          value={formData.saleLeadId}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, saleLeadId: e.target.value }))}
+                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="">
+                            {loadingLeadOptions ? "Loading leads..." : "Select lead"}
+                          </option>
+                          {leadOptions.map((lead) => (
+                            <option key={lead._id} value={lead._id}>
+                              {getLeadOptionLabel(lead)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                            Payment Mode *
+                          </label>
+                          <select
+                            value={formData.salePaymentMode}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, salePaymentMode: e.target.value }))}
+                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="">Select mode</option>
+                            {SOLD_PAYMENT_MODE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                            Payment Type *
+                          </label>
+                          <select
+                            value={formData.salePaymentType}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, salePaymentType: e.target.value }))}
+                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="">Select type</option>
+                            {SOLD_PAYMENT_TYPE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                            Total Amount *
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.saleTotalAmount}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, saleTotalAmount: e.target.value }))}
+                            placeholder="Enter sold amount"
+                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+
+                        {formData.salePaymentType === "PARTIAL" ? (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                              Remaining Amount *
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={formData.saleRemainingAmount}
+                              onChange={(e) => setFormData((prev) => ({ ...prev, saleRemainingAmount: e.target.value }))}
+                              placeholder="Enter remaining"
+                              className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                              Remaining Amount
+                            </label>
+                            <input
+                              type="text"
+                              readOnly
+                              value="0"
+                              className="mt-1 w-full p-3 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-500"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                          Payment Reference {isNonCashPaymentMode(formData.salePaymentMode) ? "*" : ""}
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.salePaymentReference}
+                          onChange={(e) =>
+                            setFormData((prev) => ({ ...prev, salePaymentReference: e.target.value }))
+                          }
+                          placeholder={
+                            isNonCashPaymentMode(formData.salePaymentMode)
+                              ? "Enter UTR / transaction / cheque number"
+                              : "Not required for cash payment"
+                          }
+                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                          Sale Note
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={formData.saleNote}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, saleNote: e.target.value }))}
+                          placeholder="Add important context (payment proof, remarks, commitments, etc.)"
+                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 resize-none"
+                        />
+                      </div>
                     </div>
                   ) : null}
                 </div>

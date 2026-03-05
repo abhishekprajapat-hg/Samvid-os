@@ -53,10 +53,77 @@ const leadSchema = new mongoose.Schema(
         "CONTACTED",
         "INTERESTED",
         "SITE_VISIT",
+        "REQUESTED",
         "CLOSED",
         "LOST"
       ],
       default: "NEW"
+    },
+
+    dealPayment: {
+      mode: {
+        type: String,
+        enum: ["UPI", "CASH", "CHECK", "NET_BANKING_NEFTRTGSIMPS"],
+        default: null,
+      },
+      paymentType: {
+        type: String,
+        enum: ["FULL", "PARTIAL"],
+        default: null,
+      },
+      remainingAmount: {
+        type: Number,
+        min: 0,
+        default: null,
+      },
+      paymentReference: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      note: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      approvalStatus: {
+        type: String,
+        enum: ["PENDING", "APPROVED", "REJECTED"],
+        default: null,
+      },
+      approvalNote: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      approvalRequestedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      approvalRequestedAt: {
+        type: Date,
+        default: null,
+      },
+      approvalReviewedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      approvalReviewedAt: {
+        type: Date,
+        default: null,
+      },
+      requestedFromStatus: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      requestedTargetStatus: {
+        type: String,
+        default: "",
+        trim: true,
+      },
     },
 
     assignedTo: {

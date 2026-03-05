@@ -54,6 +54,11 @@ const userSchema = new mongoose.Schema(
       sparse: true,
     },
 
+    canViewInventory: {
+      type: Boolean,
+      default: false,
+    },
+
     isActive: {
       type: Boolean,
       default: true,

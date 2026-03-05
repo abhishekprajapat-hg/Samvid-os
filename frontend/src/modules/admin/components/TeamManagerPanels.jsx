@@ -167,7 +167,7 @@ export const UserProfilePanel = ({
             initial={{ x: 600 }}
             animate={{ x: 0 }}
             exit={{ x: 600 }}
-            className={`h-full w-full max-w-2xl border-l shadow-2xl p-6 flex flex-col gap-4 overflow-y-auto ${
+            className={`h-full w-full max-w-2xl border-l shadow-2xl p-6 flex flex-col gap-4 overflow-y-auto custom-scrollbar ${
               isDarkTheme
                 ? "bg-slate-950 border-slate-700"
                 : "bg-white border-slate-200"

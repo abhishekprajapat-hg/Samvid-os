@@ -39,6 +39,7 @@ const LEAD_STATUSES = [
   "CONTACTED",
   "INTERESTED",
   "SITE_VISIT",
+  "REQUESTED",
   "CLOSED",
   "LOST",
 ];
@@ -56,6 +57,7 @@ const USER_SELECTABLE_FIELDS = [
   "role",
   "companyId",
   "parentId",
+  "canViewInventory",
   "isActive",
   "lastAssignedAt",
   "liveLocation",
@@ -221,6 +223,7 @@ const toProfileView = (user) => ({
   companyId: user.companyId || null,
   parentId: user.parentId || null,
   partnerCode: user.partnerCode || null,
+  canViewInventory: Boolean(user.canViewInventory),
   isActive: Boolean(user.isActive),
   lastAssignedAt: user.lastAssignedAt || null,
   liveLocation: user.liveLocation || null,
@@ -344,7 +347,7 @@ const buildProfileSummary = async (userDoc) => {
       Lead.countDocuments({ assignedTo: userId }),
       Lead.countDocuments({
         assignedTo: userId,
-        status: { $in: ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"] },
+        status: { $in: ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED"] },
       }),
       Lead.countDocuments({ assignedTo: userId, status: "CLOSED" }),
       Lead.countDocuments({
@@ -730,6 +733,10 @@ exports.createUserByRole = async (req, res) => {
       role,
       companyId: req.user.companyId,
       parentId: resolvedParentId,
+      canViewInventory:
+        role === USER_ROLES.CHANNEL_PARTNER
+          ? Boolean(req.body?.canViewInventory)
+          : false,
     });
 
     res.status(201).json({
@@ -741,6 +748,7 @@ exports.createUserByRole = async (req, res) => {
         role: newUser.role,
         companyId: newUser.companyId,
         parentId: newUser.parentId,
+        canViewInventory: Boolean(newUser.canViewInventory),
       },
     });
   } catch (error) {
@@ -748,6 +756,69 @@ exports.createUserByRole = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "createUserByRole failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateChannelPartnerInventoryAccess = async (req, res) => {
+  try {
+    if (req.user.role !== USER_ROLES.ADMIN) {
+      return res.status(403).json({
+        message: "Only ADMIN can change channel partner inventory access",
+      });
+    }
+
+    const { userId } = req.params;
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    const hasFlag = Object.prototype.hasOwnProperty.call(
+      req.body || {},
+      "canViewInventory",
+    );
+    if (!hasFlag) {
+      return res.status(400).json({
+        message: "canViewInventory is required",
+      });
+    }
+
+    const canViewInventory = Boolean(req.body?.canViewInventory);
+
+    const updatedUser = await User.findOneAndUpdate(
+      {
+        _id: userId,
+        companyId: req.user.companyId,
+        role: USER_ROLES.CHANNEL_PARTNER,
+      },
+      {
+        $set: { canViewInventory },
+      },
+      {
+        new: true,
+      },
+    )
+      .populate("parentId", "name role")
+      .lean();
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        message: "Channel partner not found",
+      });
+    }
+
+    return res.json({
+      message: canViewInventory
+        ? "Channel partner inventory access enabled"
+        : "Channel partner inventory access disabled",
+      user: updatedUser,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "updateChannelPartnerInventoryAccess failed",
     });
     return res.status(500).json({ message: "Server error" });
   }

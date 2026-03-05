@@ -29,13 +29,15 @@ const LEAD_POPULATE_FIELDS = [
   { path: "assignedExecutive", select: "name role" },
   { path: "assignedFieldExecutive", select: "name role" },
   { path: "createdBy", select: "name role" },
+  { path: "dealPayment.approvalRequestedBy", select: "name role" },
+  { path: "dealPayment.approvalReviewedBy", select: "name role" },
   {
     path: "inventoryId",
-    select: "projectName towerName unitNumber location siteLocation status price",
+    select: "projectName towerName unitNumber location siteLocation status price type category images",
   },
   {
     path: "relatedInventoryIds",
-    select: "projectName towerName unitNumber location siteLocation status price",
+    select: "projectName towerName unitNumber location siteLocation status price type category images",
   },
 ];
 
@@ -51,6 +53,7 @@ const LEAD_SELECTABLE_FIELDS = [
   "siteLocation",
   "source",
   "status",
+  "dealPayment",
   "assignedTo",
   "assignedManager",
   "assignedExecutive",
@@ -81,12 +84,38 @@ const LEAD_DIARY_SELECTABLE_FIELDS = [
 
 const FIELD_EXECUTIVE_ROLE = USER_ROLES.FIELD_EXECUTIVE;
 const SITE_VISIT_STATUS = "SITE_VISIT";
+const REQUESTED_STATUS = "REQUESTED";
+const CLOSED_STATUS = "CLOSED";
+const LEAD_STATUS_VALUES = Object.freeze([
+  "NEW",
+  "CONTACTED",
+  "INTERESTED",
+  "SITE_VISIT",
+  "REQUESTED",
+  "CLOSED",
+  "LOST",
+]);
+const DEAL_PAYMENT_MODE_VALUES = Object.freeze([
+  "UPI",
+  "CASH",
+  "CHECK",
+  "NET_BANKING_NEFTRTGSIMPS",
+]);
+const DEAL_PAYMENT_TYPE_VALUES = Object.freeze(["FULL", "PARTIAL"]);
+const DEAL_PAYMENT_APPROVAL_VALUES = Object.freeze([
+  "PENDING",
+  "APPROVED",
+  "REJECTED",
+]);
+const ADMIN_PAYMENT_DECISION_VALUES = Object.freeze(["APPROVED", "REJECTED"]);
 const EARTH_RADIUS_METERS = 6371000;
 const DEFAULT_SITE_VISIT_RADIUS_METERS =
   Number.parseInt(process.env.SITE_VISIT_RADIUS_METERS, 10) || 200;
 const SITE_VISIT_MAX_LOCATION_STALE_MINUTES =
   Number.parseInt(process.env.SITE_VISIT_MAX_LOCATION_STALE_MINUTES, 10) || 15;
 const MAX_LEAD_DIARY_NOTE_LENGTH = 2000;
+const MAX_PAYMENT_NOTE_LENGTH = 1000;
+const MAX_PAYMENT_REFERENCE_LENGTH = 120;
 
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -255,6 +284,170 @@ const parseSiteLocationPayload = (rawSiteLocation) => {
       radiusMeters,
     },
   };
+};
+
+const normalizeEnumValue = (value) =>
+  String(value || "").trim().toUpperCase();
+
+const isDealPaymentInputDefined = (rawDealPayment = {}) =>
+  rawDealPayment.mode !== undefined
+  || rawDealPayment.paymentType !== undefined
+  || rawDealPayment.remainingAmount !== undefined
+  || rawDealPayment.paymentReference !== undefined
+  || rawDealPayment.note !== undefined;
+
+const parseDealPaymentPayload = (rawDealPayment) => {
+  if (rawDealPayment === undefined) {
+    return { provided: false };
+  }
+
+  if (rawDealPayment === null) {
+    return {
+      provided: true,
+      value: {
+        mode: "",
+        paymentType: "",
+        remainingAmount: null,
+        paymentReference: "",
+        note: "",
+        approvalStatus: "",
+        approvalNote: "",
+        hasRemainingAmount: false,
+      },
+    };
+  }
+
+  if (typeof rawDealPayment !== "object" || Array.isArray(rawDealPayment)) {
+    return { error: "dealPayment must be an object" };
+  }
+
+  const mode = normalizeEnumValue(rawDealPayment.mode);
+  const paymentType = normalizeEnumValue(rawDealPayment.paymentType);
+  const approvalStatus = normalizeEnumValue(rawDealPayment.approvalStatus);
+  const hasRemainingAmount = rawDealPayment.remainingAmount !== undefined;
+  const remainingAmount = toFiniteNumber(rawDealPayment.remainingAmount);
+  const paymentReference = String(rawDealPayment.paymentReference || "").trim();
+
+  if (mode && !DEAL_PAYMENT_MODE_VALUES.includes(mode)) {
+    return {
+      error: `dealPayment.mode must be one of: ${DEAL_PAYMENT_MODE_VALUES.join(", ")}`,
+    };
+  }
+
+  if (paymentType && !DEAL_PAYMENT_TYPE_VALUES.includes(paymentType)) {
+    return {
+      error: `dealPayment.paymentType must be one of: ${DEAL_PAYMENT_TYPE_VALUES.join(", ")}`,
+    };
+  }
+
+  if (approvalStatus && !DEAL_PAYMENT_APPROVAL_VALUES.includes(approvalStatus)) {
+    return {
+      error: `dealPayment.approvalStatus must be one of: ${DEAL_PAYMENT_APPROVAL_VALUES.join(", ")}`,
+    };
+  }
+
+  if (hasRemainingAmount && remainingAmount === null) {
+    return { error: "dealPayment.remainingAmount must be a valid number" };
+  }
+
+  const note = String(rawDealPayment.note || "").trim();
+  const approvalNote = String(rawDealPayment.approvalNote || "").trim();
+
+  if (paymentReference.length > MAX_PAYMENT_REFERENCE_LENGTH) {
+    return {
+      error: `Payment reference cannot exceed ${MAX_PAYMENT_REFERENCE_LENGTH} characters`,
+    };
+  }
+
+  if (note.length > MAX_PAYMENT_NOTE_LENGTH) {
+    return {
+      error: `Payment note cannot exceed ${MAX_PAYMENT_NOTE_LENGTH} characters`,
+    };
+  }
+
+  if (approvalNote.length > MAX_PAYMENT_NOTE_LENGTH) {
+    return {
+      error: `Approval note cannot exceed ${MAX_PAYMENT_NOTE_LENGTH} characters`,
+    };
+  }
+
+  return {
+    provided: true,
+    value: {
+      mode,
+      paymentType,
+      remainingAmount,
+      paymentReference,
+      note,
+      approvalStatus,
+      approvalNote,
+      hasRemainingAmount,
+    },
+  };
+};
+
+const getDealPaymentModeLabel = (mode) => {
+  switch (mode) {
+    case "NET_BANKING_NEFTRTGSIMPS":
+      return "Net Banking (NEFT/RTGS/IMPS)";
+    case "UPI":
+      return "UPI";
+    case "CASH":
+      return "Cash";
+    case "CHECK":
+      return "Check";
+    default:
+      return String(mode || "").replaceAll("_", " ");
+  }
+};
+
+const emitAdminPaymentRequestCreated = ({
+  io,
+  lead,
+  requestedBy,
+  companyId,
+}) => {
+  const resolvedCompanyId = String(companyId || "").trim();
+  if (!io || !lead?._id || !resolvedCompanyId) return;
+
+  const requestedAt = lead?.dealPayment?.approvalRequestedAt || new Date();
+  const requestedAtIso = new Date(requestedAt).toISOString();
+  const eventId = `lead-payment:${lead._id}:${new Date(requestedAtIso).getTime()}`;
+  const payload = {
+    eventId,
+    source: "lead",
+    requestType: "LEAD_PAYMENT_APPROVAL",
+    leadId: lead._id,
+    status: String(lead?.dealPayment?.approvalStatus || "PENDING").toUpperCase(),
+    companyId: resolvedCompanyId,
+    createdAt: requestedAtIso,
+    message: "New lead payment approval request",
+    lead: {
+      _id: lead._id,
+      name: lead.name || "",
+      phone: lead.phone || "",
+      projectInterested: lead.projectInterested || "",
+      status: lead.status || "",
+    },
+    payment: {
+      mode: lead?.dealPayment?.mode || "",
+      paymentType: lead?.dealPayment?.paymentType || "",
+      remainingAmount: lead?.dealPayment?.remainingAmount ?? null,
+      paymentReference: lead?.dealPayment?.paymentReference || "",
+      note: lead?.dealPayment?.note || "",
+    },
+    requestedBy: requestedBy
+      ? {
+        _id: requestedBy._id || null,
+        name: requestedBy.name || "",
+        role: requestedBy.role || "",
+      }
+      : null,
+  };
+
+  const adminRoom = `company:${resolvedCompanyId}:role:${USER_ROLES.ADMIN}`;
+  io.to(adminRoom).emit("lead:payment:request:created", payload);
+  io.to(adminRoom).emit("admin:request:new", payload);
 };
 
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
@@ -454,17 +647,28 @@ exports.createLead = async (req, res) => {
     }
 
     const lead = await Lead.create(createPayload);
+    const shouldAutoAssignLead = req.user.role !== USER_ROLES.CHANNEL_PARTNER;
 
-    await autoAssignLead({
-      lead,
-      requester: req.user,
-      performedBy: req.user._id,
-    });
+    if (shouldAutoAssignLead) {
+      await autoAssignLead({
+        lead,
+        requester: req.user,
+        performedBy: req.user._id,
+      });
+    } else {
+      await LeadActivity.create({
+        lead: lead._id,
+        action: "Lead created by channel partner and pending admin assignment",
+        performedBy: req.user._id,
+      });
+    }
 
     const populatedLead = await getLeadViewById(lead._id);
 
     return res.status(201).json({
-      message: "Lead created and assignment processed",
+      message: shouldAutoAssignLead
+        ? "Lead created and assignment processed"
+        : "Lead created successfully",
       lead: populatedLead,
     });
   } catch (error) {
@@ -538,7 +742,11 @@ exports.assignLead = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    const executive = await User.findById(executiveId);
+    const executive = await User.findOne({
+      _id: executiveId,
+      companyId: req.user.companyId,
+      isActive: true,
+    });
     if (!executive || !EXECUTIVE_ROLES.includes(executive.role)) {
       return res.status(400).json({ message: "Invalid executive" });
     }
@@ -860,13 +1068,75 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
   }
 };
 
+exports.getLeadPaymentRequests = async (req, res) => {
+  try {
+    if (req.user.role !== USER_ROLES.ADMIN) {
+      return res.status(403).json({
+        message: "Only admin can view payment requests",
+      });
+    }
+
+    const approvalStatusFilter = normalizeEnumValue(req.query?.approvalStatus);
+    const limitRaw = Number.parseInt(req.query?.limit, 10);
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(limitRaw, 400)
+        : 200;
+
+    const query = {
+      "dealPayment.approvalStatus": { $in: DEAL_PAYMENT_APPROVAL_VALUES },
+    };
+
+    if (approvalStatusFilter && approvalStatusFilter !== "ALL") {
+      if (!DEAL_PAYMENT_APPROVAL_VALUES.includes(approvalStatusFilter)) {
+        return res.status(400).json({
+          message: `approvalStatus must be one of: ALL, ${DEAL_PAYMENT_APPROVAL_VALUES.join(", ")}`,
+        });
+      }
+      query["dealPayment.approvalStatus"] = approvalStatusFilter;
+    }
+
+    const rows = await Lead.find(query)
+      .sort({ updatedAt: -1 })
+      .limit(limit)
+      .populate(LEAD_POPULATE_FIELDS)
+      .lean();
+
+    const requests = rows.map((lead) => toLeadView(lead));
+
+    return res.json({
+      count: requests.length,
+      requests,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getLeadPaymentRequests failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.updateLeadStatus = async (req, res) => {
   try {
     const { leadId } = req.params;
-    const { status, nextFollowUp, siteLocation: rawSiteLocation } = req.body;
+    const {
+      status: rawStatus,
+      nextFollowUp,
+      siteLocation: rawSiteLocation,
+      dealPayment: rawDealPayment,
+    } = req.body;
+    const requestedStatus = normalizeEnumValue(rawStatus);
 
-    if (!status) {
+    if (!requestedStatus) {
       return res.status(400).json({ message: "Status is required" });
+    }
+
+    if (!LEAD_STATUS_VALUES.includes(requestedStatus)) {
+      return res.status(400).json({
+        message: `Status must be one of: ${LEAD_STATUS_VALUES.join(", ")}`,
+      });
     }
 
     const lead = await Lead.findById(leadId);
@@ -878,6 +1148,47 @@ exports.updateLeadStatus = async (req, res) => {
     if (parsedSiteLocation.error) {
       return res.status(400).json({ message: parsedSiteLocation.error });
     }
+
+    const parsedDealPayment = parseDealPaymentPayload(rawDealPayment);
+    if (parsedDealPayment.error) {
+      return res.status(400).json({ message: parsedDealPayment.error });
+    }
+
+    const dealPaymentPayload = parsedDealPayment.value || {};
+    const isAdminUser = req.user.role === USER_ROLES.ADMIN;
+    const isExecutiveUser = EXECUTIVE_ROLES.includes(req.user.role);
+    const isExecutiveCloseRequest =
+      isExecutiveUser && requestedStatus === CLOSED_STATUS;
+
+    if (
+      requestedStatus === REQUESTED_STATUS
+      && !isAdminUser
+      && normalizeEnumValue(lead.status) !== REQUESTED_STATUS
+    ) {
+      return res.status(403).json({
+        message: "Only admin can set status to REQUESTED directly",
+      });
+    }
+
+    let nextLeadStatus = isExecutiveCloseRequest
+      ? REQUESTED_STATUS
+      : requestedStatus;
+    const isDealPaymentWorkflowStatus = [REQUESTED_STATUS, CLOSED_STATUS].includes(nextLeadStatus);
+    const wasDealPaymentWorkflowStatus = [REQUESTED_STATUS, CLOSED_STATUS].includes(
+      normalizeEnumValue(lead.status),
+    );
+
+    if (parsedDealPayment.provided && !isDealPaymentWorkflowStatus && !wasDealPaymentWorkflowStatus) {
+      return res.status(400).json({
+        message: "Payment details can be updated only when lead status is REQUESTED or CLOSED",
+      });
+    }
+
+    const hasDealPaymentInput =
+      parsedDealPayment.provided && isDealPaymentInputDefined(dealPaymentPayload);
+    const hasApprovalInput =
+      parsedDealPayment.provided
+      && Boolean(dealPaymentPayload.approvalStatus || dealPaymentPayload.approvalNote);
 
     if (
       parsedSiteLocation.provided
@@ -893,8 +1204,10 @@ exports.updateLeadStatus = async (req, res) => {
     }
 
     const isSiteVisitTransition =
-      status === SITE_VISIT_STATUS && lead.status !== SITE_VISIT_STATUS;
+      nextLeadStatus === SITE_VISIT_STATUS && lead.status !== SITE_VISIT_STATUS;
     let siteVisitDistanceMeters = null;
+    let paymentRequestAction = "";
+    let paymentDecisionAction = "";
 
     if (isSiteVisitTransition && req.user.role === FIELD_EXECUTIVE_ROLE) {
       if (!isSiteLocationConfigured(lead)) {
@@ -938,7 +1251,174 @@ exports.updateLeadStatus = async (req, res) => {
       }
     }
 
-    lead.status = status;
+    if (isExecutiveCloseRequest && lead.status !== CLOSED_STATUS) {
+      if (!hasDealPaymentInput) {
+        return res.status(400).json({
+          message:
+            "Payment mode and payment type are required when executive closes the deal",
+        });
+      }
+
+      if (!dealPaymentPayload.mode || !dealPaymentPayload.paymentType) {
+        return res.status(400).json({
+          message:
+            "Payment mode and payment type are required when executive closes the deal",
+        });
+      }
+    }
+
+    if (hasDealPaymentInput) {
+      const existingDealPayment = lead?.dealPayment?.toObject
+        ? lead.dealPayment.toObject()
+        : (lead.dealPayment || {});
+      const nextMode =
+        dealPaymentPayload.mode || normalizeEnumValue(existingDealPayment.mode);
+      const nextPaymentType =
+        dealPaymentPayload.paymentType
+        || normalizeEnumValue(existingDealPayment.paymentType);
+      const nextPaymentReference =
+        nextMode === "CASH"
+          ? ""
+          : String(dealPaymentPayload.paymentReference || existingDealPayment.paymentReference || "").trim();
+
+      if (!nextMode || !nextPaymentType) {
+        return res.status(400).json({
+          message: "Both payment mode and payment type are required",
+        });
+      }
+
+      if (isExecutiveUser && nextMode !== "CASH" && !nextPaymentReference) {
+        return res.status(400).json({
+          message:
+            "Payment reference (UTR/transaction/check number) is required for non-cash payments",
+        });
+      }
+
+      let nextRemainingAmount = null;
+      if (nextPaymentType === "PARTIAL") {
+        const remainingCandidate = dealPaymentPayload.hasRemainingAmount
+          ? dealPaymentPayload.remainingAmount
+          : toFiniteNumber(existingDealPayment.remainingAmount);
+
+        if (remainingCandidate === null || remainingCandidate <= 0) {
+          return res.status(400).json({
+            message: "Remaining amount must be greater than 0 for partial payment",
+          });
+        }
+        nextRemainingAmount = remainingCandidate;
+      } else {
+        nextRemainingAmount = 0;
+      }
+
+      lead.dealPayment = {
+        ...existingDealPayment,
+        mode: nextMode,
+        paymentType: nextPaymentType,
+        remainingAmount: nextRemainingAmount,
+        paymentReference: nextPaymentReference,
+        note: dealPaymentPayload.note || existingDealPayment.note || "",
+        approvalStatus: existingDealPayment.approvalStatus || null,
+        approvalNote: existingDealPayment.approvalNote || "",
+        approvalRequestedBy: existingDealPayment.approvalRequestedBy || null,
+        approvalRequestedAt: existingDealPayment.approvalRequestedAt || null,
+        approvalReviewedBy: existingDealPayment.approvalReviewedBy || null,
+        approvalReviewedAt: existingDealPayment.approvalReviewedAt || null,
+        requestedFromStatus: existingDealPayment.requestedFromStatus || "",
+        requestedTargetStatus: existingDealPayment.requestedTargetStatus || "",
+      };
+    }
+
+    if (
+      isExecutiveCloseRequest
+      && hasDealPaymentInput
+      && normalizeEnumValue(lead.status) !== CLOSED_STATUS
+    ) {
+      const existingRequestedFromStatus = normalizeEnumValue(
+        lead?.dealPayment?.requestedFromStatus,
+      );
+      const resolvedRequestedFromStatus = LEAD_STATUS_VALUES.includes(existingRequestedFromStatus)
+        && ![REQUESTED_STATUS, CLOSED_STATUS].includes(existingRequestedFromStatus)
+        ? existingRequestedFromStatus
+        : [REQUESTED_STATUS, CLOSED_STATUS].includes(normalizeEnumValue(lead.status))
+          ? "INTERESTED"
+          : normalizeEnumValue(lead.status) || "INTERESTED";
+      const paymentTypeLabel =
+        lead.dealPayment.paymentType === "PARTIAL" ? "Partial payment" : "Full payment";
+      const remainingLabel =
+        lead.dealPayment.paymentType === "PARTIAL"
+          ? `, remaining Rs ${Number(lead.dealPayment.remainingAmount || 0).toLocaleString("en-IN")}`
+          : "";
+
+      lead.dealPayment.requestedFromStatus = resolvedRequestedFromStatus;
+      lead.dealPayment.requestedTargetStatus = CLOSED_STATUS;
+      lead.dealPayment.approvalStatus = "PENDING";
+      lead.dealPayment.approvalRequestedBy = req.user._id;
+      lead.dealPayment.approvalRequestedAt = new Date();
+      lead.dealPayment.approvalReviewedBy = null;
+      lead.dealPayment.approvalReviewedAt = null;
+      lead.dealPayment.approvalNote = "";
+      nextLeadStatus = REQUESTED_STATUS;
+
+      paymentRequestAction =
+        `Payment submitted for admin approval (${getDealPaymentModeLabel(lead.dealPayment.mode)}, `
+        + `${paymentTypeLabel}${remainingLabel})`;
+    }
+
+    if (hasApprovalInput) {
+      if (!isAdminUser) {
+        return res.status(403).json({
+          message: "Only admin can approve or reject deal payment",
+        });
+      }
+
+      if (!lead?.dealPayment?.mode || !lead?.dealPayment?.paymentType) {
+        return res.status(400).json({
+          message: "Payment details are not available for approval decision",
+        });
+      }
+
+      if (
+        dealPaymentPayload.approvalStatus
+        && !ADMIN_PAYMENT_DECISION_VALUES.includes(dealPaymentPayload.approvalStatus)
+      ) {
+        return res.status(400).json({
+          message: `approvalStatus must be one of: ${ADMIN_PAYMENT_DECISION_VALUES.join(", ")}`,
+        });
+      }
+
+      if (dealPaymentPayload.approvalStatus) {
+        lead.dealPayment.approvalStatus = dealPaymentPayload.approvalStatus;
+        lead.dealPayment.approvalReviewedBy = req.user._id;
+        lead.dealPayment.approvalReviewedAt = new Date();
+
+        if (dealPaymentPayload.approvalStatus === "APPROVED") {
+          nextLeadStatus = CLOSED_STATUS;
+        } else if (dealPaymentPayload.approvalStatus === "REJECTED") {
+          const requestedFromStatus = normalizeEnumValue(
+            lead?.dealPayment?.requestedFromStatus,
+          );
+          const fallbackStatus =
+            LEAD_STATUS_VALUES.includes(requestedFromStatus)
+            && ![REQUESTED_STATUS, CLOSED_STATUS].includes(requestedFromStatus)
+              ? requestedFromStatus
+              : "INTERESTED";
+          nextLeadStatus = fallbackStatus;
+        }
+      }
+
+      if (dealPaymentPayload.approvalNote) {
+        lead.dealPayment.approvalNote = dealPaymentPayload.approvalNote;
+      }
+
+      if (dealPaymentPayload.approvalStatus) {
+        paymentDecisionAction =
+          `Payment ${dealPaymentPayload.approvalStatus.toLowerCase()} by admin`;
+      } else if (dealPaymentPayload.approvalNote) {
+        paymentDecisionAction = "Payment approval note updated by admin";
+      }
+    }
+
+    lead.status = nextLeadStatus;
     lead.lastContactedAt = new Date();
 
     if (nextFollowUp) {
@@ -947,14 +1427,37 @@ exports.updateLeadStatus = async (req, res) => {
 
     await lead.save();
 
-    await LeadActivity.create({
-      lead: lead._id,
-      action:
-        siteVisitDistanceMeters !== null
-          ? `Status changed to ${status} (${Math.round(siteVisitDistanceMeters)}m from site)`
-          : `Status changed to ${status}`,
-      performedBy: req.user._id,
-    });
+    if (paymentRequestAction) {
+      emitAdminPaymentRequestCreated({
+        io: req.app.get("io"),
+        lead,
+        requestedBy: req.user,
+        companyId: req.user?.companyId || null,
+      });
+    }
+
+    const activityActions = [
+      siteVisitDistanceMeters !== null
+        ? `Status changed to ${nextLeadStatus} (${Math.round(siteVisitDistanceMeters)}m from site)`
+        : `Status changed to ${nextLeadStatus}`,
+    ];
+
+    if (paymentRequestAction) {
+      activityActions.push(paymentRequestAction);
+    }
+
+    if (paymentDecisionAction) {
+      activityActions.push(paymentDecisionAction);
+    }
+
+    await Promise.all(
+      activityActions.map((action) =>
+        LeadActivity.create({
+          lead: lead._id,
+          action,
+          performedBy: req.user._id,
+        })),
+    );
 
     const populatedLead = await getLeadViewById(lead._id);
 
