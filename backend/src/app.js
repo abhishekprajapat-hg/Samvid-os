@@ -94,6 +94,7 @@ app.use("/api/inventory", require("./routes/inventory.routes"));
 app.use("/api/inventory-request", require("./routes/inventoryRequest.routes"));
 app.use("/api/webhook", require("./routes/webhook.routes"));
 app.use("/api/chat", require("./routes/chat.routes"));
+app.use("/api/samvid", require("./routes/samvid.routes"));
 
 app.use((req, res) => {
   res.status(404).json({

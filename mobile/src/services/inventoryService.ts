@@ -24,6 +24,13 @@ export const createInventoryAsset = async (payload: Partial<InventoryAsset>): Pr
   return res.data?.asset;
 };
 
+export const createInventoryCreateRequest = async (payload: Partial<InventoryAsset>) => {
+  const res = await api.post("/inventory-request/create", {
+    proposedData: payload,
+  });
+  return res.data?.request || null;
+};
+
 export const updateInventoryAsset = async (assetId: string, payload: Partial<InventoryAsset>): Promise<InventoryAsset> => {
   const res = await api.patch(`/inventory/${assetId}`, payload);
   return res.data?.asset;
@@ -33,9 +40,15 @@ export const deleteInventoryAsset = async (assetId: string) => {
   await api.delete(`/inventory/${assetId}`);
 };
 
-export const requestInventoryStatusChange = async (assetId: string, status: string) => {
+export const requestInventoryStatusChange = async (
+  assetId: string,
+  status: string,
+  requestNote = "",
+  saleMeta?: InventoryAsset["saleMeta"],
+) => {
   const res = await api.post(`/inventory-request/update/${assetId}`, {
-    proposedData: { status },
+    proposedData: { status, ...(saleMeta ? { saleMeta } : {}) },
+    requestNote,
   });
   return res.data?.request || null;
 };

@@ -46,7 +46,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           if (me?.user) {
             setToken(storedToken);
             setUser(me.user as User);
-            await sessionStorage.setSession(storedToken, me.user as User);
+            const storedRefreshToken = await sessionStorage.getRefreshToken();
+            await sessionStorage.setSession(storedToken, me.user as User, storedRefreshToken);
           } else {
             await sessionStorage.clearSession();
             setToken(null);
@@ -70,8 +71,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const login = async ({ email, password, portal = "GENERAL" }: { email: string; password: string; portal?: "GENERAL" | "ADMIN" }) => {
     const payload = await loginUser({ email, password, portal });
-    await sessionStorage.setSession(payload.token, payload.user);
-    setToken(payload.token);
+    const accessToken = String(payload.accessToken || payload.token || "").trim();
+    const refreshToken = String(payload.refreshToken || "").trim();
+    await sessionStorage.setSession(accessToken, payload.user, refreshToken || null);
+    setToken(accessToken);
     setUser(payload.user);
   };
 
@@ -86,7 +89,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (!prev) return prev;
       const next = { ...prev, ...patch };
       if (token) {
-        sessionStorage.setSession(token, next);
+        sessionStorage.getRefreshToken().then((refreshToken) => {
+          sessionStorage.setSession(token, next, refreshToken);
+        });
       }
       return next;
     });

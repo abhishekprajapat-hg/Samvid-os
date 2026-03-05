@@ -22,6 +22,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    profileImageUrl: {
+      type: String,
+      trim: true,
+      default: "",
+    },
 
     password: {
       type: String,

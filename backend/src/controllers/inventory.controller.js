@@ -14,7 +14,6 @@ const {
   parseFieldSelection,
 } = require("../utils/queryOptions");
 
-const FE_ROLE = "FIELD_EXECUTIVE";
 const INVENTORY_SELECTABLE_FIELDS = [
   "_id",
   "companyId",
@@ -23,7 +22,12 @@ const INVENTORY_SELECTABLE_FIELDS = [
   "unitNumber",
   "price",
   "status",
+  "saleMeta",
   "location",
+  "type",
+  "category",
+  "description",
+  "amenities",
   "siteLocation",
   "images",
   "documents",
@@ -40,7 +44,7 @@ const toLegacyStatus = (status) => {
   return status || "Available";
 };
 
-const toLegacyAsset = (inventory, role) => {
+const toLegacyAsset = (inventory) => {
   if (!inventory) return null;
 
   const titleParts = [inventory.projectName, inventory.towerName, inventory.unitNumber]
@@ -52,9 +56,12 @@ const toLegacyAsset = (inventory, role) => {
     title: titleParts.join(" - ") || "Inventory Unit",
     location: inventory.location || "",
     price: inventory.price || 0,
-    type: "Sale",
-    category: "Apartment",
+    type: inventory.type || "Sale",
+    category: inventory.category || "Apartment",
+    description: inventory.description || "",
+    amenities: Array.isArray(inventory.amenities) ? inventory.amenities : [],
     status: toLegacyStatus(inventory.status),
+    saleMeta: inventory.saleMeta || null,
     siteLocation: inventory.siteLocation || { lat: null, lng: null },
     images: Array.isArray(inventory.images) ? inventory.images : [],
     documents: Array.isArray(inventory.documents) ? inventory.documents : [],
@@ -65,37 +72,15 @@ const toLegacyAsset = (inventory, role) => {
     updatedAt: inventory.updatedAt,
   };
 
-  if (role !== FE_ROLE) {
-    asset.teamId = inventory.teamId;
-    asset.createdBy = inventory.createdBy;
-    asset.approvedBy = inventory.approvedBy;
-    asset.updatedBy = inventory.updatedBy;
-  }
+  asset.teamId = inventory.teamId;
+  asset.createdBy = inventory.createdBy;
+  asset.approvedBy = inventory.approvedBy;
+  asset.updatedBy = inventory.updatedBy;
 
   return asset;
 };
 
-const toFieldExecutiveInventoryView = (inventory) => ({
-  _id: inventory._id,
-  projectName: inventory.projectName,
-  towerName: inventory.towerName,
-  unitNumber: inventory.unitNumber,
-  price: inventory.price,
-  status: inventory.status,
-  location: inventory.location,
-  siteLocation: inventory.siteLocation || { lat: null, lng: null },
-  images: Array.isArray(inventory.images) ? inventory.images : [],
-  documents: Array.isArray(inventory.documents) ? inventory.documents : [],
-  createdAt: inventory.createdAt,
-  updatedAt: inventory.updatedAt,
-});
-
-const toRoleBasedInventory = (inventory, role) => {
-  if (role === FE_ROLE) {
-    return toFieldExecutiveInventoryView(inventory);
-  }
-  return inventory;
-};
+const toRoleBasedInventory = (inventory) => inventory;
 
 const handleControllerError = (req, res, error, fallbackMessage) => {
   const statusCode = error.statusCode || 500;
@@ -137,8 +122,8 @@ exports.getInventory = async (req, res) => {
     const rows = pagination.enabled ? inventoryResult.rows : inventoryResult;
     const totalCount = pagination.enabled ? inventoryResult.totalCount : rows.length;
 
-    const visibleInventory = rows.map((row) => toRoleBasedInventory(row, req.user.role));
-    const assets = visibleInventory.map((row) => toLegacyAsset(row, req.user.role));
+    const visibleInventory = rows.map((row) => toRoleBasedInventory(row));
+    const assets = visibleInventory.map((row) => toLegacyAsset(row));
 
     if (!pagination.enabled) {
       return res.json({
@@ -169,8 +154,8 @@ exports.getInventoryById = async (req, res) => {
       user: req.user,
       inventoryId: req.params.id,
     });
-    const visibleInventory = toRoleBasedInventory(inventory, req.user.role);
-    const asset = toLegacyAsset(visibleInventory, req.user.role);
+    const visibleInventory = toRoleBasedInventory(inventory);
+    const asset = toLegacyAsset(visibleInventory);
 
     return res.json({ asset, inventory: visibleInventory });
   } catch (error) {
@@ -184,7 +169,7 @@ exports.createInventory = async (req, res) => {
       user: req.user,
       payload: req.body,
     });
-    const asset = toLegacyAsset(inventory, req.user.role);
+    const asset = toLegacyAsset(inventory);
 
     return res.status(201).json({
       message: "Inventory created successfully",
@@ -203,7 +188,7 @@ exports.updateInventory = async (req, res) => {
       inventoryId: req.params.id,
       payload: req.body,
     });
-    const asset = toLegacyAsset(inventory, req.user.role);
+    const asset = toLegacyAsset(inventory);
 
     return res.json({
       message: "Inventory updated successfully",

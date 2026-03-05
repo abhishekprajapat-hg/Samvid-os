@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, Animated, FlatList, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { useRoute } from "@react-navigation/native";
+import { PinchGestureHandler, State } from "react-native-gesture-handler";
+import * as ImagePicker from "expo-image-picker";
+import { Ionicons } from "@expo/vector-icons";
 import { getInventoryAssetActivity, getInventoryAssetById, updateInventoryAsset } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
@@ -8,6 +11,8 @@ import { useAuth } from "../../context/AuthContext";
 import type { InventoryActivity, InventoryAsset } from "../../types";
 
 const STATUS_OPTIONS = ["Available", "Blocked", "Sold"];
+const CLOUDINARY_CLOUD_NAME = String(process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME || "djfiq8kiy").trim();
+const CLOUDINARY_UPLOAD_PRESET = String(process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "samvid_upload").trim();
 const buildDefaultImageSet = (seed: string) => {
   const safeSeed = encodeURIComponent(seed || "asset");
   return Array.from({ length: 4 }, (_, index) => `https://picsum.photos/seed/${safeSeed}-${index + 1}/900/600`);
@@ -49,12 +54,42 @@ const formatActionLabel = (activity: InventoryActivity) => {
   return "Inventory activity";
 };
 
+const ZoomableViewerImage = ({ uri }: { uri: string }) => {
+  const baseScale = useRef(new Animated.Value(1)).current;
+  const pinchScale = useRef(new Animated.Value(1)).current;
+  const composedScale = useMemo(() => Animated.multiply(baseScale, pinchScale), [baseScale, pinchScale]);
+  const lastScale = useRef(1);
+
+  useEffect(() => {
+    lastScale.current = 1;
+    baseScale.setValue(1);
+    pinchScale.setValue(1);
+  }, [uri, baseScale, pinchScale]);
+
+  const onPinchGestureEvent = Animated.event([{ nativeEvent: { scale: pinchScale } }], { useNativeDriver: true });
+
+  const onPinchHandlerStateChange = (event: any) => {
+    if (event.nativeEvent.oldState !== State.ACTIVE) return;
+
+    const nextScale = Math.max(1, Math.min(4, lastScale.current * Number(event.nativeEvent.scale || 1)));
+    lastScale.current = nextScale;
+    baseScale.setValue(nextScale);
+    pinchScale.setValue(1);
+  };
+
+  return (
+    <PinchGestureHandler onGestureEvent={onPinchGestureEvent} onHandlerStateChange={onPinchHandlerStateChange}>
+      <Animated.Image source={{ uri }} style={[styles.viewerImage, { transform: [{ scale: composedScale }] }]} resizeMode="contain" />
+    </PinchGestureHandler>
+  );
+};
+
 export const InventoryDetailsScreen = () => {
   const route = useRoute<any>();
   const assetId = String(route.params?.assetId || "");
   const { role } = useAuth();
   const canManage = role === "ADMIN";
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -64,25 +99,31 @@ export const InventoryDetailsScreen = () => {
   const [activities, setActivities] = useState<InventoryActivity[]>([]);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [photoDeleteConfirmOpen, setPhotoDeleteConfirmOpen] = useState(false);
   const viewerListRef = useRef<FlatList<string>>(null);
 
   const galleryImages = useMemo(
     () => (asset?.images?.length ? asset.images : asset ? buildDefaultImageSet(asset.title || asset._id) : []),
     [asset],
   );
-  const viewerWidth = Math.max(windowWidth - 32, 1);
+  const viewerWidth = Math.max(windowWidth, 1);
+  const viewerHeight = Math.max(windowHeight, 1);
 
   const loadDetails = async () => {
     try {
       setLoading(true);
       setError("");
-      const [{ asset }, timeline] = await Promise.all([
-        getInventoryAssetById(assetId),
-        getInventoryAssetActivity(assetId, { limit: 60 }),
-      ]);
+      const detail = await getInventoryAssetById(assetId);
+      setAsset(detail?.asset || null);
 
-      setAsset(asset);
-      setActivities(Array.isArray(timeline) ? timeline : []);
+      try {
+        const timeline = await getInventoryAssetActivity(assetId, { limit: 60 });
+        setActivities(Array.isArray(timeline) ? timeline : []);
+      } catch {
+        // Activity endpoint is restricted for some roles; details should still open.
+        setActivities([]);
+      }
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load inventory details"));
     } finally {
@@ -110,6 +151,14 @@ export const InventoryDetailsScreen = () => {
     return () => clearTimeout(timer);
   }, [viewerOpen, viewerIndex]);
 
+  useEffect(() => {
+    if (viewerOpen || galleryImages.length <= 1) return;
+    const timer = setInterval(() => {
+      setViewerIndex((prev) => (prev >= galleryImages.length - 1 ? 0 : prev + 1));
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [viewerOpen, galleryImages.length]);
+
   const updateStatus = async (status: string) => {
     if (!asset || !canManage) return;
 
@@ -125,6 +174,115 @@ export const InventoryDetailsScreen = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const uploadToCloudinary = async (file: { uri: string; name: string; mimeType?: string }) => {
+    const formData = new FormData();
+    formData.append("file", {
+      uri: file.uri,
+      name: file.name,
+      type: file.mimeType || "application/octet-stream",
+    } as any);
+    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`, {
+      method: "POST",
+      body: formData as any,
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || !payload?.secure_url) {
+      throw new Error(String(payload?.error?.message || payload?.message || "Upload failed"));
+    }
+
+    return String(payload.secure_url);
+  };
+
+  const addPhotos = async () => {
+    if (!asset) return;
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError("Media permission is required to upload photos");
+        return;
+      }
+
+      setSaving(true);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 0.85,
+        selectionLimit: 10,
+      });
+
+      if (result.canceled) return;
+      const rows = (result.assets || []).map((picked, index) => ({
+        uri: picked.uri,
+        name: picked.fileName || `photo-${Date.now()}-${index + 1}.jpg`,
+        mimeType: picked.mimeType || "image/jpeg",
+      }));
+      if (!rows.length) return;
+
+      const uploaded = await Promise.all(rows.map((row) => uploadToCloudinary(row)));
+      const currentImages = Array.isArray(asset.images) ? asset.images : [];
+      const nextImages = [...currentImages, ...uploaded.map((url) => resolveFileUrl(url)).filter(Boolean)];
+      const updated = await updateInventoryAsset(asset._id, { images: nextImages });
+      setAsset(updated);
+      setSuccess("Photos added");
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to add photos"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteCurrentPhoto = async () => {
+    if (!asset) return;
+    const currentImages = Array.isArray(asset.images) ? asset.images : [];
+    if (!currentImages.length) {
+      setError("No uploaded photo available to delete");
+      return;
+    }
+    if (viewerIndex < 0 || viewerIndex >= currentImages.length) {
+      setError("Selected photo cannot be deleted");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      const nextImages = currentImages.filter((_, index) => index !== viewerIndex);
+      const updated = await updateInventoryAsset(asset._id, { images: nextImages });
+      setAsset(updated);
+      const maxIndex = Math.max(0, nextImages.length - 1);
+      setViewerIndex((prev) => Math.min(prev, maxIndex));
+      setSuccess("Photo deleted");
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to delete photo"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openPhotoMenu = () => {
+    setPhotoDeleteConfirmOpen(false);
+    setPhotoMenuOpen(true);
+  };
+
+  const closePhotoMenu = () => {
+    if (saving) return;
+    setPhotoMenuOpen(false);
+    setPhotoDeleteConfirmOpen(false);
+  };
+
+  const addPhotoFromMenu = async () => {
+    setPhotoMenuOpen(false);
+    await addPhotos();
+  };
+
+  const deletePhotoFromMenu = async () => {
+    setPhotoDeleteConfirmOpen(false);
+    setPhotoMenuOpen(false);
+    await deleteCurrentPhoto();
   };
 
   const openFile = async (url?: string) => {
@@ -183,16 +341,54 @@ export const InventoryDetailsScreen = () => {
         {!!(asset.images?.length || 4) ? (
           <>
             <Text style={styles.sectionInline}>Photos</Text>
+            <View style={styles.carouselWrap}>
+              <Pressable
+                style={styles.carouselMain}
+                onPress={() => {
+                  setViewerOpen(true);
+                }}
+              >
+                <Image source={{ uri: resolveFileUrl(galleryImages[viewerIndex] || "") }} style={styles.carouselMainImage} />
+              </Pressable>
+              <Pressable style={styles.carouselMenuBtn} onPress={openPhotoMenu} disabled={saving}>
+                <Ionicons name="ellipsis-vertical" size={14} color="#ffffff" />
+              </Pressable>
+              {galleryImages.length > 1 ? (
+                <View style={styles.carouselCountBadge}>
+                  <Text style={styles.carouselCountText}>{viewerIndex + 1}/{galleryImages.length}</Text>
+                </View>
+              ) : null}
+
+              {galleryImages.length > 1 ? (
+                <>
+                  <Pressable
+                    style={[styles.carouselArrow, styles.carouselArrowLeft]}
+                    onPress={() => setViewerIndex((prev) => (prev <= 0 ? galleryImages.length - 1 : prev - 1))}
+                  >
+                    <Text style={styles.carouselArrowText}>{"<"}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.carouselArrow, styles.carouselArrowRight]}
+                    onPress={() => setViewerIndex((prev) => (prev >= galleryImages.length - 1 ? 0 : prev + 1))}
+                  >
+                    <Text style={styles.carouselArrowText}>{">"}</Text>
+                  </Pressable>
+                </>
+              ) : null}
+            </View>
+
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.photoRow}>
               {galleryImages.map((photo, index) => (
                 <Pressable
                   key={`photo-${index}`}
                   onPress={() => {
                     setViewerIndex(index);
-                    setViewerOpen(true);
                   }}
                 >
-                  <Image source={{ uri: resolveFileUrl(photo) }} style={styles.photoThumb} />
+                  <Image
+                    source={{ uri: resolveFileUrl(photo) }}
+                    style={[styles.photoThumb, index === viewerIndex && styles.photoThumbActive]}
+                  />
                 </Pressable>
               ))}
             </ScrollView>
@@ -247,8 +443,11 @@ export const InventoryDetailsScreen = () => {
         )}
       />
 
-      <Modal visible={viewerOpen} transparent animationType="fade" onRequestClose={() => setViewerOpen(false)}>
+      <Modal visible={viewerOpen} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setViewerOpen(false)}>
         <View style={styles.viewerOverlay}>
+          <Pressable style={styles.viewerMenu} onPress={openPhotoMenu} disabled={saving}>
+            <Ionicons name="ellipsis-vertical" size={16} color="#ffffff" />
+          </Pressable>
           <Pressable style={styles.viewerClose} onPress={() => setViewerOpen(false)}>
             <Text style={styles.viewerCloseText}>Close</Text>
           </Pressable>
@@ -259,7 +458,7 @@ export const InventoryDetailsScreen = () => {
             horizontal
             pagingEnabled
             showsHorizontalScrollIndicator={false}
-            style={{ width: viewerWidth }}
+            style={{ width: viewerWidth, height: viewerHeight }}
             getItemLayout={(_, index) => ({ length: viewerWidth, offset: viewerWidth * index, index })}
             initialScrollIndex={viewerIndex}
             onScrollToIndexFailed={() => {}}
@@ -268,8 +467,8 @@ export const InventoryDetailsScreen = () => {
               setViewerIndex(Math.max(0, Math.min(galleryImages.length - 1, page)));
             }}
             renderItem={({ item }) => (
-              <View style={[styles.viewerSlide, { width: viewerWidth }]}>
-                <Image source={{ uri: resolveFileUrl(item) }} style={styles.viewerImage} resizeMode="contain" />
+              <View style={[styles.viewerSlide, { width: viewerWidth, height: viewerHeight }]}>
+                <ZoomableViewerImage uri={resolveFileUrl(item)} />
               </View>
             )}
           />
@@ -302,6 +501,38 @@ export const InventoryDetailsScreen = () => {
             </>
           ) : null}
         </View>
+      </Modal>
+
+      <Modal visible={photoMenuOpen} animationType="fade" transparent onRequestClose={closePhotoMenu}>
+        <Pressable style={styles.actionSheetBackdrop} onPress={closePhotoMenu}>
+          <View style={styles.actionSheetCard}>
+            {!photoDeleteConfirmOpen ? (
+              <>
+                <Pressable style={styles.actionSheetBtn} onPress={addPhotoFromMenu} disabled={saving}>
+                  <Text style={styles.actionSheetText}>Add Photo</Text>
+                </Pressable>
+                <Pressable style={[styles.actionSheetBtn, styles.actionSheetDangerBtn]} onPress={() => setPhotoDeleteConfirmOpen(true)} disabled={saving}>
+                  <Text style={[styles.actionSheetText, styles.actionSheetDangerText]}>Delete Photo</Text>
+                </Pressable>
+                <Pressable style={styles.actionSheetBtn} onPress={closePhotoMenu} disabled={saving}>
+                  <Text style={styles.actionSheetMutedText}>Cancel</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.actionSheetTitle}>Delete this photo?</Text>
+                <View style={styles.actionSheetRow}>
+                  <Pressable style={styles.actionSheetRowBtn} onPress={() => setPhotoDeleteConfirmOpen(false)} disabled={saving}>
+                    <Text style={styles.actionSheetMutedText}>No</Text>
+                  </Pressable>
+                  <Pressable style={[styles.actionSheetRowBtn, styles.actionSheetDangerBtn]} onPress={deletePhotoFromMenu} disabled={saving}>
+                    <Text style={[styles.actionSheetText, styles.actionSheetDangerText]}>Yes, Delete</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -351,11 +582,80 @@ const styles = StyleSheet.create({
     marginTop: 6,
     gap: 8,
   },
+  carouselWrap: {
+    marginTop: 6,
+    borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#e2e8f0",
+    position: "relative",
+  },
+  carouselMain: {
+    width: "100%",
+    height: 220,
+  },
+  carouselMainImage: {
+    width: "100%",
+    height: "100%",
+  },
+  carouselArrow: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -18,
+    width: 30,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: "rgba(15,23,42,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  carouselArrowLeft: {
+    left: 10,
+  },
+  carouselArrowRight: {
+    right: 10,
+  },
+  carouselArrowText: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  carouselMenuBtn: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    backgroundColor: "rgba(15,23,42,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  carouselCountBadge: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    backgroundColor: "rgba(15,23,42,0.72)",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    minWidth: 34,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  carouselCountText: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 11,
+  },
   photoThumb: {
     width: 120,
     height: 90,
     borderRadius: 8,
     backgroundColor: "#e2e8f0",
+  },
+  photoThumbActive: {
+    borderWidth: 2,
+    borderColor: "#0f172a",
   },
   docLink: {
     marginTop: 6,
@@ -397,10 +697,9 @@ const styles = StyleSheet.create({
   },
   viewerOverlay: {
     flex: 1,
-    backgroundColor: "rgba(15,23,42,0.92)",
+    backgroundColor: "#020617",
     justifyContent: "center",
     alignItems: "center",
-    padding: 16,
   },
   viewerClose: {
     position: "absolute",
@@ -421,7 +720,83 @@ const styles = StyleSheet.create({
   },
   viewerImage: {
     width: "100%",
-    height: "82%",
+    height: "100%",
+  },
+  viewerMenu: {
+    position: "absolute",
+    top: 50,
+    right: 84,
+    zIndex: 2,
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    backgroundColor: "#0f172a",
+    borderWidth: 1,
+    borderColor: "#334155",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionSheetBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.45)",
+    justifyContent: "flex-end",
+    padding: 14,
+  },
+  actionSheetCard: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 8,
+    gap: 6,
+  },
+  actionSheetTitle: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "700",
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 2,
+  },
+  actionSheetBtn: {
+    height: 42,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#fff",
+  },
+  actionSheetRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  actionSheetRowBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#fff",
+  },
+  actionSheetDangerBtn: {
+    borderColor: "#fecaca",
+    backgroundColor: "#fff1f2",
+  },
+  actionSheetText: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  actionSheetDangerText: {
+    color: "#991b1b",
+  },
+  actionSheetMutedText: {
+    color: "#475569",
+    fontSize: 13,
+    fontWeight: "600",
   },
   viewerSlide: {
     justifyContent: "center",
@@ -456,6 +831,7 @@ const styles = StyleSheet.create({
   viewerCounter: {
     position: "absolute",
     bottom: 24,
+    right: 20,
     color: "#e2e8f0",
     fontSize: 12,
     fontWeight: "700",

@@ -3,6 +3,8 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   AlertCircle,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Building2,
   CalendarClock,
   FileText,
@@ -51,6 +53,22 @@ const formatUserRef = (value) => {
   const role = value.role || "";
   if (name && role) return `${name} (${role})`;
   return name || role || "-";
+};
+
+const resolveAssetUrl = (url) => {
+  const safe = String(url || "").trim();
+  if (!safe) return "";
+  if (/^https?:\/\//i.test(safe)) return safe;
+
+  const configuredOrigin = String(
+    (import.meta.env.DEV ? import.meta.env.VITE_DEV_API_TARGET : "") ||
+    import.meta.env.VITE_SOCKET_URL ||
+    import.meta.env.VITE_API_ORIGIN ||
+    "",
+  ).trim();
+  const base = configuredOrigin || window.location.origin;
+  const cleanBase = base.replace(/\/$/, "");
+  return `${cleanBase}${safe.startsWith("/") ? "" : "/"}${safe}`;
 };
 
 const statusClass = (status) => {
@@ -137,14 +155,17 @@ const InventoryDetails = () => {
 
   const statusValue = inventory?.status || asset?.status || "Unknown";
   const images = useMemo(
-    () => (Array.isArray(inventory?.images) && inventory.images.length ? inventory.images : asset?.images || []),
+    () =>
+      (Array.isArray(inventory?.images) && inventory.images.length ? inventory.images : asset?.images || [])
+        .map((url) => resolveAssetUrl(url))
+        .filter(Boolean),
     [asset?.images, inventory?.images],
   );
   const documents = useMemo(
     () =>
       Array.isArray(inventory?.documents) && inventory.documents.length
-        ? inventory.documents
-        : asset?.documents || [],
+        ? inventory.documents.map((url) => resolveAssetUrl(url)).filter(Boolean)
+        : (asset?.documents || []).map((url) => resolveAssetUrl(url)).filter(Boolean),
     [asset?.documents, inventory?.documents],
   );
 
@@ -201,6 +222,16 @@ const InventoryDetails = () => {
     navigate("/chat", {
       state: { shareProperty: sharePayload },
     });
+  };
+
+  const goToPreviousImage = () => {
+    if (images.length <= 1) return;
+    setActiveImageIndex((prev) => (prev <= 0 ? images.length - 1 : prev - 1));
+  };
+
+  const goToNextImage = () => {
+    if (images.length <= 1) return;
+    setActiveImageIndex((prev) => (prev >= images.length - 1 ? 0 : prev + 1));
   };
 
   if (loading) {
@@ -272,7 +303,29 @@ const InventoryDetails = () => {
         <div className="xl:col-span-2 rounded-2xl border border-slate-200 bg-white overflow-hidden">
           <div className="h-80 sm:h-96 xl:h-[32rem] bg-slate-100 flex items-center justify-center">
             {activeImage ? (
-              <img src={activeImage} alt={pageTitle} className="w-full h-full object-cover" />
+              <div className="relative w-full h-full">
+                <img src={activeImage} alt={pageTitle} className="w-full h-full object-cover" />
+                {images.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={goToPreviousImage}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full border border-white/50 bg-black/45 text-white flex items-center justify-center hover:bg-black/60"
+                      aria-label="Previous image"
+                    >
+                      <ChevronLeft size={18} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={goToNextImage}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full border border-white/50 bg-black/45 text-white flex items-center justify-center hover:bg-black/60"
+                      aria-label="Next image"
+                    >
+                      <ChevronRight size={18} />
+                    </button>
+                  </>
+                )}
+              </div>
             ) : (
               <div className="text-slate-300 flex flex-col items-center">
                 <ImageIcon size={52} />

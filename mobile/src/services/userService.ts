@@ -7,6 +7,41 @@ export const getUsers = async (): Promise<{ users: User[] }> => {
   return res.data;
 };
 
+export const getMyProfile = async (): Promise<{
+  profile: {
+    _id?: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+    role?: string;
+    companyId?: string | null;
+    profileImageUrl?: string;
+    manager?: { _id?: string; name?: string; email?: string; phone?: string; role?: string } | null;
+    createdAt?: string | null;
+    updatedAt?: string | null;
+    lastAssignedAt?: string | null;
+  } | null;
+  summary: Record<string, number>;
+}> => {
+  const res = await api.get("/users/profile");
+  return {
+    profile: res.data?.profile || null,
+    summary: res.data?.summary || {},
+  };
+};
+
+export const updateMyProfile = async (payload: {
+  name?: string;
+  phone?: string;
+  profileImageUrl?: string;
+}) => {
+  const res = await api.patch("/users/profile", payload);
+  return {
+    profile: res.data?.profile || null,
+    summary: res.data?.summary || {},
+  };
+};
+
 export const createUser = async (payload: Partial<User> & { password?: string }) => {
   const res = await api.post("/users/create", payload);
   return res.data;
@@ -17,9 +52,41 @@ export const rebalanceExecutives = async () => {
   return res.data;
 };
 
+export const getFieldExecutiveLocations = async (params: Record<string, unknown> = {}) => {
+  const res = await api.get("/users/field-locations", { params });
+  return res.data?.users || [];
+};
+
+export const updateMyLiveLocation = async (payload: {
+  lat: number;
+  lng: number;
+  accuracy?: number | null;
+  heading?: number | null;
+  speed?: number | null;
+}) => {
+  const res = await api.patch("/users/location", payload);
+  return res.data?.user || null;
+};
+
 export const deleteUser = async (userId: string) => {
   const res = await api.delete(`/users/${userId}`);
   return res.data;
+};
+
+export const updateUserById = async (
+  userId: string,
+  payload: {
+    name?: string;
+    phone?: string;
+    role?: string;
+    managerId?: string;
+    reportingToId?: string;
+    parentId?: string;
+    isActive?: boolean;
+  },
+) => {
+  const res = await api.patch(`/users/${userId}`, payload);
+  return res.data?.user || null;
 };
 
 export const uploadMyProfilePicture = async ({

@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,7 +14,14 @@ import {
 } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Screen } from "../../components/common/Screen";
-import { getAllLeads, updateLeadStatus } from "../../services/leadService";
+import {
+  addLeadDiaryEntry,
+  getAllLeads,
+  getLeadDiary,
+  updateLeadDiaryEntry,
+  updateLeadStatus,
+  type LeadDiaryEntry,
+} from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import type { Lead } from "../../types";
@@ -24,6 +33,10 @@ type PickerState = {
   date: Date;
   mode: "date" | "time";
 } | null;
+
+const pad2 = (value: number) => String(value).padStart(2, "0");
+const toDateInputValue = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+const toTimeInputValue = (value: Date) => `${pad2(value.getHours())}:${pad2(value.getMinutes())}`;
 
 const toDate = (value?: string) => {
   if (!value) return null;
@@ -42,6 +55,22 @@ export const MasterScheduleScreen = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [draftMap, setDraftMap] = useState<Record<string, Date>>({});
   const [pickerState, setPickerState] = useState<PickerState>(null);
+  const [webPickerVisible, setWebPickerVisible] = useState(false);
+  const [webPickerLeadId, setWebPickerLeadId] = useState("");
+  const [webPickerDate, setWebPickerDate] = useState("");
+  const [webPickerTime, setWebPickerTime] = useState("");
+  const [diaryModalLead, setDiaryModalLead] = useState<Lead | null>(null);
+  const [diaryEntries, setDiaryEntries] = useState<LeadDiaryEntry[]>([]);
+  const [diaryLoading, setDiaryLoading] = useState(false);
+  const [diaryDraft, setDiaryDraft] = useState("");
+  const [showAllDiaryEntries, setShowAllDiaryEntries] = useState(false);
+  const [editingDiaryEntryId, setEditingDiaryEntryId] = useState("");
+  const [diaryEditDraft, setDiaryEditDraft] = useState("");
+  const [updatingDiaryEntry, setUpdatingDiaryEntry] = useState(false);
+  const [isDiaryListening, setIsDiaryListening] = useState(false);
+  const [isDiaryMicSupported, setIsDiaryMicSupported] = useState(false);
+  const diaryRecognitionRef = useRef<any>(null);
+  const lastDiaryTranscriptRef = useRef("");
 
   const load = async (silent = false) => {
     try {
@@ -77,6 +106,71 @@ export const MasterScheduleScreen = () => {
     const timer = setTimeout(() => setSuccess(""), 1500);
     return () => clearTimeout(timer);
   }, [success]);
+
+  useEffect(() => {
+    const win = globalThis as any;
+    const SpeechRecognition = win?.SpeechRecognition || win?.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setIsDiaryMicSupported(false);
+      diaryRecognitionRef.current = null;
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-IN";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        lastDiaryTranscriptRef.current = "";
+        setIsDiaryListening(true);
+      };
+      recognition.onend = () => {
+        setIsDiaryListening(false);
+      };
+      recognition.onerror = () => {
+        setIsDiaryListening(false);
+      };
+      recognition.onresult = (event: any) => {
+        const chunks = [];
+        for (let index = event?.resultIndex || 0; index < (event?.results?.length || 0); index += 1) {
+          if (!event.results[index]?.isFinal) continue;
+          const transcript = String(event.results[index]?.[0]?.transcript || "").trim();
+          if (transcript) chunks.push(transcript);
+        }
+        const incomingText = chunks.join(" ").replace(/\s+/g, " ").trim();
+        if (!incomingText) return;
+
+        setDiaryDraft((prev) => {
+          const normalizedPrev = String(prev || "").trimEnd();
+          if (!normalizedPrev) {
+            lastDiaryTranscriptRef.current = incomingText;
+            return incomingText;
+          }
+          const lastIncoming = lastDiaryTranscriptRef.current;
+          if (incomingText === lastIncoming || normalizedPrev.endsWith(incomingText)) {
+            return normalizedPrev;
+          }
+          lastDiaryTranscriptRef.current = incomingText;
+          return `${normalizedPrev} ${incomingText}`;
+        });
+      };
+
+      diaryRecognitionRef.current = recognition;
+      setIsDiaryMicSupported(true);
+    } catch {
+      setIsDiaryMicSupported(false);
+      diaryRecognitionRef.current = null;
+    }
+
+    return () => {
+      if (!diaryRecognitionRef.current) return;
+      try {
+        diaryRecognitionRef.current.stop();
+      } catch {}
+    };
+  }, []);
 
   const scoped = useMemo(() => {
     const now = new Date();
@@ -118,7 +212,32 @@ export const MasterScheduleScreen = () => {
 
   const openPicker = (leadId: string, mode: "date" | "time") => {
     const current = draftMap[leadId] || new Date();
+    if (Platform.OS === "web") {
+      setWebPickerLeadId(leadId);
+      setWebPickerDate(toDateInputValue(current));
+      setWebPickerTime(toTimeInputValue(current));
+      setWebPickerVisible(true);
+      return;
+    }
     setPickerState({ leadId, date: current, mode });
+  };
+
+  const applyWebPicker = () => {
+    if (!webPickerLeadId || !webPickerDate || !webPickerTime) {
+      setError("Please select both date and time");
+      return;
+    }
+    const parsed = new Date(`${webPickerDate}T${webPickerTime}:00`);
+    if (Number.isNaN(parsed.getTime())) {
+      setError("Please select a valid date/time");
+      return;
+    }
+    setDraftMap((prev) => ({
+      ...prev,
+      [webPickerLeadId]: parsed,
+    }));
+    setWebPickerVisible(false);
+    setWebPickerLeadId("");
   };
 
   const onPickerChange = (event: DateTimePickerEvent, selected?: Date) => {
@@ -141,11 +260,7 @@ export const MasterScheduleScreen = () => {
         [state.leadId]: withDate,
       }));
 
-      if (Platform.OS === "android") {
-        setPickerState({ leadId: state.leadId, date: withDate, mode: "time" });
-      } else {
-        setPickerState(null);
-      }
+      setPickerState({ leadId: state.leadId, date: withDate, mode: "time" });
       return;
     }
 
@@ -159,7 +274,9 @@ export const MasterScheduleScreen = () => {
     setPickerState(null);
   };
 
-  const scheduleLead = async (leadId: string) => {
+  const scheduleLead = async (lead: Lead) => {
+    const leadId = String(lead?._id || "");
+    if (!leadId) return;
     const selectedDate = draftMap[leadId];
     if (!selectedDate || Number.isNaN(selectedDate.getTime())) {
       setError("Please select a valid follow-up date/time");
@@ -170,6 +287,7 @@ export const MasterScheduleScreen = () => {
       setSavingId(leadId);
       setError("");
       const updated = await updateLeadStatus(leadId, {
+        status: String(lead.status || "NEW"),
         nextFollowUp: selectedDate.toISOString(),
       });
 
@@ -182,6 +300,110 @@ export const MasterScheduleScreen = () => {
       setSavingId("");
     }
   };
+
+  const openLeadDiary = async (lead: Lead) => {
+    setDiaryModalLead(lead);
+    setDiaryEntries([]);
+    setDiaryDraft("");
+    setEditingDiaryEntryId("");
+    setDiaryEditDraft("");
+    setShowAllDiaryEntries(false);
+    try {
+      setDiaryLoading(true);
+      const entries = await getLeadDiary(lead._id);
+      setDiaryEntries(Array.isArray(entries) ? entries : []);
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to load lead diary"));
+    } finally {
+      setDiaryLoading(false);
+    }
+  };
+
+  const closeLeadDiary = () => {
+    setDiaryModalLead(null);
+    setDiaryEntries([]);
+    setDiaryDraft("");
+    setEditingDiaryEntryId("");
+    setDiaryEditDraft("");
+    setShowAllDiaryEntries(false);
+    if (diaryRecognitionRef.current && isDiaryListening) {
+      try {
+        diaryRecognitionRef.current.stop();
+      } catch {}
+    }
+  };
+
+  const handleDiaryVoiceToggle = () => {
+    if (!isDiaryMicSupported || !diaryRecognitionRef.current) {
+      setError("Voice input not supported on this device/browser");
+      return;
+    }
+    try {
+      if (isDiaryListening) {
+        diaryRecognitionRef.current.stop();
+      } else {
+        diaryRecognitionRef.current.start();
+      }
+    } catch {
+      setError("Unable to start voice input");
+    }
+  };
+
+  const saveLeadDiary = async () => {
+    if (!diaryModalLead?._id) return;
+    const note = diaryDraft.trim();
+    if (!note) {
+      setError("Diary note cannot be empty");
+      return;
+    }
+    try {
+      setSavingId(diaryModalLead._id);
+      const entry = await addLeadDiaryEntry(diaryModalLead._id, { note });
+      if (entry?._id) {
+        setDiaryEntries((prev) => [entry, ...prev]);
+      }
+      setDiaryDraft("");
+      setSuccess("Diary note added");
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to save diary note"));
+    } finally {
+      setSavingId("");
+    }
+  };
+
+  const startEditDiary = (entry: LeadDiaryEntry) => {
+    setEditingDiaryEntryId(String(entry._id || ""));
+    setDiaryEditDraft(String(entry.note || entry.conversation || entry.visitDetails || entry.nextStep || entry.conversionDetails || ""));
+  };
+
+  const cancelEditDiary = () => {
+    setEditingDiaryEntryId("");
+    setDiaryEditDraft("");
+  };
+
+  const updateDiary = async () => {
+    if (!diaryModalLead?._id || !editingDiaryEntryId) return;
+    const note = diaryEditDraft.trim();
+    if (!note) {
+      setError("Diary note cannot be empty");
+      return;
+    }
+    try {
+      setUpdatingDiaryEntry(true);
+      const updated = await updateLeadDiaryEntry(diaryModalLead._id, editingDiaryEntryId, { note });
+      if (updated?._id) {
+        setDiaryEntries((prev) => prev.map((entry) => (String(entry._id) === String(updated._id) ? updated : entry)));
+      }
+      setSuccess("Diary note updated");
+      cancelEditDiary();
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to update diary note"));
+    } finally {
+      setUpdatingDiaryEntry(false);
+    }
+  };
+
+  const visibleDiaryEntries = showAllDiaryEntries ? diaryEntries : diaryEntries.slice(0, 4);
 
   return (
     <Screen title="Master Schedule" subtitle="Follow-up Calendar" loading={loading} error={error}>
@@ -232,10 +454,17 @@ export const MasterScheduleScreen = () => {
 
               <Pressable
                 style={styles.saveBtn}
-                onPress={() => scheduleLead(item._id)}
+                onPress={() => scheduleLead(item)}
                 disabled={savingId === item._id}
               >
                 {savingId === item._id ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Schedule</Text>}
+              </Pressable>
+
+              <Pressable
+                style={styles.diaryBtn}
+                onPress={() => openLeadDiary(item)}
+              >
+                <Text style={styles.diaryBtnText}>Lead Diary</Text>
               </Pressable>
             </View>
           );
@@ -247,10 +476,119 @@ export const MasterScheduleScreen = () => {
           value={pickerState.date}
           mode={pickerState.mode}
           onChange={onPickerChange}
-          minimumDate={new Date()}
           is24Hour
         />
       ) : null}
+
+      <Modal visible={webPickerVisible} transparent animationType="fade" onRequestClose={() => setWebPickerVisible(false)}>
+        <View style={styles.modalWrap}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Follow-up Date & Time</Text>
+            {/* web-only input type fallback for reliable browser selection */}
+            {/* @ts-ignore */}
+            <TextInput style={styles.search} value={webPickerDate} onChangeText={setWebPickerDate} placeholder="YYYY-MM-DD" type="date" />
+            {/* @ts-ignore */}
+            <TextInput style={styles.search} value={webPickerTime} onChangeText={setWebPickerTime} placeholder="HH:mm" type="time" />
+            <View style={styles.editActions}>
+              <Pressable style={styles.secondaryBtn} onPress={() => setWebPickerVisible(false)}>
+                <Text style={styles.secondaryBtnText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.addBtn} onPress={applyWebPicker}>
+                <Text style={styles.addBtnText}>Apply</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(diaryModalLead)}
+        transparent
+        animationType="slide"
+        onRequestClose={closeLeadDiary}
+      >
+        <View style={styles.modalWrap}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Lead Diary</Text>
+            <Text style={styles.modalMeta}>{diaryModalLead?.name || "-"}</Text>
+            <TextInput
+              style={styles.diaryInput}
+              placeholder="Add conversation notes, visit details, objections, next step..."
+              value={diaryDraft}
+              onChangeText={setDiaryDraft}
+              multiline
+              maxLength={2000}
+            />
+            <View style={styles.diaryActions}>
+              <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={!isDiaryMicSupported || Boolean(savingId)}>
+                <Text style={styles.voiceBtnText}>{isDiaryListening ? "Stop Voice" : "Voice"}</Text>
+              </Pressable>
+              <Pressable style={[styles.addBtn, (!diaryDraft.trim() || Boolean(savingId)) && styles.addBtnDisabled]} onPress={saveLeadDiary} disabled={!diaryDraft.trim() || Boolean(savingId)}>
+                {Boolean(savingId) ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.addBtnText}>Add Note</Text>}
+              </Pressable>
+            </View>
+            <Text style={styles.counterText}>{diaryDraft.length}/2000</Text>
+
+            {diaryLoading ? (
+              <View style={styles.loadingWrap}>
+                <ActivityIndicator color="#0f172a" />
+              </View>
+            ) : (
+              <ScrollView style={styles.diaryList}>
+                {diaryEntries.length > 4 ? (
+                  <Pressable onPress={() => setShowAllDiaryEntries((prev) => !prev)} style={styles.moreBtn}>
+                    <Text style={styles.moreBtnText}>{showAllDiaryEntries ? "Show less" : "See more"}</Text>
+                  </Pressable>
+                ) : null}
+                {visibleDiaryEntries.length === 0 ? (
+                  <Text style={styles.empty}>No diary notes yet</Text>
+                ) : (
+                  visibleDiaryEntries.map((entry) => (
+                    <View key={entry._id} style={styles.diaryCard}>
+                      {String(editingDiaryEntryId) === String(entry._id) ? (
+                        <>
+                          <TextInput
+                            style={[styles.diaryInput, styles.editInput]}
+                            value={diaryEditDraft}
+                            onChangeText={setDiaryEditDraft}
+                            multiline
+                            maxLength={2000}
+                          />
+                          <View style={styles.editActions}>
+                            <Pressable style={styles.secondaryBtn} onPress={cancelEditDiary} disabled={updatingDiaryEntry}>
+                              <Text style={styles.secondaryBtnText}>Cancel</Text>
+                            </Pressable>
+                            <Pressable style={[styles.addBtn, (!diaryEditDraft.trim() || updatingDiaryEntry) && styles.addBtnDisabled]} onPress={updateDiary} disabled={!diaryEditDraft.trim() || updatingDiaryEntry}>
+                              <Text style={styles.addBtnText}>{updatingDiaryEntry ? "Saving..." : "Save"}</Text>
+                            </Pressable>
+                          </View>
+                        </>
+                      ) : (
+                        <>
+                          <Text style={styles.diaryText}>{String(entry.note || "-")}</Text>
+                          <View style={styles.diaryMetaRow}>
+                            <Text style={styles.modalMeta}>
+                              {formatDateTime(entry.createdAt)} {entry.createdBy?.name ? `| ${entry.createdBy.name}` : ""}
+                              {entry.isEdited ? " | Edited" : ""}
+                            </Text>
+                            <Pressable style={styles.secondaryBtn} onPress={() => startEditDiary(entry)}>
+                              <Text style={styles.secondaryBtnText}>Edit</Text>
+                            </Pressable>
+                          </View>
+                        </>
+                      )}
+                    </View>
+                  ))
+                )}
+              </ScrollView>
+            )}
+
+            <Pressable style={styles.closeBtn} onPress={closeLeadDiary}>
+              <Text style={styles.closeBtnText}>Close</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 };
@@ -353,5 +691,175 @@ const styles = StyleSheet.create({
   saveText: {
     color: "#fff",
     fontWeight: "700",
+  },
+  diaryBtn: {
+    marginTop: 8,
+    height: 36,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  diaryBtnText: {
+    color: "#334155",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  modalWrap: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.45)",
+    justifyContent: "flex-end",
+    padding: 12,
+  },
+  modalCard: {
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    padding: 12,
+    maxHeight: "88%",
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#0f172a",
+  },
+  modalMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    color: "#64748b",
+  },
+  diaryInput: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 84,
+    textAlignVertical: "top",
+  },
+  diaryActions: {
+    marginTop: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  voiceBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  voiceBtnText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  addBtn: {
+    borderRadius: 8,
+    backgroundColor: "#0f172a",
+    paddingHorizontal: 12,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 90,
+  },
+  addBtnDisabled: {
+    opacity: 0.6,
+  },
+  addBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  counterText: {
+    marginTop: 6,
+    color: "#64748b",
+    fontSize: 11,
+  },
+  loadingWrap: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 14,
+  },
+  diaryList: {
+    marginTop: 8,
+  },
+  moreBtn: {
+    alignSelf: "flex-end",
+    marginBottom: 6,
+  },
+  moreBtnText: {
+    color: "#2563eb",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  diaryCard: {
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    padding: 10,
+    marginBottom: 8,
+  },
+  diaryText: {
+    color: "#334155",
+    fontSize: 12,
+  },
+  diaryMetaRow: {
+    marginTop: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  editInput: {
+    marginTop: 0,
+    minHeight: 72,
+  },
+  editActions: {
+    marginTop: 6,
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  secondaryBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryBtnText: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  closeBtn: {
+    marginTop: 6,
+    height: 36,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  closeBtnText: {
+    color: "#334155",
+    fontWeight: "700",
+    fontSize: 12,
   },
 });

@@ -9,12 +9,17 @@ const toPositiveInt = (value, fallback) => {
 
 const connectDB = async () => {
   try {
+    const mongoUri = String(process.env.MONGO_URI || "").trim();
+    if (!mongoUri) {
+      throw new Error("MONGO_URI is missing. Create backend/.env and set a valid MongoDB URI.");
+    }
+
     const autoIndexEnv = String(process.env.MONGO_AUTO_INDEX || "").trim().toLowerCase();
     const autoIndex = autoIndexEnv ? autoIndexEnv === "true" : true;
 
     mongoose.plugin(slowQueryPlugin);
 
-    await mongoose.connect(process.env.MONGO_URI, {
+    await mongoose.connect(mongoUri, {
       maxPoolSize: toPositiveInt(process.env.MONGO_MAX_POOL_SIZE, 25),
       minPoolSize: toPositiveInt(process.env.MONGO_MIN_POOL_SIZE, 5),
       serverSelectionTimeoutMS: toPositiveInt(

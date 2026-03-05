@@ -14,6 +14,9 @@ import {
   CheckCircle2,
   History,
   Save,
+  Check,
+  Pencil,
+  RotateCcw,
   ArrowUpRight,
   Mic,
   MicOff,
@@ -31,6 +34,7 @@ import {
   getLeadActivity,
   getLeadDiary,
   addLeadDiaryEntry,
+  updateLeadDiaryEntry,
 } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
@@ -47,6 +51,7 @@ const LEAD_STATUSES = [
 
 const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
 const MANAGEMENT_ROLES = ["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"];
+const LEAD_DIARY_EDITOR_ROLES = ["ADMIN"];
 const SITE_VISIT_RADIUS_METERS = 200;
 
 const defaultFormData = {
@@ -220,6 +225,9 @@ const LeadsMatrix = () => {
   const [diaryEntries, setDiaryEntries] = useState([]);
   const [diaryDraft, setDiaryDraft] = useState("");
   const [savingDiary, setSavingDiary] = useState(false);
+  const [editingDiaryEntryId, setEditingDiaryEntryId] = useState("");
+  const [diaryEditDraft, setDiaryEditDraft] = useState("");
+  const [updatingDiaryEntry, setUpdatingDiaryEntry] = useState(false);
   const [isDiaryMicSupported, setIsDiaryMicSupported] = useState(false);
   const [isDiaryListening, setIsDiaryListening] = useState(false);
   const [savingUpdates, setSavingUpdates] = useState(false);
@@ -237,8 +245,18 @@ const LeadsMatrix = () => {
 
   const [executives, setExecutives] = useState([]);
   const diaryRecognitionRef = useRef(null);
+  const lastDiaryTranscriptRef = useRef("");
 
   const userRole = localStorage.getItem("role") || "";
+  const currentUser = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}") || {};
+    } catch {
+      return {};
+    }
+  }, []);
+  const currentUserId = String(currentUser?._id || currentUser?.id || "");
+  const isAdminUser = userRole === "ADMIN";
   const canAddLead = userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
   const canAssignLead = userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
   const canManageLeadProperties = userRole !== "CHANNEL_PARTNER";
@@ -363,6 +381,7 @@ const LeadsMatrix = () => {
     recognition.maxAlternatives = 1;
 
     recognition.onstart = () => {
+      lastDiaryTranscriptRef.current = "";
       setIsDiaryListening(true);
     };
 
@@ -390,6 +409,7 @@ const LeadsMatrix = () => {
     recognition.onresult = (event) => {
       const chunks = [];
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        if (!event.results[index]?.isFinal) continue;
         const transcript = String(event.results[index]?.[0]?.transcript || "").trim();
         if (transcript) {
           chunks.push(transcript);
@@ -398,10 +418,21 @@ const LeadsMatrix = () => {
 
       if (!chunks.length) return;
 
-      const incomingText = chunks.join(" ");
+      const incomingText = chunks.join(" ").replace(/\s+/g, " ").trim();
       setDiaryDraft((prev) => {
         const normalizedPrev = String(prev || "").trimEnd();
-        return normalizedPrev ? `${normalizedPrev} ${incomingText}` : incomingText;
+        if (!normalizedPrev) {
+          lastDiaryTranscriptRef.current = incomingText;
+          return incomingText;
+        }
+
+        const lastIncoming = lastDiaryTranscriptRef.current;
+        if (incomingText === lastIncoming || normalizedPrev.endsWith(incomingText)) {
+          return normalizedPrev;
+        }
+
+        lastDiaryTranscriptRef.current = incomingText;
+        return `${normalizedPrev} ${incomingText}`;
       });
     };
 
@@ -485,6 +516,8 @@ const LeadsMatrix = () => {
     );
     setRelatedInventoryDraft("");
     setDiaryDraft("");
+    setEditingDiaryEntryId("");
+    setDiaryEditDraft("");
     setIsDetailsOpen(true);
 
     setActivityLoading(true);
@@ -527,6 +560,8 @@ const LeadsMatrix = () => {
     setActivities([]);
     setDiaryEntries([]);
     setDiaryDraft("");
+    setEditingDiaryEntryId("");
+    setDiaryEditDraft("");
     setSiteLatDraft("");
     setSiteLngDraft("");
     setRelatedInventoryDraft("");
@@ -876,6 +911,75 @@ const LeadsMatrix = () => {
       setSavingDiary(false);
     }
   };
+
+  const canEditDiaryEntry = useCallback(
+    (entry) => {
+      if (!entry?._id) return false;
+      if (LEAD_DIARY_EDITOR_ROLES.includes(userRole)) return true;
+      return String(entry?.createdBy?._id || "") === currentUserId;
+    },
+    [currentUserId, userRole],
+  );
+
+  const startEditDiaryEntry = useCallback(
+    (entry) => {
+      if (!canEditDiaryEntry(entry)) return;
+      setEditingDiaryEntryId(String(entry._id));
+      setDiaryEditDraft(String(entry?.note || ""));
+    },
+    [canEditDiaryEntry],
+  );
+
+  const cancelDiaryEntryEdit = useCallback(() => {
+    setEditingDiaryEntryId("");
+    setDiaryEditDraft("");
+  }, []);
+
+  const handleUpdateDiaryEntry = useCallback(async () => {
+    if (!selectedLead || !editingDiaryEntryId) return;
+
+    const note = String(diaryEditDraft || "").trim();
+    if (!note) {
+      setError("Diary note cannot be empty");
+      return;
+    }
+
+    try {
+      setUpdatingDiaryEntry(true);
+      setError("");
+
+      const updatedEntry = await updateLeadDiaryEntry(
+        selectedLead._id,
+        editingDiaryEntryId,
+        note,
+      );
+
+      if (updatedEntry?._id) {
+        setDiaryEntries((prev) =>
+          prev.map((entry) =>
+            String(entry._id) === String(updatedEntry._id) ? updatedEntry : entry,
+          ),
+        );
+      } else {
+        const diary = await getLeadDiary(selectedLead._id);
+        setDiaryEntries(Array.isArray(diary) ? diary : []);
+      }
+
+      cancelDiaryEntryEdit();
+      setSuccess("Diary note updated");
+    } catch (updateError) {
+      const message = toErrorMessage(updateError, "Failed to update diary note");
+      console.error(`Update lead diary failed: ${message}`);
+      setError(message);
+    } finally {
+      setUpdatingDiaryEntry(false);
+    }
+  }, [
+    cancelDiaryEntryEdit,
+    diaryEditDraft,
+    editingDiaryEntryId,
+    selectedLead,
+  ]);
 
   const handleDiaryVoiceToggle = () => {
     if (!isDiaryMicSupported || !diaryRecognitionRef.current) {
@@ -1554,13 +1658,95 @@ const LeadsMatrix = () => {
                       <div className="space-y-2 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
                         {diaryEntries.map((entry) => (
                           <div key={entry._id} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
-                            <div className="text-sm text-slate-800 whitespace-pre-wrap break-words">
-                              {entry.note}
-                            </div>
-                            <div className="text-[11px] text-slate-500 mt-1">
-                              {formatDate(entry.createdAt)}
-                              {entry.createdBy?.name ? ` - ${entry.createdBy.name}` : ""}
-                            </div>
+                            {String(editingDiaryEntryId) === String(entry._id) ? (
+                              <>
+                                <textarea
+                                  value={diaryEditDraft}
+                                  onChange={(e) => setDiaryEditDraft(e.target.value)}
+                                  className="w-full min-h-[72px] rounded-lg border border-slate-300 px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-slate-300"
+                                  maxLength={2000}
+                                />
+                                <div className="mt-2 flex items-center justify-between gap-2">
+                                  <div className="text-[10px] text-slate-500">
+                                    {diaryEditDraft.length}/2000
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={cancelDiaryEntryEdit}
+                                      disabled={updatingDiaryEntry}
+                                      className="h-8 px-2 rounded-lg border border-slate-300 text-[11px] text-slate-700 font-semibold disabled:opacity-60 inline-flex items-center gap-1"
+                                    >
+                                      <RotateCcw size={11} />
+                                      Cancel
+                                    </button>
+                                    <button
+                                      onClick={handleUpdateDiaryEntry}
+                                      disabled={updatingDiaryEntry || !diaryEditDraft.trim()}
+                                      className="h-8 px-2 rounded-lg bg-slate-900 text-white text-[11px] font-semibold disabled:opacity-60 inline-flex items-center gap-1"
+                                    >
+                                      {updatingDiaryEntry ? (
+                                        <Loader size={11} className="animate-spin" />
+                                      ) : (
+                                        <Check size={11} />
+                                      )}
+                                      Save
+                                    </button>
+                                  </div>
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="text-sm text-slate-800 whitespace-pre-wrap break-words">
+                                  {entry.note}
+                                </div>
+                                <div className="mt-1 flex items-center justify-between gap-2">
+                                  <div className="text-[11px] text-slate-500">
+                                    {formatDate(entry.createdAt)}
+                                    {entry.createdBy?.name ? ` - ${entry.createdBy.name}` : ""}
+                                    {entry.isEdited ? " | Edited" : ""}
+                                    {entry.lastEditedAt ? ` (${formatDate(entry.lastEditedAt)})` : ""}
+                                  </div>
+                                  {canEditDiaryEntry(entry) && (
+                                    <button
+                                      onClick={() => startEditDiaryEntry(entry)}
+                                      className="h-7 px-2 rounded-lg border border-slate-300 text-[11px] text-slate-700 font-semibold inline-flex items-center gap-1"
+                                    >
+                                      <Pencil size={11} />
+                                      Edit
+                                    </button>
+                                  )}
+                                </div>
+
+                                {isAdminUser
+                                  && Array.isArray(entry.editHistory)
+                                  && entry.editHistory.length > 0 && (
+                                    <div className="mt-2 space-y-1">
+                                      {entry.editHistory
+                                        .slice()
+                                        .reverse()
+                                        .map((historyRow, index) => (
+                                          <div
+                                            key={`${entry._id}-history-${index}`}
+                                            className="rounded border border-slate-200 bg-white px-2 py-1"
+                                          >
+                                            <div className="text-[10px] text-slate-500">
+                                              {formatDate(historyRow.editedAt)}
+                                              {historyRow?.editedBy?.name
+                                                ? ` - ${historyRow.editedBy.name}`
+                                                : ""}
+                                            </div>
+                                            <div className="text-[11px] text-rose-700 line-through whitespace-pre-wrap break-words">
+                                              {historyRow.previousNote || "-"}
+                                            </div>
+                                            <div className="text-[11px] text-emerald-700 whitespace-pre-wrap break-words">
+                                              {historyRow.updatedNote || "-"}
+                                            </div>
+                                          </div>
+                                        ))}
+                                    </div>
+                                  )}
+                              </>
+                            )}
                           </div>
                         ))}
                       </div>

@@ -90,6 +90,22 @@ const formatCurrency = (value) => {
   return `Rs ${parsed.toLocaleString("en-IN")}`;
 };
 
+const resolveAssetUrl = (url) => {
+  const safe = String(url || "").trim();
+  if (!safe) return "";
+  if (/^https?:\/\//i.test(safe)) return safe;
+
+  const configuredOrigin = String(
+    (import.meta.env.DEV ? import.meta.env.VITE_DEV_API_TARGET : "") ||
+    import.meta.env.VITE_SOCKET_URL ||
+    import.meta.env.VITE_API_ORIGIN ||
+    "",
+  ).trim();
+  const base = configuredOrigin || window.location.origin;
+  const cleanBase = base.replace(/\/$/, "");
+  return `${cleanBase}${safe.startsWith("/") ? "" : "/"}${safe}`;
+};
+
 const toSharePayload = (asset) => {
   if (!asset?._id) return null;
   const firstImage = Array.isArray(asset.images) ? asset.images[0] || "" : "";
@@ -213,7 +229,13 @@ const AssetVault = () => {
         canManage ? getPendingInventoryRequests() : Promise.resolve([]),
       ]);
 
-      setAssets(Array.isArray(list) ? list : []);
+      setAssets(
+        (Array.isArray(list) ? list : []).map((asset) => ({
+          ...asset,
+          images: Array.isArray(asset.images) ? asset.images.map((url) => resolveAssetUrl(url)).filter(Boolean) : [],
+          documents: Array.isArray(asset.documents) ? asset.documents.map((url) => resolveAssetUrl(url)).filter(Boolean) : [],
+        })),
+      );
       setPendingRequests(Array.isArray(requests) ? requests : []);
     } catch (fetchError) {
       console.error(`Error loading inventory: ${toErrorMessage(fetchError, "Unknown error")}`);
@@ -238,7 +260,14 @@ const AssetVault = () => {
 
       const searchMatch =
         !normalizedSearch ||
-        [asset.title, asset.location, asset.category].some((value) =>
+        [
+          asset.title,
+          asset.location,
+          asset.category,
+          asset.projectName,
+          asset.towerName,
+          asset.unitNumber,
+        ].some((value) =>
           String(value || "")
             .toLowerCase()
             .includes(normalizedSearch),
@@ -741,7 +770,7 @@ const AssetVault = () => {
               onClick={openAddModal}
               className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 text-white rounded-full text-xs font-bold uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg"
             >
-              <Plus size={16} /> {canManage ? "Add Asset" : "Add Request"}
+              <Plus size={16} /> Add Asset
             </button>
           )}
         </div>
@@ -754,7 +783,7 @@ const AssetVault = () => {
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search title, location, category"
+            placeholder="Search property name, title, location"
             className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
           />
         </div>
@@ -963,7 +992,7 @@ const AssetVault = () => {
               <div className="relative h-52 bg-slate-100 flex items-center justify-center overflow-hidden">
                 {asset.images && asset.images.length > 0 ? (
                   <img
-                    src={asset.images[0]}
+                    src={resolveAssetUrl(asset.images[0])}
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                     alt={asset.title}
                   />

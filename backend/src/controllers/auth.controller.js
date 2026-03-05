@@ -72,6 +72,7 @@ const toAuthResponse = ({ user, tokenBundle }) => ({
     companyId: user.companyId,
     parentId: user.parentId || null,
     partnerCode: user.partnerCode || null,
+    profileImageUrl: user.profileImageUrl || "",
   },
 });
 
@@ -153,7 +154,7 @@ exports.refresh = async (req, res) => {
     }
 
     const user = await User.findById(rotated.userId).select(
-      "_id name email role companyId parentId partnerCode isActive",
+      "_id name email role companyId parentId partnerCode profileImageUrl isActive",
     );
 
     if (!user || !user.isActive) {
@@ -173,6 +174,7 @@ exports.refresh = async (req, res) => {
         companyId: user.companyId || null,
         parentId: user.parentId || null,
         partnerCode: user.partnerCode || null,
+        profileImageUrl: user.profileImageUrl || "",
       },
     });
   } catch (error) {
@@ -223,6 +225,7 @@ exports.getMe = async (req, res) => {
         companyId: req.user.companyId || null,
         parentId: req.user.parentId || null,
         partnerCode: req.user.partnerCode || null,
+        profileImageUrl: req.user.profileImageUrl || "",
       },
     });
   } catch (error) {

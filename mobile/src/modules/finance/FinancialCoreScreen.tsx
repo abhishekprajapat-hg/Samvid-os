@@ -1,21 +1,27 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
+  Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
+import { AppButton, AppChip } from "../../components/common/ui";
 import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
 
 const COMMISSION_PER_DEAL = 50000;
-const RANGE_OPTIONS = ["ALL", "THIS_MONTH", "30_D"] as const;
+const RANGE_OPTIONS = ["ALL", "THIS_MONTH", "CUSTOM"] as const;
 const PIPELINE_STATUSES = [
   { key: "NEW", label: "New" },
   { key: "CONTACTED", label: "Contacted" },
@@ -35,11 +41,6 @@ const toDate = (value?: string) => {
 
 const getRangeStart = (rangeKey: RangeKey) => {
   const now = new Date();
-  if (rangeKey === "30_D") {
-    const start = new Date(now);
-    start.setDate(start.getDate() - 30);
-    return start;
-  }
   if (rangeKey === "THIS_MONTH") {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   }
@@ -66,12 +67,51 @@ const getAssigneeName = (assignedTo?: Lead["assignedTo"]) => {
   return assignedTo.name || "Unassigned";
 };
 
+const pad2 = (value: number) => String(value).padStart(2, "0");
+const toDateInputValue = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+
+const WebDateInput = ({
+  value,
+  onChange,
+  placeholder,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) => {
+  if (Platform.OS === "web") {
+    return (
+      <View style={styles.webInputWrap}>
+        <input
+          value={value}
+          onChange={(event) => onChange((event.target as HTMLInputElement).value)}
+          placeholder={placeholder}
+          type="date"
+          style={styles.webDateInput as any}
+        />
+      </View>
+    );
+  }
+  return <TextInput style={styles.modalInput} value={value} onChangeText={onChange} placeholder={placeholder} />;
+};
+
 export const FinancialCoreScreen = () => {
   const navigation = useNavigation<any>();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [rangeKey, setRangeKey] = useState<RangeKey>("ALL");
+  const [selectedMonthDate, setSelectedMonthDate] = useState(new Date());
+  const [customFromDate, setCustomFromDate] = useState<Date | null>(null);
+  const [customToDate, setCustomToDate] = useState<Date | null>(null);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [showCustomFromPicker, setShowCustomFromPicker] = useState(false);
+  const [showCustomToPicker, setShowCustomToPicker] = useState(false);
+  const [webMonthPickerVisible, setWebMonthPickerVisible] = useState(false);
+  const [webMonthDateValue, setWebMonthDateValue] = useState(toDateInputValue(new Date()));
+  const [webCustomPickerVisible, setWebCustomPickerVisible] = useState(false);
+  const [webCustomFromValue, setWebCustomFromValue] = useState("");
+  const [webCustomToValue, setWebCustomToValue] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
 
   const load = async (silent = false) => {
@@ -98,13 +138,40 @@ export const FinancialCoreScreen = () => {
   }, []);
 
   const scopedLeads = useMemo(() => {
-    const start = getRangeStart(rangeKey);
-    if (!start) return leads;
+    if (rangeKey === "ALL") return leads;
+    if (rangeKey === "THIS_MONTH") {
+      return leads.filter((lead) => {
+        const createdAt = toDate(lead.createdAt);
+        if (!createdAt) return false;
+        return (
+          createdAt.getFullYear() === selectedMonthDate.getFullYear()
+          && createdAt.getMonth() === selectedMonthDate.getMonth()
+        );
+      });
+    }
+    if (!customFromDate || !customToDate) return [];
+    const start = new Date(customFromDate);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(customToDate);
+    end.setHours(23, 59, 59, 999);
     return leads.filter((lead) => {
       const createdAt = toDate(lead.createdAt);
-      return createdAt && createdAt >= start;
+      if (!createdAt) return false;
+      return createdAt >= start && createdAt <= end;
     });
-  }, [leads, rangeKey]);
+  }, [leads, rangeKey, selectedMonthDate, customFromDate, customToDate]);
+
+  const periodLabel = useMemo(() => {
+    if (rangeKey === "ALL") return "All data";
+    if (rangeKey === "THIS_MONTH") {
+      return selectedMonthDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
+    }
+    if (customFromDate && customToDate) {
+      return `${customFromDate.toLocaleDateString("en-IN")} to ${customToDate.toLocaleDateString("en-IN")}`;
+    }
+    if (customFromDate) return `From ${customFromDate.toLocaleDateString("en-IN")}`;
+    return "Custom range";
+  }, [rangeKey, selectedMonthDate, customFromDate, customToDate]);
 
   const dashboard = useMemo(() => {
     const statusCount: Record<string, number> = {};
@@ -195,6 +262,59 @@ export const FinancialCoreScreen = () => {
     [scopedLeads],
   );
 
+  const openMonthPicker = () => {
+    if (Platform.OS === "web") {
+      setWebMonthDateValue(toDateInputValue(selectedMonthDate));
+      setWebMonthPickerVisible(true);
+      return;
+    }
+    setShowMonthPicker(true);
+  };
+
+  const openCustomRangePicker = () => {
+    if (Platform.OS === "web") {
+      setWebCustomFromValue(customFromDate ? toDateInputValue(customFromDate) : "");
+      setWebCustomToValue(customToDate ? toDateInputValue(customToDate) : "");
+      setWebCustomPickerVisible(true);
+      return;
+    }
+    setShowCustomFromPicker(true);
+  };
+
+  const applyWebMonthPicker = () => {
+    if (!webMonthDateValue) {
+      setError("Please select date");
+      return;
+    }
+    const parsed = new Date(`${webMonthDateValue}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+      setError("Please select valid date");
+      return;
+    }
+    setSelectedMonthDate(parsed);
+    setWebMonthPickerVisible(false);
+  };
+
+  const applyWebCustomRange = () => {
+    if (!webCustomFromValue || !webCustomToValue) {
+      setError("Please select from and to date");
+      return;
+    }
+    const parsedFrom = new Date(`${webCustomFromValue}T00:00:00`);
+    const parsedTo = new Date(`${webCustomToValue}T00:00:00`);
+    if (Number.isNaN(parsedFrom.getTime()) || Number.isNaN(parsedTo.getTime())) {
+      setError("Please select valid custom dates");
+      return;
+    }
+    if (parsedTo < parsedFrom) {
+      setError("To date cannot be before from date");
+      return;
+    }
+    setCustomFromDate(parsedFrom);
+    setCustomToDate(parsedTo);
+    setWebCustomPickerVisible(false);
+  };
+
   return (
     <Screen title="Financial Core" subtitle="Finance Dashboard" loading={loading} error={error}>
       <ScrollView
@@ -202,17 +322,82 @@ export const FinancialCoreScreen = () => {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.rangeRow}>
-          {RANGE_OPTIONS.map((range) => (
-            <Pressable
-              key={range}
-              style={[styles.rangeChip, rangeKey === range && styles.rangeChipActive]}
-              onPress={() => setRangeKey(range)}
-            >
-              <Text style={[styles.rangeText, rangeKey === range && styles.rangeTextActive]}>{range}</Text>
+        <View style={styles.sectionCard}>
+          <View style={styles.filterRow}>
+            <AppChip label="All" active={rangeKey === "ALL"} onPress={() => setRangeKey("ALL")} />
+            <AppChip label="This Month" active={rangeKey === "THIS_MONTH"} onPress={() => setRangeKey("THIS_MONTH")} />
+            <AppChip
+              label="Custom"
+              active={rangeKey === "CUSTOM"}
+              onPress={() => {
+                setRangeKey("CUSTOM");
+                openCustomRangePicker();
+              }}
+            />
+            <View style={{ flex: 1 }} />
+            <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
+              <Ionicons name="calendar-outline" size={14} color="#334155" />
             </Pressable>
-          ))}
+            <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} disabled={refreshing} />
+          </View>
+          <Text style={styles.periodText}>Showing: {periodLabel}</Text>
+          {rangeKey === "CUSTOM" ? (
+            <View style={styles.customRangeRow}>
+              <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
+                <Text style={styles.customDateText}>From: {customFromDate ? customFromDate.toLocaleDateString("en-IN") : "Select"}</Text>
+              </Pressable>
+              <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
+                <Text style={styles.customDateText}>To: {customToDate ? customToDate.toLocaleDateString("en-IN") : "Select"}</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
+
+        {showMonthPicker ? (
+          <DateTimePicker
+            value={selectedMonthDate}
+            mode="date"
+            display="default"
+            onChange={(_, next) => {
+              setShowMonthPicker(false);
+              if (next) setSelectedMonthDate(next);
+            }}
+          />
+        ) : null}
+        {showCustomFromPicker ? (
+          <DateTimePicker
+            value={customFromDate || new Date()}
+            mode="date"
+            display="default"
+            onChange={(_, next) => {
+              setShowCustomFromPicker(false);
+              if (next) {
+                setCustomFromDate(next);
+                if (!customToDate || customToDate < next) {
+                  setCustomToDate(next);
+                }
+                setTimeout(() => setShowCustomToPicker(true), 30);
+              }
+            }}
+          />
+        ) : null}
+        {showCustomToPicker ? (
+          <DateTimePicker
+            value={customToDate || customFromDate || new Date()}
+            mode="date"
+            display="default"
+            onChange={(_, next) => {
+              setShowCustomToPicker(false);
+              if (next) {
+                if (customFromDate && next < customFromDate) {
+                  setCustomToDate(customFromDate);
+                  return;
+                }
+                setCustomToDate(next);
+              }
+            }}
+          />
+        ) : null}
 
         <View style={styles.metricsGrid}>
           <MetricCard
@@ -356,6 +541,41 @@ export const FinancialCoreScreen = () => {
           </View>
         </View>
       </ScrollView>
+
+      <Modal visible={webMonthPickerVisible} transparent animationType="fade" onRequestClose={() => setWebMonthPickerVisible(false)}>
+        <View style={styles.modalWrap}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Month/Date</Text>
+            <WebDateInput value={webMonthDateValue} onChange={setWebMonthDateValue} placeholder="YYYY-MM-DD" />
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancelBtn} onPress={() => setWebMonthPickerVisible(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.modalApplyBtn} onPress={applyWebMonthPicker}>
+                <Text style={styles.modalApplyText}>Apply</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={webCustomPickerVisible} transparent animationType="fade" onRequestClose={() => setWebCustomPickerVisible(false)}>
+        <View style={styles.modalWrap}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Select Custom Range</Text>
+            <WebDateInput value={webCustomFromValue} onChange={setWebCustomFromValue} placeholder="From date" />
+            <WebDateInput value={webCustomToValue} onChange={setWebCustomToValue} placeholder="To date" />
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalCancelBtn} onPress={() => setWebCustomPickerVisible(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={styles.modalApplyBtn} onPress={applyWebCustomRange}>
+                <Text style={styles.modalApplyText}>Apply</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 };
@@ -408,29 +628,45 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingBottom: 16,
   },
-  rangeRow: {
+  filterRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+  },
+  calendarIconBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 9,
+    backgroundColor: "#fff",
+    height: 36,
+    width: 36,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  periodText: {
+    marginTop: 8,
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  customRangeRow: {
+    marginTop: 8,
     flexDirection: "row",
     gap: 8,
   },
-  rangeChip: {
+  customDateBtn: {
+    flex: 1,
     borderWidth: 1,
     borderColor: "#cbd5e1",
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderRadius: 10,
     backgroundColor: "#fff",
+    padding: 10,
   },
-  rangeChipActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
-  },
-  rangeText: {
-    fontSize: 12,
+  customDateText: {
     color: "#334155",
+    fontSize: 11,
     fontWeight: "600",
-  },
-  rangeTextActive: {
-    color: "#fff",
   },
   metricsGrid: {
     gap: 10,
@@ -626,6 +862,95 @@ const styles = StyleSheet.create({
   },
   actionBtnText: {
     color: "#334155",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  modalWrap: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 16,
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 420,
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    padding: 14,
+  },
+  modalTitle: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 10,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    color: "#0f172a",
+    height: 44,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    fontSize: 13,
+  },
+  webInputWrap: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    height: 44,
+    marginBottom: 8,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  webDateInput: {
+    height: 30,
+    fontSize: 13,
+    color: "#0f172a",
+    backgroundColor: "transparent",
+    borderWidth: 0,
+    padding: 0,
+  },
+  modalActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
+    marginTop: 6,
+  },
+  modalCancelBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    minWidth: 90,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    backgroundColor: "#fff",
+  },
+  modalCancelText: {
+    color: "#334155",
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  modalApplyBtn: {
+    borderWidth: 1,
+    borderColor: "#0f172a",
+    borderRadius: 10,
+    minWidth: 90,
+    height: 38,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    backgroundColor: "#0f172a",
+  },
+  modalApplyText: {
+    color: "#fff",
     fontWeight: "700",
     fontSize: 12,
   },

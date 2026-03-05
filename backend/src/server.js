@@ -62,6 +62,16 @@ const io = new Server(httpServer, {
 app.set("io", io);
 registerChatSocketHandlers(io);
 
+httpServer.on("error", (error) => {
+  if (error?.code === "EADDRINUSE") {
+    logger.error({ port: PORT, error: `Port ${PORT} is already in use`, message: "Server failed to start" });
+    process.exit(1);
+    return;
+  }
+  logger.error({ error: error?.message || String(error), message: "HTTP server error" });
+  process.exit(1);
+});
+
 httpServer.listen(PORT, () => {
   logger.info({ port: PORT, message: "Server started" });
 });
@@ -72,4 +82,5 @@ process.on("unhandledRejection", (reason) => {
 
 process.on("uncaughtException", (error) => {
   logger.error({ error: error.message, message: "Uncaught exception" });
+  process.exit(1);
 });

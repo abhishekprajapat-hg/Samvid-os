@@ -92,6 +92,16 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
 
   const normalizedRole = roleKeyMap[userRole] || "manager";
   const currentMenu = MENU_CONFIG[normalizedRole] || MENU_CONFIG.manager;
+  const mobileMenuItems = Array.from(
+    Object.values(MENU_CONFIG)
+      .flat()
+      .reduce((map, item) => {
+        if (!map.has(item.path)) {
+          map.set(item.path, item);
+        }
+        return map;
+      }, new Map()),
+  ).map((entry) => entry[1]);
 
   const handleCloseMenus = () => {
     setMobileMenuOpen(false);
@@ -218,7 +228,7 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
               }`}
             >
               <div className="p-3 grid grid-cols-1 gap-2">
-                {currentMenu.map((item) => (
+                {mobileMenuItems.map((item) => (
                   <NavLink key={item.path} to={item.path} onClick={handleCloseMenus}>
                     {({ isActive }) => (
                       <div

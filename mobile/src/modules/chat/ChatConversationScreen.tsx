@@ -52,7 +52,7 @@ const initials = (name: string) =>
     .map((part) => part[0]?.toUpperCase() || "")
     .join("");
 
-type PendingAttachment = { uri: string; name: string; mimeType: string; size?: number };
+type PendingAttachment = { uri: string; name: string; mimeType: string; size?: number; file?: any };
 
 type ForwardPayload = {
   textInput?: string;
@@ -111,6 +111,59 @@ const renderAvatar = (name: string, avatarUrl: string, size = 32) => {
       <Text style={{ color: "#0e7490", fontSize: 10, fontWeight: "700" }}>{initials(name)}</Text>
     </View>
   );
+};
+
+const pickUriString = (value: unknown): string => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object") {
+    const row = value as Record<string, unknown>;
+    const nested =
+      row.uri
+      || row.url
+      || row.secure_url
+      || row.href
+      || (row.file as any)?.uri
+      || (row.file as any)?.url
+      || "";
+    return typeof nested === "string" ? nested : "";
+  }
+  return "";
+};
+
+const isLikelyImageMime = (mimeType?: string) => String(mimeType || "").toLowerCase().startsWith("image/");
+const isRenderableImageUri = (uri: string) => /^(https?:|file:|content:|blob:|data:)/i.test(String(uri || ""));
+
+const toAttachment = (row: any) => {
+  if (!row || typeof row !== "object") return null;
+  return {
+    fileName: String(row.fileName || row.name || ""),
+    fileUrl: pickUriString(row.fileUrl || row.url || row.secure_url || ""),
+    mimeType: String(row.mimeType || row.type || ""),
+    size: Number(row.size || 0) || 0,
+    storagePath: String(row.storagePath || row.public_id || ""),
+  };
+};
+
+const normalizeIncomingMessage = (row: any): ChatMessage | null => {
+  if (!row?._id) return null;
+  const mediaRows = Array.isArray(row.mediaAttachments) ? row.mediaAttachments : [];
+  const attachment = toAttachment(row.attachment || mediaRows[0] || null);
+
+  return {
+    _id: String(row._id),
+    text: String(row.text || ""),
+    type: String(row.type || "TEXT"),
+    attachment,
+    createdAt: String(row.createdAt || new Date().toISOString()),
+    sender: row.sender
+      ? {
+          _id: String(row.sender._id || ""),
+          name: String(row.sender.name || ""),
+          avatarUrl: String(row.sender.avatarUrl || row.sender.profileImageUrl || ""),
+        }
+      : undefined,
+  };
 };
 
 export const ChatConversationScreen = () => {
@@ -263,54 +316,68 @@ export const ChatConversationScreen = () => {
     const socket = createChatSocket(token);
     socketRef.current = socket;
 
-    socket.on("messenger:message:new", ({ conversation, message }: { conversation?: ChatConversation; message?: ChatMessage }) => {
-      if (!conversation?._id || !message?._id) return;
+    const handleIncomingMessage = ({ conversation, room, message }: { conversation?: ChatConversation; room?: ChatConversation; message?: any }) => {
+      const resolvedConversation = (conversation || room) as ChatConversation | undefined;
+      const normalizedMessage = normalizeIncomingMessage(message);
+      if (!resolvedConversation?._id || !normalizedMessage?._id) return;
 
       if (!conversationId) {
-        const participantIds = (conversation.participants || []).map((p) => String(p._id));
+        const participantIds = (resolvedConversation.participants || []).map((p) => String(p._id));
         if (participantIds.includes(String(contactId))) {
-          setConversationId(conversation._id);
+          setConversationId(resolvedConversation._id);
         }
       }
 
-      if (String(conversation._id) === String(conversationId || params.conversationId || "")) {
-        setMessages((prev) => mergeMessages(prev, [message]));
+      if (String(resolvedConversation._id) === String(conversationId || params.conversationId || "")) {
+        setMessages((prev) => mergeMessages(prev, [normalizedMessage]));
       }
-    });
+    };
 
-    socket.on("messenger:call:incoming", (payload: any) => {
-      const callerId = String(payload?.caller?._id || "");
-      const incomingConversationId = String(payload?.conversationId || conversationId || "");
-      const callerName = String(payload?.caller?.name || contactName);
+    socket.on("messenger:message:new", handleIncomingMessage);
+    socket.on("chat:message:new", handleIncomingMessage as any);
+
+    const handleIncomingCall = (payload: any) => {
+      const caller = payload?.caller || payload?.from || {};
+      const callerId = String(caller?._id || "");
+      const incomingConversationId = String(payload?.conversationId || payload?.roomId || conversationId || "");
+      const callerName = String(caller?.name || contactName);
+      const resolvedCallType =
+        String(payload?.callType || payload?.mode || "VOICE").toUpperCase() === "VIDEO" ? "VIDEO" : "VOICE";
 
       setActiveCall({
         callId: String(payload?.callId || ""),
-        callType: String(payload?.callType || "VOICE").toUpperCase() === "VIDEO" ? "VIDEO" : "VOICE",
+        callType: resolvedCallType,
         status: "INCOMING",
         startedAt: Date.now(),
         peerName: callerName,
         peerId: callerId || contactId,
         conversationId: incomingConversationId,
       });
-    });
+    };
+    socket.on("messenger:call:incoming", handleIncomingCall);
+    socket.on("chat:call:incoming", handleIncomingCall);
 
-    socket.on("messenger:call:update", async (payload: any) => {
-      const status = String(payload?.status || "").toUpperCase();
+    const handleCallUpdate = async (payload: any) => {
+      const status = String(payload?.status || payload?.event || "").toUpperCase();
       const incomingCallId = String(payload?.callId || "");
       if (!incomingCallId) return;
 
-      if (status === "ACCEPTED") {
+      if (status === "ACCEPTED" || status === "CONNECTED") {
         setActiveCall((prev) => {
           if (!prev || prev.callId !== incomingCallId) return prev;
           return { ...prev, status: "CONNECTED", startedAt: Date.now() };
         });
       }
 
-      if (["REJECTED", "MISSED", "ENDED", "FAILED", "CANCELLED"].includes(status)) {
+      if (["REJECTED", "MISSED", "ENDED", "FAILED", "CANCELLED", "DISCONNECTED"].includes(status)) {
         setActiveCall((prev) => (prev && prev.callId === incomingCallId ? null : prev));
-        await loadCallLogs(String(payload?.conversationId || conversationId || ""));
+        await loadCallLogs(String(payload?.conversationId || payload?.roomId || conversationId || ""));
       }
-    });
+    };
+    socket.on("messenger:call:update", handleCallUpdate);
+    socket.on("chat:call:accepted", (payload: any) => handleCallUpdate({ ...payload, status: "ACCEPTED" }));
+    socket.on("chat:call:rejected", (payload: any) => handleCallUpdate({ ...payload, status: "REJECTED" }));
+    socket.on("chat:call:ended", (payload: any) => handleCallUpdate({ ...payload, status: "ENDED" }));
 
     return () => {
       socket.disconnect();
@@ -334,10 +401,18 @@ export const ChatConversationScreen = () => {
 
     const targetConversationId = overrideConversationId || conversationId;
     const targetRecipientId = overrideRecipientId || contactId;
+    const mediaAttachment = attachment
+      ? {
+          url: String(attachment.fileUrl || ""),
+          name: String(attachment.fileName || ""),
+          mimeType: String(attachment.mimeType || ""),
+          size: Number(attachment.size || 0) || 0,
+        }
+      : null;
 
     const payload = targetConversationId
-      ? { conversationId: targetConversationId, text, attachment }
-      : { recipientId: targetRecipientId, text, attachment };
+      ? { conversationId: targetConversationId, text, attachment, mediaAttachments: mediaAttachment ? [mediaAttachment] : [] }
+      : { recipientId: targetRecipientId, text, attachment, mediaAttachments: mediaAttachment ? [mediaAttachment] : [] };
 
     if (!overrideConversationId && !overrideRecipientId) {
       const socket = socketRef.current;
@@ -354,18 +429,22 @@ export const ChatConversationScreen = () => {
           setConversationId(String(ack.conversation._id));
         }
         if (ack?.message) {
-          setMessages((prev) => mergeMessages(prev, [ack.message as ChatMessage]));
+          const normalized = normalizeIncomingMessage(ack.message);
+          if (normalized) {
+            setMessages((prev) => mergeMessages(prev, [normalized]));
+          }
         }
         return;
       }
     }
 
     const result = await sendDirectMessage(payload);
-    if (!overrideConversationId && !overrideRecipientId && result?.message) {
+    const sentMessage = result?.message || null;
+    if (!overrideConversationId && !overrideRecipientId && sentMessage) {
       if (result?.conversation?._id && !conversationId) {
         setConversationId(String(result.conversation._id));
       }
-      setMessages((prev) => mergeMessages(prev, [result.message]));
+      setMessages((prev) => mergeMessages(prev, [sentMessage]));
     }
   };
 
@@ -378,20 +457,28 @@ export const ChatConversationScreen = () => {
       const picked = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
         multiple: true,
-        type: ["image/*", "application/pdf"],
+        type: "*/*",
       });
       if (picked.canceled || !picked.assets?.length) return;
 
-      const nextFiles = picked.assets.map((asset) => ({
-        uri: asset.uri,
-        name: asset.name || "attachment",
-        mimeType: asset.mimeType || "application/octet-stream",
-        size: asset.size,
-      }));
+      const nextFiles = picked.assets
+        .map((asset: any) => {
+          const uri = pickUriString(asset?.uri);
+          const file = asset?.file || null;
+          const fallbackName = typeof file?.name === "string" ? file.name : "attachment";
+          return {
+            uri,
+            name: String(asset?.name || fallbackName || "attachment"),
+            mimeType: String(asset?.mimeType || file?.type || "application/octet-stream"),
+            size: Number(asset?.size || file?.size || 0) || 0,
+            file,
+          };
+        })
+        .filter((file) => Boolean(file.uri || file.file));
 
       setPendingAttachments((prev) => {
         const map = new Map<string, PendingAttachment>();
-        [...prev, ...nextFiles].forEach((file) => map.set(`${file.uri}|${file.name}|${file.size || 0}`, file));
+        [...prev, ...nextFiles].forEach((file) => map.set(`${file.uri || "blob"}|${file.name}|${file.size || 0}`, file));
         return [...map.values()];
       });
     } catch (e) {
@@ -412,15 +499,17 @@ export const ChatConversationScreen = () => {
         return;
       }
 
-      const captured = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.8, allowsEditing: false });
+      const captured = await ImagePicker.launchCameraAsync({ mediaTypes: ["images", "videos"], quality: 0.8, allowsEditing: false });
       if (captured.canceled || !captured.assets?.length) return;
 
       setSending(true);
       const asset = captured.assets[0];
+      const fallbackExt = String(asset?.mimeType || "").toLowerCase().startsWith("video/") ? "mp4" : "jpg";
       const uploaded = await uploadChatFile({
-        uri: asset.uri,
-        name: asset.fileName || `camera-${Date.now()}.jpg`,
-        mimeType: asset.mimeType || "image/jpeg",
+        uri: pickUriString(asset.uri),
+        name: asset.fileName || `camera-${Date.now()}.${fallbackExt}`,
+        mimeType: asset.mimeType || (fallbackExt === "mp4" ? "video/mp4" : "image/jpeg"),
+        file: (asset as any)?.file,
       });
 
       if (!uploaded) throw new Error("Upload failed");
@@ -499,8 +588,7 @@ export const ChatConversationScreen = () => {
         const mime = String(file.mimeType || "").toLowerCase();
         const isImage = mime.startsWith("image/");
         const isAudio = mime.startsWith("audio/");
-        const uploaded = await uploadChatFile({ uri: file.uri, name: file.name, mimeType: file.mimeType });
-
+        const uploaded = await uploadChatFile({ uri: file.uri, name: file.name, mimeType: file.mimeType, file: file.file || undefined });
         if (!uploaded) throw new Error("Upload failed");
 
         await dispatchMessage({
@@ -518,7 +606,9 @@ export const ChatConversationScreen = () => {
   };
 
   const openImageViewer = (urls: string[], index = 0) => {
-    setViewerUrls(urls);
+    const cleanUrls = urls.map((url) => pickUriString(url)).filter(Boolean);
+    if (!cleanUrls.length) return;
+    setViewerUrls(cleanUrls);
     setViewerIndex(index);
     setViewerVisible(true);
   };
@@ -610,13 +700,17 @@ export const ChatConversationScreen = () => {
   const startCall = async (callType: "VOICE" | "VIDEO") => {
     try {
       setError("");
+      const resolvedConversationId = conversationId || String(params.conversationId || "");
+      if (!resolvedConversationId) {
+        throw new Error("Open an existing conversation before starting call");
+      }
       const e2ee = {
         enabled: true,
         protocol: "X25519-AES-256-GCM",
         senderKeyFingerprint: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       };
       const created = await createCallLog({
-        conversationId: conversationId || undefined,
+        conversationId: resolvedConversationId,
         recipientId: contactId || undefined,
         callType,
         e2ee,
@@ -630,9 +724,14 @@ export const ChatConversationScreen = () => {
       }
 
       const socket = socketRef.current;
+      socket?.emit("chat:call:initiate", {
+        callId: created.call._id,
+        conversationId: created.conversationId || resolvedConversationId,
+        mode: callType === "VIDEO" ? "video" : "audio",
+      });
       socket?.emit("messenger:call:initiate", {
         callId: created.call._id,
-        conversationId: created.conversationId || conversationId || null,
+        conversationId: created.conversationId || resolvedConversationId,
         recipientId: contactId,
         callType,
         e2ee,
@@ -642,19 +741,37 @@ export const ChatConversationScreen = () => {
         callType,
         peerId: contactId,
         peerName: contactName,
-        conversationId: created.conversationId || conversationId || "",
+        conversationId: created.conversationId || resolvedConversationId,
         incoming: false,
       });
-      loadCallLogs(created.conversationId || conversationId || "");
+      loadCallLogs(created.conversationId || resolvedConversationId);
     } catch (e) {
       setError(toErrorMessage(e, "Failed to start call"));
     }
+  };
+
+  const openAttachmentUrl = async (url: unknown) => {
+    const resolved = pickUriString(url);
+    if (!resolved) {
+      setError("Attachment URL is invalid");
+      return;
+    }
+    const canOpen = await Linking.canOpenURL(resolved).catch(() => false);
+    if (!canOpen) {
+      setError("Unable to open this attachment");
+      return;
+    }
+    Linking.openURL(resolved).catch(() => setError("Unable to open this attachment"));
   };
 
   const acceptIncomingCall = async () => {
     if (!activeCall?.callId) return;
     try {
       await updateCallLog({ callId: activeCall.callId, status: "ACCEPTED" });
+      socketRef.current?.emit("chat:call:accept", {
+        callId: activeCall.callId,
+        conversationId: activeCall.conversationId || conversationId || null,
+      });
       socketRef.current?.emit("messenger:call:update", {
         callId: activeCall.callId,
         conversationId: activeCall.conversationId || conversationId || null,
@@ -680,6 +797,11 @@ export const ChatConversationScreen = () => {
     if (!activeCall?.callId) return;
     try {
       await updateCallLog({ callId: activeCall.callId, status: "REJECTED", durationSec: 0 });
+      socketRef.current?.emit("chat:call:reject", {
+        callId: activeCall.callId,
+        conversationId: activeCall.conversationId || conversationId || null,
+        reason: "rejected",
+      });
       socketRef.current?.emit("messenger:call:update", {
         callId: activeCall.callId,
         conversationId: activeCall.conversationId || conversationId || null,
@@ -701,6 +823,11 @@ export const ChatConversationScreen = () => {
         ? Math.max(0, Math.floor((Date.now() - activeCall.startedAt) / 1000))
         : 0;
       await updateCallLog({ callId: activeCall.callId, status: "ENDED", durationSec });
+      socketRef.current?.emit("chat:call:end", {
+        callId: activeCall.callId,
+        conversationId: activeCall.conversationId || conversationId || null,
+        reason: "ended",
+      });
       socketRef.current?.emit("messenger:call:update", {
         callId: activeCall.callId,
         conversationId: activeCall.conversationId || conversationId || null,
@@ -832,7 +959,7 @@ export const ChatConversationScreen = () => {
                 if (item.kind === "image-group") {
                   const firstMessage = item.messages[0];
                   const mine = String(firstMessage.sender?._id || "") === String(user?._id || user?.id || "");
-                  const urls = item.messages.map((row) => String(row.attachment?.fileUrl || "")).filter(Boolean);
+                  const urls = item.messages.map((row) => pickUriString(row.attachment?.fileUrl || "")).filter(Boolean);
                   const previewUrls = urls.slice(0, 4);
                   const extraCount = Math.max(urls.length - previewUrls.length, 0);
                   const lastMessage = item.messages[item.messages.length - 1];
@@ -875,7 +1002,7 @@ export const ChatConversationScreen = () => {
                 const hasAttachment = Boolean(message.attachment?.fileUrl);
                 const attachmentMime = getAttachmentMimeType(message);
                 const isImageAttachment = attachmentMime.startsWith("image/");
-                const fileUrl = String(message.attachment?.fileUrl || "");
+                const fileUrl = pickUriString(message.attachment?.fileUrl || "");
                 const fileName = String(message.attachment?.fileName || "");
                 const isAudioAttachment =
                   attachmentMime.startsWith("audio/")
@@ -898,13 +1025,13 @@ export const ChatConversationScreen = () => {
                       {!hasAttachment ? (
                         <Text style={[styles.messageText, mine && styles.messageTextMine]}>{message.text}</Text>
                       ) : isImageAttachment ? (
-                        <Pressable onPress={() => openImageViewer([String(message.attachment?.fileUrl || "")], 0)}>
-                          <Image source={{ uri: String(message.attachment?.fileUrl || "") }} style={styles.attachmentImage} resizeMode="cover" />
+                        <Pressable onPress={() => openImageViewer([pickUriString(message.attachment?.fileUrl || "")], 0)}>
+                          <Image source={{ uri: pickUriString(message.attachment?.fileUrl || "") }} style={styles.attachmentImage} resizeMode="cover" />
                         </Pressable>
                       ) : isAudioAttachment ? (
                         <Pressable
                           style={[styles.audioCard, mine && styles.audioCardMine]}
-                          onPress={() => playAudioAttachment(message._id, String(message.attachment?.fileUrl || ""))}
+                          onPress={() => playAudioAttachment(message._id, pickUriString(message.attachment?.fileUrl || ""))}
                         >
                           <Ionicons
                             name={playingMessageId === message._id ? "pause" : "play"}
@@ -916,12 +1043,12 @@ export const ChatConversationScreen = () => {
                           </Text>
                         </Pressable>
                       ) : isPdfAttachment ? (
-                        <Pressable style={[styles.pdfCard, mine && styles.pdfCardMine]} onPress={() => Linking.openURL(String(message.attachment?.fileUrl || ""))}>
+                        <Pressable style={[styles.pdfCard, mine && styles.pdfCardMine]} onPress={() => openAttachmentUrl(message.attachment?.fileUrl || "")}>
                           <Ionicons name="document-text-outline" size={16} color={mine ? "#ffffff" : "#1e293b"} />
                           <Text style={[styles.pdfText, mine && styles.messageTextMine]} numberOfLines={1}>{message.attachment?.fileName || "Open PDF"}</Text>
                         </Pressable>
                       ) : (
-                        <Pressable onPress={() => Linking.openURL(String(message.attachment?.fileUrl || ""))}>
+                        <Pressable onPress={() => openAttachmentUrl(message.attachment?.fileUrl || "")}>
                           <Text style={[styles.fileText, mine && styles.messageTextMine]}>{message.attachment?.fileName || "Open file"}</Text>
                         </Pressable>
                       )}
@@ -940,10 +1067,10 @@ export const ChatConversationScreen = () => {
                 <Text style={styles.pendingLabel}>Ready to send ({pendingAttachments.length})</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pendingList}>
                   {pendingAttachments.map((file, index) => {
-                    const isImage = String(file.mimeType || "").toLowerCase().startsWith("image/");
+                    const isImage = isLikelyImageMime(file.mimeType) && isRenderableImageUri(file.uri);
                     const isAudio = String(file.mimeType || "").toLowerCase().startsWith("audio/");
                     return (
-                      <View key={`${file.uri}-${index}`} style={styles.pendingItem}>
+                      <View key={`${file.uri || file.name}-${index}`} style={styles.pendingItem}>
                         {isImage ? (
                           <Image source={{ uri: file.uri }} style={styles.pendingThumb} resizeMode="cover" />
                         ) : isAudio ? (

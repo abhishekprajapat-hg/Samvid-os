@@ -1,6 +1,10 @@
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api/client";
+const configuredBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim();
+const defaultBaseUrl = import.meta.env.DEV
+  ? "/api/client"
+  : "https://nemnidhi.cloud/api/client";
+const API_BASE_URL = configuredBaseUrl || defaultBaseUrl;
 
 const api = axios.create({
   baseURL: API_BASE_URL,

@@ -49,6 +49,13 @@ router.patch(
   userController.updateMyLocation
 );
 
+router.patch(
+  "/:userId",
+  writeLimiter,
+  authMiddleware.protect,
+  userController.updateUserByRole
+);
+
 router.get(
   "/field-locations",
   authMiddleware.protect,

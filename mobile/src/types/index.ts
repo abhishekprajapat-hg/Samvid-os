@@ -1,4 +1,11 @@
-export type UserRole = "ADMIN" | "MANAGER" | "EXECUTIVE" | "FIELD_EXECUTIVE";
+export type UserRole =
+  | "ADMIN"
+  | "MANAGER"
+  | "ASSISTANT_MANAGER"
+  | "TEAM_LEADER"
+  | "EXECUTIVE"
+  | "FIELD_EXECUTIVE"
+  | "CHANNEL_PARTNER";
 
 export interface User {
   _id?: string;
@@ -13,6 +20,8 @@ export interface User {
 
 export interface AuthPayload {
   token: string;
+  accessToken?: string;
+  refreshToken?: string;
   user: User;
 }
 
@@ -27,6 +36,31 @@ export interface Lead {
   status: string;
   nextFollowUp?: string;
   assignedTo?: User;
+  assignedManager?: User;
+  assignedExecutive?: User;
+  assignedFieldExecutive?: User;
+  inventoryId?: {
+    _id?: string;
+    projectName?: string;
+    towerName?: string;
+    unitNumber?: string;
+    saleMeta?: {
+      remainingAmount?: number | null;
+      remainingDueDate?: string;
+      paymentDate?: string;
+    } | null;
+  } | string | null;
+  relatedInventoryIds?: Array<{
+    _id?: string;
+    projectName?: string;
+    towerName?: string;
+    unitNumber?: string;
+    saleMeta?: {
+      remainingAmount?: number | null;
+      remainingDueDate?: string;
+      paymentDate?: string;
+    } | null;
+  }>;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -39,6 +73,43 @@ export interface InventoryAsset {
   type?: string;
   category?: string;
   status?: string;
+  saleMeta?: {
+    leadId?: string;
+    paymentMode?: "Cash" | "Cheque" | "Bank Transfer" | "Net Banking" | "UPI" | string;
+    totalAmount?: number | null;
+    partialAmount?: number | null;
+    remainingAmount?: number | null;
+    remainingDueDate?: string;
+    paymentDate?: string;
+    paidTo?: string;
+    notes?: string;
+    voiceNoteUrl?: string;
+    voiceNoteName?: string;
+    cheque?: {
+      bankName?: string;
+      chequeNumber?: string;
+      ifsc?: string;
+      accountHolder?: string;
+      branch?: string;
+      chequeDate?: string;
+    };
+    netBanking?: {
+      bankName?: string;
+      accountNumber?: string;
+      ifsc?: string;
+      transactionId?: string;
+      accountHolder?: string;
+    };
+    bankTransfer?: {
+      transferType?: "RTGS" | "IMPS" | "NEFT" | string;
+      utrNumber?: string;
+    };
+    upi?: {
+      upiId?: string;
+      transactionId?: string;
+      receiverName?: string;
+    };
+  } | null;
   amenities?: string[];
   images?: string[];
   documents?: string[];

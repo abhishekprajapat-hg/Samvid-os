@@ -76,3 +76,8 @@ export const addLeadDiaryEntry = async (leadId, note) => {
   const res = await api.post(`/leads/${leadId}/diary`, { note });
   return res.data?.entry || null;
 };
+
+export const updateLeadDiaryEntry = async (leadId, entryId, note) => {
+  const res = await api.patch(`/leads/${leadId}/diary/${entryId}`, { note });
+  return res.data?.entry || null;
+};

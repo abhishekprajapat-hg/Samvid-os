@@ -33,6 +33,26 @@ router.get(
   leadController.getTodayFollowUps
 );
 
+router.get(
+  "/status-requests/pending",
+  authMiddleware.protect,
+  leadController.getPendingLeadStatusRequests
+);
+
+router.patch(
+  "/status-requests/:requestId/approve",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.approveLeadStatusRequest
+);
+
+router.patch(
+  "/status-requests/:requestId/reject",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.rejectLeadStatusRequest
+);
+
 // ======================================
 // ASSIGN LEAD (Admin / Manager only)
 // ======================================
@@ -75,6 +95,13 @@ router.patch(
   leadController.updateLeadStatus
 );
 
+router.post(
+  "/:leadId/status-request",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.createLeadStatusRequest
+);
+
 // ======================================
 // LEAD ACTIVITY
 // ======================================
@@ -95,6 +122,13 @@ router.post(
   writeLimiter,
   authMiddleware.protect,
   leadController.addLeadDiaryEntry
+);
+
+router.patch(
+  "/:leadId/diary/:entryId",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.updateLeadDiaryEntry
 );
 
 module.exports = router;

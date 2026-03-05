@@ -141,6 +141,107 @@ const normalizeLegacyStatus = (status) => {
   return cleanStatus;
 };
 
+const PAYMENT_MODES = ["Cash", "Cheque", "Bank Transfer", "UPI", "Net Banking"];
+const TRANSFER_TYPES = ["RTGS", "IMPS", "NEFT"];
+
+const sanitizeSaleMeta = (value) => {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw createHttpError(400, "saleMeta must be an object");
+  }
+
+  const leadId = sanitizeString(value.leadId);
+  if (!leadId || !isValidObjectId(leadId)) {
+    throw createHttpError(400, "Valid saleMeta.leadId is required");
+  }
+
+  const rawPaymentMode = sanitizeString(value.paymentMode);
+  const paymentMode = rawPaymentMode === "Net Banking" ? "Bank Transfer" : rawPaymentMode;
+  if (!PAYMENT_MODES.includes(paymentMode)) {
+    throw createHttpError(400, "Invalid saleMeta.paymentMode");
+  }
+
+  const totalAmount = toFiniteNumber(value.totalAmount);
+  if (totalAmount === null || totalAmount <= 0) {
+    throw createHttpError(400, "saleMeta.totalAmount must be greater than 0");
+  }
+
+  const partialAmount = toFiniteNumber(value.partialAmount);
+  if (partialAmount === null) {
+    throw createHttpError(400, "saleMeta.partialAmount is required");
+  }
+  if (partialAmount < 0 || partialAmount > totalAmount) {
+    throw createHttpError(400, "saleMeta.partialAmount must be between 0 and totalAmount");
+  }
+
+  const remainingAmount = Number((totalAmount - partialAmount).toFixed(2));
+  const paymentDate = sanitizeString(value.paymentDate);
+  const remainingDueDate = sanitizeString(value.remainingDueDate);
+  const voiceNoteUrl = sanitizeString(value.voiceNoteUrl);
+  const voiceNoteName = sanitizeString(value.voiceNoteName);
+
+  const safeSaleMeta = {
+    leadId,
+    paymentMode,
+    totalAmount,
+    partialAmount,
+    remainingAmount,
+    remainingDueDate,
+    paymentDate,
+    voiceNoteUrl,
+    voiceNoteName,
+  };
+
+  if (remainingAmount > 0 && !remainingDueDate) {
+    throw createHttpError(400, "saleMeta.remainingDueDate is required when remaining amount is pending");
+  }
+
+  if (paymentMode === "Cash" && !paymentDate) {
+    throw createHttpError(400, "saleMeta.paymentDate is required for cash payments");
+  }
+
+  if (paymentMode === "Cheque") {
+    const cheque = value.cheque || {};
+    const safeCheque = {
+      bankName: sanitizeString(cheque.bankName),
+      chequeNumber: sanitizeString(cheque.chequeNumber),
+      chequeDate: sanitizeString(cheque.chequeDate),
+    };
+    if (!safeCheque.bankName || !safeCheque.chequeNumber || !safeCheque.chequeDate) {
+      throw createHttpError(400, "Complete cheque details are required in saleMeta.cheque");
+    }
+    safeSaleMeta.cheque = safeCheque;
+  }
+
+  if (paymentMode === "Bank Transfer") {
+    const bankTransfer = value.bankTransfer || value.netBanking || {};
+    const safeBankTransfer = {
+      transferType: sanitizeString(bankTransfer.transferType).toUpperCase(),
+      utrNumber: sanitizeString(bankTransfer.utrNumber || bankTransfer.transactionId),
+    };
+    if (!safeBankTransfer.transferType || !TRANSFER_TYPES.includes(safeBankTransfer.transferType)) {
+      throw createHttpError(400, "Valid transfer type (RTGS/IMPS/NEFT) is required in saleMeta.bankTransfer");
+    }
+    if (!safeBankTransfer.utrNumber || !paymentDate) {
+      throw createHttpError(400, "UTR number and payment date are required in saleMeta.bankTransfer");
+    }
+    safeSaleMeta.bankTransfer = safeBankTransfer;
+  }
+
+  if (paymentMode === "UPI") {
+    const upi = value.upi || {};
+    const safeUpi = {
+      transactionId: sanitizeString(upi.transactionId),
+    };
+    if (!safeUpi.transactionId || !paymentDate) {
+      throw createHttpError(400, "Transaction id and payment date are required in saleMeta.upi");
+    }
+    safeSaleMeta.upi = safeUpi;
+  }
+
+  return safeSaleMeta;
+};
+
 const deriveStructuredFieldsFromTitle = (title) => {
   const cleanTitle = sanitizeString(title);
   if (!cleanTitle) return {};
@@ -244,7 +345,16 @@ const resolveDirectCreateTeamId = async ({ user, payload, companyId }) => {
   }
 
   if (user.role !== USER_ROLES.ADMIN) {
-    throw createHttpError(400, "teamId is required");
+    const derivedTeamId = getTeamIdForUser(user);
+    if (!derivedTeamId) {
+      throw createHttpError(400, "teamId is required");
+    }
+
+    await ensureManagerExistsInCompany({
+      managerId: derivedTeamId,
+      companyId,
+    });
+    return derivedTeamId;
   }
 
   const manager = await User.findOne({
@@ -319,6 +429,39 @@ const sanitizeInventoryPayload = ({
       return;
     }
 
+    if (field === "type") {
+      const cleanValue = sanitizeString(value);
+      if (!["Sale", "Rent"].includes(cleanValue)) {
+        throw createHttpError(400, "type must be Sale or Rent");
+      }
+      safePayload[field] = cleanValue;
+      return;
+    }
+
+    if (field === "category") {
+      const cleanValue = sanitizeString(value);
+      if (!cleanValue) {
+        throw createHttpError(400, "category must be a non-empty string");
+      }
+      safePayload[field] = cleanValue;
+      return;
+    }
+
+    if (field === "description") {
+      safePayload[field] = sanitizeString(value);
+      return;
+    }
+
+    if (field === "amenities") {
+      if (!Array.isArray(value)) {
+        throw createHttpError(400, "amenities must be an array");
+      }
+      safePayload[field] = [...new Set(
+        value.map((item) => sanitizeString(item)).filter(Boolean),
+      )];
+      return;
+    }
+
     if (field === "price") {
       const parsedPrice = sanitizePrice(value);
       if (parsedPrice === null) {
@@ -334,6 +477,11 @@ const sanitizeInventoryPayload = ({
         throw createHttpError(400, "Invalid inventory status");
       }
       safePayload[field] = cleanStatus;
+      return;
+    }
+
+    if (field === "saleMeta") {
+      safePayload[field] = sanitizeSaleMeta(value);
       return;
     }
 
@@ -356,6 +504,10 @@ const sanitizeInventoryPayload = ({
 
   if (mode === "update" && Object.keys(safePayload).length === 0) {
     throw createHttpError(400, "At least one valid field is required for update");
+  }
+
+  if (safePayload.status === "Sold" && !safePayload.saleMeta) {
+    throw createHttpError(400, "saleMeta is required when status is Sold");
   }
 
   return safePayload;
@@ -487,8 +639,8 @@ const getInventoryById = async ({ user, inventoryId }) => {
 };
 
 const createInventoryDirect = async ({ user, payload }) => {
-  if (user.role !== USER_ROLES.ADMIN) {
-    throw createHttpError(403, "Only ADMIN can create inventory directly");
+  if (![USER_ROLES.ADMIN, USER_ROLES.EXECUTIVE].includes(user.role)) {
+    throw createHttpError(403, "Only ADMIN/EXECUTIVE can create inventory directly");
   }
 
   const companyId = getCompanyIdForUser(user);
@@ -679,8 +831,8 @@ const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
 };
 
 const createInventoryCreateRequest = async ({ user, payload, io }) => {
-  if (user.role !== USER_ROLES.FIELD_EXECUTIVE) {
-    throw createHttpError(403, "Only FIELD_EXECUTIVE can submit create requests");
+  if (![USER_ROLES.FIELD_EXECUTIVE, USER_ROLES.EXECUTIVE].includes(user.role)) {
+    throw createHttpError(403, "Only FIELD_EXECUTIVE/EXECUTIVE can submit create requests");
   }
 
   const companyId = getCompanyIdForUser(user);
@@ -717,11 +869,11 @@ const createInventoryCreateRequest = async ({ user, payload, io }) => {
   return applyRequestPopulates(InventoryRequest.findById(request._id));
 };
 
-const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) => {
-  if (user.role !== USER_ROLES.FIELD_EXECUTIVE) {
+const createInventoryUpdateRequest = async ({ user, inventoryId, payload, requestNote, io }) => {
+  if (![USER_ROLES.FIELD_EXECUTIVE, USER_ROLES.EXECUTIVE].includes(user.role)) {
     throw createHttpError(
       403,
-      "Only FIELD_EXECUTIVE can submit update requests",
+      "Only FIELD_EXECUTIVE/EXECUTIVE can submit update requests",
     );
   }
 
@@ -735,7 +887,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     companyId,
   })
     .select(
-      "_id projectName towerName unitNumber price status location siteLocation images documents",
+      "_id projectName towerName unitNumber price status saleMeta location siteLocation images documents",
     )
     .lean();
 
@@ -777,6 +929,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     inventoryId: inventory._id,
     type: "update",
     proposedData: newValue,
+    requestNote: sanitizeString(requestNote),
     status: REQUEST_STATUS_PENDING,
     teamId: teamId || null,
   });

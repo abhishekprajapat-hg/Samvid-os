@@ -27,6 +27,12 @@ const inventoryRequestSchema = new mongoose.Schema(
       required: true,
       default: {},
     },
+    requestNote: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 500,
+    },
     // Legacy field kept for backward compatibility.
     proposedChanges: {
       type: mongoose.Schema.Types.Mixed,
