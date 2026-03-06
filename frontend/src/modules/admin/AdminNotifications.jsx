@@ -6,9 +6,11 @@ import {
   CircleDollarSign,
   CheckCircle2,
   Clock3,
+  FileText,
   Loader,
   RefreshCw,
   Search,
+  UserRound,
   XCircle,
 } from "lucide-react";
 import { getLeadPaymentRequests, updateLeadStatus } from "../../services/leadService";
@@ -106,6 +108,58 @@ const getInventoryUnitLabel = (inventoryLike = {}) =>
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(" - ");
+
+const toObjectIdString = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value._id) return String(value._id);
+  return String(value);
+};
+
+const formatRoleLabel = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .split("_")
+    .map((chunk) => chunk.charAt(0).toUpperCase() + chunk.slice(1))
+    .join(" ");
+
+const formatUserWithRole = (userLike) => {
+  if (!userLike) return "-";
+  if (typeof userLike === "string") return userLike;
+  const name = String(userLike?.name || "").trim();
+  const role = formatRoleLabel(userLike?.role);
+  if (!name && !role) return "-";
+  if (!role) return name || "-";
+  if (!name) return role;
+  return `${name} (${role})`;
+};
+
+const getUserContactField = (userLike, field) => {
+  if (!userLike || typeof userLike !== "object") return "";
+  return String(userLike?.[field] || "").trim();
+};
+
+const isSoldInventoryStatus = (value) =>
+  String(value || "").trim().toLowerCase() === "sold";
+
+const getLeadPropertyRows = (lead = {}) => {
+  const rows = [];
+  const dedupe = new Set();
+
+  const pushInventory = (inventoryLike) => {
+    const inventoryId = toObjectIdString(inventoryLike);
+    if (!inventoryId || dedupe.has(inventoryId)) return;
+    dedupe.add(inventoryId);
+    rows.push(inventoryLike);
+  };
+
+  pushInventory(lead?.inventoryId);
+  if (Array.isArray(lead?.relatedInventoryIds)) {
+    lead.relatedInventoryIds.forEach((inventoryLike) => pushInventory(inventoryLike));
+  }
+
+  return rows;
+};
 
 const formatCoordinates = (siteLocation = {}) => {
   const lat = Number(siteLocation?.lat);
@@ -239,6 +293,18 @@ const AdminNotifications = () => {
       const phone = String(lead?.phone || "").toLowerCase();
       const project = String(lead?.projectInterested || "").toLowerCase();
       const requestedBy = String(lead?.dealPayment?.approvalRequestedBy?.name || "").toLowerCase();
+      const assignedTo = String(lead?.assignedTo?.name || "").toLowerCase();
+      const assignedManager = String(lead?.assignedManager?.name || "").toLowerCase();
+      const assignedExecutive = String(lead?.assignedExecutive?.name || "").toLowerCase();
+      const assignedFieldExecutive = String(lead?.assignedFieldExecutive?.name || "").toLowerCase();
+      const closureDocs = Array.isArray(lead?.closureDocuments) ? lead.closureDocuments : [];
+      const closureDocNames = closureDocs
+        .map((doc) => String(doc?.name || doc?.url || "").toLowerCase())
+        .join(" ");
+      const propertyNames = getLeadPropertyRows(lead)
+        .map((inventoryLike) => getInventoryUnitLabel(inventoryLike))
+        .join(" ")
+        .toLowerCase();
 
       const searchableText = [
         approvalStatus,
@@ -250,6 +316,12 @@ const AdminNotifications = () => {
         phone,
         project,
         requestedBy,
+        assignedTo,
+        assignedManager,
+        assignedExecutive,
+        assignedFieldExecutive,
+        closureDocNames,
+        propertyNames,
       ].join(" ");
 
       return searchableText.includes(normalizedQuery);
@@ -512,7 +584,7 @@ const AdminNotifications = () => {
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by lead, phone, project, payment ref, requester..."
+              placeholder="Search by lead, property, docs, executive, payment ref..."
               className={`h-10 w-full rounded-lg border pl-9 pr-3 text-sm ${
                 isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-300 bg-white text-slate-700"
               }`}
@@ -670,6 +742,18 @@ const AdminNotifications = () => {
                 const approvalStatus = String(lead?.dealPayment?.approvalStatus || "PENDING").toUpperCase();
                 const isPendingApproval = approvalStatus === "PENDING";
                 const isReviewingLead = reviewingLeadId === String(lead?._id || "");
+                const closureDocuments = Array.isArray(lead?.closureDocuments) ? lead.closureDocuments : [];
+                const propertyRows = getLeadPropertyRows(lead);
+                const soldProperties = propertyRows.filter((inventoryLike) =>
+                  isSoldInventoryStatus(inventoryLike?.status));
+                const primaryProperty = propertyRows[0] || null;
+                const executiveDetails = [
+                  { label: "Assigned To", user: lead?.assignedTo },
+                  { label: "Manager", user: lead?.assignedManager },
+                  { label: "Executive", user: lead?.assignedExecutive },
+                  { label: "Field Executive", user: lead?.assignedFieldExecutive },
+                  { label: "Created By", user: lead?.createdBy },
+                ];
                 return (
                   <div key={lead._id} className={`rounded-xl border p-3 ${
                     isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
@@ -696,6 +780,137 @@ const AdminNotifications = () => {
                       <div className="col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Reference:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{lead?.dealPayment?.paymentReference || "-"}</span></div>
                       <div className="col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Requested By:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{lead?.dealPayment?.approvalRequestedBy?.name || "-"}</span></div>
                       <div className="col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Admin Note:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{lead?.dealPayment?.approvalNote || "-"}</span></div>
+                    </div>
+
+                    <div className={`mt-2 rounded-lg border p-2 ${
+                      isDark ? "border-slate-700 bg-slate-900/65" : "border-slate-200 bg-white"
+                    }`}>
+                      <div className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}>
+                        <Building2 size={11} />
+                        Sold Property Details
+                      </div>
+                      <div className="mt-1 space-y-1 text-[11px]">
+                        <div>
+                          <span className={isDark ? "text-slate-400" : "text-slate-500"}>Primary Property:</span>{" "}
+                          <span className={isDark ? "text-slate-200" : "text-slate-700"}>
+                            {primaryProperty ? getInventoryUnitLabel(primaryProperty) || "-" : "-"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className={isDark ? "text-slate-400" : "text-slate-500"}>Primary Status:</span>{" "}
+                          <span className={isDark ? "text-slate-200" : "text-slate-700"}>
+                            {formatInventoryStatusLabel(primaryProperty?.status)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className={isDark ? "text-slate-400" : "text-slate-500"}>Sold Properties:</span>{" "}
+                          <span className={isDark ? "text-slate-200" : "text-slate-700"}>
+                            {soldProperties.length}
+                          </span>
+                        </div>
+                        {soldProperties.length > 0 ? (
+                          <div className="space-y-1">
+                            {soldProperties.map((inventoryLike) => (
+                              <div
+                                key={toObjectIdString(inventoryLike)}
+                                className={`rounded border px-2 py-1 ${
+                                  isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
+                                }`}
+                              >
+                                <div className={isDark ? "text-slate-100" : "text-slate-800"}>
+                                  {getInventoryUnitLabel(inventoryLike) || "-"}
+                                </div>
+                                <div className={isDark ? "text-slate-400" : "text-slate-500"}>
+                                  {inventoryLike?.location || "-"} | {formatAmount(inventoryLike?.price)}
+                                </div>
+                                <div className={isDark ? "text-slate-400" : "text-slate-500"}>
+                                  {Array.isArray(inventoryLike?.images) ? inventoryLike.images.length : 0} images
+                                  {" | "}
+                                  {Array.isArray(inventoryLike?.documents) ? inventoryLike.documents.length : 0} docs
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className={`mt-2 rounded-lg border p-2 ${
+                      isDark ? "border-slate-700 bg-slate-900/65" : "border-slate-200 bg-white"
+                    }`}>
+                      <div className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}>
+                        <UserRound size={11} />
+                        Executive Details
+                      </div>
+                      <div className="mt-1 grid grid-cols-1 gap-1 text-[11px] sm:grid-cols-2">
+                        {executiveDetails.map((detail) => (
+                          <div
+                            key={`${lead._id}:${detail.label}`}
+                            className={`rounded border px-2 py-1 ${
+                              isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
+                            }`}
+                          >
+                            <div>
+                              <span className={isDark ? "text-slate-400" : "text-slate-500"}>{detail.label}:</span>{" "}
+                              <span className={isDark ? "text-slate-200" : "text-slate-700"}>
+                                {formatUserWithRole(detail.user)}
+                              </span>
+                            </div>
+                            <div className={isDark ? "text-slate-400" : "text-slate-500"}>
+                              Phone: {getUserContactField(detail.user, "phone") || "-"}
+                            </div>
+                            <div className={isDark ? "text-slate-400" : "text-slate-500"}>
+                              Email: {getUserContactField(detail.user, "email") || "-"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className={`mt-2 rounded-lg border p-2 ${
+                      isDark ? "border-slate-700 bg-slate-900/65" : "border-slate-200 bg-white"
+                    }`}>
+                      <div className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                        isDark ? "text-slate-400" : "text-slate-500"
+                      }`}>
+                        <FileText size={11} />
+                        Submitted Documents ({closureDocuments.length})
+                      </div>
+                      {closureDocuments.length === 0 ? (
+                        <div className={`mt-1 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          No documents submitted yet.
+                        </div>
+                      ) : (
+                        <div className="mt-1 space-y-1">
+                          {closureDocuments.map((doc, index) => (
+                            <a
+                              key={`${lead._id}:${doc?.url || index}`}
+                              href={doc?.url || "#"}
+                              target="_blank"
+                              rel="noreferrer"
+                              className={`block rounded border px-2 py-1 text-[11px] ${
+                                isDark
+                                  ? "border-slate-700 bg-slate-950/70 text-cyan-200 hover:border-cyan-300/40"
+                                  : "border-slate-200 bg-slate-50 text-cyan-700 hover:border-cyan-300"
+                              }`}
+                            >
+                              <div className="font-semibold">
+                                {doc?.name || `Document ${index + 1}`}
+                              </div>
+                              <div className={isDark ? "text-slate-400" : "text-slate-500"}>
+                                {String(doc?.kind || "file").toUpperCase()} | {formatDate(doc?.uploadedAt)}
+                              </div>
+                              <div className={isDark ? "text-slate-400" : "text-slate-500"}>
+                                Uploaded By: {formatUserWithRole(doc?.uploadedBy)}
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -744,6 +959,17 @@ const AdminNotifications = () => {
                           }`}
                         >
                           Open Lead Matrix
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/leads/${lead._id}`)}
+                          className={`h-7 rounded-lg border px-2 text-[10px] font-semibold ${
+                            isDark
+                              ? "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-300/40"
+                              : "border-slate-300 bg-white text-slate-700 hover:border-cyan-300"
+                          }`}
+                        >
+                          Open Lead Details
                         </button>
                       </div>
                     </div>

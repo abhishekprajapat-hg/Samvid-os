@@ -45,6 +45,16 @@ export const deleteUser = async (userId) => {
   return res.data;
 };
 
+export const updateUserDesignation = async (userId, payload = {}) => {
+  const res = await api.patch(`/users/${userId}/designation`, payload);
+  return res.data?.user || null;
+};
+
+export const updateUserByAdmin = async (userId, payload = {}) => {
+  const res = await api.patch(`/users/${userId}`, payload);
+  return res.data?.user || null;
+};
+
 export const updateChannelPartnerInventoryAccess = async (userId, canViewInventory) => {
   const res = await api.patch(
     `/users/${userId}/channel-partner/inventory-access`,

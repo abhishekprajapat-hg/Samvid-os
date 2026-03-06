@@ -41,13 +41,13 @@ router.get(
 );
 
 // ======================================
-// ASSIGN LEAD (Admin only)
+// ASSIGN LEAD (Admin + Leadership roles)
 // ======================================
 router.patch(
   "/:leadId/assign",
   writeLimiter,
   authMiddleware.protect,
-  authMiddleware.checkRole(["ADMIN"]),
+  authMiddleware.checkRole(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]),
   leadController.assignLead
 );
 

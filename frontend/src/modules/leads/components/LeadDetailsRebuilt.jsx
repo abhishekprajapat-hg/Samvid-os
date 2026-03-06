@@ -75,6 +75,66 @@ const INITIAL_PROPOSAL_OPTIONS_RENDER_COUNT = 24;
 const INITIAL_DIARY_RENDER_COUNT = 20;
 const INITIAL_ACTIVITY_RENDER_COUNT = 20;
 const RENDER_STEP_COUNT = 20;
+const CLOUDINARY_CLOUD_NAME = "djfiq8kiy";
+const CLOUDINARY_UPLOAD_PRESET = "samvid_upload";
+const MAX_CLOSURE_DOCUMENTS = 20;
+const MAX_CLOSURE_FILE_SIZE_BYTES = 25 * 1024 * 1024;
+const CLOSURE_DOCUMENT_ACCEPT = "image/*,application/pdf";
+
+const detectClosureDocumentKind = (mimeType = "") => {
+  const normalizedMimeType = String(mimeType || "").trim().toLowerCase();
+  if (normalizedMimeType.startsWith("image/")) return "image";
+  if (normalizedMimeType === "application/pdf") return "pdf";
+  return "file";
+};
+
+const sanitizeClosureDocument = (value = {}) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const url = String(value.url || value.secure_url || "").trim();
+  if (!url) return null;
+
+  const mimeType = String(value.mimeType || value.type || "").trim().slice(0, 120);
+  const normalizedKind = String(value.kind || "").trim().toLowerCase();
+  const fallbackKind = detectClosureDocumentKind(mimeType);
+
+  return {
+    url: url.slice(0, 2048),
+    kind: ["image", "pdf", "file"].includes(normalizedKind) ? normalizedKind : fallbackKind,
+    mimeType,
+    name: String(value.name || value.original_filename || "").trim().slice(0, 180),
+    size: Math.max(0, Math.round(Number(value.size) || 0)),
+    uploadedAt: value.uploadedAt || new Date().toISOString(),
+    uploadedBy: value.uploadedBy || null,
+  };
+};
+
+const sanitizeClosureDocumentList = (value) => {
+  if (!Array.isArray(value)) return [];
+  const dedupe = new Set();
+  const rows = [];
+
+  value.forEach((item) => {
+    const doc = sanitizeClosureDocument(item);
+    if (!doc || dedupe.has(doc.url)) return;
+    dedupe.add(doc.url);
+    rows.push(doc);
+  });
+
+  return rows.slice(0, MAX_CLOSURE_DOCUMENTS);
+};
+
+const formatFileSize = (size) => {
+  const bytes = Number(size);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${kb.toFixed(kb >= 100 ? 0 : 1)} KB`;
+  const mb = kb / 1024;
+  return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
+};
 
 const blobToDataUrl = (blob) =>
   new Promise((resolve, reject) => {
@@ -204,6 +264,8 @@ const LeadDetailsRebuiltContent = ({
   setPaymentApprovalStatusDraft,
   paymentApprovalNoteDraft,
   setPaymentApprovalNoteDraft,
+  closureDocumentsDraft,
+  setClosureDocumentsDraft,
   canReviewDealPayment,
   siteLatDraft,
   setSiteLatDraft,
@@ -254,11 +316,20 @@ const LeadDetailsRebuiltContent = ({
   ).toUpperCase();
   const showRemainingAmountField = paymentTypeDraft === "PARTIAL";
   const requiresPaymentReference = Boolean(paymentModeDraft) && paymentModeDraft !== "CASH";
+  const isClosedStatusSelected =
+    statusDraft === "CLOSED" || String(selectedLead?.status || "").toUpperCase() === "CLOSED";
   const normalizedActiveInventoryId = String(selectedLeadActiveInventoryId || "").trim();
   const proposalShareBaseWhatsappHref = String(selectedLeadWhatsAppHref || "").trim();
+  const normalizedClosureDocuments = React.useMemo(
+    () => sanitizeClosureDocumentList(closureDocumentsDraft),
+    [closureDocumentsDraft],
+  );
+  const remainingClosureSlots = Math.max(0, MAX_CLOSURE_DOCUMENTS - normalizedClosureDocuments.length);
   const [proposalValidityDays, setProposalValidityDays] = React.useState("7");
   const [proposalSpecialNote, setProposalSpecialNote] = React.useState("");
   const [proposalActionMessage, setProposalActionMessage] = React.useState("");
+  const [closureUploadMessage, setClosureUploadMessage] = React.useState("");
+  const [uploadingClosureDocuments, setUploadingClosureDocuments] = React.useState(false);
   const [proposalSelectedPropertyIds, setProposalSelectedPropertyIds] = React.useState([]);
   const [isGeneratingProposalPdf, setIsGeneratingProposalPdf] = React.useState(false);
   const [visiblePropertiesCount, setVisiblePropertiesCount] = React.useState(INITIAL_PROPERTIES_RENDER_COUNT);
@@ -323,6 +394,8 @@ const LeadDetailsRebuiltContent = ({
     setProposalSpecialNote("");
     setProposalActionMessage("");
     setIsGeneratingProposalPdf(false);
+    setClosureUploadMessage("");
+    setUploadingClosureDocuments(false);
     setVisiblePropertiesCount(INITIAL_PROPERTIES_RENDER_COUNT);
     setVisibleProposalOptionsCount(INITIAL_PROPOSAL_OPTIONS_RENDER_COUNT);
     setVisibleDiaryCount(INITIAL_DIARY_RENDER_COUNT);
@@ -370,6 +443,127 @@ const LeadDetailsRebuiltContent = ({
       proposalMessageTimerRef.current = null;
     }, 2200);
   }, []);
+
+  const uploadClosureDocumentFile = React.useCallback(async (file) => {
+    const data = new FormData();
+    data.append("file", file);
+    data.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
+    data.append("cloud_name", CLOUDINARY_CLOUD_NAME);
+
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
+      {
+        method: "POST",
+        body: data,
+      },
+    );
+
+    const payload = await response.json();
+    if (!response.ok || !payload?.secure_url) {
+      throw new Error(payload?.error?.message || "Failed to upload document");
+    }
+
+    const uploaded = sanitizeClosureDocument({
+      url: payload.secure_url,
+      mimeType: file.type,
+      name: file.name,
+      size: file.size,
+      kind: detectClosureDocumentKind(file.type),
+    });
+
+    if (!uploaded) {
+      throw new Error("Invalid upload response");
+    }
+
+    return uploaded;
+  }, []);
+
+  const handleClosureDocumentsInput = React.useCallback(async (event) => {
+    const selectedFiles = Array.from(event?.target?.files || []);
+    if (event?.target) {
+      event.target.value = "";
+    }
+    if (!selectedFiles.length) return;
+
+    if (remainingClosureSlots <= 0) {
+      setClosureUploadMessage(`Only ${MAX_CLOSURE_DOCUMENTS} documents are allowed`);
+      return;
+    }
+
+    const allowedFiles = selectedFiles.slice(0, remainingClosureSlots);
+    const validFiles = [];
+    const skippedNames = [];
+
+    allowedFiles.forEach((file) => {
+      const mimeType = String(file?.type || "").trim().toLowerCase();
+      const isAllowedType = mimeType.startsWith("image/") || mimeType === "application/pdf";
+      if (!isAllowedType) {
+        skippedNames.push(file?.name || "Unknown file");
+        return;
+      }
+      if ((Number(file?.size) || 0) > MAX_CLOSURE_FILE_SIZE_BYTES) {
+        skippedNames.push(file?.name || "Unknown file");
+        return;
+      }
+      validFiles.push(file);
+    });
+
+    if (!validFiles.length) {
+      setClosureUploadMessage("Please select JPG/PNG/WebP images or PDF files (max 25MB each)");
+      return;
+    }
+
+    setUploadingClosureDocuments(true);
+    setClosureUploadMessage("Uploading documents...");
+
+    const uploadedRows = [];
+    const failedNames = [];
+
+    for (const file of validFiles) {
+      try {
+        const uploaded = await uploadClosureDocumentFile(file);
+        uploadedRows.push(uploaded);
+      } catch {
+        failedNames.push(file.name || "Unknown file");
+      }
+    }
+
+    if (uploadedRows.length > 0) {
+      setClosureDocumentsDraft((previous) => {
+        const merged = sanitizeClosureDocumentList([
+          ...(Array.isArray(previous) ? previous : []),
+          ...uploadedRows,
+        ]);
+        return merged;
+      });
+    }
+
+    setUploadingClosureDocuments(false);
+
+    const uploadedCount = uploadedRows.length;
+    if (uploadedCount > 0 && failedNames.length === 0 && skippedNames.length === 0) {
+      setClosureUploadMessage(`${uploadedCount} document${uploadedCount === 1 ? "" : "s"} uploaded`);
+      return;
+    }
+
+    const messageParts = [];
+    if (uploadedCount > 0) {
+      messageParts.push(`${uploadedCount} uploaded`);
+    }
+    const rejectedCount = failedNames.length + skippedNames.length;
+    if (rejectedCount > 0) {
+      messageParts.push(`${rejectedCount} skipped`);
+    }
+    setClosureUploadMessage(messageParts.join(", "));
+  }, [remainingClosureSlots, setClosureDocumentsDraft, uploadClosureDocumentFile]);
+
+  const handleRemoveClosureDocument = React.useCallback((urlToRemove) => {
+    setClosureDocumentsDraft((previous) => sanitizeClosureDocumentList(
+      (Array.isArray(previous) ? previous : []).filter(
+        (row) => String(row?.url || "") !== String(urlToRemove || ""),
+      ),
+    ));
+  }, [setClosureDocumentsDraft]);
 
   const selectedProposalPropertyIdSet = React.useMemo(
     () => new Set(proposalSelectedPropertyIds),
@@ -1524,6 +1718,67 @@ const LeadDetailsRebuiltContent = ({
           <section className={`rounded-2xl border p-3 ${card}`}>
             <div className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>Lead Controls</div>
             <div className="mt-2">
+              <label className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                <CalendarClock size={12} /> Next Follow-up
+              </label>
+              <input type="datetime-local" value={followUpDraft} onChange={(event) => setFollowUpDraft(event.target.value)} className={`mt-1 h-10 w-full rounded-xl border px-3 text-sm ${input}`} />
+            </div>
+
+            <div className={`mt-3 rounded-xl border p-3 ${softCard}`}>
+              <div className={`mb-2 text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>Lead Diary</div>
+              <textarea
+                value={diaryDraft}
+                onChange={(event) => setDiaryDraft(event.target.value)}
+                placeholder="Add conversation notes, visit details, objections, or next steps..."
+                className={`min-h-[120px] w-full resize-y rounded-xl border px-3 py-2 text-sm ${input}`}
+                maxLength={2000}
+              />
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <div className={`text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>{diaryDraft.length}/2000</div>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={onDiaryVoiceToggle} disabled={savingDiary || !isDiaryMicSupported} className={`inline-flex h-9 items-center gap-1 rounded-lg border px-3 text-xs font-semibold disabled:opacity-60 ${button}`}>
+                    {isDiaryListening ? <MicOff size={13} /> : <Mic size={13} />} {isDiaryListening ? "Stop Mic" : "Voice"}
+                  </button>
+                  <button type="button" onClick={onAddDiary} disabled={savingDiary || !diaryDraft.trim()} className={`inline-flex h-9 items-center gap-1 rounded-lg px-3 text-xs font-semibold text-white disabled:opacity-60 ${primaryBtn}`}>
+                    {savingDiary ? <Loader size={13} className="animate-spin" /> : <Save size={13} />} Add Note
+                  </button>
+                </div>
+              </div>
+              {!isDiaryMicSupported ? (
+                <div className={`mt-2 text-[10px] ${isDark ? "text-amber-200" : "text-amber-700"}`}>Voice input not supported in this browser.</div>
+              ) : null}
+              <div className="mt-3">
+                {diaryLoading ? (
+                  <div className={`flex h-16 items-center justify-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    <Loader size={14} className="animate-spin" /> Loading diary...
+                  </div>
+                ) : normalizedDiaryEntries.length === 0 ? (
+                  <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>No diary notes yet</div>
+                ) : (
+                  <div className="space-y-2">
+                    {visibleDiaryEntries.map((entry) => (
+                      <div key={entry._id} className={`rounded-lg border p-2 ${softCard}`}>
+                        <div className={`whitespace-pre-wrap break-words text-sm ${isDark ? "text-slate-100" : "text-slate-800"}`}>{entry.note}</div>
+                        <div className={`mt-1 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {formatDate(entry.createdAt)}{entry.createdBy?.name ? ` - ${entry.createdBy.name}` : ""}
+                        </div>
+                      </div>
+                    ))}
+                    {hasMoreDiaryEntries ? (
+                      <button
+                        type="button"
+                        onClick={() => setVisibleDiaryCount((previous) => previous + RENDER_STEP_COUNT)}
+                        className={`h-8 rounded-lg border px-3 text-[11px] font-semibold ${button}`}
+                      >
+                        Show More Notes ({normalizedDiaryEntries.length - visibleDiaryEntries.length} left)
+                      </button>
+                    ) : null}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-3">
               <label className={`text-[10px] uppercase tracking-wider font-bold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Status</label>
               <select value={statusDraft} onChange={(event) => setStatusDraft(event.target.value)} className={`mt-1 h-10 w-full rounded-xl border px-3 text-sm ${input}`}>
                 {leadStatuses.map((status) => (
@@ -1533,12 +1788,86 @@ const LeadDetailsRebuiltContent = ({
                 ))}
               </select>
             </div>
-            <div className="mt-2">
-              <label className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <CalendarClock size={12} /> Next Follow-up
-              </label>
-              <input type="datetime-local" value={followUpDraft} onChange={(event) => setFollowUpDraft(event.target.value)} className={`mt-1 h-10 w-full rounded-xl border px-3 text-sm ${input}`} />
-            </div>
+
+            {isClosedStatusSelected ? (
+              <div className={`mt-3 rounded-xl border p-3 space-y-3 ${softCard}`}>
+                <div className={`flex items-center justify-between gap-2 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                  <div className={`text-[10px] uppercase tracking-wider font-bold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Document Submission</div>
+                  <div className="text-[10px]">
+                    {normalizedClosureDocuments.length}/{MAX_CLOSURE_DOCUMENTS}
+                  </div>
+                </div>
+                <div className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Upload closing proof documents (photos or PDF).
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label
+                    className={`inline-flex h-9 cursor-pointer items-center gap-1 rounded-lg border px-3 text-xs font-semibold ${
+                      uploadingClosureDocuments || remainingClosureSlots <= 0 ? `${input} cursor-not-allowed opacity-60` : button
+                    }`}
+                  >
+                    {uploadingClosureDocuments ? <Loader size={12} className="animate-spin" /> : <Plus size={12} />}
+                    {uploadingClosureDocuments ? "Uploading..." : "Add Photos / PDFs"}
+                    <input
+                      type="file"
+                      accept={CLOSURE_DOCUMENT_ACCEPT}
+                      multiple
+                      disabled={uploadingClosureDocuments || remainingClosureSlots <= 0}
+                      onChange={handleClosureDocumentsInput}
+                      className="hidden"
+                    />
+                  </label>
+                  <div className={`text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Max file size: 25MB each
+                  </div>
+                </div>
+                {closureUploadMessage ? (
+                  <div className={`text-[11px] font-semibold ${isDark ? "text-emerald-200" : "text-emerald-700"}`}>
+                    {closureUploadMessage}
+                  </div>
+                ) : null}
+
+                {normalizedClosureDocuments.length === 0 ? (
+                  <div className={`rounded-lg border px-3 py-2 text-xs ${isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500"}`}>
+                    No documents uploaded yet
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {normalizedClosureDocuments.map((doc, index) => (
+                      <div key={doc.url || `${doc.name}-${index}`} className={`flex items-center justify-between gap-2 rounded-lg border px-2 py-2 ${input}`}>
+                        <div className="min-w-0">
+                          <div className={`truncate text-xs font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                            {doc.name || `Document ${index + 1}`}
+                          </div>
+                          <div className={`text-[10px] uppercase tracking-wide ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                            {doc.kind || "file"} - {formatFileSize(doc.size)}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <a
+                            href={doc.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${button}`}
+                            title="View document"
+                          >
+                            <Eye size={13} />
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveClosureDocument(doc.url)}
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${button}`}
+                            title="Remove document"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             {isClosedDealFlow ? (
               <div className={`mt-3 rounded-xl border p-3 space-y-3 ${softCard}`}>
@@ -1611,60 +1940,6 @@ const LeadDetailsRebuiltContent = ({
             <button type="button" onClick={onUpdateLead} disabled={savingUpdates} className={`mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60 ${primaryBtn}`}>
               {savingUpdates ? <Loader size={14} className="animate-spin" /> : <Save size={14} />} Save Lead Update
             </button>
-          </section>
-
-          <section className={`rounded-2xl border p-3 ${card}`}>
-            <div className={`mb-2 text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>Lead Diary</div>
-            <textarea
-              value={diaryDraft}
-              onChange={(event) => setDiaryDraft(event.target.value)}
-              placeholder="Add conversation notes, visit details, objections, or next steps..."
-              className={`min-h-[120px] w-full resize-y rounded-xl border px-3 py-2 text-sm ${input}`}
-              maxLength={2000}
-            />
-            <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-              <div className={`text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>{diaryDraft.length}/2000</div>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={onDiaryVoiceToggle} disabled={savingDiary || !isDiaryMicSupported} className={`inline-flex h-9 items-center gap-1 rounded-lg border px-3 text-xs font-semibold disabled:opacity-60 ${button}`}>
-                  {isDiaryListening ? <MicOff size={13} /> : <Mic size={13} />} {isDiaryListening ? "Stop Mic" : "Voice"}
-                </button>
-                <button type="button" onClick={onAddDiary} disabled={savingDiary || !diaryDraft.trim()} className={`inline-flex h-9 items-center gap-1 rounded-lg px-3 text-xs font-semibold text-white disabled:opacity-60 ${primaryBtn}`}>
-                  {savingDiary ? <Loader size={13} className="animate-spin" /> : <Save size={13} />} Add Note
-                </button>
-              </div>
-            </div>
-            {!isDiaryMicSupported ? (
-              <div className={`mt-2 text-[10px] ${isDark ? "text-amber-200" : "text-amber-700"}`}>Voice input not supported in this browser.</div>
-            ) : null}
-            <div className="mt-3">
-              {diaryLoading ? (
-                <div className={`flex h-16 items-center justify-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  <Loader size={14} className="animate-spin" /> Loading diary...
-                </div>
-              ) : normalizedDiaryEntries.length === 0 ? (
-                <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>No diary notes yet</div>
-              ) : (
-                <div className="space-y-2">
-                  {visibleDiaryEntries.map((entry) => (
-                    <div key={entry._id} className={`rounded-lg border p-2 ${softCard}`}>
-                      <div className={`whitespace-pre-wrap break-words text-sm ${isDark ? "text-slate-100" : "text-slate-800"}`}>{entry.note}</div>
-                      <div className={`mt-1 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        {formatDate(entry.createdAt)}{entry.createdBy?.name ? ` - ${entry.createdBy.name}` : ""}
-                      </div>
-                    </div>
-                  ))}
-                  {hasMoreDiaryEntries ? (
-                    <button
-                      type="button"
-                      onClick={() => setVisibleDiaryCount((previous) => previous + RENDER_STEP_COUNT)}
-                      className={`h-8 rounded-lg border px-3 text-[11px] font-semibold ${button}`}
-                    >
-                      Show More Notes ({normalizedDiaryEntries.length - visibleDiaryEntries.length} left)
-                    </button>
-                  ) : null}
-                </div>
-              )}
-            </div>
           </section>
 
           <section

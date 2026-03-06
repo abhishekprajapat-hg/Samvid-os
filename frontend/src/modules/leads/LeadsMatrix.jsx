@@ -70,6 +70,7 @@ const INVENTORY_STATUS_OPTIONS = [
 ];
 const INVENTORY_STATUS_REQUEST_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
 const MAX_PAYMENT_NOTE_LENGTH = 1000;
+const MAX_CLOSURE_DOCUMENTS = 20;
 
 const defaultFormData = {
   inventoryId: "",
@@ -93,6 +94,49 @@ const toObjectIdString = (value) => {
   if (typeof value === "string") return value;
   if (typeof value === "object" && value._id) return String(value._id);
   return String(value);
+};
+
+const sanitizeClosureDocument = (value = {}) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const url = String(value.url || value.secure_url || "").trim();
+  if (!url) return null;
+
+  const mimeType = String(value.mimeType || value.type || "").trim();
+  const normalizedKind = String(value.kind || "").trim().toLowerCase();
+  const derivedKind = mimeType.startsWith("image/")
+    ? "image"
+    : mimeType === "application/pdf"
+      ? "pdf"
+      : "file";
+
+  return {
+    url: url.slice(0, 2048),
+    kind: ["image", "pdf", "file"].includes(normalizedKind) ? normalizedKind : derivedKind,
+    mimeType: mimeType.slice(0, 120),
+    name: String(value.name || value.original_filename || "").trim().slice(0, 180),
+    size: Math.max(0, Math.round(Number(value.size) || 0)),
+    uploadedAt: value.uploadedAt || new Date().toISOString(),
+    uploadedBy: value.uploadedBy || null,
+  };
+};
+
+const sanitizeClosureDocumentList = (value) => {
+  if (!Array.isArray(value)) return [];
+
+  const dedupe = new Set();
+  const rows = [];
+
+  value.forEach((item) => {
+    const doc = sanitizeClosureDocument(item);
+    if (!doc || dedupe.has(doc.url)) return;
+    dedupe.add(doc.url);
+    rows.push(doc);
+  });
+
+  return rows.slice(0, MAX_CLOSURE_DOCUMENTS);
 };
 
 const getLeadRelatedInventories = (lead = {}) => {
@@ -302,6 +346,7 @@ const LeadsMatrix = () => {
   const [paymentNoteDraft, setPaymentNoteDraft] = useState("");
   const [paymentApprovalStatusDraft, setPaymentApprovalStatusDraft] = useState("");
   const [paymentApprovalNoteDraft, setPaymentApprovalNoteDraft] = useState("");
+  const [closureDocumentsDraft, setClosureDocumentsDraft] = useState([]);
 
   const [executives, setExecutives] = useState([]);
   const diaryRecognitionRef = useRef(null);
@@ -318,7 +363,7 @@ const LeadsMatrix = () => {
     userRole === "ADMIN"
     || MANAGEMENT_ROLES.includes(userRole)
     || userRole === "CHANNEL_PARTNER";
-  const canAssignLead = userRole === "ADMIN";
+  const canAssignLead = userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
   const canManageLeadProperties = userRole !== "CHANNEL_PARTNER";
   const canConfigureSiteLocation =
     userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
@@ -652,6 +697,7 @@ const LeadsMatrix = () => {
     setPaymentNoteDraft(String(lead?.dealPayment?.note || ""));
     setPaymentApprovalStatusDraft("");
     setPaymentApprovalNoteDraft(String(lead?.dealPayment?.approvalNote || ""));
+    setClosureDocumentsDraft(sanitizeClosureDocumentList(lead?.closureDocuments));
     setDiaryDraft("");
     setIsDetailsOpen(true);
 
@@ -705,6 +751,7 @@ const LeadsMatrix = () => {
     setPaymentNoteDraft("");
     setPaymentApprovalStatusDraft("");
     setPaymentApprovalNoteDraft("");
+    setClosureDocumentsDraft([]);
     if (normalizedRouteLeadId) {
       navigate(currentLeadRouteBase);
     }
@@ -781,6 +828,7 @@ const LeadsMatrix = () => {
     setPaymentNoteDraft(String(updatedLead?.dealPayment?.note || ""));
     setPaymentApprovalStatusDraft("");
     setPaymentApprovalNoteDraft(String(updatedLead?.dealPayment?.approvalNote || ""));
+    setClosureDocumentsDraft(sanitizeClosureDocumentList(updatedLead?.closureDocuments));
   };
 
   const mergeInventorySnapshotIntoLead = useCallback((leadRow, updatedInventory) => {
@@ -1061,6 +1109,10 @@ const LeadsMatrix = () => {
         if (Object.keys(dealPaymentPayload).length > 0) {
           payload.dealPayment = dealPaymentPayload;
         }
+      }
+
+      if (String(statusDraft || "").toUpperCase() === "CLOSED") {
+        payload.closureDocuments = sanitizeClosureDocumentList(closureDocumentsDraft);
       }
 
       const updatedLead = await updateLeadStatus(selectedLead._id, payload);
@@ -1593,6 +1645,8 @@ const LeadsMatrix = () => {
             setPaymentApprovalStatusDraft={setPaymentApprovalStatusDraft}
             paymentApprovalNoteDraft={paymentApprovalNoteDraft}
             setPaymentApprovalNoteDraft={setPaymentApprovalNoteDraft}
+            closureDocumentsDraft={closureDocumentsDraft}
+            setClosureDocumentsDraft={setClosureDocumentsDraft}
             canReviewDealPayment={canReviewDealPayment}
             siteLatDraft={siteLatDraft}
             setSiteLatDraft={setSiteLatDraft}

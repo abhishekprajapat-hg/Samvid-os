@@ -31,6 +31,7 @@ const LEAD_POPULATE_FIELDS = [
   { path: "createdBy", select: "name role" },
   { path: "dealPayment.approvalRequestedBy", select: "name role" },
   { path: "dealPayment.approvalReviewedBy", select: "name role" },
+  { path: "closureDocuments.uploadedBy", select: "name role" },
   {
     path: "inventoryId",
     select: "projectName towerName unitNumber location siteLocation status price type category images",
@@ -38,6 +39,25 @@ const LEAD_POPULATE_FIELDS = [
   {
     path: "relatedInventoryIds",
     select: "projectName towerName unitNumber location siteLocation status price type category images",
+  },
+];
+
+const LEAD_PAYMENT_REQUEST_POPULATE_FIELDS = [
+  { path: "assignedTo", select: "name role phone email" },
+  { path: "assignedManager", select: "name role phone email" },
+  { path: "assignedExecutive", select: "name role phone email" },
+  { path: "assignedFieldExecutive", select: "name role phone email" },
+  { path: "createdBy", select: "name role phone email" },
+  { path: "dealPayment.approvalRequestedBy", select: "name role phone email" },
+  { path: "dealPayment.approvalReviewedBy", select: "name role phone email" },
+  { path: "closureDocuments.uploadedBy", select: "name role phone email" },
+  {
+    path: "inventoryId",
+    select: "projectName towerName unitNumber location siteLocation status price type category images documents",
+  },
+  {
+    path: "relatedInventoryIds",
+    select: "projectName towerName unitNumber location siteLocation status price type category images documents",
   },
 ];
 
@@ -54,6 +74,7 @@ const LEAD_SELECTABLE_FIELDS = [
   "source",
   "status",
   "dealPayment",
+  "closureDocuments",
   "assignedTo",
   "assignedManager",
   "assignedExecutive",
@@ -116,6 +137,11 @@ const SITE_VISIT_MAX_LOCATION_STALE_MINUTES =
 const MAX_LEAD_DIARY_NOTE_LENGTH = 2000;
 const MAX_PAYMENT_NOTE_LENGTH = 1000;
 const MAX_PAYMENT_REFERENCE_LENGTH = 120;
+const MAX_CLOSURE_DOCUMENTS = 20;
+const MAX_CLOSURE_DOCUMENT_URL_LENGTH = 2048;
+const MAX_CLOSURE_DOCUMENT_NAME_LENGTH = 180;
+const MAX_CLOSURE_DOCUMENT_MIME_LENGTH = 120;
+const MAX_CLOSURE_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024;
 
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -288,6 +314,100 @@ const parseSiteLocationPayload = (rawSiteLocation) => {
 
 const normalizeEnumValue = (value) =>
   String(value || "").trim().toUpperCase();
+
+const isValidHttpUrl = (value) => /^https?:\/\//i.test(String(value || "").trim());
+
+const detectClosureDocumentKind = ({ kind, mimeType = "", url = "" } = {}) => {
+  const normalizedKind = String(kind || "").trim().toLowerCase();
+  if (["image", "pdf", "file"].includes(normalizedKind)) {
+    return normalizedKind;
+  }
+
+  const normalizedMimeType = String(mimeType || "").trim().toLowerCase();
+  if (normalizedMimeType.startsWith("image/")) return "image";
+  if (normalizedMimeType === "application/pdf") return "pdf";
+
+  const normalizedUrl = String(url || "").trim().toLowerCase();
+  if (normalizedUrl.endsWith(".pdf")) return "pdf";
+  return "file";
+};
+
+const sanitizeClosureDocument = (row = {}) => {
+  if (!row || typeof row !== "object" || Array.isArray(row)) {
+    return null;
+  }
+
+  const url = String(row.url || row.secure_url || "").trim().slice(0, MAX_CLOSURE_DOCUMENT_URL_LENGTH);
+  if (!url || !isValidHttpUrl(url)) {
+    return null;
+  }
+
+  const mimeType = String(row.mimeType || row.type || "").trim().slice(0, MAX_CLOSURE_DOCUMENT_MIME_LENGTH);
+  const name = String(row.name || row.original_filename || "").trim().slice(0, MAX_CLOSURE_DOCUMENT_NAME_LENGTH);
+  const size = Math.max(0, Math.round(Number(row.size) || 0));
+  const uploadedAt = row.uploadedAt ? new Date(row.uploadedAt) : null;
+
+  return {
+    url,
+    kind: detectClosureDocumentKind({ kind: row.kind, mimeType, url }),
+    mimeType,
+    name,
+    size,
+    uploadedAt:
+      uploadedAt && !Number.isNaN(uploadedAt.getTime())
+        ? uploadedAt
+        : new Date(),
+    uploadedBy: isValidObjectId(row.uploadedBy) ? row.uploadedBy : null,
+  };
+};
+
+const parseClosureDocumentsPayload = (rawClosureDocuments) => {
+  if (rawClosureDocuments === undefined) {
+    return { provided: false };
+  }
+
+  if (rawClosureDocuments === null) {
+    return {
+      provided: true,
+      value: [],
+    };
+  }
+
+  if (!Array.isArray(rawClosureDocuments)) {
+    return { error: "closureDocuments must be an array" };
+  }
+
+  if (rawClosureDocuments.length > MAX_CLOSURE_DOCUMENTS) {
+    return { error: `Maximum ${MAX_CLOSURE_DOCUMENTS} closure documents are allowed` };
+  }
+
+  const dedupe = new Set();
+  const sanitized = [];
+
+  for (let index = 0; index < rawClosureDocuments.length; index += 1) {
+    const row = sanitizeClosureDocument(rawClosureDocuments[index]);
+    if (!row) {
+      return {
+        error: `closureDocuments[${index}] must include a valid http/https url`,
+      };
+    }
+
+    if (row.size > MAX_CLOSURE_DOCUMENT_SIZE_BYTES) {
+      return {
+        error: `closureDocuments[${index}] exceeds ${Math.round(MAX_CLOSURE_DOCUMENT_SIZE_BYTES / (1024 * 1024))}MB limit`,
+      };
+    }
+
+    if (dedupe.has(row.url)) continue;
+    dedupe.add(row.url);
+    sanitized.push(row);
+  }
+
+  return {
+    provided: true,
+    value: sanitized,
+  };
+};
 
 const isDealPaymentInputDefined = (rawDealPayment = {}) =>
   rawDealPayment.mode !== undefined
@@ -758,6 +878,7 @@ exports.assignLead = async (req, res) => {
 
       const targetExecutiveId = String(executive._id);
       const leadAssigneeId = String(lead.assignedTo || "");
+      const leadAssignedManagerId = String(lead.assignedManager || "");
       const leadCreatorId = String(lead.createdBy || "");
       const managerId = String(req.user._id);
 
@@ -770,6 +891,7 @@ exports.assignLead = async (req, res) => {
       const canManageLead =
         !leadAssigneeId
         || teamExecutiveIds.has(leadAssigneeId)
+        || leadAssignedManagerId === managerId
         || leadCreatorId === managerId;
 
       if (!canManageLead) {
@@ -1099,7 +1221,7 @@ exports.getLeadPaymentRequests = async (req, res) => {
     const rows = await Lead.find(query)
       .sort({ updatedAt: -1 })
       .limit(limit)
-      .populate(LEAD_POPULATE_FIELDS)
+      .populate(LEAD_PAYMENT_REQUEST_POPULATE_FIELDS)
       .lean();
 
     const requests = rows.map((lead) => toLeadView(lead));
@@ -1126,6 +1248,7 @@ exports.updateLeadStatus = async (req, res) => {
       nextFollowUp,
       siteLocation: rawSiteLocation,
       dealPayment: rawDealPayment,
+      closureDocuments: rawClosureDocuments,
     } = req.body;
     const requestedStatus = normalizeEnumValue(rawStatus);
 
@@ -1152,6 +1275,10 @@ exports.updateLeadStatus = async (req, res) => {
     const parsedDealPayment = parseDealPaymentPayload(rawDealPayment);
     if (parsedDealPayment.error) {
       return res.status(400).json({ message: parsedDealPayment.error });
+    }
+    const parsedClosureDocuments = parseClosureDocumentsPayload(rawClosureDocuments);
+    if (parsedClosureDocuments.error) {
+      return res.status(400).json({ message: parsedClosureDocuments.error });
     }
 
     const dealPaymentPayload = parsedDealPayment.value || {};
@@ -1418,6 +1545,23 @@ exports.updateLeadStatus = async (req, res) => {
       }
     }
 
+    if (parsedClosureDocuments.provided) {
+      const canUpdateClosureDocuments =
+        requestedStatus === CLOSED_STATUS
+        || [REQUESTED_STATUS, CLOSED_STATUS].includes(nextLeadStatus);
+      if (!canUpdateClosureDocuments) {
+        return res.status(400).json({
+          message: "Closure documents can be updated only for REQUESTED or CLOSED leads",
+        });
+      }
+
+      lead.closureDocuments = parsedClosureDocuments.value.map((row) => ({
+        ...row,
+        uploadedBy: row.uploadedBy || req.user._id,
+        uploadedAt: row.uploadedAt || new Date(),
+      }));
+    }
+
     lead.status = nextLeadStatus;
     lead.lastContactedAt = new Date();
 
@@ -1448,6 +1592,12 @@ exports.updateLeadStatus = async (req, res) => {
 
     if (paymentDecisionAction) {
       activityActions.push(paymentDecisionAction);
+    }
+
+    if (parsedClosureDocuments.provided) {
+      activityActions.push(
+        `Closure documents updated (${lead.closureDocuments.length} file${lead.closureDocuments.length === 1 ? "" : "s"})`,
+      );
     }
 
     await Promise.all(

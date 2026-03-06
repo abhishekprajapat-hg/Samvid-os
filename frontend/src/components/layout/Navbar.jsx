@@ -53,6 +53,7 @@ const MENU_CONFIG = {
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Reports", icon: ClipboardList, path: "/reports" },
     { name: "Targets", icon: PieChart, path: "/targets" },
+    { name: "Access", icon: ShieldCheck, path: "/admin/users" },
     { name: "Profile", icon: UserCircle2, path: "/profile" },
     { name: "System", icon: Settings, path: "/settings" },
   ],

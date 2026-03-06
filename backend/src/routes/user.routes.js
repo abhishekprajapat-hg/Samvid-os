@@ -37,6 +37,13 @@ router.get(
 );
 
 router.patch(
+  "/:userId/designation",
+  writeLimiter,
+  authMiddleware.protect,
+  userController.updateUserDesignation
+);
+
+router.patch(
   "/:userId/channel-partner/inventory-access",
   writeLimiter,
   authMiddleware.protect,
@@ -74,6 +81,13 @@ router.post(
   writeLimiter,
   authMiddleware.protect,
   userController.rebalanceExecutives
+);
+
+router.patch(
+  "/:userId",
+  writeLimiter,
+  authMiddleware.protect,
+  userController.updateUserByAdmin
 );
 
 router.delete(

@@ -92,8 +92,12 @@ const normalizeOptionalNumber = (value) => {
 const sanitizeName = (value) => String(value || "").trim();
 const sanitizePhone = (value) => String(value || "").trim();
 const sanitizeProfileImageUrl = (value) => String(value || "").trim();
+const sanitizeEmail = (value) => String(value || "").trim().toLowerCase();
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
+const toRoleExpectationLabel = (roles = []) =>
+  roles.map((parentRole) => ROLE_LABELS[parentRole] || parentRole).join(" / ");
 
 const getLeadScopeLabel = (role) => {
   if (role === USER_ROLES.ADMIN) return "Global Leads";
@@ -776,6 +780,526 @@ exports.createUserByRole = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "createUserByRole failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateUserByAdmin = async (req, res) => {
+  try {
+    if (req.user.role !== USER_ROLES.ADMIN) {
+      return res.status(403).json({
+        message: "Only ADMIN can update user details",
+      });
+    }
+
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "Company context is required" });
+    }
+
+    const { userId } = req.params;
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    if (String(req.user._id) === String(userId)) {
+      return res.status(400).json({
+        message: "You cannot edit your own account from this page",
+      });
+    }
+
+    const hasAnyEditableField = [
+      "name",
+      "email",
+      "phone",
+      "role",
+      "reportingToId",
+      "parentId",
+      "managerId",
+      "isActive",
+      "canViewInventory",
+      "password",
+    ].some((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
+
+    if (!hasAnyEditableField) {
+      return res.status(400).json({
+        message: "No editable fields provided",
+      });
+    }
+
+    const user = await User.findOne({
+      _id: userId,
+      companyId: req.user.companyId,
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const previousRole = user.role;
+    const patch = {};
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
+      const name = sanitizeName(req.body.name);
+      if (!name || name.length < 2 || name.length > 80) {
+        return res.status(400).json({
+          message: "Name must be between 2 and 80 characters",
+        });
+      }
+      patch.name = name;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "email")) {
+      const email = sanitizeEmail(req.body.email);
+      if (!isValidEmail(email)) {
+        return res.status(400).json({
+          message: "Valid email is required",
+        });
+      }
+
+      const existingUser = await User.findOne({
+        email,
+        _id: { $ne: user._id },
+      })
+        .select("_id")
+        .lean();
+      if (existingUser) {
+        return res.status(400).json({ message: "Email already in use" });
+      }
+
+      patch.email = email;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "phone")) {
+      const phone = sanitizePhone(req.body.phone);
+      if (phone.length > 25) {
+        return res.status(400).json({
+          message: "Phone cannot exceed 25 characters",
+        });
+      }
+      patch.phone = phone;
+    }
+
+    let nextRole = user.role;
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "role")) {
+      const requestedRole = String(req.body.role || "").trim().toUpperCase();
+      if (!requestedRole || !Object.values(USER_ROLES).includes(requestedRole)) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+
+      if (requestedRole === USER_ROLES.ADMIN) {
+        return res.status(400).json({
+          message: "Role cannot be changed to ADMIN",
+        });
+      }
+
+      nextRole = requestedRole;
+      patch.role = nextRole;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "isActive")) {
+      patch.isActive = Boolean(req.body?.isActive);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "password")) {
+      const rawPassword = String(req.body?.password || "");
+      if (rawPassword && rawPassword.length < 6) {
+        return res.status(400).json({
+          message: "Password must be at least 6 characters",
+        });
+      }
+      if (rawPassword) {
+        user.password = rawPassword;
+      }
+    }
+
+    if (EXECUTIVE_ROLES.includes(previousRole) && !EXECUTIVE_ROLES.includes(nextRole)) {
+      const openAssignedLeads = await Lead.countDocuments({
+        assignedTo: user._id,
+        status: { $nin: ["CLOSED", "LOST"] },
+      });
+      if (openAssignedLeads > 0) {
+        return res.status(400).json({
+          message:
+            "User has active assigned leads. Reassign leads before changing designation.",
+        });
+      }
+    }
+
+    if (nextRole !== previousRole) {
+      const activeDirectReports = await User.find({
+        parentId: user._id,
+        companyId: req.user.companyId,
+        isActive: true,
+      })
+        .select("_id role")
+        .lean();
+
+      const allowedChildRoles = new Set(TEAM_HIERARCHY_CHILD_ROLES[nextRole] || []);
+      const incompatibleReports = activeDirectReports.filter(
+        (row) => !allowedChildRoles.has(row.role),
+      );
+
+      if (incompatibleReports.length) {
+        return res.status(400).json({
+          message:
+            "User has direct reports incompatible with requested designation. Reassign direct reports first.",
+        });
+      }
+    }
+
+    const requestedReportingToId =
+      req.body?.reportingToId
+      ?? req.body?.parentId
+      ?? req.body?.managerId
+      ?? undefined;
+
+    const allowedParentRoles = getAllowedParentRoles(nextRole);
+    let resolvedParentId = user.parentId || null;
+
+    if (allowedParentRoles.length) {
+      let reportingParent = null;
+      const hasReportingInput = requestedReportingToId !== undefined;
+      const reportingId =
+        hasReportingInput && requestedReportingToId !== null
+          ? String(requestedReportingToId || "").trim()
+          : "";
+
+      if (reportingId) {
+        if (!isValidObjectId(reportingId)) {
+          return res.status(400).json({ message: "Invalid reportingToId" });
+        }
+        if (String(user._id) === reportingId) {
+          return res.status(400).json({
+            message: "User cannot report to itself",
+          });
+        }
+
+        reportingParent = await User.findOne({
+          _id: reportingId,
+          role: { $in: allowedParentRoles },
+          isActive: true,
+          companyId: req.user.companyId,
+        })
+          .select("_id role")
+          .lean();
+
+        if (!reportingParent) {
+          const expected = toRoleExpectationLabel(allowedParentRoles);
+          return res.status(400).json({
+            message: `Invalid reportingToId. Expected active ${expected}`,
+          });
+        }
+      } else if (
+        resolvedParentId
+        && !hasReportingInput
+      ) {
+        reportingParent = await User.findOne({
+          _id: resolvedParentId,
+          role: { $in: allowedParentRoles },
+          isActive: true,
+          companyId: req.user.companyId,
+        })
+          .select("_id role")
+          .lean();
+      }
+
+      if (!reportingParent) {
+        reportingParent = await findLeastLoadedParentForRole({
+          companyId: req.user.companyId,
+          role: nextRole,
+          currentAdminId: req.user._id,
+        });
+      }
+
+      if (!reportingParent?._id) {
+        const expected = toRoleExpectationLabel(allowedParentRoles);
+        return res.status(400).json({
+          message: `No active ${expected} available for assignment`,
+        });
+      }
+
+      const descendants = await getDescendantUsers({
+        rootUserId: user._id,
+        companyId: req.user.companyId,
+        includeInactive: true,
+        select: "_id role parentId isActive",
+      });
+      const descendantIdSet = new Set(
+        descendants.map((row) => String(row._id)),
+      );
+      if (descendantIdSet.has(String(reportingParent._id))) {
+        return res.status(400).json({
+          message: "Reporting manager cannot be selected from this user's team tree",
+        });
+      }
+
+      resolvedParentId = reportingParent._id;
+      patch.parentId = resolvedParentId;
+    }
+
+    if (nextRole === USER_ROLES.CHANNEL_PARTNER) {
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, "canViewInventory")) {
+        patch.canViewInventory = Boolean(req.body?.canViewInventory);
+      }
+    } else {
+      patch.canViewInventory = false;
+    }
+
+    Object.entries(patch).forEach(([key, value]) => {
+      user[key] = value;
+    });
+
+    await user.save();
+
+    if (nextRole !== previousRole) {
+      if (nextRole === USER_ROLES.EXECUTIVE) {
+        await Lead.updateMany(
+          { assignedTo: user._id },
+          { $set: { assignedExecutive: user._id, assignedFieldExecutive: null } },
+        );
+      } else if (nextRole === USER_ROLES.FIELD_EXECUTIVE) {
+        await Lead.updateMany(
+          { assignedTo: user._id },
+          { $set: { assignedExecutive: null, assignedFieldExecutive: user._id } },
+        );
+      } else {
+        await Lead.updateMany(
+          { assignedTo: user._id },
+          { $set: { assignedExecutive: null, assignedFieldExecutive: null } },
+        );
+      }
+    }
+
+    const updated = await User.findOne({
+      _id: user._id,
+      companyId: req.user.companyId,
+    })
+      .populate("parentId", "name email phone role")
+      .lean();
+
+    return res.json({
+      message: "User updated successfully",
+      user: toProfileView(updated),
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "updateUserByAdmin failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateUserDesignation = async (req, res) => {
+  try {
+    if (req.user.role !== USER_ROLES.ADMIN) {
+      return res.status(403).json({
+        message: "Only ADMIN can change user designation",
+      });
+    }
+
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "Company context is required" });
+    }
+
+    const { userId } = req.params;
+    if (!isValidObjectId(userId)) {
+      return res.status(400).json({ message: "Invalid user id" });
+    }
+
+    if (String(req.user._id) === String(userId)) {
+      return res.status(400).json({
+        message: "You cannot change your own designation",
+      });
+    }
+
+    const requestedRole = String(req.body?.role || "").trim().toUpperCase();
+    if (!requestedRole) {
+      return res.status(400).json({ message: "role is required" });
+    }
+
+    if (!Object.values(USER_ROLES).includes(requestedRole)) {
+      return res.status(400).json({ message: "Invalid role" });
+    }
+
+    if (requestedRole === USER_ROLES.ADMIN) {
+      return res.status(400).json({
+        message: "Designation cannot be changed to ADMIN",
+      });
+    }
+
+    const targetUser = await User.findOne({
+      _id: userId,
+      companyId: req.user.companyId,
+    })
+      .select("_id role parentId companyId canViewInventory")
+      .lean();
+    if (!targetUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const requestedReportingToId =
+      req.body?.reportingToId || req.body?.managerId || req.body?.parentId || null;
+    const allowedParentRoles = getAllowedParentRoles(requestedRole);
+
+    const activeDirectReports = await User.find({
+      parentId: targetUser._id,
+      companyId: req.user.companyId,
+      isActive: true,
+    })
+      .select("_id role")
+      .lean();
+    const allowedChildRoles = new Set(TEAM_HIERARCHY_CHILD_ROLES[requestedRole] || []);
+    const invalidReports = activeDirectReports.filter(
+      (row) => !allowedChildRoles.has(row.role),
+    );
+    if (invalidReports.length) {
+      return res.status(400).json({
+        message:
+          "User has direct reports incompatible with requested designation. Reassign direct reports first.",
+      });
+    }
+
+    if (
+      EXECUTIVE_ROLES.includes(targetUser.role)
+      && !EXECUTIVE_ROLES.includes(requestedRole)
+    ) {
+      const openAssignedLeads = await Lead.countDocuments({
+        assignedTo: targetUser._id,
+        status: { $nin: ["CLOSED", "LOST"] },
+      });
+      if (openAssignedLeads > 0) {
+        return res.status(400).json({
+          message:
+            "User has active assigned leads. Reassign leads before changing designation.",
+        });
+      }
+    }
+
+    let resolvedParentId = targetUser.parentId || null;
+    if (allowedParentRoles.length) {
+      let reportingParent = null;
+
+      if (requestedReportingToId) {
+        if (!isValidObjectId(requestedReportingToId)) {
+          return res.status(400).json({ message: "Invalid reportingToId" });
+        }
+
+        if (String(requestedReportingToId) === String(targetUser._id)) {
+          return res.status(400).json({
+            message: "User cannot report to itself",
+          });
+        }
+
+        reportingParent = await User.findOne({
+          _id: requestedReportingToId,
+          role: { $in: allowedParentRoles },
+          isActive: true,
+          companyId: req.user.companyId,
+        })
+          .select("_id role")
+          .lean();
+
+        if (!reportingParent) {
+          const expected = toRoleExpectationLabel(allowedParentRoles);
+          return res.status(400).json({
+            message: `Invalid reportingToId. Expected active ${expected}`,
+          });
+        }
+
+        const descendants = await getDescendantUsers({
+          rootUserId: targetUser._id,
+          companyId: req.user.companyId,
+          includeInactive: true,
+          select: "_id role parentId isActive",
+        });
+        const descendantIdSet = new Set(
+          descendants.map((row) => String(row._id)),
+        );
+        if (descendantIdSet.has(String(reportingParent._id))) {
+          return res.status(400).json({
+            message: "Reporting manager cannot be selected from this user's team tree",
+          });
+        }
+      } else if (resolvedParentId) {
+        reportingParent = await User.findOne({
+          _id: resolvedParentId,
+          role: { $in: allowedParentRoles },
+          isActive: true,
+          companyId: req.user.companyId,
+        })
+          .select("_id role")
+          .lean();
+      }
+
+      if (!reportingParent) {
+        reportingParent = await findLeastLoadedParentForRole({
+          companyId: req.user.companyId,
+          role: requestedRole,
+          currentAdminId: req.user._id,
+        });
+      }
+
+      if (!reportingParent?._id) {
+        const expected = toRoleExpectationLabel(allowedParentRoles);
+        return res.status(400).json({
+          message: `No active ${expected} available for assignment`,
+        });
+      }
+
+      resolvedParentId = reportingParent._id;
+    }
+
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: userId, companyId: req.user.companyId },
+      {
+        $set: {
+          role: requestedRole,
+          parentId: resolvedParentId || null,
+          canViewInventory:
+            requestedRole === USER_ROLES.CHANNEL_PARTNER
+              ? Boolean(targetUser.canViewInventory)
+              : false,
+        },
+      },
+      { new: true },
+    )
+      .populate("parentId", "name role")
+      .lean();
+
+    if (!updatedUser) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    if (EXECUTIVE_ROLES.includes(requestedRole)) {
+      const assignmentPatch =
+        requestedRole === USER_ROLES.EXECUTIVE
+          ? {
+            assignedExecutive: updatedUser._id,
+            assignedFieldExecutive: null,
+          }
+          : {
+            assignedExecutive: null,
+            assignedFieldExecutive: updatedUser._id,
+          };
+
+      await Lead.updateMany(
+        { assignedTo: updatedUser._id },
+        { $set: assignmentPatch },
+      );
+    }
+
+    return res.json({
+      message: "User designation updated successfully",
+      user: updatedUser,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "updateUserDesignation failed",
     });
     return res.status(500).json({ message: "Server error" });
   }

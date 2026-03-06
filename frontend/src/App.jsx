@@ -24,6 +24,7 @@ const ManagerDashboard = lazy(() => import("./modules/manager/ManagerDashboard")
 const ExecutiveDashboard = lazy(() => import("./modules/executive/ExecutiveDashboard"));
 const FieldDashboard = lazy(() => import("./modules/field/FieldDashboard"));
 const TeamManager = lazy(() => import("./modules/admin/TeamManager"));
+const UserDetailsEditor = lazy(() => import("./modules/admin/UserDetailsEditor"));
 const AdminNotifications = lazy(() => import("./modules/admin/AdminNotifications"));
 const AdminCommandConsole = lazy(() => import("./modules/admin/AdminCommandConsole"));
 const TeamChat = lazy(() => import("./modules/chat/TeamChat"));
@@ -692,7 +693,11 @@ export default function App() {
                         />
                         <Route
                           path="/admin/users"
-                          element={userRole === "ADMIN" ? <TeamManager theme={theme} /> : <Navigate to="/" />}
+                          element={canAccess(["ADMIN", ...MANAGEMENT_ROLES]) ? <TeamManager theme={theme} /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/admin/users/:userId"
+                          element={userRole === "ADMIN" ? <UserDetailsEditor theme={theme} /> : <Navigate to="/" />}
                         />
                         <Route
                           path="/admin/console"

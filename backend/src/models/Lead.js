@@ -125,6 +125,44 @@ const leadSchema = new mongoose.Schema(
         trim: true,
       },
     },
+    closureDocuments: [
+      {
+        url: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+        kind: {
+          type: String,
+          enum: ["image", "pdf", "file"],
+          default: "file",
+        },
+        mimeType: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+        name: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+        size: {
+          type: Number,
+          min: 0,
+          default: 0,
+        },
+        uploadedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        uploadedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          default: null,
+        },
+      },
+    ],
 
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,

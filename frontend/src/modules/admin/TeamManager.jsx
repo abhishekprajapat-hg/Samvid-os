@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, RefreshCw } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Plus, RefreshCw, Search, Sparkles, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import {
   createUser,
   deleteUser,
-  getUserProfileById,
   getUsers,
   rebalanceExecutives,
   updateChannelPartnerInventoryAccess,
@@ -12,7 +12,6 @@ import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import {
   UserFormPanel,
-  UserProfilePanel,
 } from "./components/TeamManagerPanels";
 import {
   TeamLeadOverviewCards,
@@ -38,7 +37,6 @@ const REPORTING_PARENT_ROLES = {
   FIELD_EXECUTIVE: ["TEAM_LEADER"],
   CHANNEL_PARTNER: ["ADMIN"],
 };
-const LEAD_STATUSES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED", "CLOSED", "LOST"];
 const ROLE_LABELS = {
   ADMIN: "Admin",
   MANAGER: "Manager",
@@ -48,15 +46,6 @@ const ROLE_LABELS = {
   FIELD_EXECUTIVE: "Field Executive",
   CHANNEL_PARTNER: "Channel Partner",
 };
-const STATUS_LABELS = {
-  NEW: "New",
-  CONTACTED: "Contacted",
-  INTERESTED: "Interested",
-  SITE_VISIT: "Site Visit",
-  REQUESTED: "Requested",
-  CLOSED: "Closed",
-  LOST: "Lost",
-};
 
 const getEntityId = (value) => {
   if (!value) return "";
@@ -64,73 +53,9 @@ const getEntityId = (value) => {
   return String(value._id || value.id || "");
 };
 
-const formatDate = (value) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString([], {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const toSummaryCards = (role, summary = {}) => {
-  if (role === "ADMIN") {
-    return [
-      { key: "users", label: "Active Users", value: summary.users ?? 0 },
-      { key: "managers", label: "Managers", value: summary.managers ?? 0 },
-      {
-        key: "assistantManagers",
-        label: "Assistant Managers",
-        value: summary.assistantManagers ?? 0,
-      },
-      { key: "teamLeaders", label: "Team Leaders", value: summary.teamLeaders ?? 0 },
-      { key: "executives", label: "Executives", value: summary.executives ?? 0 },
-      { key: "fieldExecutives", label: "Field Team", value: summary.fieldExecutives ?? 0 },
-      { key: "leads", label: "Leads", value: summary.leads ?? 0 },
-      { key: "inventory", label: "Inventory", value: summary.inventory ?? 0 },
-    ];
-  }
-
-  if (MANAGEMENT_ROLES.includes(role)) {
-    return [
-      { key: "teamMembers", label: "Team Members", value: summary.teamMembers ?? 0 },
-      {
-        key: "assistantManagers",
-        label: "Assistant Managers",
-        value: summary.assistantManagers ?? 0,
-      },
-      { key: "teamLeaders", label: "Team Leaders", value: summary.teamLeaders ?? 0 },
-      { key: "executives", label: "Executives", value: summary.executives ?? 0 },
-      { key: "fieldExecutives", label: "Field Team", value: summary.fieldExecutives ?? 0 },
-      { key: "teamLeads", label: "Team Leads", value: summary.teamLeads ?? 0 },
-      { key: "dueFollowUpsToday", label: "Follow-ups Today", value: summary.dueFollowUpsToday ?? 0 },
-    ];
-  }
-
-  if (role === "EXECUTIVE" || role === "FIELD_EXECUTIVE") {
-    return [
-      { key: "assignedLeads", label: "Assigned Leads", value: summary.assignedLeads ?? 0 },
-      { key: "openLeads", label: "Open Leads", value: summary.openLeads ?? 0 },
-      { key: "closedLeads", label: "Closed Leads", value: summary.closedLeads ?? 0 },
-      { key: "dueFollowUpsToday", label: "Follow-ups Today", value: summary.dueFollowUpsToday ?? 0 },
-    ];
-  }
-
-  if (role === "CHANNEL_PARTNER") {
-    return [
-      { key: "createdLeads", label: "Created Leads", value: summary.createdLeads ?? 0 },
-      { key: "closedLeads", label: "Closed Leads", value: summary.closedLeads ?? 0 },
-    ];
-  }
-
-  return [];
-};
 
 const TeamManager = ({ theme = "light" }) => {
+  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -141,6 +66,8 @@ const TeamManager = ({ theme = "light" }) => {
   const [rebalancing, setRebalancing] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState("");
   const [inventoryAccessUpdatingUserId, setInventoryAccessUpdatingUserId] = useState("");
+  const [roleFilter, setRoleFilter] = useState("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -149,19 +76,13 @@ const TeamManager = ({ theme = "light" }) => {
     role: "MANAGER",
     reportingToId: "",
   });
-  const [profilePanelOpen, setProfilePanelOpen] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState("");
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileError, setProfileError] = useState("");
-  const [selectedProfile, setSelectedProfile] = useState(null);
-  const [selectedSummary, setSelectedSummary] = useState({});
-  const [selectedPerformance, setSelectedPerformance] = useState({});
-  const profileRequestRef = useRef(0);
 
   const currentRole = localStorage.getItem("role");
   const isAdmin = currentRole === "ADMIN";
+  const canViewTeamAccess = isAdmin || MANAGEMENT_ROLES.includes(currentRole);
   const isDarkTheme = theme === "dark";
-  const currentUserId = JSON.parse(localStorage.getItem("user") || "{}")?.id;
+  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const currentUserId = currentUser?.id || currentUser?._id || "";
 
   const reportingCandidates = useMemo(() => {
     const allowedParentRoles = REPORTING_PARENT_ROLES[formData.role] || [];
@@ -182,10 +103,72 @@ const TeamManager = ({ theme = "light" }) => {
       .join(" / ");
   }, [formData.role]);
 
-  const selectedSummaryCards = useMemo(
-    () => toSummaryCards(selectedProfile?.role, selectedSummary || {}),
-    [selectedProfile?.role, selectedSummary],
+  const roleFilterOptions = useMemo(() => {
+    const visibleRoleSet = new Set(
+      users
+        .map((user) => String(user.role || "").trim())
+        .filter(Boolean),
+    );
+    const orderedKnownRoles = Object.keys(ROLE_LABELS).filter((role) =>
+      visibleRoleSet.has(role));
+    const unknownRoles = [...visibleRoleSet]
+      .filter((role) => !ROLE_LABELS[role])
+      .sort();
+
+    return [
+      { label: "All Roles", value: "ALL" },
+      ...orderedKnownRoles.map((role) => ({
+        label: ROLE_LABELS[role] || role,
+        value: role,
+      })),
+      ...unknownRoles.map((role) => ({
+        label: role,
+        value: role,
+      })),
+    ];
+  }, [users]);
+
+  const normalizedSearchQuery = String(searchQuery || "").trim().toLowerCase();
+
+  const roleBreakdown = useMemo(() => {
+    const breakdown = {};
+    users.forEach((user) => {
+      const role = String(user?.role || "").trim();
+      if (!role) return;
+      breakdown[role] = Number(breakdown[role] || 0) + 1;
+    });
+    return breakdown;
+  }, [users]);
+
+  const activeUsersCount = useMemo(
+    () => users.filter((user) => user?.isActive).length,
+    [users],
   );
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      const roleMatch =
+        roleFilter === "ALL" || String(user.role || "").trim() === roleFilter;
+
+      if (!roleMatch) return false;
+      if (!normalizedSearchQuery) return true;
+
+      const searchableText = [
+        user?.name,
+        user?.email,
+        user?.phone,
+        user?.parentId?.name,
+        ROLE_LABELS[user?.role] || user?.role,
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" ");
+
+      return searchableText.includes(normalizedSearchQuery);
+    });
+  }, [normalizedSearchQuery, roleFilter, users]);
+
+  const hasActiveFilters =
+    roleFilter !== "ALL" || Boolean(normalizedSearchQuery);
 
   const leadStats = useMemo(() => {
     const childrenByParent = new Map();
@@ -298,6 +281,14 @@ const TeamManager = ({ theme = "light" }) => {
     loadData();
   }, []);
 
+  useEffect(() => {
+    if (roleFilter === "ALL") return;
+    const hasFilterValue = roleFilterOptions.some((option) => option.value === roleFilter);
+    if (!hasFilterValue) {
+      setRoleFilter("ALL");
+    }
+  }, [roleFilter, roleFilterOptions]);
+
   const resetForm = () => {
     setFormData({
       name: "",
@@ -310,45 +301,10 @@ const TeamManager = ({ theme = "light" }) => {
     setFormError("");
   };
 
-  const resetProfilePanel = () => {
-    profileRequestRef.current += 1;
-    setProfilePanelOpen(false);
-    setSelectedUserId("");
-    setProfileLoading(false);
-    setProfileError("");
-    setSelectedProfile(null);
-    setSelectedSummary({});
-    setSelectedPerformance({});
-  };
-
-  const handleOpenUserProfile = async (userId) => {
+  const handleOpenUserProfile = (userId) => {
+    if (!isAdmin) return;
     if (!userId) return;
-
-    const requestId = profileRequestRef.current + 1;
-    profileRequestRef.current = requestId;
-    setSelectedUserId(String(userId));
-    setProfilePanelOpen(true);
-    setProfileLoading(true);
-    setProfileError("");
-    setSelectedProfile(null);
-    setSelectedSummary({});
-    setSelectedPerformance({});
-
-    try {
-      const response = await getUserProfileById(userId);
-      if (profileRequestRef.current !== requestId) return;
-
-      setSelectedProfile(response.profile || null);
-      setSelectedSummary(response.summary || {});
-      setSelectedPerformance(response.performance || {});
-    } catch (err) {
-      if (profileRequestRef.current !== requestId) return;
-      setProfileError(toErrorMessage(err, "Failed to load user profile"));
-    } finally {
-      if (profileRequestRef.current === requestId) {
-        setProfileLoading(false);
-      }
-    }
+    navigate(`/admin/users/${userId}`);
   };
 
   const handleCreateUser = async () => {
@@ -411,9 +367,6 @@ const TeamManager = ({ theme = "light" }) => {
     try {
       setDeletingUserId(user._id);
       await deleteUser(user._id);
-      if (String(selectedUserId) === String(user._id)) {
-        resetProfilePanel();
-      }
       await loadData();
     } catch (err) {
       setError(toErrorMessage(err, "Failed to delete user"));
@@ -447,9 +400,6 @@ const TeamManager = ({ theme = "light" }) => {
         ),
       );
 
-      if (String(selectedUserId) === String(updatedUser._id)) {
-        setSelectedProfile((prev) => (prev ? { ...prev, ...updatedUser } : prev));
-      }
     } catch (err) {
       setError(toErrorMessage(err, "Failed to update channel partner inventory access"));
     } finally {
@@ -464,80 +414,212 @@ const TeamManager = ({ theme = "light" }) => {
     return "Owned Leads";
   };
 
-  if (!isAdmin) {
+  if (!canViewTeamAccess) {
     return (
-      <div className={`w-full h-full overflow-x-hidden px-4 sm:px-6 md:px-10 pt-20 md:pt-24 pb-8 ${isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"}`}>
+      <div className={`w-full h-full overflow-x-hidden px-4 sm:px-6 md:px-10 pt-4 md:pt-6 pb-8 ${isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"}`}>
         <div className={`rounded-xl border p-4 text-sm ${isDarkTheme ? "border-amber-500/30 bg-amber-500/10 text-amber-300" : "border-amber-300 bg-amber-50 text-amber-700"}`}>
-          Access denied. Only ADMIN can manage users.
+          Access denied. You do not have permission to view team access.
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`w-full h-full overflow-x-hidden px-4 sm:px-6 md:px-10 pt-20 md:pt-24 pb-8 flex flex-col gap-6 overflow-y-auto custom-scrollbar ${isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"}`}>
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h1 className={`text-3xl font-bold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>Team Access</h1>
-          <p className={`text-xs uppercase tracking-widest mt-1 ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
-            Total Users: {users.length}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={loadData}
-            className={`px-4 py-2 rounded-lg border text-sm font-semibold flex items-center gap-2 ${
-              isDarkTheme
-                ? "border-slate-700 text-slate-200 bg-slate-900/60"
-                : "border-slate-300 text-slate-700 bg-white"
-            }`}
-          >
-            <RefreshCw size={15} />
-            Refresh
-          </button>
-          <button
-            onClick={handleRebalance}
-            disabled={rebalancing}
-            className={`px-4 py-2 rounded-lg border text-sm font-semibold ${
-              isDarkTheme
-                ? "border-slate-700 text-slate-200 bg-slate-900/60"
-                : "border-slate-300 text-slate-700 bg-white"
-            }`}
-          >
-            {rebalancing ? "Rebalancing..." : "Rebalance Executives"}
-          </button>
-          <button
-            onClick={() => setPanelOpen(true)}
-            className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold flex items-center gap-2"
-          >
-            <Plus size={15} />
-            New User
-          </button>
-        </div>
-      </div>
+    <div className={`w-full h-full overflow-x-hidden px-4 sm:px-6 md:px-10 pt-4 md:pt-6 pb-8 flex flex-col gap-4 overflow-y-auto custom-scrollbar ${
+      isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"
+    }`}>
+      <section className={`rounded-2xl border p-4 ${
+        isDarkTheme ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"
+      }`}>
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold ${
+              isAdmin
+                ? isDarkTheme
+                  ? "border-cyan-400/35 bg-cyan-500/15 text-cyan-100"
+                  : "border-cyan-200 bg-cyan-50 text-cyan-700"
+                : isDarkTheme
+                  ? "border-slate-600 bg-slate-800/80 text-slate-200"
+                  : "border-slate-300 bg-slate-100 text-slate-700"
+            }`}>
+              <Sparkles size={13} />
+              {isAdmin ? "Admin Command Mode" : "Leadership View Mode"}
+            </div>
+            <span className={`rounded-full border px-3 py-1 text-xs ${
+              isDarkTheme ? "border-slate-700 bg-slate-950/70 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
+            }`}>
+              Users: <span className="font-semibold">{users.length}</span>
+            </span>
+            <span className={`rounded-full border px-3 py-1 text-xs ${
+              isDarkTheme ? "border-slate-700 bg-slate-950/70 text-emerald-300" : "border-slate-200 bg-slate-50 text-emerald-700"
+            }`}>
+              Active: <span className="font-semibold">{activeUsersCount}</span>
+            </span>
+            <span className={`rounded-full border px-3 py-1 text-xs ${
+              isDarkTheme ? "border-slate-700 bg-slate-950/70 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
+            }`}>
+              Leads: <span className="font-semibold">{globalStats.total}</span>
+            </span>
+            <span className={`rounded-full border px-3 py-1 text-xs ${
+              isDarkTheme ? "border-slate-700 bg-slate-950/70 text-cyan-300" : "border-slate-200 bg-slate-50 text-cyan-700"
+            }`}>
+              Closed: <span className="font-semibold">{globalStats.converted}</span>
+            </span>
+          </div>
 
-      {error && (
-        <div className={`rounded-xl border p-3 text-sm ${isDarkTheme ? "border-red-500/30 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={loadData}
+              className={`h-10 rounded-xl border px-4 text-sm font-semibold inline-flex items-center gap-2 ${
+                isDarkTheme
+                  ? "border-slate-700 text-slate-200 bg-slate-950/70 hover:border-cyan-300/45"
+                  : "border-slate-300 text-slate-700 bg-white hover:border-cyan-300"
+              }`}
+            >
+              <RefreshCw size={15} />
+              Refresh
+            </button>
+            {isAdmin ? (
+              <>
+                <button
+                  onClick={handleRebalance}
+                  disabled={rebalancing}
+                  className={`h-10 rounded-xl border px-4 text-sm font-semibold ${
+                    isDarkTheme
+                      ? "border-slate-700 text-slate-200 bg-slate-950/70 hover:border-cyan-300/45"
+                      : "border-slate-300 text-slate-700 bg-white hover:border-cyan-300"
+                  } disabled:opacity-60`}
+                >
+                  {rebalancing ? "Rebalancing..." : "Rebalance Executives"}
+                </button>
+                <button
+                  onClick={() => setPanelOpen(true)}
+                  className="h-10 rounded-xl bg-cyan-600 px-4 text-sm font-semibold text-white hover:bg-cyan-500 inline-flex items-center gap-2"
+                >
+                  <Plus size={15} />
+                  New User
+                </button>
+              </>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      {error ? (
+        <div className={`rounded-xl border p-3 text-sm ${
+          isDarkTheme ? "border-red-500/30 bg-red-500/10 text-red-300" : "border-red-200 bg-red-50 text-red-700"
+        }`}>
           {error}
         </div>
-      )}
+      ) : null}
 
-      <TeamLeadOverviewCards globalStats={globalStats} isDarkTheme={isDarkTheme} />
+      <section className={`rounded-2xl border p-4 ${
+        isDarkTheme ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"
+      }`}>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.2fr_280px]">
+          <label className={`relative block ${isDarkTheme ? "text-slate-300" : "text-slate-700"}`}>
+            <Search size={14} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${
+              isDarkTheme ? "text-slate-500" : "text-slate-400"
+            }`} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search by name, email, phone, manager or role..."
+              className={`h-11 w-full rounded-xl border pl-9 pr-3 text-sm ${
+                isDarkTheme
+                  ? "border-slate-700 bg-slate-950 text-slate-200"
+                  : "border-slate-300 bg-white text-slate-700"
+              }`}
+            />
+          </label>
+
+          <div className="flex items-center gap-2">
+            <select
+              value={roleFilter}
+              onChange={(event) => setRoleFilter(event.target.value)}
+              className={`h-11 w-full rounded-xl border px-3 text-sm ${
+                isDarkTheme
+                  ? "border-slate-700 bg-slate-950 text-slate-200"
+                  : "border-slate-300 bg-white text-slate-700"
+              }`}
+            >
+              {roleFilterOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setRoleFilter("ALL");
+                  setSearchQuery("");
+                }}
+                className={`h-11 rounded-xl border px-3 text-xs font-semibold ${
+                  isDarkTheme
+                    ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-cyan-300/45"
+                    : "border-slate-300 bg-white text-slate-700 hover:border-cyan-300"
+                }`}
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {roleFilterOptions
+            .filter((option) => option.value !== "ALL")
+            .map((option) => (
+              <button
+                key={`chip-${option.value}`}
+                type="button"
+                onClick={() => setRoleFilter(option.value)}
+                className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
+                  roleFilter === option.value
+                    ? isDarkTheme
+                      ? "border-cyan-300/45 bg-cyan-500/15 text-cyan-100"
+                      : "border-cyan-200 bg-cyan-50 text-cyan-700"
+                    : isDarkTheme
+                      ? "border-slate-700 bg-slate-950/70 text-slate-300"
+                      : "border-slate-200 bg-slate-50 text-slate-600"
+                }`}
+              >
+                {option.label} ({Number(roleBreakdown[option.value] || 0)})
+              </button>
+            ))}
+          <span className={`ml-auto text-xs ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
+            Showing {filteredUsers.length} of {users.length} user(s)
+          </span>
+        </div>
+      </section>
+
+      <TeamLeadOverviewCards
+        globalStats={globalStats}
+        roleBreakdown={roleBreakdown}
+        totalUsers={users.length}
+        activeUsers={activeUsersCount}
+        isDarkTheme={isDarkTheme}
+      />
 
       <div className={`text-xs ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
-        Click any user card to open full profile, performance and recent lead activity.
+        {isAdmin
+          ? "Admin mode: full user controls and profile edit navigation are enabled."
+          : "Leadership mode: view-only visibility for your hierarchy team details."}
       </div>
 
       <TeamUserGrid
-        users={users}
+        users={filteredUsers}
         loading={loading}
         leadStats={leadStats}
         isDarkTheme={isDarkTheme}
-        profilePanelOpen={profilePanelOpen}
-        selectedUserId={selectedUserId}
         deletingUserId={deletingUserId}
         currentUserId={currentUserId}
         roleLabels={ROLE_LABELS}
+        canManageUsers={isAdmin}
+        canOpenUserProfile={isAdmin}
         onOpenUserProfile={handleOpenUserProfile}
         onDeleteUser={handleDeleteUser}
         onToggleChannelPartnerInventoryAccess={handleToggleChannelPartnerInventoryAccess}
@@ -545,38 +627,25 @@ const TeamManager = ({ theme = "light" }) => {
         getLeadScopeLabel={getLeadScopeLabel}
       />
 
-      <UserFormPanel
-        isOpen={panelOpen}
-        onClose={() => {
-          setPanelOpen(false);
-          resetForm();
-        }}
-        onSubmit={handleCreateUser}
-        formData={formData}
-        setFormData={setFormData}
-        reportingCandidates={reportingCandidates}
-        reportingLabel={reportingLabel}
-        submitting={submitting}
-        error={formError}
-        isDarkTheme={isDarkTheme}
-        roleOptions={ROLE_OPTIONS}
-        reportingParentRoles={REPORTING_PARENT_ROLES}
-      />
-
-      <UserProfilePanel
-        isOpen={profilePanelOpen}
-        onClose={resetProfilePanel}
-        loading={profileLoading}
-        error={profileError}
-        profile={selectedProfile}
-        performance={selectedPerformance}
-        summaryCards={selectedSummaryCards}
-        isDarkTheme={isDarkTheme}
-        roleLabels={ROLE_LABELS}
-        statusLabels={STATUS_LABELS}
-        leadStatuses={LEAD_STATUSES}
-        formatDate={formatDate}
-      />
+      {isAdmin ? (
+        <UserFormPanel
+          isOpen={panelOpen}
+          onClose={() => {
+            setPanelOpen(false);
+            resetForm();
+          }}
+          onSubmit={handleCreateUser}
+          formData={formData}
+          setFormData={setFormData}
+          reportingCandidates={reportingCandidates}
+          reportingLabel={reportingLabel}
+          submitting={submitting}
+          error={formError}
+          isDarkTheme={isDarkTheme}
+          roleOptions={ROLE_OPTIONS}
+          reportingParentRoles={REPORTING_PARENT_ROLES}
+        />
+      ) : null}
     </div>
   );
 };
