@@ -19,7 +19,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as MailComposer from "expo-mail-composer";
 import * as Print from "expo-print";
-import { jsPDF } from "jspdf";
 import { Screen } from "../../components/common/Screen";
 import {
   assignLead,
@@ -528,6 +527,8 @@ export const LeadsMatrixScreen = () => {
       const fileName = `proposal_${safeLeadName}_${Date.now()}.pdf`;
 
       if (Platform.OS === "web") {
+        const { jsPDF } = await import("jspdf");
+
         const loadImageForPdf = async (url: string): Promise<{ dataUrl: string; width: number; height: number } | null> =>
           new Promise((resolve) => {
             const img = new Image();

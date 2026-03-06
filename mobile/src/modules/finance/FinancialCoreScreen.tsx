@@ -67,6 +67,102 @@ const getAssigneeName = (assignedTo?: Lead["assignedTo"]) => {
   return assignedTo.name || "Unassigned";
 };
 
+const toObjectIdString = (value: any): string => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value._id) return String(value._id);
+  return String(value);
+};
+
+const toAmountNumber = (value: unknown): number | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getLeadRelatedInventories = (lead: Lead): any[] => {
+  const merged: any[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (value: any) => {
+    const id = toObjectIdString(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    merged.push(value);
+  };
+
+  pushUnique((lead as any)?.inventoryId);
+  if (Array.isArray((lead as any)?.relatedInventoryIds)) {
+    (lead as any).relatedInventoryIds.forEach((row: any) => pushUnique(row));
+  }
+
+  return merged;
+};
+
+const getLeadSaleEntries = (lead: Lead): Array<{ entryKey: string; totalAmount: number; remainingAmount: number }> => {
+  const leadId = toObjectIdString((lead as any)?._id) || "lead";
+  const leadStatus = String((lead as any)?.status || "").trim().toUpperCase();
+  const isClosedContext = ["CLOSED", "REQUESTED"].includes(leadStatus);
+  const linkedInventories = getLeadRelatedInventories(lead);
+  const entries: Array<{ entryKey: string; totalAmount: number; remainingAmount: number }> = [];
+
+  linkedInventories.forEach((inventory, index) => {
+    if (!inventory || typeof inventory !== "object") return;
+
+    const saleTotalAmount = toAmountNumber((inventory as any)?.saleDetails?.totalAmount);
+    const inventoryPrice = toAmountNumber((inventory as any)?.price);
+    const totalAmount =
+      saleTotalAmount !== null && saleTotalAmount > 0
+        ? saleTotalAmount
+        : inventoryPrice;
+
+    if (totalAmount === null || totalAmount <= 0) return;
+
+    const inventoryStatus = String((inventory as any)?.status || "").trim().toUpperCase();
+    const hasSaleDetails = saleTotalAmount !== null && saleTotalAmount > 0;
+    const isSoldInventory = inventoryStatus === "SOLD" || hasSaleDetails;
+    if (!isClosedContext && !isSoldInventory) return;
+
+    const remainingRaw = toAmountNumber((inventory as any)?.saleDetails?.remainingAmount);
+    const remainingAmount =
+      remainingRaw === null
+        ? 0
+        : Math.max(0, Math.min(remainingRaw, totalAmount));
+    const entryKey = toObjectIdString(inventory) || `${leadId}:${index}`;
+
+    entries.push({
+      entryKey,
+      totalAmount,
+      remainingAmount,
+    });
+  });
+
+  if (entries.length > 0 || !isClosedContext) return entries;
+
+  const fallbackInventory = linkedInventories.find((inventory) => {
+    if (!inventory || typeof inventory !== "object") return false;
+    const amount = toAmountNumber((inventory as any)?.price);
+    return amount !== null && amount > 0;
+  });
+  const fallbackTotalAmount = toAmountNumber((fallbackInventory as any)?.price);
+  if (fallbackTotalAmount === null || fallbackTotalAmount <= 0) return entries;
+
+  const paymentType = String((lead as any)?.dealPayment?.paymentType || "").trim().toUpperCase();
+  const dealRemainingRaw = toAmountNumber((lead as any)?.dealPayment?.remainingAmount);
+  const fallbackRemainingAmount =
+    paymentType === "PARTIAL" && dealRemainingRaw !== null
+      ? Math.max(0, Math.min(dealRemainingRaw, fallbackTotalAmount))
+      : 0;
+
+  entries.push({
+    entryKey: `${leadId}:fallback`,
+    totalAmount: fallbackTotalAmount,
+    remainingAmount: fallbackRemainingAmount,
+  });
+
+  return entries;
+};
+
 const pad2 = (value: number) => String(value).padStart(2, "0");
 const toDateInputValue = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
 
@@ -181,6 +277,9 @@ export const FinancialCoreScreen = () => {
 
     const sourceCount = { META: 0, MANUAL: 0, OTHER: 0 };
     const activeStatuses = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
+    const countedSaleKeys = new Set<string>();
+    let totalSellAmount = 0;
+    let pendingSellCollection = 0;
 
     scopedLeads.forEach((lead) => {
       const status = String(lead.status || "NEW");
@@ -191,6 +290,13 @@ export const FinancialCoreScreen = () => {
       if (source === "META") sourceCount.META += 1;
       else if (source === "MANUAL") sourceCount.MANUAL += 1;
       else sourceCount.OTHER += 1;
+
+      getLeadSaleEntries(lead).forEach((entry) => {
+        if (countedSaleKeys.has(entry.entryKey)) return;
+        countedSaleKeys.add(entry.entryKey);
+        totalSellAmount += entry.totalAmount;
+        pendingSellCollection += entry.remainingAmount;
+      });
     });
 
     const totalLeads = scopedLeads.length;
@@ -199,6 +305,7 @@ export const FinancialCoreScreen = () => {
     const activePipeline = [...activeStatuses].reduce((sum, status) => sum + (statusCount[status] || 0), 0);
     const conversionRate = totalLeads > 0 ? Math.round((closedDeals / totalLeads) * 100) : 0;
     const winRate = closedDeals + lostDeals > 0 ? Math.round((closedDeals / (closedDeals + lostDeals)) * 100) : 0;
+    const collectedSellValue = Math.max(0, totalSellAmount - pendingSellCollection);
     const commissionPayable = closedDeals * COMMISSION_PER_DEAL;
     const avgCommissionPerClosed = closedDeals > 0 ? commissionPayable / closedDeals : 0;
 
@@ -209,6 +316,9 @@ export const FinancialCoreScreen = () => {
       activePipeline,
       conversionRate,
       winRate,
+      totalSellAmount,
+      pendingSellCollection,
+      collectedSellValue,
       commissionPayable,
       avgCommissionPerClosed,
       statusCount,
@@ -416,6 +526,18 @@ export const FinancialCoreScreen = () => {
             title="Closed Deals"
             value={dashboard.closedDeals}
             helper={`Win rate ${dashboard.winRate}%`}
+            onPress={() => navigation.navigate("Leads", { initialStatus: "CLOSED" })}
+          />
+          <MetricCard
+            title="Total Sell Value"
+            value={formatCurrency(dashboard.totalSellAmount)}
+            helper={`Collected ${formatCurrency(dashboard.collectedSellValue)} | Pending ${formatCurrency(dashboard.pendingSellCollection)}`}
+            onPress={() => navigation.navigate("Leads", { initialStatus: "CLOSED" })}
+          />
+          <MetricCard
+            title="Remaining Amount"
+            value={formatCurrency(dashboard.pendingSellCollection)}
+            helper="Pending collection on partial closures"
             onPress={() => navigation.navigate("Leads", { initialStatus: "CLOSED" })}
           />
           <MetricCard

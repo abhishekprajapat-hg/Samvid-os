@@ -47,6 +47,25 @@ const formatCurrencyInr = (value) => {
   return INR_CURRENCY_FORMATTER.format(amount);
 };
 
+const toDateTimeInputValue = (dateValue) => {
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const buildDefaultCollectionFollowUp = () => {
+  const date = new Date();
+  date.setDate(date.getDate() + 7);
+  date.setHours(11, 0, 0, 0);
+  return toDateTimeInputValue(date);
+};
+
 const resolveImageExtension = (url, mimeType = "") => {
   const mime = String(mimeType || "").toLowerCase();
   if (mime.includes("png")) return "png";
@@ -243,6 +262,16 @@ const LeadDetailsRebuiltContent = ({
   linkingProperty,
   onLinkPropertyToLead,
   leadStatuses,
+  nameDraft,
+  setNameDraft,
+  phoneDraft,
+  setPhoneDraft,
+  emailDraft,
+  setEmailDraft,
+  cityDraft,
+  setCityDraft,
+  projectInterestedDraft,
+  setProjectInterestedDraft,
   statusDraft,
   setStatusDraft,
   followUpDraft,
@@ -316,6 +345,20 @@ const LeadDetailsRebuiltContent = ({
   ).toUpperCase();
   const showRemainingAmountField = paymentTypeDraft === "PARTIAL";
   const requiresPaymentReference = Boolean(paymentModeDraft) && paymentModeDraft !== "CASH";
+  const normalizedPaymentType = String(
+    paymentTypeDraft || selectedLead?.dealPayment?.paymentType || "",
+  ).trim().toUpperCase();
+  const rawRemainingAmountValue = Number(
+    paymentRemainingDraft !== ""
+      ? paymentRemainingDraft
+      : selectedLead?.dealPayment?.remainingAmount,
+  );
+  const remainingAmountForCollection =
+    Number.isFinite(rawRemainingAmountValue) && rawRemainingAmountValue > 0
+      ? rawRemainingAmountValue
+      : null;
+  const requiresRemainingPaymentFollowUp =
+    isClosedDealFlow && normalizedPaymentType === "PARTIAL";
   const isClosedStatusSelected =
     statusDraft === "CLOSED" || String(selectedLead?.status || "").toUpperCase() === "CLOSED";
   const normalizedActiveInventoryId = String(selectedLeadActiveInventoryId || "").trim();
@@ -1243,10 +1286,10 @@ const LeadDetailsRebuiltContent = ({
               Lead Profile
             </p>
             <h2 className={`truncate text-xl font-bold sm:text-2xl ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-              {selectedLead?.name || "Lead"}
+              {String(nameDraft || "").trim() || selectedLead?.name || "Lead"}
             </h2>
             <p className={`mt-1 truncate text-[11px] sm:text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              {selectedLead?.projectInterested || "Project not tagged yet"}
+              {String(projectInterestedDraft || "").trim() || selectedLead?.projectInterested || "Project not tagged yet"}
             </p>
             <div className="mt-2 flex flex-wrap gap-1">
               <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] sm:px-2 sm:text-[10px] ${
@@ -1328,11 +1371,68 @@ const LeadDetailsRebuiltContent = ({
                 </a>
               ) : <button type="button" disabled className={`h-9 rounded-lg border text-xs font-semibold opacity-50 ${input}`}>Maps</button>}
             </div>
-            <div className={`mt-3 space-y-1.5 text-sm ${isDark ? "text-slate-200" : "text-slate-700"}`}>
-              <div className="flex items-center gap-2"><Phone size={13} /> {selectedLead?.phone || "-"}</div>
-              <div className="flex items-center gap-2 break-all"><Mail size={13} /> {selectedLead?.email || "-"}</div>
-              <div className="flex items-center gap-2"><MapPin size={13} /> {selectedLead?.city || "-"}</div>
-              <div className="flex items-center gap-2"><Building2 size={13} /> {selectedLead?.projectInterested || "-"}</div>
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Name
+                </span>
+                <input
+                  type="text"
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  placeholder="Lead name"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Phone
+                </span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={phoneDraft}
+                  onChange={(event) => setPhoneDraft(event.target.value)}
+                  placeholder="Phone"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
+              <label className="space-y-1 sm:col-span-2">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Email
+                </span>
+                <input
+                  type="email"
+                  value={emailDraft}
+                  onChange={(event) => setEmailDraft(event.target.value)}
+                  placeholder="Email"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  City
+                </span>
+                <input
+                  type="text"
+                  value={cityDraft}
+                  onChange={(event) => setCityDraft(event.target.value)}
+                  placeholder="City"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Project
+                </span>
+                <input
+                  type="text"
+                  value={projectInterestedDraft}
+                  onChange={(event) => setProjectInterestedDraft(event.target.value)}
+                  placeholder="Project interested"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
             </div>
           </section>
 
@@ -1719,9 +1819,19 @@ const LeadDetailsRebuiltContent = ({
             <div className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>Lead Controls</div>
             <div className="mt-2">
               <label className={`inline-flex items-center gap-1 text-[10px] uppercase tracking-wider font-bold ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                <CalendarClock size={12} /> Next Follow-up
+                <CalendarClock size={12} />
+                {requiresRemainingPaymentFollowUp ? "Remaining Payment Follow-up" : "Next Follow-up"}
+                {requiresRemainingPaymentFollowUp ? (
+                  <span className={isDark ? "text-amber-200" : "text-amber-700"}>*</span>
+                ) : null}
               </label>
               <input type="datetime-local" value={followUpDraft} onChange={(event) => setFollowUpDraft(event.target.value)} className={`mt-1 h-10 w-full rounded-xl border px-3 text-sm ${input}`} />
+              {requiresRemainingPaymentFollowUp ? (
+                <div className={`mt-1 text-[10px] ${isDark ? "text-amber-200" : "text-amber-700"}`}>
+                  Required for collection of pending amount
+                  {remainingAmountForCollection ? ` (${formatCurrencyInr(remainingAmountForCollection)})` : ""}.
+                </div>
+              ) : null}
             </div>
 
             <div className={`mt-3 rounded-xl border p-3 ${softCard}`}>
@@ -1881,7 +1991,17 @@ const LeadDetailsRebuiltContent = ({
                     <option value="">Payment mode</option>
                     {dealPaymentModes.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
                   </select>
-                  <select value={paymentTypeDraft} onChange={(event) => setPaymentTypeDraft(event.target.value)} className={`h-9 w-full rounded-lg border px-2 text-xs ${input}`}>
+                  <select
+                    value={paymentTypeDraft}
+                    onChange={(event) => {
+                      const nextPaymentType = String(event.target.value || "");
+                      setPaymentTypeDraft(nextPaymentType);
+                      if (nextPaymentType === "PARTIAL" && !String(followUpDraft || "").trim()) {
+                        setFollowUpDraft(buildDefaultCollectionFollowUp());
+                      }
+                    }}
+                    className={`h-9 w-full rounded-lg border px-2 text-xs ${input}`}
+                  >
                     <option value="">Payment type</option>
                     {dealPaymentTypes.map((paymentType) => <option key={paymentType.value} value={paymentType.value}>{paymentType.label}</option>)}
                   </select>

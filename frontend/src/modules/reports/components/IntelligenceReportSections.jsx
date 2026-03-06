@@ -24,26 +24,52 @@ export const ReportsHeader = ({
       <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
         Funnel, quality, team and inventory reporting
       </p>
+      <p className="mt-2 text-xs text-slate-500">
+        Use filters to scope report windows and export current insights.
+      </p>
     </div>
 
-    <div className="flex flex-wrap gap-2">
-      {rangeOptions.map((range) => (
+    <div className="flex flex-col items-start gap-2 sm:items-end">
+      <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+        <div className="inline-flex flex-wrap items-center gap-1 rounded-xl bg-slate-100 p-1">
+          {rangeOptions.map((range) => (
+            <button
+              key={range.key}
+              type="button"
+              onClick={() => onRangeChange(range.key)}
+              className={`h-9 rounded-lg px-3 text-xs font-semibold transition-all ${
+                rangeKey === range.key
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "bg-transparent text-slate-700 hover:bg-white hover:text-slate-900"
+              }`}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
+
         <button
-          key={range.key}
           type="button"
-          onClick={() => onRangeChange(range.key)}
-          className={`h-9 rounded-lg border px-3 text-xs font-semibold transition-colors ${
-            rangeKey === range.key
-              ? "border-slate-900 bg-slate-900 text-white"
-              : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
-          }`}
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="h-9 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-60 inline-flex items-center gap-2"
         >
-          {range.label}
+          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+          Refresh
         </button>
-      ))}
+
+        <button
+          type="button"
+          onClick={onExport}
+          className="h-9 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-400 inline-flex items-center gap-2"
+        >
+          <Download size={14} />
+          Export CSV
+        </button>
+      </div>
 
       {rangeKey === "CUSTOM" ? (
-        <>
+        <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
           <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-600">
             From
             <input
@@ -84,27 +110,8 @@ export const ReportsHeader = ({
               className="h-9 bg-transparent text-slate-700 outline-none"
             />
           </label>
-        </>
+        </div>
       ) : null}
-
-      <button
-        type="button"
-        onClick={onRefresh}
-        disabled={refreshing}
-        className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-60 inline-flex items-center gap-2"
-      >
-        <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-        Refresh
-      </button>
-
-      <button
-        type="button"
-        onClick={onExport}
-        className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-400 inline-flex items-center gap-2"
-      >
-        <Download size={14} />
-        Export CSV
-      </button>
     </div>
   </div>
 );

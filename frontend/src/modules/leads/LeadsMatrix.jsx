@@ -39,6 +39,7 @@ const LEAD_STATUSES = [
   "CLOSED",
   "LOST",
 ];
+const LEAD_STATUS_SET = new Set(["ALL", ...LEAD_STATUSES]);
 
 const LEAD_SORT_OPTIONS = {
   RECENT: "RECENT",
@@ -333,6 +334,11 @@ const LeadsMatrix = () => {
   const [propertyActionType, setPropertyActionType] = useState("");
   const [propertyStatusActionInventoryId, setPropertyStatusActionInventoryId] = useState("");
 
+  const [nameDraft, setNameDraft] = useState("");
+  const [phoneDraft, setPhoneDraft] = useState("");
+  const [emailDraft, setEmailDraft] = useState("");
+  const [cityDraft, setCityDraft] = useState("");
+  const [projectInterestedDraft, setProjectInterestedDraft] = useState("");
   const [statusDraft, setStatusDraft] = useState("NEW");
   const [followUpDraft, setFollowUpDraft] = useState("");
   const [executiveDraft, setExecutiveDraft] = useState("");
@@ -470,6 +476,29 @@ const LeadsMatrix = () => {
       setRelatedInventoryDraft("");
     }
   }, [selectedLead, inventoryOptions, relatedInventoryDraft]);
+
+  useEffect(() => {
+    if (isRouteDetailsView) return;
+
+    const search = new URLSearchParams(location.search || "");
+    const statusParam = String(search.get("status") || "").trim().toUpperCase();
+    const queryParam = search.get("q");
+    const dueParam = String(search.get("due") || "").trim().toLowerCase();
+
+    if (statusParam && LEAD_STATUS_SET.has(statusParam)) {
+      setStatusFilter(statusParam);
+    } else {
+      setStatusFilter("ALL");
+    }
+
+    if (queryParam !== null) {
+      setQuery(String(queryParam || ""));
+    } else {
+      setQuery("");
+    }
+
+    setShowDueOnly(["1", "true", "yes"].includes(dueParam));
+  }, [isRouteDetailsView, location.search]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -676,6 +705,11 @@ const LeadsMatrix = () => {
     const leadSiteLng = toCoordinateNumber(lead?.siteLocation?.lng);
 
     setSelectedLead(lead);
+    setNameDraft(String(lead?.name || ""));
+    setPhoneDraft(String(lead?.phone || ""));
+    setEmailDraft(String(lead?.email || ""));
+    setCityDraft(String(lead?.city || ""));
+    setProjectInterestedDraft(String(lead?.projectInterested || ""));
     setStatusDraft(lead.status || "NEW");
     setFollowUpDraft(toDateTimeInput(lead.nextFollowUp));
     setSiteLatDraft(leadSiteLat === null ? "" : String(leadSiteLat));
@@ -741,6 +775,11 @@ const LeadsMatrix = () => {
     setActivities([]);
     setDiaryEntries([]);
     setDiaryDraft("");
+    setNameDraft("");
+    setPhoneDraft("");
+    setEmailDraft("");
+    setCityDraft("");
+    setProjectInterestedDraft("");
     setSiteLatDraft("");
     setSiteLngDraft("");
     setRelatedInventoryDraft("");
@@ -810,7 +849,13 @@ const LeadsMatrix = () => {
       prev.map((lead) => (lead._id === updatedLead._id ? updatedLead : lead)),
     );
     setSelectedLead(updatedLead);
+    setNameDraft(String(updatedLead?.name || ""));
+    setPhoneDraft(String(updatedLead?.phone || ""));
+    setEmailDraft(String(updatedLead?.email || ""));
+    setCityDraft(String(updatedLead?.city || ""));
+    setProjectInterestedDraft(String(updatedLead?.projectInterested || ""));
     setStatusDraft(String(updatedLead.status || "NEW"));
+    setFollowUpDraft(toDateTimeInput(updatedLead?.nextFollowUp));
 
     const nextSiteLat = toCoordinateNumber(updatedLead?.siteLocation?.lat);
     const nextSiteLng = toCoordinateNumber(updatedLead?.siteLocation?.lng);
@@ -970,9 +1015,27 @@ const LeadsMatrix = () => {
       const parsedSiteLng = toCoordinateNumber(siteLngDraft);
       const hasAnySiteCoordinate =
         parsedSiteLat !== null || parsedSiteLng !== null;
+      const normalizedStatusDraft = String(statusDraft || "").trim().toUpperCase();
+      const normalizedLeadStatus = String(selectedLead?.status || "").trim().toUpperCase();
+      const normalizedNameDraft = String(nameDraft || "").trim();
+      const normalizedPhoneDraft = String(phoneDraft || "").trim();
+      const normalizedExistingPhone = String(selectedLead?.phone || "").trim();
+      const normalizedEmailDraft = String(emailDraft || "").trim();
+      const normalizedCityDraft = String(cityDraft || "").trim();
+      const normalizedProjectInterestedDraft = String(projectInterestedDraft || "").trim();
+      const normalizedFollowUpDraft = String(followUpDraft || "").trim();
+      const hasFollowUpDraft = normalizedFollowUpDraft.length > 0;
+      const parsedFollowUpDate = hasFollowUpDraft ? new Date(normalizedFollowUpDraft) : null;
       const parsedPaymentRemaining = toAmountNumber(paymentRemainingDraft);
+      const existingPaymentRemaining = toAmountNumber(selectedLead?.dealPayment?.remainingAmount);
       const normalizedPaymentMode = String(paymentModeDraft || "").trim().toUpperCase();
       const normalizedPaymentType = String(paymentTypeDraft || "").trim().toUpperCase();
+      const existingPaymentType = String(selectedLead?.dealPayment?.paymentType || "").trim().toUpperCase();
+      const effectivePaymentType = normalizedPaymentType || existingPaymentType;
+      const effectiveRemainingAmount =
+        effectivePaymentType === "PARTIAL"
+          ? (paymentRemainingDraft !== "" ? parsedPaymentRemaining : existingPaymentRemaining)
+          : 0;
       const normalizedApprovalStatus = String(paymentApprovalStatusDraft || "")
         .trim()
         .toUpperCase();
@@ -980,12 +1043,17 @@ const LeadsMatrix = () => {
       const trimmedPaymentNote = String(paymentNoteDraft || "").trim();
       const trimmedApprovalNote = String(paymentApprovalNoteDraft || "").trim();
       const isClosedFlow =
-        ["CLOSED", "REQUESTED"].includes(statusDraft)
-        || ["CLOSED", "REQUESTED"].includes(String(selectedLead?.status || ""));
+        ["CLOSED", "REQUESTED"].includes(normalizedStatusDraft)
+        || ["CLOSED", "REQUESTED"].includes(normalizedLeadStatus);
       const isExecutiveClosingDeal =
         isExecutiveUser
-        && statusDraft === "CLOSED"
-        && String(selectedLead?.status || "") !== "CLOSED";
+        && normalizedStatusDraft === "CLOSED"
+        && normalizedLeadStatus !== "CLOSED";
+      const requiresRemainingPaymentFollowUp =
+        isClosedFlow
+        && effectivePaymentType === "PARTIAL"
+        && Number.isFinite(effectiveRemainingAmount)
+        && effectiveRemainingAmount > 0;
 
       if (
         canConfigureSiteLocation
@@ -993,6 +1061,27 @@ const LeadsMatrix = () => {
         && (parsedSiteLat === null || parsedSiteLng === null)
       ) {
         setError("Enter valid site latitude and longitude");
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (!normalizedNameDraft) {
+        setError("Name is required");
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (
+        normalizedPhoneDraft !== normalizedExistingPhone
+        && (!normalizedPhoneDraft || !/^\d{8,15}$/.test(normalizedPhoneDraft))
+      ) {
+        setError("Phone should be 8 to 15 digits");
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (hasFollowUpDraft && Number.isNaN(parsedFollowUpDate?.getTime())) {
+        setError("Enter a valid follow-up date and time");
         setSavingUpdates(false);
         return;
       }
@@ -1024,10 +1113,16 @@ const LeadsMatrix = () => {
 
       if (
         isClosedFlow
-        && normalizedPaymentType === "PARTIAL"
-        && (parsedPaymentRemaining === null || parsedPaymentRemaining <= 0)
+        && effectivePaymentType === "PARTIAL"
+        && (effectiveRemainingAmount === null || effectiveRemainingAmount <= 0)
       ) {
         setError("Enter remaining amount greater than 0 for partial payment");
+        setSavingUpdates(false);
+        return;
+      }
+
+      if (requiresRemainingPaymentFollowUp && !hasFollowUpDraft) {
+        setError("Set follow-up date/time for remaining payment collection");
         setSavingUpdates(false);
         return;
       }
@@ -1055,11 +1150,16 @@ const LeadsMatrix = () => {
       }
 
       const payload = {
+        name: normalizedNameDraft,
+        phone: normalizedPhoneDraft,
+        email: normalizedEmailDraft,
+        city: normalizedCityDraft,
+        projectInterested: normalizedProjectInterestedDraft,
         status: statusDraft,
       };
 
-      if (followUpDraft) {
-        payload.nextFollowUp = followUpDraft;
+      if (hasFollowUpDraft) {
+        payload.nextFollowUp = normalizedFollowUpDraft;
       }
 
       if (canConfigureSiteLocation && hasAnySiteCoordinate) {
@@ -1081,10 +1181,10 @@ const LeadsMatrix = () => {
           dealPaymentPayload.paymentType = normalizedPaymentType;
         }
 
-        if (normalizedPaymentType === "FULL") {
+        if (effectivePaymentType === "FULL") {
           dealPaymentPayload.remainingAmount = 0;
-        } else if (normalizedPaymentType === "PARTIAL" && parsedPaymentRemaining !== null) {
-          dealPaymentPayload.remainingAmount = parsedPaymentRemaining;
+        } else if (effectivePaymentType === "PARTIAL" && effectiveRemainingAmount !== null) {
+          dealPaymentPayload.remainingAmount = effectiveRemainingAmount;
         }
 
         if (normalizedPaymentMode === "CASH") {
@@ -1624,6 +1724,16 @@ const LeadsMatrix = () => {
             linkingProperty={linkingProperty}
             onLinkPropertyToLead={handleLinkPropertyToLead}
             leadStatuses={LEAD_STATUSES}
+            nameDraft={nameDraft}
+            setNameDraft={setNameDraft}
+            phoneDraft={phoneDraft}
+            setPhoneDraft={setPhoneDraft}
+            emailDraft={emailDraft}
+            setEmailDraft={setEmailDraft}
+            cityDraft={cityDraft}
+            setCityDraft={setCityDraft}
+            projectInterestedDraft={projectInterestedDraft}
+            setProjectInterestedDraft={setProjectInterestedDraft}
             statusDraft={statusDraft}
             setStatusDraft={setStatusDraft}
             followUpDraft={followUpDraft}

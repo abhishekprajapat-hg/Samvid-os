@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BellRing,
@@ -217,6 +217,21 @@ const AdminNotifications = () => {
   const [inventoryRequests, setInventoryRequests] = useState([]);
   const [reviewingLeadId, setReviewingLeadId] = useState("");
   const [reviewingInventoryRequestId, setReviewingInventoryRequestId] = useState("");
+  const leadSectionRef = useRef(null);
+  const inventorySectionRef = useRef(null);
+
+  const isDirectInteractiveTarget = useCallback((target) => {
+    if (!target || typeof target.closest !== "function") return false;
+    return Boolean(target.closest("button, a, input, select, textarea, option"));
+  }, []);
+
+  const scrollToSection = useCallback((sectionKey) => {
+    if (sectionKey === "inventory") {
+      inventorySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    leadSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   const loadNotifications = useCallback(async (asRefresh = false) => {
     try {
@@ -558,22 +573,82 @@ const AdminNotifications = () => {
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-2 lg:grid-cols-4">
-        <div className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/80" : "border-slate-200 bg-white"}`}>
-          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Pending Payments</p>
-          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-amber-200" : "text-amber-700"}`}>{metrics.pendingLead}</p>
-        </div>
-        <div className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/80" : "border-slate-200 bg-white"}`}>
-          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Approved Payments</p>
-          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-emerald-200" : "text-emerald-700"}`}>{metrics.approvedLead}</p>
-        </div>
-        <div className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/80" : "border-slate-200 bg-white"}`}>
-          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Rejected Payments</p>
-          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-rose-200" : "text-rose-700"}`}>{metrics.rejectedLead}</p>
-        </div>
-        <div className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/80" : "border-slate-200 bg-white"}`}>
-          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Inventory Pending</p>
-          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-cyan-200" : "text-cyan-700"}`}>{metrics.pendingInventory}</p>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setApprovalFilter("PENDING");
+            scrollToSection("lead");
+          }}
+          className={`rounded-xl border p-3 text-left transition-colors ${
+            isDark
+              ? "border-slate-700 bg-slate-900/80 hover:border-amber-300/40"
+              : "border-slate-200 bg-white hover:border-amber-300"
+          }`}
+        >
+          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            Pending Payments
+          </p>
+          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-amber-200" : "text-amber-700"}`}>
+            {metrics.pendingLead}
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setApprovalFilter("APPROVED");
+            scrollToSection("lead");
+          }}
+          className={`rounded-xl border p-3 text-left transition-colors ${
+            isDark
+              ? "border-slate-700 bg-slate-900/80 hover:border-emerald-300/40"
+              : "border-slate-200 bg-white hover:border-emerald-300"
+          }`}
+        >
+          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            Approved Payments
+          </p>
+          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-emerald-200" : "text-emerald-700"}`}>
+            {metrics.approvedLead}
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setApprovalFilter("REJECTED");
+            scrollToSection("lead");
+          }}
+          className={`rounded-xl border p-3 text-left transition-colors ${
+            isDark
+              ? "border-slate-700 bg-slate-900/80 hover:border-rose-300/40"
+              : "border-slate-200 bg-white hover:border-rose-300"
+          }`}
+        >
+          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            Rejected Payments
+          </p>
+          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-rose-200" : "text-rose-700"}`}>
+            {metrics.rejectedLead}
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setApprovalFilter("ALL");
+            scrollToSection("inventory");
+          }}
+          className={`rounded-xl border p-3 text-left transition-colors ${
+            isDark
+              ? "border-slate-700 bg-slate-900/80 hover:border-cyan-300/40"
+              : "border-slate-200 bg-white hover:border-cyan-300"
+          }`}
+        >
+          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+            Inventory Pending
+          </p>
+          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-cyan-200" : "text-cyan-700"}`}>
+            {metrics.pendingInventory}
+          </p>
+        </button>
       </div>
 
       <div className={`mb-5 rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
@@ -652,9 +727,25 @@ const AdminNotifications = () => {
               const requestTag = source === "lead"
                 ? "Payment Request"
                 : `${String(payload?.inventoryRequestType || payload?.type || "UPDATE").toUpperCase()} Inventory Request`;
+              const openAlertTarget = () => handleOpenAlertTarget(alert);
+              const handleAlertCardClick = (event) => {
+                if (isDirectInteractiveTarget(event.target)) return;
+                openAlertTarget();
+              };
+              const handleAlertCardKeyDown = (event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                openAlertTarget();
+              };
 
               return (
-                <div key={alert.id} className={`rounded-xl border p-3 ${
+                <div
+                  key={alert.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={handleAlertCardClick}
+                  onKeyDown={handleAlertCardKeyDown}
+                  className={`cursor-pointer rounded-xl border p-3 transition-colors ${
                   isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
                 }`}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -694,7 +785,7 @@ const AdminNotifications = () => {
                   <div className="mt-2 flex justify-end">
                     <button
                       type="button"
-                      onClick={() => handleOpenAlertTarget(alert)}
+                      onClick={openAlertTarget}
                       className={`h-7 rounded-lg border px-2 text-[10px] font-semibold ${
                         isDark
                           ? "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-300/40"
@@ -712,7 +803,7 @@ const AdminNotifications = () => {
       </section>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <section className={`rounded-2xl border p-4 ${
+        <section ref={leadSectionRef} className={`rounded-2xl border p-4 ${
           isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"
         }`}>
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -754,8 +845,28 @@ const AdminNotifications = () => {
                   { label: "Field Executive", user: lead?.assignedFieldExecutive },
                   { label: "Created By", user: lead?.createdBy },
                 ];
+                const openLeadDetails = () => {
+                  const leadId = String(lead?._id || "");
+                  if (!leadId) return;
+                  navigate(`/leads/${leadId}`);
+                };
+                const handleLeadCardClick = (event) => {
+                  if (isDirectInteractiveTarget(event.target)) return;
+                  openLeadDetails();
+                };
+                const handleLeadCardKeyDown = (event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  openLeadDetails();
+                };
                 return (
-                  <div key={lead._id} className={`rounded-xl border p-3 ${
+                  <div
+                    key={lead._id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={handleLeadCardClick}
+                    onKeyDown={handleLeadCardKeyDown}
+                    className={`cursor-pointer rounded-xl border p-3 transition-colors ${
                     isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
                   }`}>
                     <div className="mb-2 flex items-start justify-between gap-2">
@@ -980,7 +1091,7 @@ const AdminNotifications = () => {
           )}
         </section>
 
-        <section className={`rounded-2xl border p-4 ${
+        <section ref={inventorySectionRef} className={`rounded-2xl border p-4 ${
           isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"
         }`}>
           <div className="mb-3 flex items-center justify-between gap-2">
@@ -1032,11 +1143,31 @@ const AdminNotifications = () => {
                   .map((value) => String(value || "").trim())
                   .filter(Boolean)
                   .join(" - ");
+                const openInventoryDetails = () => {
+                  if (!inventoryId) return;
+                  navigate(`/inventory/${inventoryId}`);
+                };
+                const handleInventoryCardClick = (event) => {
+                  if (isDirectInteractiveTarget(event.target)) return;
+                  openInventoryDetails();
+                };
+                const handleInventoryCardKeyDown = (event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  event.preventDefault();
+                  openInventoryDetails();
+                };
 
                 return (
-                  <div key={request._id} className={`rounded-xl border p-3 ${
+                  <div
+                    key={request._id}
+                    role={inventoryId ? "button" : undefined}
+                    tabIndex={inventoryId ? 0 : undefined}
+                    onClick={inventoryId ? handleInventoryCardClick : undefined}
+                    onKeyDown={inventoryId ? handleInventoryCardKeyDown : undefined}
+                    className={`rounded-xl border p-3 ${
                     isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
-                  }`}>
+                  } ${inventoryId ? "cursor-pointer transition-colors" : ""}`}
+                  >
                     <div className="mb-2 flex items-start justify-between">
                       <div>
                         <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>

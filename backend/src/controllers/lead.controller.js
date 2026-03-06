@@ -34,11 +34,11 @@ const LEAD_POPULATE_FIELDS = [
   { path: "closureDocuments.uploadedBy", select: "name role" },
   {
     path: "inventoryId",
-    select: "projectName towerName unitNumber location siteLocation status price type category images",
+    select: "projectName towerName unitNumber location siteLocation status price type category images saleDetails",
   },
   {
     path: "relatedInventoryIds",
-    select: "projectName towerName unitNumber location siteLocation status price type category images",
+    select: "projectName towerName unitNumber location siteLocation status price type category images saleDetails",
   },
 ];
 
@@ -53,11 +53,11 @@ const LEAD_PAYMENT_REQUEST_POPULATE_FIELDS = [
   { path: "closureDocuments.uploadedBy", select: "name role phone email" },
   {
     path: "inventoryId",
-    select: "projectName towerName unitNumber location siteLocation status price type category images documents",
+    select: "projectName towerName unitNumber location siteLocation status price type category images documents saleDetails",
   },
   {
     path: "relatedInventoryIds",
-    select: "projectName towerName unitNumber location siteLocation status price type category images documents",
+    select: "projectName towerName unitNumber location siteLocation status price type category images documents saleDetails",
   },
 ];
 
@@ -1244,6 +1244,11 @@ exports.updateLeadStatus = async (req, res) => {
   try {
     const { leadId } = req.params;
     const {
+      name,
+      phone,
+      email,
+      city,
+      projectInterested,
       status: rawStatus,
       nextFollowUp,
       siteLocation: rawSiteLocation,
@@ -1256,15 +1261,104 @@ exports.updateLeadStatus = async (req, res) => {
       return res.status(400).json({ message: "Status is required" });
     }
 
+    const hasNameField = Object.prototype.hasOwnProperty.call(req.body || {}, "name");
+    const hasPhoneField = Object.prototype.hasOwnProperty.call(req.body || {}, "phone");
+    const hasEmailField = Object.prototype.hasOwnProperty.call(req.body || {}, "email");
+    const hasCityField = Object.prototype.hasOwnProperty.call(req.body || {}, "city");
+    const hasProjectInterestedField = Object.prototype.hasOwnProperty.call(req.body || {}, "projectInterested");
+    const normalizedName = hasNameField ? String(name || "").trim() : "";
+    const normalizedPhone = hasPhoneField ? String(phone || "").trim() : "";
+    const normalizedEmail = hasEmailField ? String(email || "").trim() : "";
+    const normalizedCity = hasCityField ? String(city || "").trim() : "";
+    const normalizedProjectInterested = hasProjectInterestedField
+      ? String(projectInterested || "").trim()
+      : "";
+
     if (!LEAD_STATUS_VALUES.includes(requestedStatus)) {
       return res.status(400).json({
         message: `Status must be one of: ${LEAD_STATUS_VALUES.join(", ")}`,
       });
     }
 
+    const hasNextFollowUpField =
+      Object.prototype.hasOwnProperty.call(req.body || {}, "nextFollowUp");
+    const normalizedNextFollowUp = hasNextFollowUpField
+      ? String(nextFollowUp || "").trim()
+      : "";
+    const hasNextFollowUpInput = normalizedNextFollowUp.length > 0;
+    const clearNextFollowUp =
+      hasNextFollowUpField && !hasNextFollowUpInput;
+    const parsedNextFollowUp = hasNextFollowUpInput
+      ? new Date(normalizedNextFollowUp)
+      : null;
+    if (hasNextFollowUpInput && Number.isNaN(parsedNextFollowUp.getTime())) {
+      return res.status(400).json({
+        message: "nextFollowUp must be a valid date/time",
+      });
+    }
+
     const lead = await Lead.findById(leadId);
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const updatedProfileFields = [];
+    if (hasNameField) {
+      if (!normalizedName) {
+        return res.status(400).json({ message: "Name is required" });
+      }
+
+      const existingName = String(lead?.name || "").trim();
+      if (normalizedName !== existingName) {
+        lead.name = normalizedName;
+        updatedProfileFields.push("name");
+      }
+    }
+
+    if (hasPhoneField) {
+      const existingPhone = String(lead?.phone || "").trim();
+      if (normalizedPhone !== existingPhone) {
+        if (!normalizedPhone || !/^\d{8,15}$/.test(normalizedPhone)) {
+          return res.status(400).json({ message: "Phone must be 8 to 15 digits" });
+        }
+
+        const existingLeadWithPhone = await Lead.findOne({
+          _id: { $ne: lead._id },
+          phone: normalizedPhone,
+        })
+          .select("_id")
+          .lean();
+        if (existingLeadWithPhone) {
+          return res.status(400).json({ message: "Lead already exists with this phone" });
+        }
+
+        lead.phone = normalizedPhone;
+        updatedProfileFields.push("phone");
+      }
+    }
+
+    if (hasEmailField) {
+      const existingEmail = String(lead?.email || "").trim();
+      if (normalizedEmail !== existingEmail) {
+        lead.email = normalizedEmail;
+        updatedProfileFields.push("email");
+      }
+    }
+
+    if (hasCityField) {
+      const existingCity = String(lead?.city || "").trim();
+      if (normalizedCity !== existingCity) {
+        lead.city = normalizedCity;
+        updatedProfileFields.push("city");
+      }
+    }
+
+    if (hasProjectInterestedField) {
+      const existingProjectInterested = String(lead?.projectInterested || "").trim();
+      if (normalizedProjectInterested !== existingProjectInterested) {
+        lead.projectInterested = normalizedProjectInterested;
+        updatedProfileFields.push("projectInterested");
+      }
     }
 
     const parsedSiteLocation = parseSiteLocationPayload(rawSiteLocation);
@@ -1562,11 +1656,34 @@ exports.updateLeadStatus = async (req, res) => {
       }));
     }
 
+    const normalizedPaymentType = normalizeEnumValue(lead?.dealPayment?.paymentType);
+    const normalizedRemainingAmount = toFiniteNumber(lead?.dealPayment?.remainingAmount);
+    const existingFollowUpDate = lead?.nextFollowUp ? new Date(lead.nextFollowUp) : null;
+    const hasExistingFollowUp =
+      existingFollowUpDate && !Number.isNaN(existingFollowUpDate.getTime());
+    const isRemainingCollectionFlow =
+      [REQUESTED_STATUS, CLOSED_STATUS].includes(nextLeadStatus)
+      && normalizedPaymentType === "PARTIAL"
+      && normalizedRemainingAmount !== null
+      && normalizedRemainingAmount > 0;
+    const hasCollectionFollowUp =
+      hasNextFollowUpInput
+      || (!clearNextFollowUp && hasExistingFollowUp);
+
+    if (isRemainingCollectionFlow && !hasCollectionFollowUp) {
+      return res.status(400).json({
+        message:
+          "Set nextFollowUp for remaining payment collection when closing with partial payment",
+      });
+    }
+
     lead.status = nextLeadStatus;
     lead.lastContactedAt = new Date();
 
-    if (nextFollowUp) {
-      lead.nextFollowUp = new Date(nextFollowUp);
+    if (hasNextFollowUpInput) {
+      lead.nextFollowUp = parsedNextFollowUp;
+    } else if (clearNextFollowUp) {
+      lead.nextFollowUp = null;
     }
 
     await lead.save();
@@ -1598,6 +1715,20 @@ exports.updateLeadStatus = async (req, res) => {
       activityActions.push(
         `Closure documents updated (${lead.closureDocuments.length} file${lead.closureDocuments.length === 1 ? "" : "s"})`,
       );
+    }
+
+    if (updatedProfileFields.length > 0) {
+      const labelMap = {
+        name: "Name",
+        phone: "Phone",
+        email: "Email",
+        city: "City",
+        projectInterested: "Project",
+      };
+      const profileFieldLabels = updatedProfileFields
+        .map((field) => labelMap[field] || field)
+        .join(", ");
+      activityActions.push(`Lead profile updated (${profileFieldLabels})`);
     }
 
     await Promise.all(

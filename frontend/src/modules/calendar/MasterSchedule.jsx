@@ -12,6 +12,13 @@ import {
   RefreshCw,
   Phone,
   User,
+  Users,
+  Mail,
+  MapPin,
+  MessageCircle,
+  PanelRightOpen,
+  Trash2,
+  X,
 } from "lucide-react";
 import api from "../../services/api";
 import { addLeadDiaryEntry, getLeadDiary } from "../../services/leadService";
@@ -72,6 +79,70 @@ const buildCalendarCells = (monthDate) => {
   });
 };
 
+const getAssignedUser = (lead) =>
+  lead?.assignedTo || lead?.assignedExecutive || lead?.assignedFieldExecutive || null;
+
+const getAssignedLabel = (lead) => {
+  const assignedUser = getAssignedUser(lead);
+  if (assignedUser?.name) return assignedUser.name;
+  return "Unassigned";
+};
+
+const getReportingLabel = (lead) => {
+  if (lead?.assignedManager?.name) return lead.assignedManager.name;
+  return "-";
+};
+
+const normalizePhoneDigits = (value) =>
+  String(value || "").replace(/\D/g, "");
+
+const getDialerHref = (phone) => {
+  const digits = normalizePhoneDigits(phone);
+  return digits ? `tel:${digits}` : "";
+};
+
+const getWhatsAppHref = (phone) => {
+  const digits = normalizePhoneDigits(phone);
+  if (!digits) return "";
+  const waNumber = digits.length === 10 ? `91${digits}` : digits;
+  return `https://wa.me/${waNumber}`;
+};
+
+const getMailHref = (email) => {
+  const trimmed = String(email || "").trim();
+  return trimmed ? `mailto:${trimmed}` : "";
+};
+
+const getMapsHref = (lead) => {
+  const locationQuery = [lead?.projectInterested, lead?.city]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(", ");
+  return locationQuery
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(locationQuery)}`
+    : "";
+};
+
+const formatCurrencyInr = (value) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) return "-";
+  return `Rs ${amount.toLocaleString("en-IN")}`;
+};
+
+const getRemainingAmount = (lead) => {
+  const paymentType = String(lead?.dealPayment?.paymentType || "").trim().toUpperCase();
+  const remainingAmount = Number(lead?.dealPayment?.remainingAmount);
+
+  if (paymentType === "FULL") return 0;
+  if (paymentType === "PARTIAL" && Number.isFinite(remainingAmount) && remainingAmount > 0) {
+    return remainingAmount;
+  }
+  if (Number.isFinite(remainingAmount) && remainingAmount >= 0) {
+    return remainingAmount;
+  }
+  return null;
+};
+
 const MasterSchedule = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -79,6 +150,9 @@ const MasterSchedule = () => {
   const [success, setSuccess] = useState("");
   const [leads, setLeads] = useState([]);
   const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [activeDiaryLeadId, setActiveDiaryLeadId] = useState("");
+  const [detailsLeadId, setDetailsLeadId] = useState("");
+  const [deletingLeadId, setDeletingLeadId] = useState("");
   const [diaryLoading, setDiaryLoading] = useState(false);
   const [diarySaving, setDiarySaving] = useState(false);
   const [diaryDraft, setDiaryDraft] = useState("");
@@ -95,6 +169,7 @@ const MasterSchedule = () => {
   });
 
   const isDark = (localStorage.getItem("theme") || "light") === "dark";
+  const userRole = String(localStorage.getItem("role") || "");
 
   const loadLeads = async () => {
     try {
@@ -152,11 +227,35 @@ const MasterSchedule = () => {
     const items = [...(byDate.get(selectedKey) || [])];
     return items.sort((a, b) => new Date(a.nextFollowUp) - new Date(b.nextFollowUp));
   }, [byDate, selectedKey]);
-  const selectedLead = useMemo(
+  const selectedDayLead = useMemo(
     () => selectedDayItems.find((lead) => lead._id === selectedLeadId) || selectedDayItems[0] || null,
     [selectedDayItems, selectedLeadId],
   );
+  const selectedLead = useMemo(() => {
+    if (activeDiaryLeadId) {
+      return leads.find((lead) => lead._id === activeDiaryLeadId) || null;
+    }
+    return selectedDayLead;
+  }, [activeDiaryLeadId, leads, selectedDayLead]);
+  const detailsLead = useMemo(
+    () => leads.find((lead) => lead._id === detailsLeadId) || null,
+    [leads, detailsLeadId],
+  );
   const selectedDiaryLeadId = String(selectedLead?._id || "");
+  const detailsDialerHref = getDialerHref(detailsLead?.phone);
+  const detailsWhatsAppHref = getWhatsAppHref(detailsLead?.phone);
+  const detailsMailHref = getMailHref(detailsLead?.email);
+  const detailsMapsHref = getMapsHref(detailsLead);
+  const detailsRemainingAmount = getRemainingAmount(detailsLead);
+  const hasAnyContactAction = Boolean(
+    detailsDialerHref || detailsWhatsAppHref || detailsMailHref || detailsMapsHref,
+  );
+  const detailsPaymentMode = String(detailsLead?.dealPayment?.mode || "")
+    .trim()
+    .replaceAll("_", " ");
+  const detailsPaymentType = String(detailsLead?.dealPayment?.paymentType || "")
+    .trim()
+    .replaceAll("_", " ");
 
   const monthTitle = monthCursor.toLocaleDateString([], {
     month: "long",
@@ -166,17 +265,35 @@ const MasterSchedule = () => {
   useEffect(() => {
     if (!selectedDayItems.length) {
       setSelectedLeadId("");
-      setDiaryDraft("");
-      setDiaryEntries([]);
       return;
     }
 
     const isSelectedLeadStillVisible = selectedDayItems.some((lead) => lead._id === selectedLeadId);
     if (!isSelectedLeadStillVisible) {
       setSelectedLeadId(selectedDayItems[0]._id);
-      setDiaryDraft("");
     }
   }, [selectedDayItems, selectedLeadId]);
+
+  useEffect(() => {
+    if (activeDiaryLeadId && !leads.some((lead) => lead._id === activeDiaryLeadId)) {
+      setActiveDiaryLeadId("");
+      setDiaryDraft("");
+      setDiaryEntries([]);
+      return;
+    }
+  }, [activeDiaryLeadId, leads]);
+
+  useEffect(() => {
+    if (detailsLeadId && !leads.some((lead) => lead._id === detailsLeadId)) {
+      setDetailsLeadId("");
+    }
+  }, [detailsLeadId, leads]);
+
+  useEffect(() => {
+    if (!activeDiaryLeadId && selectedDayLead?._id) {
+      setActiveDiaryLeadId(selectedDayLead._id);
+    }
+  }, [activeDiaryLeadId, selectedDayLead]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -237,6 +354,15 @@ const MasterSchedule = () => {
 
       setSuccess("Follow-up scheduled successfully");
       await loadLeads();
+
+      const followUpDate = new Date(form.nextFollowUp);
+      if (!Number.isNaN(followUpDate.getTime())) {
+        setSelectedDate(followUpDate);
+        setMonthCursor(new Date(followUpDate.getFullYear(), followUpDate.getMonth(), 1));
+      }
+      setSelectedLeadId(form.leadId);
+      setActiveDiaryLeadId(form.leadId);
+      setDiaryDraft("");
     } catch (err) {
       setError(toErrorMessage(err, "Failed to schedule follow-up"));
     } finally {
@@ -256,7 +382,74 @@ const MasterSchedule = () => {
 
   const handleSelectLead = (leadId) => {
     setSelectedLeadId(leadId);
+    setActiveDiaryLeadId(leadId);
     setDiaryDraft("");
+  };
+
+  const handleOpenLeadDetails = (leadId) => {
+    setSelectedLeadId(leadId);
+    setActiveDiaryLeadId(leadId);
+    setDetailsLeadId(leadId);
+    setDiaryDraft("");
+  };
+
+  const handleCloseLeadDetails = () => {
+    setDetailsLeadId("");
+  };
+
+  const handleDeleteFollowUp = async (lead) => {
+    const leadId = String(lead?._id || "");
+    if (!leadId || deletingLeadId) return;
+
+    const confirmed = window.confirm(
+      `Delete follow-up for ${lead?.name || "this lead"}?`,
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeletingLeadId(leadId);
+      setError("");
+      setSuccess("");
+
+      await api.patch(`/leads/${leadId}/status`, {
+        status: lead?.status || "NEW",
+        nextFollowUp: null,
+      });
+
+      if (detailsLeadId === leadId) {
+        setDetailsLeadId("");
+      }
+
+      if (selectedLeadId === leadId) {
+        setSelectedLeadId("");
+        setActiveDiaryLeadId("");
+        setDiaryDraft("");
+        setDiaryEntries([]);
+      }
+
+      setSuccess("Follow-up deleted successfully");
+      await loadLeads();
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to delete follow-up"));
+    } finally {
+      setDeletingLeadId("");
+    }
+  };
+
+  const handleFormLeadChange = (leadId) => {
+    setForm((prev) => ({ ...prev, leadId }));
+    setSelectedLeadId(leadId);
+    setActiveDiaryLeadId(leadId);
+    setDiaryDraft("");
+
+    const selected = leads.find((lead) => lead._id === leadId);
+    if (!selected?.nextFollowUp) return;
+
+    const followUpDate = new Date(selected.nextFollowUp);
+    if (Number.isNaN(followUpDate.getTime())) return;
+
+    setSelectedDate(followUpDate);
+    setMonthCursor(new Date(followUpDate.getFullYear(), followUpDate.getMonth(), 1));
   };
 
   const handleAddDiary = async () => {
@@ -301,6 +494,11 @@ const MasterSchedule = () => {
           <p className={`text-xs mt-1 uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
             Real follow-ups: {followUps.length}
           </p>
+          {userRole === "ADMIN" ? (
+            <p className={`text-[11px] mt-1 ${isDark ? "text-cyan-300" : "text-sky-700"}`}>
+              Admin view: all follow-ups in your company
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -398,7 +596,7 @@ const MasterSchedule = () => {
             <div className="space-y-2">
               <select
                 value={form.leadId}
-                onChange={(e) => setForm((prev) => ({ ...prev, leadId: e.target.value }))}
+                onChange={(e) => handleFormLeadChange(e.target.value)}
                 className="w-full h-10 px-3 rounded-xl border bg-transparent text-sm"
               >
                 <option value="">Select lead</option>
@@ -449,116 +647,301 @@ const MasterSchedule = () => {
                 </div>
                 ) : (
                   selectedDayItems.map((lead, index) => {
-                    const isActiveLead = selectedDiaryLeadId === lead._id;
+                    const isActiveLead = selectedLeadId === lead._id;
+                    const isDiaryForLead = selectedDiaryLeadId === lead._id;
 
                     return (
-                      <motion.div
-                        key={lead._id}
-                        initial={{ opacity: 0, x: 10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: index * 0.04 }}
-                        onClick={() => handleSelectLead(lead._id)}
-                        className={`rounded-xl border p-3 cursor-pointer transition-colors ${
-                          isActiveLead
-                            ? (isDark ? "border-cyan-500/50 bg-cyan-500/10" : "border-sky-400 bg-sky-50")
-                            : (isDark ? "border-slate-700 bg-slate-900/85 hover:border-slate-500" : "border-slate-200 bg-white hover:border-slate-300")
-                        }`}
-                      >
-                        <div className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>{lead.name}</div>
-                        <div className={`mt-2 text-xs space-y-1 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                          <div className="flex items-center gap-2">
-                            <Clock3 size={12} /> {formatDateTime(lead.nextFollowUp)}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Phone size={12} /> {lead.phone || "-"}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <User size={12} /> {lead.status}
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })
-                )}
-              </div>
-              <div className={`border-t p-4 space-y-3 ${isDark ? "border-slate-700" : "border-slate-200"}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <NotebookPen size={14} className={isDark ? "text-cyan-300" : "text-sky-700"} />
-                    <span className={`text-sm font-bold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-                      Lead Diary
-                    </span>
-                  </div>
-                  {selectedLead && (
-                    <span className={`text-[11px] font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                      {selectedLead.name}
-                    </span>
-                  )}
-                </div>
-
-                {selectedLead ? (
-                  <>
-                    <div className="space-y-2">
-                      <textarea
-                        value={diaryDraft}
-                        onChange={(e) => setDiaryDraft(e.target.value)}
-                        maxLength={2000}
-                        placeholder={`Add diary note for ${selectedLead.name}`}
-                        className={`w-full min-h-[84px] rounded-xl border px-3 py-2 text-sm bg-transparent resize-y ${
-                          isDark ? "border-slate-700 text-slate-100 placeholder:text-slate-500" : "border-slate-300 text-slate-800 placeholder:text-slate-400"
-                        }`}
-                      />
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {diaryDraft.length}/2000
-                        </span>
-                        <button
-                          onClick={handleAddDiary}
-                          disabled={diarySaving || !diaryDraft.trim()}
-                          className={`h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${
-                            isDark ? "bg-cyan-600 hover:bg-cyan-500 text-white" : "bg-sky-600 hover:bg-sky-500 text-white"
-                          } disabled:opacity-60`}
+                      <div key={lead._id} className="space-y-3">
+                        <motion.div
+                          initial={{ opacity: 0, x: 10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.04 }}
+                          onClick={() => handleSelectLead(lead._id)}
+                          className={`rounded-xl border p-3 cursor-pointer transition-colors ${
+                            isActiveLead
+                              ? (isDark ? "border-cyan-500/50 bg-cyan-500/10" : "border-sky-400 bg-sky-50")
+                              : (isDark ? "border-slate-700 bg-slate-900/85 hover:border-slate-500" : "border-slate-200 bg-white hover:border-slate-300")
+                          }`}
                         >
-                          {diarySaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                          {diarySaving ? "Saving..." : "Add Note"}
-                        </button>
-                      </div>
-                    </div>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>{lead.name}</div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleOpenLeadDetails(lead._id);
+                                }}
+                                className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${
+                                  isDark
+                                    ? "border-slate-600 bg-slate-800 text-slate-200 hover:border-cyan-400/60"
+                                    : "border-slate-300 bg-white text-slate-600 hover:border-sky-400 hover:text-sky-700"
+                                }`}
+                                title="Follow-up details"
+                                aria-label="Open follow-up details"
+                              >
+                                <PanelRightOpen size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleDeleteFollowUp(lead);
+                                }}
+                                disabled={deletingLeadId === lead._id}
+                                className={`inline-flex h-7 w-7 items-center justify-center rounded-md border ${
+                                  isDark
+                                    ? "border-rose-500/50 bg-rose-500/10 text-rose-200 hover:border-rose-400"
+                                    : "border-rose-300 bg-rose-50 text-rose-700 hover:border-rose-400"
+                                } disabled:opacity-60`}
+                                title="Delete follow-up"
+                                aria-label="Delete follow-up"
+                              >
+                                {deletingLeadId === lead._id ? (
+                                  <Loader2 size={13} className="animate-spin" />
+                                ) : (
+                                  <Trash2 size={13} />
+                                )}
+                              </button>
+                            </div>
+                          </div>
+                          <div className={`mt-2 text-xs space-y-1 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                            <div className="flex items-center gap-2">
+                              <Clock3 size={12} /> {formatDateTime(lead.nextFollowUp)}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Phone size={12} /> {lead.phone || "-"}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <User size={12} /> Assigned: {getAssignedLabel(lead)}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Users size={12} /> Under: {getReportingLabel(lead)}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <User size={12} /> {lead.status}
+                            </div>
+                          </div>
+                        </motion.div>
 
-                    <div className={`rounded-xl border max-h-48 overflow-y-auto custom-scrollbar ${isDark ? "border-slate-700 bg-slate-900/50" : "border-slate-200 bg-slate-50/60"}`}>
-                      {diaryLoading ? (
-                        <div className={`px-3 py-4 text-sm flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                          <Loader2 size={14} className="animate-spin" /> Loading diary...
-                        </div>
-                      ) : diaryEntries.length === 0 ? (
-                        <div className={`px-3 py-4 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          No diary notes yet
-                        </div>
-                      ) : (
-                        <div className="divide-y divide-slate-200/60 dark:divide-slate-700/80">
-                          {diaryEntries.map((entry) => (
-                            <div key={entry._id} className="px-3 py-2.5">
-                              <p className={`text-sm whitespace-pre-wrap break-words ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-                                {entry.note}
-                              </p>
-                              <div className={`mt-1 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                                {entry.createdBy?.name || "Unknown"} - {formatDiaryTime(entry.createdAt)}
+                        {isActiveLead && isDiaryForLead ? (
+                          <div className={`rounded-xl border p-4 space-y-3 ${isDark ? "border-cyan-500/40 bg-slate-900/70" : "border-sky-300 bg-sky-50/60"}`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <NotebookPen size={14} className={isDark ? "text-cyan-300" : "text-sky-700"} />
+                                <span className={`text-sm font-bold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                                  Lead Diary
+                                </span>
+                              </div>
+                              <span className={`text-[11px] font-semibold ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                                {lead.name}
+                              </span>
+                            </div>
+
+                            <div className="space-y-2">
+                              <textarea
+                                value={diaryDraft}
+                                onChange={(e) => setDiaryDraft(e.target.value)}
+                                maxLength={2000}
+                                placeholder={`Add diary note for ${lead.name}`}
+                                className={`w-full min-h-[84px] rounded-xl border px-3 py-2 text-sm bg-transparent resize-y ${
+                                  isDark ? "border-slate-700 text-slate-100 placeholder:text-slate-500" : "border-slate-300 text-slate-800 placeholder:text-slate-400"
+                                }`}
+                              />
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                                  {diaryDraft.length}/2000
+                                </span>
+                                <button
+                                  onClick={handleAddDiary}
+                                  disabled={diarySaving || !diaryDraft.trim()}
+                                  className={`h-9 px-3 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${
+                                    isDark ? "bg-cyan-600 hover:bg-cyan-500 text-white" : "bg-sky-600 hover:bg-sky-500 text-white"
+                                  } disabled:opacity-60`}
+                                >
+                                  {diarySaving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                                  {diarySaving ? "Saving..." : "Add Note"}
+                                </button>
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    Select a follow-up lead from this day to view diary notes.
-                  </div>
+
+                            <div className={`rounded-xl border max-h-48 overflow-y-auto custom-scrollbar ${isDark ? "border-slate-700 bg-slate-900/50" : "border-slate-200 bg-white"}`}>
+                              {diaryLoading ? (
+                                <div className={`px-3 py-4 text-sm flex items-center gap-2 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                                  <Loader2 size={14} className="animate-spin" /> Loading diary...
+                                </div>
+                              ) : diaryEntries.length === 0 ? (
+                                <div className={`px-3 py-4 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                                  No diary notes yet
+                                </div>
+                              ) : (
+                                <div className="divide-y divide-slate-200/60 dark:divide-slate-700/80">
+                                  {diaryEntries.map((entry) => (
+                                    <div key={entry._id} className="px-3 py-2.5">
+                                      <p className={`text-sm whitespace-pre-wrap break-words ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                                        {entry.note}
+                                      </p>
+                                      <div className={`mt-1 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                                        {entry.createdBy?.name || "Unknown"} - {formatDiaryTime(entry.createdAt)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
           </section>
         </div>
+
+      {detailsLead ? (
+        <div className="fixed inset-0 z-[80] flex justify-end bg-slate-900/40" onClick={handleCloseLeadDetails}>
+          <motion.aside
+            initial={{ opacity: 0, x: 36 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={(event) => event.stopPropagation()}
+            className={`h-full w-full max-w-md border-l shadow-2xl ${
+              isDark ? "border-slate-700 bg-slate-950 text-slate-100" : "border-slate-200 bg-white text-slate-900"
+            }`}
+          >
+            <div className={`flex items-start justify-between gap-3 border-b px-4 py-3 ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+              <div>
+                <div className={`text-[11px] font-semibold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Follow-up Details
+                </div>
+                <div className="mt-1 text-sm font-bold">{detailsLead.name || "-"}</div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseLeadDetails}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border ${
+                  isDark ? "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-400/50" : "border-slate-300 bg-white text-slate-700 hover:border-sky-400"
+                }`}
+                aria-label="Close details"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="h-[calc(100%-64px)] overflow-y-auto p-4 space-y-4 custom-scrollbar">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => handleDeleteFollowUp(detailsLead)}
+                  disabled={deletingLeadId === detailsLead._id}
+                  className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-xs font-semibold ${
+                    isDark
+                      ? "border-rose-500/50 bg-rose-500/10 text-rose-200 hover:border-rose-400"
+                      : "border-rose-300 bg-rose-50 text-rose-700 hover:border-rose-400"
+                  } disabled:opacity-60`}
+                >
+                  {deletingLeadId === detailsLead._id ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={12} />
+                  )}
+                  Delete Follow-up
+                </button>
+              </div>
+
+              <div className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-slate-50"}`}>
+                <div className="text-xs font-semibold">Schedule</div>
+                <div className="mt-2 space-y-1 text-xs">
+                  <div>Follow-up: {formatDateTime(detailsLead.nextFollowUp)}</div>
+                  <div>Status: {detailsLead.status || "-"}</div>
+                  <div>Assigned: {getAssignedLabel(detailsLead)}</div>
+                  <div>Under: {getReportingLabel(detailsLead)}</div>
+                </div>
+              </div>
+
+              <div className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-slate-50"}`}>
+                <div className="text-xs font-semibold">Payment</div>
+                <div className="mt-2 space-y-1 text-xs">
+                  <div>Mode: {detailsPaymentMode || "-"}</div>
+                  <div>Type: {detailsPaymentType || "-"}</div>
+                  <div className={detailsRemainingAmount > 0 ? (isDark ? "text-amber-200" : "text-amber-700") : ""}>
+                    Remaining: {detailsRemainingAmount === null ? "-" : formatCurrencyInr(detailsRemainingAmount)}
+                  </div>
+                  <div>Approval: {String(detailsLead?.dealPayment?.approvalStatus || "PENDING")}</div>
+                </div>
+              </div>
+
+              <div className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-slate-50"}`}>
+                <div className="text-xs font-semibold">Lead Info</div>
+                <div className="mt-2 space-y-1 text-xs">
+                  <div>Phone: {detailsLead.phone || "-"}</div>
+                  <div>Email: {detailsLead.email || "-"}</div>
+                  <div>City: {detailsLead.city || "-"}</div>
+                  <div>Project: {detailsLead.projectInterested || "-"}</div>
+                </div>
+              </div>
+
+              <div className={`rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-slate-50"}`}>
+                <div className="text-xs font-semibold">Contact Actions</div>
+                {hasAnyContactAction ? (
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    {detailsDialerHref ? (
+                      <a
+                        href={detailsDialerHref}
+                        className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${
+                          isDark ? "border-slate-600 bg-slate-900 hover:border-cyan-400/50" : "border-slate-300 bg-white hover:border-sky-400"
+                        }`}
+                      >
+                        <Phone size={12} /> Call
+                      </a>
+                    ) : null}
+                    {detailsWhatsAppHref ? (
+                      <a
+                        href={detailsWhatsAppHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${
+                          isDark ? "border-slate-600 bg-slate-900 hover:border-cyan-400/50" : "border-slate-300 bg-white hover:border-sky-400"
+                        }`}
+                      >
+                        <MessageCircle size={12} /> WhatsApp
+                      </a>
+                    ) : null}
+                    {detailsMailHref ? (
+                      <a
+                        href={detailsMailHref}
+                        className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${
+                          isDark ? "border-slate-600 bg-slate-900 hover:border-cyan-400/50" : "border-slate-300 bg-white hover:border-sky-400"
+                        }`}
+                      >
+                        <Mail size={12} /> Email
+                      </a>
+                    ) : null}
+                    {detailsMapsHref ? (
+                      <a
+                        href={detailsMapsHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${
+                          isDark ? "border-slate-600 bg-slate-900 hover:border-cyan-400/50" : "border-slate-300 bg-white hover:border-sky-400"
+                        }`}
+                      >
+                        <MapPin size={12} /> Maps
+                      </a>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className={`mt-2 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Contact details are not available for this lead.
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.aside>
+        </div>
+      ) : null}
     </div>
   );
 };

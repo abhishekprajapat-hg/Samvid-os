@@ -119,6 +119,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         <Tab.Screen name="Dashboard" component={ExecutiveDashboardScreen} />
         <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
         <Tab.Screen name="Inventory" component={AssetVaultScreen} />
+        <Tab.Screen name="Finance" component={FinancialCoreScreen} />
         <Tab.Screen name="Targets" component={PerformanceScreen} />
         <Tab.Screen name="Calendar" component={MasterScheduleScreen} />
         <Tab.Screen name="Chat" component={TeamChatScreen} />
@@ -143,6 +144,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
       <Tab.Screen name="Dashboard" component={FieldDashboardScreen} />
       <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
       <Tab.Screen name="Inventory" component={AssetVaultScreen} />
+      <Tab.Screen name="Finance" component={FinancialCoreScreen} />
       <Tab.Screen name="Targets" component={PerformanceScreen} />
       <Tab.Screen name="Field Ops" component={FieldOpsScreen} />
       <Tab.Screen name="Calendar" component={MasterScheduleScreen} />

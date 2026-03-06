@@ -16,6 +16,7 @@ import {
 } from "./components/IntelligenceReportSections";
 
 const RANGE_OPTIONS = [
+  { key: "TODAY", label: "Today" },
   { key: "30D", label: "Last 30 Days" },
   { key: "THIS_MONTH", label: "This Month" },
   { key: "CUSTOM", label: "Custom" },
@@ -89,6 +90,14 @@ const getDayEnd = (value) => {
 
 const resolveRangeBounds = ({ rangeKey, customRange }) => {
   const now = new Date();
+
+  if (rangeKey === "TODAY") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
 
   if (rangeKey === "30D") {
     const start = new Date(now);

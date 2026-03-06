@@ -61,6 +61,7 @@ const MENU_CONFIG = {
     { name: "My Desk", icon: Briefcase, path: "/" },
     { name: "My Leads", icon: Users, path: "/my-leads" },
     { name: "Inventory", icon: Building2, path: "/inventory" },
+    { name: "Finance", icon: PieChart, path: "/finance" },
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Schedule", icon: Calendar, path: "/calendar" },
     { name: "Targets", icon: PieChart, path: "/targets" },
@@ -70,6 +71,7 @@ const MENU_CONFIG = {
     { name: "Route", icon: Map, path: "/" },
     { name: "My Leads", icon: Users, path: "/my-leads" },
     { name: "Inventory", icon: Building2, path: "/inventory" },
+    { name: "Finance", icon: PieChart, path: "/finance" },
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Field Ops", icon: Navigation, path: "/map" },
     { name: "Schedule", icon: Calendar, path: "/calendar" },
@@ -110,6 +112,7 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
     ...(canChannelPartnerViewInventory
       ? [{ name: "Inventory", icon: Building2, path: "/inventory" }]
       : []),
+    { name: "Finance", icon: PieChart, path: "/finance" },
     { name: "Profile", icon: UserCircle2, path: "/profile" },
   ];
   const currentMenu = normalizedRole === "partner"

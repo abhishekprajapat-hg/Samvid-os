@@ -4,6 +4,7 @@ import {
   AlertCircle,
   BarChart3,
   Building2,
+  ChevronRight,
   CheckCircle2,
   Clock3,
   IndianRupee,
@@ -17,6 +18,7 @@ import { toErrorMessage } from "../../utils/errorMessage";
 const COMMISSION_PER_DEAL = 50000;
 
 const RANGE_OPTIONS = [
+  { key: "TODAY", label: "Today" },
   { key: "30D", label: "Last 30 Days" },
   { key: "THIS_MONTH", label: "This Month" },
   { key: "CUSTOM", label: "Custom" },
@@ -32,6 +34,8 @@ const PIPELINE_STATUSES = [
   { key: "CLOSED", label: "Closed" },
   { key: "LOST", label: "Lost" },
 ];
+const LEAD_STATUS_SET = new Set(["ALL", ...PIPELINE_STATUSES.map((status) => status.key)]);
+const EXECUTIVE_ROLE_SET = new Set(["EXECUTIVE", "FIELD_EXECUTIVE"]);
 
 const parseLocalDateInput = (value) => {
   const raw = String(value || "").trim();
@@ -89,6 +93,14 @@ const getDayEnd = (value) => {
 const resolveRangeBounds = ({ rangeKey, customRange }) => {
   const now = new Date();
 
+  if (rangeKey === "TODAY") {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { start, end };
+  }
+
   if (rangeKey === "30D") {
     const start = new Date(now);
     start.setDate(start.getDate() - 29);
@@ -143,8 +155,106 @@ const formatDateTime = (value) => {
   });
 };
 
+const toObjectIdString = (value) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value._id) return String(value._id);
+  return String(value);
+};
+
+const toAmountNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getLeadRelatedInventories = (lead = {}) => {
+  const merged = [];
+  const seen = new Set();
+  const pushUnique = (value) => {
+    const id = toObjectIdString(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    merged.push(value);
+  };
+
+  pushUnique(lead?.inventoryId);
+  if (Array.isArray(lead?.relatedInventoryIds)) {
+    lead.relatedInventoryIds.forEach((row) => pushUnique(row));
+  }
+
+  return merged;
+};
+
+const getLeadSaleEntries = (lead = {}) => {
+  const leadId = toObjectIdString(lead?._id) || "lead";
+  const leadStatus = String(lead?.status || "").trim().toUpperCase();
+  const isClosedContext = ["CLOSED", "REQUESTED"].includes(leadStatus);
+  const linkedInventories = getLeadRelatedInventories(lead);
+  const saleEntries = [];
+
+  linkedInventories.forEach((inventory, index) => {
+    if (!inventory || typeof inventory !== "object") return;
+
+    const saleTotalAmount = toAmountNumber(inventory?.saleDetails?.totalAmount);
+    const inventoryPrice = toAmountNumber(inventory?.price);
+    const totalAmount =
+      saleTotalAmount !== null && saleTotalAmount > 0
+        ? saleTotalAmount
+        : inventoryPrice;
+
+    if (totalAmount === null || totalAmount <= 0) return;
+
+    const inventoryStatus = String(inventory?.status || "").trim().toUpperCase();
+    const hasSaleDetails = saleTotalAmount !== null && saleTotalAmount > 0;
+    const isSoldInventory = inventoryStatus === "SOLD" || hasSaleDetails;
+
+    if (!isClosedContext && !isSoldInventory) return;
+
+    const remainingRaw = toAmountNumber(inventory?.saleDetails?.remainingAmount);
+    const remainingAmount =
+      remainingRaw === null
+        ? 0
+        : Math.max(0, Math.min(remainingRaw, totalAmount));
+    const entryKey = toObjectIdString(inventory) || `${leadId}:${index}`;
+
+    saleEntries.push({
+      entryKey,
+      totalAmount,
+      remainingAmount,
+    });
+  });
+
+  if (saleEntries.length > 0 || !isClosedContext) return saleEntries;
+
+  const fallbackInventory = linkedInventories.find((inventory) => {
+    if (!inventory || typeof inventory !== "object") return false;
+    const amount = toAmountNumber(inventory?.price);
+    return amount !== null && amount > 0;
+  });
+  const fallbackTotalAmount = toAmountNumber(fallbackInventory?.price);
+  if (fallbackTotalAmount === null || fallbackTotalAmount <= 0) return saleEntries;
+
+  const paymentType = String(lead?.dealPayment?.paymentType || "").trim().toUpperCase();
+  const dealRemainingRaw = toAmountNumber(lead?.dealPayment?.remainingAmount);
+  const fallbackRemainingAmount =
+    paymentType === "PARTIAL" && dealRemainingRaw !== null
+      ? Math.max(0, Math.min(dealRemainingRaw, fallbackTotalAmount))
+      : 0;
+
+  saleEntries.push({
+    entryKey: `${leadId}:fallback`,
+    totalAmount: fallbackTotalAmount,
+    remainingAmount: fallbackRemainingAmount,
+  });
+
+  return saleEntries;
+};
+
 const FinancialCore = () => {
   const navigate = useNavigate();
+  const [leadWorkspaceBasePath, setLeadWorkspaceBasePath] = useState("/leads");
   const [rangeKey, setRangeKey] = useState("30D");
   const [customRange, setCustomRange] = useState(() => {
     const now = new Date();
@@ -159,6 +269,15 @@ const FinancialCore = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [leads, setLeads] = useState([]);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const role = String(window.localStorage.getItem("role") || "")
+      .trim()
+      .toUpperCase();
+    setLeadWorkspaceBasePath(EXECUTIVE_ROLE_SET.has(role) ? "/my-leads" : "/leads");
+  }, []);
 
   const loadFinanceData = useCallback(async (silent = false) => {
     try {
@@ -171,6 +290,7 @@ const FinancialCore = () => {
       setError("");
       const rows = await getAllLeads();
       setLeads(Array.isArray(rows) ? rows : []);
+      setLastUpdatedAt(new Date());
     } catch (fetchError) {
       setError(toErrorMessage(fetchError, "Failed to load finance data"));
       setLeads([]);
@@ -205,6 +325,9 @@ const FinancialCore = () => {
 
     const sourceCount = { META: 0, MANUAL: 0, OTHER: 0 };
     const activeStatuses = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
+    const countedSaleKeys = new Set();
+    let totalSellAmount = 0;
+    let pendingSellCollection = 0;
 
     scopedLeads.forEach((lead) => {
       const status = String(lead.status || "NEW");
@@ -221,6 +344,13 @@ const FinancialCore = () => {
       } else {
         sourceCount.OTHER += 1;
       }
+
+      getLeadSaleEntries(lead).forEach((entry) => {
+        if (countedSaleKeys.has(entry.entryKey)) return;
+        countedSaleKeys.add(entry.entryKey);
+        totalSellAmount += entry.totalAmount;
+        pendingSellCollection += entry.remainingAmount;
+      });
     });
 
     const totalLeads = scopedLeads.length;
@@ -237,6 +367,7 @@ const FinancialCore = () => {
         ? Math.round((closedDeals / (closedDeals + lostDeals)) * 100)
         : 0;
 
+    const collectedSellValue = Math.max(0, totalSellAmount - pendingSellCollection);
     const commissionPayable = closedDeals * COMMISSION_PER_DEAL;
     const avgCommissionPerClosed = closedDeals > 0 ? commissionPayable / closedDeals : 0;
 
@@ -247,6 +378,9 @@ const FinancialCore = () => {
       activePipeline,
       conversionRate,
       winRate,
+      totalSellAmount,
+      pendingSellCollection,
+      collectedSellValue,
       commissionPayable,
       avgCommissionPerClosed,
       statusCount,
@@ -300,6 +434,89 @@ const FinancialCore = () => {
     [dashboard.statusCount, dashboard.totalLeads],
   );
 
+  const openLeadWorkspace = useCallback(
+    ({ status = "", query = "", dueOnly = false, leadId = "" } = {}) => {
+      const normalizedStatus = String(status || "").trim().toUpperCase();
+      const normalizedQuery = String(query || "").trim();
+      const normalizedLeadId = String(leadId || "").trim();
+      const searchParams = new URLSearchParams();
+
+      if (normalizedStatus && LEAD_STATUS_SET.has(normalizedStatus)) {
+        searchParams.set("status", normalizedStatus);
+      }
+
+      if (normalizedQuery) {
+        searchParams.set("q", normalizedQuery);
+      }
+
+      if (dueOnly) {
+        searchParams.set("due", "1");
+      }
+
+      const targetPath = normalizedLeadId
+        ? `${leadWorkspaceBasePath}/${normalizedLeadId}`
+        : leadWorkspaceBasePath;
+      const search = searchParams.toString();
+      navigate(search ? `${targetPath}?${search}` : targetPath);
+    },
+    [leadWorkspaceBasePath, navigate],
+  );
+
+  const statCards = useMemo(
+    () => [
+      {
+        title: "Leads In Scope",
+        value: dashboard.totalLeads,
+        helper: "Filtered by selected range",
+        icon: Users,
+        onClick: () => openLeadWorkspace({ status: "ALL" }),
+      },
+      {
+        title: "Active Pipeline",
+        value: dashboard.activePipeline,
+        helper: "New to Site Visit stages",
+        icon: TrendingUp,
+        onClick: () => openLeadWorkspace({ status: "INTERESTED" }),
+      },
+      {
+        title: "Closed Deals",
+        value: dashboard.closedDeals,
+        helper: `Win rate ${dashboard.winRate}%`,
+        icon: CheckCircle2,
+        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
+      },
+      {
+        title: "Total Sell Value",
+        value: formatCurrency(dashboard.totalSellAmount),
+        helper: `Collected ${formatCurrency(dashboard.collectedSellValue)} | Pending ${formatCurrency(dashboard.pendingSellCollection)}`,
+        icon: IndianRupee,
+        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
+      },
+      {
+        title: "Remaining Amount",
+        value: formatCurrency(dashboard.pendingSellCollection),
+        helper: "Pending collection on partial closures",
+        icon: Clock3,
+        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
+      },
+      {
+        title: "Conversion Rate",
+        value: `${dashboard.conversionRate}%`,
+        helper: `${dashboard.lostDeals} leads lost`,
+        icon: BarChart3,
+        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
+      },
+      {
+        title: "Commission Payable",
+        value: formatCurrency(dashboard.commissionPayable),
+        helper: `Avg ${formatCurrency(dashboard.avgCommissionPerClosed)} per closed deal`,
+        icon: IndianRupee,
+        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
+      },
+    ],
+    [dashboard, openLeadWorkspace],
+  );
+
   if (loading) {
     return (
       <div className="w-full h-full px-4 sm:px-6 lg:px-10 pt-20 md:pt-24 pb-8 flex items-center justify-center text-slate-500 gap-2">
@@ -317,26 +534,43 @@ const FinancialCore = () => {
           <p className="mt-1 text-xs uppercase tracking-[0.16em] text-slate-500">
             Real-time view from lead pipeline and closures
           </p>
+          <p className="mt-2 text-xs text-slate-500">
+            Click any card or row to drill down into lead workspace.
+            {lastUpdatedAt ? ` Updated ${formatDateTime(lastUpdatedAt)}.` : ""}
+          </p>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          {RANGE_OPTIONS.map((range) => (
+        <div className="flex flex-col items-start gap-2 sm:items-end">
+          <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+            <div className="inline-flex flex-wrap items-center gap-1 rounded-xl bg-slate-100 p-1">
+              {RANGE_OPTIONS.map((range) => (
+                <button
+                  key={range.key}
+                  type="button"
+                  onClick={() => setRangeKey(range.key)}
+                  className={`h-9 rounded-lg px-3 text-xs font-semibold transition-all ${
+                    rangeKey === range.key
+                      ? "bg-slate-900 text-white shadow-sm"
+                      : "bg-transparent text-slate-700 hover:bg-white hover:text-slate-900"
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
             <button
-              key={range.key}
               type="button"
-              onClick={() => setRangeKey(range.key)}
-              className={`h-9 rounded-lg border px-3 text-xs font-semibold transition-colors ${
-                rangeKey === range.key
-                  ? "border-slate-900 bg-slate-900 text-white"
-                  : "border-slate-300 bg-white text-slate-700 hover:border-slate-400"
-              }`}
+              onClick={() => loadFinanceData(true)}
+              disabled={refreshing}
+              className="h-9 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-60 inline-flex items-center gap-2"
             >
-              {range.label}
+              <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+              Refresh
             </button>
-          ))}
+          </div>
 
           {rangeKey === "CUSTOM" ? (
-            <>
+            <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
               <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-600">
                 From
                 <input
@@ -373,18 +607,8 @@ const FinancialCore = () => {
                   className="h-9 bg-transparent text-slate-700 outline-none"
                 />
               </label>
-            </>
+            </div>
           ) : null}
-
-          <button
-            type="button"
-            onClick={() => loadFinanceData(true)}
-            disabled={refreshing}
-            className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-slate-400 disabled:opacity-60 inline-flex items-center gap-2"
-          >
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-            Refresh
-          </button>
         </div>
       </div>
 
@@ -395,37 +619,17 @@ const FinancialCore = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard
-          title="Leads In Scope"
-          value={dashboard.totalLeads}
-          helper="Filtered by selected range"
-          icon={Users}
-        />
-        <StatCard
-          title="Active Pipeline"
-          value={dashboard.activePipeline}
-          helper="New to Site Visit stages"
-          icon={TrendingUp}
-        />
-        <StatCard
-          title="Closed Deals"
-          value={dashboard.closedDeals}
-          helper={`Win rate ${dashboard.winRate}%`}
-          icon={CheckCircle2}
-        />
-        <StatCard
-          title="Conversion Rate"
-          value={`${dashboard.conversionRate}%`}
-          helper={`${dashboard.lostDeals} leads lost`}
-          icon={BarChart3}
-        />
-        <StatCard
-          title="Commission Payable"
-          value={formatCurrency(dashboard.commissionPayable)}
-          helper={`Avg ${formatCurrency(dashboard.avgCommissionPerClosed)} per closed deal`}
-          icon={IndianRupee}
-        />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-7">
+        {statCards.map((card) => (
+          <StatCard
+            key={card.title}
+            title={card.title}
+            value={card.value}
+            helper={card.helper}
+            icon={card.icon}
+            onClick={card.onClick}
+          />
+        ))}
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.5fr_1fr]">
@@ -435,7 +639,12 @@ const FinancialCore = () => {
           </h2>
           <div className="mt-3 space-y-3">
             {statusRows.map((row) => (
-              <div key={row.key} className="space-y-1.5">
+              <button
+                key={row.key}
+                type="button"
+                onClick={() => openLeadWorkspace({ status: row.key })}
+                className="w-full space-y-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-slate-50"
+              >
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium text-slate-700">{row.label}</span>
                   <span className="text-slate-500">
@@ -448,7 +657,7 @@ const FinancialCore = () => {
                     style={{ width: `${Math.min(row.share, 100)}%` }}
                   />
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </section>
@@ -458,9 +667,24 @@ const FinancialCore = () => {
             Source Mix
           </h2>
           <div className="mt-4 grid grid-cols-1 gap-3">
-            <SourceCard label="Meta Leads" count={dashboard.sourceCount.META} total={dashboard.totalLeads} />
-            <SourceCard label="Manual Leads" count={dashboard.sourceCount.MANUAL} total={dashboard.totalLeads} />
-            <SourceCard label="Other Sources" count={dashboard.sourceCount.OTHER} total={dashboard.totalLeads} />
+            <SourceCard
+              label="Meta Leads"
+              count={dashboard.sourceCount.META}
+              total={dashboard.totalLeads}
+              onClick={() => openLeadWorkspace({ query: "META" })}
+            />
+            <SourceCard
+              label="Manual Leads"
+              count={dashboard.sourceCount.MANUAL}
+              total={dashboard.totalLeads}
+              onClick={() => openLeadWorkspace({ query: "MANUAL" })}
+            />
+            <SourceCard
+              label="Other Sources"
+              count={dashboard.sourceCount.OTHER}
+              total={dashboard.totalLeads}
+              onClick={() => openLeadWorkspace({ query: "OTHER" })}
+            />
           </div>
         </section>
       </div>
@@ -473,7 +697,7 @@ const FinancialCore = () => {
             </h2>
             <button
               type="button"
-              onClick={() => navigate("/leads")}
+              onClick={() => openLeadWorkspace({ status: "CLOSED" })}
               className="text-xs font-semibold text-slate-600 hover:text-slate-900"
             >
               Open Leads
@@ -495,7 +719,11 @@ const FinancialCore = () => {
                 </thead>
                 <tbody>
                   {recentClosures.map((lead) => (
-                    <tr key={lead._id} className="border-t border-slate-100">
+                    <tr
+                      key={lead._id}
+                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
+                      onClick={() => openLeadWorkspace({ leadId: lead._id })}
+                    >
                       <td className="py-2 pr-3 text-slate-800">
                         <div className="font-medium">{lead.name || "-"}</div>
                         <div className="text-xs text-slate-500">{lead.phone || "-"}</div>
@@ -520,12 +748,20 @@ const FinancialCore = () => {
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full bg-red-50 px-2.5 py-1 font-semibold text-red-700 border border-red-200">
+            <button
+              type="button"
+              onClick={() => openLeadWorkspace({ dueOnly: true })}
+              className="rounded-full bg-red-50 px-2.5 py-1 font-semibold text-red-700 border border-red-200 hover:border-red-300"
+            >
               Overdue: {followUps.overdue.length}
-            </span>
-            <span className="rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700 border border-amber-200">
+            </button>
+            <button
+              type="button"
+              onClick={() => openLeadWorkspace({ status: "ALL" })}
+              className="rounded-full bg-amber-50 px-2.5 py-1 font-semibold text-amber-700 border border-amber-200 hover:border-amber-300"
+            >
               Next 7 days: {followUps.thisWeek.length}
-            </span>
+            </button>
           </div>
 
           {followUps.all.length === 0 ? (
@@ -533,11 +769,13 @@ const FinancialCore = () => {
           ) : (
             <div className="mt-3 space-y-2">
               {followUps.all.slice(0, 8).map((lead) => (
-                <div
+                <button
                   key={lead._id}
+                  type="button"
+                  onClick={() => openLeadWorkspace({ leadId: lead._id })}
                   className={`rounded-lg border px-3 py-2 ${
                     lead.isOverdue ? "border-red-200 bg-red-50" : "border-slate-200 bg-slate-50"
-                  }`}
+                  } w-full text-left`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -548,7 +786,7 @@ const FinancialCore = () => {
                       {formatDateTime(lead.nextFollowUp)}
                     </p>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -562,7 +800,7 @@ const FinancialCore = () => {
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <button
             type="button"
-            onClick={() => navigate("/leads")}
+            onClick={() => openLeadWorkspace({ status: "ALL" })}
             className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-slate-500 inline-flex items-center justify-center gap-2"
           >
             <Users size={15} />
@@ -582,8 +820,12 @@ const FinancialCore = () => {
   );
 };
 
-const StatCard = ({ title, value, helper, icon: Icon }) => (
-  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+const StatCard = ({ title, value, helper, icon: Icon, onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className="group rounded-2xl border border-slate-200 bg-white p-4 text-left transition-all hover:border-slate-300 hover:shadow-sm"
+  >
     <div className="flex items-center justify-between gap-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{title}</p>
       <div className="rounded-lg bg-slate-100 p-2 text-slate-700">
@@ -591,15 +833,22 @@ const StatCard = ({ title, value, helper, icon: Icon }) => (
       </div>
     </div>
     <p className="mt-3 text-2xl font-semibold text-slate-900">{value}</p>
-    <p className="mt-1 text-xs text-slate-500">{helper}</p>
-  </div>
+    <div className="mt-1 flex items-center justify-between gap-2">
+      <p className="text-xs text-slate-500">{helper}</p>
+      <ChevronRight size={14} className="text-slate-400 transition-transform group-hover:translate-x-0.5" />
+    </div>
+  </button>
 );
 
-const SourceCard = ({ label, count, total }) => {
+const SourceCard = ({ label, count, total, onClick }) => {
   const share = total > 0 ? Math.round((count / total) * 100) : 0;
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:border-slate-300 hover:bg-slate-100/70"
+    >
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium text-slate-700">{label}</span>
         <span className="text-slate-600">
@@ -609,7 +858,7 @@ const SourceCard = ({ label, count, total }) => {
       <div className="mt-2 h-2 w-full rounded-full bg-slate-200">
         <div className="h-full rounded-full bg-slate-700" style={{ width: `${Math.min(share, 100)}%` }} />
       </div>
-    </div>
+    </button>
   );
 };
 

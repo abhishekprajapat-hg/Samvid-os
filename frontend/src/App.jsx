@@ -673,7 +673,12 @@ export default function App() {
                         />
                         <Route
                           path="/finance"
-                          element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <FinancialCore /> : <Navigate to="/" />}
+                          element={canAccess([
+                            ...MANAGEMENT_ROLES,
+                            "EXECUTIVE",
+                            "FIELD_EXECUTIVE",
+                            "CHANNEL_PARTNER",
+                          ]) ? <FinancialCore /> : <Navigate to="/" />}
                         />
                         <Route
                           path="/map"
