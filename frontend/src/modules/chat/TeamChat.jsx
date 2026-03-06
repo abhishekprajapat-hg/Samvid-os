@@ -2418,9 +2418,9 @@ const TeamChat = ({ theme = "light" }) => {
 
   return (
     <div
-      className={`h-[100dvh] min-h-0 w-full overflow-hidden p-0 sm:h-full sm:p-3 ${isDark ? "bg-slate-950/35" : "bg-[#e6ded6]"}`}
+      className={`h-full min-h-0 w-full overflow-hidden p-0 sm:p-3 ${isDark ? "bg-slate-950/35" : "bg-[#e6ded6]"}`}
     >
-      <div className="mx-auto flex h-[100dvh] min-h-0 w-full max-w-[1600px] flex-col gap-2 sm:h-full sm:gap-3">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-2 sm:gap-3">
         <section
           className={`hidden rounded-2xl border px-3 py-2.5 sm:block sm:px-4 ${
             isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white/90"
