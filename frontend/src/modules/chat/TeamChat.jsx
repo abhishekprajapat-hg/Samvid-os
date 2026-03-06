@@ -7,6 +7,10 @@ import {
   CheckCheck,
   ExternalLink,
   FileText,
+  Maximize2,
+  Mic,
+  MicOff,
+  Minimize2,
   Paperclip,
   Phone,
   PhoneCall,
@@ -15,6 +19,9 @@ import {
   Search,
   Share2,
   Send,
+  VideoOff,
+  Volume2,
+  VolumeX,
   Video,
   X,
 } from "lucide-react";
@@ -511,6 +518,7 @@ const TeamChat = ({ theme = "light" }) => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const callStageRef = useRef(null);
   const callToneContextRef = useRef(null);
   const callToneIntervalRef = useRef(null);
   const callToneTypeRef = useRef("");
@@ -544,6 +552,11 @@ const TeamChat = ({ theme = "light" }) => {
   const [incomingCall, setIncomingCall] = useState(null);
   const [activeCall, setActiveCall] = useState(null);
   const [callError, setCallError] = useState("");
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
+  const [isCameraMuted, setIsCameraMuted] = useState(false);
+  const [isCallFullscreen, setIsCallFullscreen] = useState(false);
+  const [callElapsedSeconds, setCallElapsedSeconds] = useState(0);
   const [mobileListMode, setMobileListMode] = useState("chats");
   const [isMobileViewport, setIsMobileViewport] = useState(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -1236,9 +1249,154 @@ const TeamChat = ({ theme = "light" }) => {
     return "On call";
   }, [activeCall]);
 
+  const activeCallId = toId(activeCall?.callId);
+  const isVideoCallActive = Boolean(
+    activeCall && normalizeCallMode(activeCall.mode) === CALL_MODES.VIDEO,
+  );
+
+  useEffect(() => {
+    setIsMicMuted(false);
+    setIsSpeakerMuted(false);
+    setIsCameraMuted(false);
+    setIsCallFullscreen(false);
+    setCallElapsedSeconds(0);
+  }, [activeCallId]);
+
+  useEffect(() => {
+    if (!activeCallId) return undefined;
+
+    const parsedStartedAt = new Date(activeCall?.at || Date.now()).getTime();
+    const startedAtMs = Number.isFinite(parsedStartedAt) ? parsedStartedAt : Date.now();
+    setCallElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+
+    const intervalId = setInterval(() => {
+      setCallElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+    }, 1000);
+
+    return () => clearInterval(intervalId);
+  }, [activeCall?.at, activeCallId]);
+
+  useEffect(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !isMicMuted;
+    });
+  }, [activeCallId, isMicMuted]);
+
+  useEffect(() => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    stream.getVideoTracks().forEach((track) => {
+      track.enabled = !isCameraMuted;
+    });
+  }, [activeCallId, isCameraMuted]);
+
+  useEffect(() => {
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.muted = isSpeakerMuted;
+      remoteAudioRef.current.volume = isSpeakerMuted ? 0 : 1;
+    }
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.muted = true;
+    }
+  }, [activeCallId, isSpeakerMuted]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+
+    const onFullscreenChange = () => {
+      const stage = callStageRef.current;
+      const fullscreenElement = document.fullscreenElement;
+      const isActive = Boolean(
+        stage
+        && fullscreenElement
+        && (fullscreenElement === stage || stage.contains(fullscreenElement)),
+      );
+      setIsCallFullscreen(isActive);
+    };
+
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (activeCallId) return;
+    if (typeof document === "undefined") return;
+    const stage = callStageRef.current;
+    const fullscreenElement = document.fullscreenElement;
+    if (!stage || !fullscreenElement) return;
+    if (fullscreenElement === stage || stage.contains(fullscreenElement)) {
+      if (typeof document.exitFullscreen === "function") {
+        document.exitFullscreen().catch(() => null);
+      }
+    }
+  }, [activeCallId]);
+
+  const handleToggleMicMute = useCallback(() => {
+    setIsMicMuted((prev) => {
+      const next = !prev;
+      const stream = localStreamRef.current;
+      if (stream) {
+        stream.getAudioTracks().forEach((track) => {
+          track.enabled = !next;
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleSpeakerMute = useCallback(() => {
+    setIsSpeakerMuted((prev) => {
+      const next = !prev;
+      if (remoteAudioRef.current) {
+        remoteAudioRef.current.muted = next;
+        remoteAudioRef.current.volume = next ? 0 : 1;
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleCameraMute = useCallback(() => {
+    if (normalizeCallMode(activeCallRef.current?.mode) !== CALL_MODES.VIDEO) {
+      return;
+    }
+
+    setIsCameraMuted((prev) => {
+      const next = !prev;
+      const stream = localStreamRef.current;
+      if (stream) {
+        stream.getVideoTracks().forEach((track) => {
+          track.enabled = !next;
+        });
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleCallFullscreen = useCallback(async () => {
+    if (typeof document === "undefined") return;
+    const stage = callStageRef.current;
+    if (!stage) return;
+
+    const fullscreenElement = document.fullscreenElement;
+    if (fullscreenElement && (fullscreenElement === stage || stage.contains(fullscreenElement))) {
+      if (typeof document.exitFullscreen === "function") {
+        await document.exitFullscreen().catch(() => null);
+      }
+      return;
+    }
+
+    if (typeof stage.requestFullscreen === "function") {
+      await stage.requestFullscreen().catch(() => null);
+    }
+  }, []);
+
   const callTimelineOffsetClass = useMemo(() => {
     if (!activeCall) return "";
-    return activeCall.mode === CALL_MODES.VIDEO ? "pt-64 sm:pt-72" : "pt-28";
+    return activeCall.mode === CALL_MODES.VIDEO ? "pt-[29rem] sm:pt-[26rem]" : "pt-40";
   }, [activeCall]);
 
   const recentCallHistory = useMemo(
@@ -2606,7 +2764,7 @@ const TeamChat = ({ theme = "light" }) => {
 
           <div className={`relative min-h-0 flex-1 overflow-hidden ${isDark ? "bg-slate-950/45" : "bg-slate-50"}`}>
             {activeCall && (
-              <audio ref={remoteAudioRef} autoPlay playsInline />
+              <audio ref={remoteAudioRef} autoPlay playsInline muted={isSpeakerMuted} />
             )}
             <div className={`pointer-events-none absolute inset-0 opacity-45 ${
               isDark
@@ -2627,37 +2785,141 @@ const TeamChat = ({ theme = "light" }) => {
                       {activeCall.mode === CALL_MODES.VIDEO ? "Video call" : "Voice call"} | {activeCallLabel}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleEndCall}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-600 text-white hover:bg-rose-500"
-                    title="End call"
-                  >
-                    <PhoneOff size={14} />
-                  </button>
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                    isDark ? "bg-slate-800 text-slate-200" : "bg-slate-100 text-slate-700"
+                  }`}>
+                    {formatCallDuration(callElapsedSeconds)}
+                  </span>
                 </div>
-                {activeCall.mode === CALL_MODES.VIDEO ? (
-                  <div className={`relative h-[56vh] sm:h-64 ${isDark ? "bg-slate-950" : "bg-slate-100"}`}>
-                    <video
-                      ref={remoteVideoRef}
-                      autoPlay
-                      playsInline
-                      className="h-full w-full bg-black object-cover"
-                    />
-                    <video
-                      ref={localVideoRef}
-                      autoPlay
-                      muted
-                      playsInline
-                      className="absolute bottom-2 right-2 h-24 w-32 rounded-lg border border-white/40 bg-black object-cover shadow-lg sm:h-28 sm:w-36"
-                    />
+
+                <div
+                  ref={callStageRef}
+                  className={activeCall.mode === CALL_MODES.VIDEO ? `relative h-[56vh] sm:h-64 ${isDark ? "bg-slate-950" : "bg-slate-100"}` : ""}
+                >
+                  {activeCall.mode === CALL_MODES.VIDEO ? (
+                    <>
+                      <video
+                        ref={remoteVideoRef}
+                        autoPlay
+                        muted
+                        playsInline
+                        className="h-full w-full bg-black object-cover"
+                      />
+                      <div className="absolute bottom-2 right-2 h-24 w-32 overflow-hidden rounded-lg border border-white/40 bg-black shadow-lg sm:h-28 sm:w-36">
+                        <video
+                          ref={localVideoRef}
+                          autoPlay
+                          muted
+                          playsInline
+                          className={`h-full w-full object-cover transition-opacity ${isCameraMuted ? "opacity-0" : "opacity-100"}`}
+                        />
+                        {isCameraMuted && (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-slate-950/85 text-[10px] text-slate-200">
+                            <VideoOff size={12} />
+                            <span>Camera off</span>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className={`flex items-center gap-2 px-3 py-3 text-sm sm:px-4 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
+                      <Phone size={14} />
+                      <span>Microphone call in progress. Keep this chat open.</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className={`border-t px-3 py-2.5 sm:px-4 ${isDark ? "border-slate-700/80" : "border-slate-200"}`}>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    <button
+                      type="button"
+                      onClick={handleToggleMicMute}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
+                        isMicMuted
+                          ? isDark
+                            ? "border-amber-400/50 bg-amber-500/15 text-amber-100"
+                            : "border-amber-300 bg-amber-50 text-amber-700"
+                          : isDark
+                            ? "border-slate-700 text-slate-200 hover:border-cyan-400/50"
+                            : "border-slate-300 text-slate-700 hover:border-emerald-400"
+                      }`}
+                      title={isMicMuted ? "Unmute microphone" : "Mute microphone"}
+                    >
+                      {isMicMuted ? <MicOff size={13} /> : <Mic size={13} />}
+                      <span>{isMicMuted ? "Unmute" : "Mute"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleSpeakerMute}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
+                        isSpeakerMuted
+                          ? isDark
+                            ? "border-amber-400/50 bg-amber-500/15 text-amber-100"
+                            : "border-amber-300 bg-amber-50 text-amber-700"
+                          : isDark
+                            ? "border-slate-700 text-slate-200 hover:border-cyan-400/50"
+                            : "border-slate-300 text-slate-700 hover:border-emerald-400"
+                      }`}
+                      title={isSpeakerMuted ? "Unmute speaker" : "Mute speaker"}
+                    >
+                      {isSpeakerMuted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+                      <span>{isSpeakerMuted ? "Speaker Off" : "Speaker"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleCameraMute}
+                      disabled={!isVideoCallActive}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
+                        !isVideoCallActive
+                          ? isDark
+                            ? "cursor-not-allowed border-slate-800 text-slate-500"
+                            : "cursor-not-allowed border-slate-200 text-slate-400"
+                          : isCameraMuted
+                            ? isDark
+                              ? "border-amber-400/50 bg-amber-500/15 text-amber-100"
+                              : "border-amber-300 bg-amber-50 text-amber-700"
+                            : isDark
+                              ? "border-slate-700 text-slate-200 hover:border-cyan-400/50"
+                              : "border-slate-300 text-slate-700 hover:border-emerald-400"
+                      }`}
+                      title={isVideoCallActive ? (isCameraMuted ? "Turn camera on" : "Turn camera off") : "Camera controls for video call only"}
+                    >
+                      {isCameraMuted ? <VideoOff size={13} /> : <Video size={13} />}
+                      <span>{isCameraMuted ? "Cam Off" : "Camera"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleToggleCallFullscreen}
+                      disabled={!isVideoCallActive}
+                      className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
+                        !isVideoCallActive
+                          ? isDark
+                            ? "cursor-not-allowed border-slate-800 text-slate-500"
+                            : "cursor-not-allowed border-slate-200 text-slate-400"
+                          : isDark
+                            ? "border-slate-700 text-slate-200 hover:border-cyan-400/50"
+                            : "border-slate-300 text-slate-700 hover:border-emerald-400"
+                      }`}
+                      title={isVideoCallActive ? (isCallFullscreen ? "Exit full screen" : "Open full screen") : "Full screen for video call only"}
+                    >
+                      {isCallFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+                      <span>{isCallFullscreen ? "Exit Full" : "Full View"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleEndCall}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-rose-600 px-2 py-2 text-xs font-semibold text-white transition-colors hover:bg-rose-500"
+                      title="End call"
+                    >
+                      <PhoneOff size={13} />
+                      <span>End</span>
+                    </button>
                   </div>
-                ) : (
-                  <div className={`flex items-center gap-2 px-3 py-3 text-sm sm:px-4 ${isDark ? "text-slate-200" : "text-slate-700"}`}>
-                    <Phone size={14} />
-                    <span>Microphone call in progress. Keep this chat open.</span>
-                  </div>
-                )}
+                </div>
               </div>
             )}
 
