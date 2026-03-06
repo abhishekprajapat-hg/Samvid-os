@@ -95,8 +95,30 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         <Tab.Screen name="Inventory" component={AssetVaultScreen} />
         <Tab.Screen name="Reports" component={IntelligenceReportsScreen} />
         <Tab.Screen name="Targets" component={PerformanceScreen} />
+        <Tab.Screen name="Calendar" component={MasterScheduleScreen} />
+        <Tab.Screen name="Field Ops" component={FieldOpsScreen} />
         <Tab.Screen name="Finance" component={FinancialCoreScreen} />
         <Tab.Screen name="Chat" component={TeamChatScreen} />
+        <Tab.Screen name="More" component={MoreMenuScreen} />
+      </Tab.Navigator>
+    );
+  }
+
+  if (role === "CHANNEL_PARTNER") {
+    return (
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          ...sharedOptions,
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={getTabIconName(route.name, focused)}
+              size={size}
+              color={color}
+            />
+          ),
+        })}
+      >
+        <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
         <Tab.Screen name="More" component={MoreMenuScreen} />
       </Tab.Navigator>
     );
