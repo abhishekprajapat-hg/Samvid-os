@@ -9,7 +9,7 @@
     "start:go": "expo start --go --tunnel --port 19020 --clear",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web --port 19021 --clear",
+    "web": "expo start --web --clear",
     "build:apk": "eas build --platform android --profile development",
     "build:apk:preview": "eas build --platform android --profile preview"
   },
