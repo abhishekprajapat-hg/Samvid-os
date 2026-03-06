@@ -2539,7 +2539,7 @@ const TeamChat = ({ theme = "light" }) => {
           toCallHistoryStatusLabel={toCallHistoryStatusLabel}
           toDayLabel={toDayLabel}
         />
-        <section className={`${mobileSidebarVisible ? "hidden md:flex" : "flex"} min-h-0 min-w-0 w-full flex-col overflow-hidden ${isDark ? "bg-slate-900/65" : "bg-[#efeae2]"}`}>
+        <section className={`${mobileSidebarVisible ? "hidden md:flex" : "flex"} h-full min-h-0 min-w-0 w-full flex-col overflow-hidden ${isDark ? "bg-slate-900/65" : "bg-[#efeae2]"}`}>
           <div className={`sticky top-0 z-20 flex items-center gap-2 border-b px-3 py-2.5 sm:px-4 ${
             isDark ? "border-slate-700 bg-slate-900/90" : "border-emerald-700/25 bg-emerald-600 md:border-slate-200 md:bg-white"
           }`}>
@@ -2762,7 +2762,7 @@ const TeamChat = ({ theme = "light" }) => {
             </div>
           )}
 
-          <div className={`relative min-h-0 flex-1 overflow-hidden ${isDark ? "bg-slate-950/45" : "bg-slate-50"}`}>
+          <div className={`relative flex min-h-0 flex-1 flex-col overflow-hidden ${isDark ? "bg-slate-950/45" : "bg-slate-50"}`}>
             {activeCall && (
               <audio ref={remoteAudioRef} autoPlay playsInline muted={isSpeakerMuted} />
             )}
@@ -2923,7 +2923,7 @@ const TeamChat = ({ theme = "light" }) => {
               </div>
             )}
 
-            <div className={`relative h-full min-h-0 space-y-3 overflow-y-auto px-3 py-4 sm:px-5 custom-scrollbar ${callTimelineOffsetClass}`}>
+            <div className={`relative min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-5 custom-scrollbar ${callTimelineOffsetClass}`}>
             {selectedConversationId && (callHistoryLoading || recentCallHistory.length > 0) && (
               <div className={`mb-2 hidden rounded-2xl border px-3 py-2.5 xl:hidden md:block ${
                 isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-white/95"
@@ -3146,7 +3146,7 @@ const TeamChat = ({ theme = "light" }) => {
 
           <form
             onSubmit={handleSend}
-            className={`border-t px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] sm:px-4 ${isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-[#f0f2f5]"}`}
+            className={`shrink-0 border-t px-3 pt-2.5 pb-[calc(0.625rem+env(safe-area-inset-bottom))] sm:px-4 ${isDark ? "border-slate-700 bg-slate-900/85" : "border-slate-200 bg-[#f0f2f5]"}`}
           >
             {queuedShare && (
               <div className={`mb-3 rounded-xl border p-2.5 ${isDark ? "border-emerald-400/25 bg-emerald-500/10" : "border-emerald-200 bg-emerald-50/80"}`}>
