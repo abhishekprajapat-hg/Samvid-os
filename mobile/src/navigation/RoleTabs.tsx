@@ -24,6 +24,8 @@ import { MasterScheduleScreen } from "../modules/calendar/MasterScheduleScreen";
 import { FieldOpsScreen } from "../modules/field/FieldOpsScreen";
 import { TeamManagerScreen } from "../modules/admin/TeamManagerScreen";
 import { SystemSettingsScreen } from "../modules/admin/SystemSettingsScreen";
+import { UserDetailsEditorScreen } from "../modules/admin/UserDetailsEditorScreen";
+import { AdminCommandConsoleScreen } from "../modules/admin/AdminCommandConsoleScreen";
 import { FinancialCoreScreen } from "../modules/finance/FinancialCoreScreen";
 import { NotificationsScreen } from "../modules/notifications/NotificationsScreen";
 import { ProfileScreen } from "../modules/profile/ProfileScreen";
@@ -216,6 +218,16 @@ export const RoleTabs = ({ role }: { role: UserRole }) => (
       name="Users"
       component={TeamManagerScreen}
       options={{ title: "Users" }}
+    />
+    <Stack.Screen
+      name="UserDetailsEditor"
+      component={UserDetailsEditorScreen}
+      options={{ title: "User Editor" }}
+    />
+    <Stack.Screen
+      name="AdminConsole"
+      component={AdminCommandConsoleScreen}
+      options={{ title: "Admin Console" }}
     />
     <Stack.Screen
       name="Profile"

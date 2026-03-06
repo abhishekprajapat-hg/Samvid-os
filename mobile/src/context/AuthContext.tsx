@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { AppState } from "react-native";
 import { getCurrentUser, loginUser } from "../services/authService";
 import { setUnauthorizedHandler } from "../services/api";
 import { sessionStorage } from "../storage/sessionStorage";
 import type { User, UserRole } from "../types";
+import { getSessionTimeoutMs, readSystemSettings } from "../utils/systemSettings";
 
 type AuthContextValue = {
   loading: boolean;
@@ -30,6 +32,50 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => {
       setUnauthorizedHandler(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    let wentBackgroundAt = 0;
+    let timeoutMs = getSessionTimeoutMs(30);
+
+    const boot = async () => {
+      try {
+        const settings = await readSystemSettings();
+        timeoutMs = getSessionTimeoutMs(settings.security.sessionTimeoutMinutes);
+      } catch {
+        timeoutMs = getSessionTimeoutMs(30);
+      }
+    };
+
+    boot();
+
+    const sub = AppState.addEventListener("change", async (nextState) => {
+      if (!alive) return;
+      if (nextState === "background" || nextState === "inactive") {
+        wentBackgroundAt = Date.now();
+        return;
+      }
+
+      if (nextState === "active" && wentBackgroundAt > 0) {
+        const now = Date.now();
+        const elapsed = now - wentBackgroundAt;
+        wentBackgroundAt = 0;
+
+        const currentToken = await sessionStorage.getToken();
+        if (!currentToken) return;
+        if (elapsed < timeoutMs) return;
+
+        await sessionStorage.clearSession();
+        setToken(null);
+        setUser(null);
+      }
+    });
+
+    return () => {
+      alive = false;
+      sub.remove();
     };
   }, []);
 
