@@ -81,3 +81,15 @@ export const getFieldExecutiveLocationsWithMeta = async (params = {}) => {
     staleMinutes: res.data?.staleMinutes || null,
   };
 };
+
+export const getRoleLeaderboard = async (params = {}) => {
+  const res = await api.get("/users/leaderboard", { params });
+  return {
+    role: res.data?.role || "",
+    roleLabel: res.data?.roleLabel || "",
+    windowDays: Number(res.data?.windowDays || 30),
+    since: res.data?.since || "",
+    count: Number(res.data?.count || 0),
+    leaderboard: Array.isArray(res.data?.leaderboard) ? res.data.leaderboard : [],
+  };
+};

@@ -3,6 +3,7 @@ const Lead = require("../models/Lead");
 const Inventory = require("../models/Inventory");
 const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
+const mongoose = require("mongoose");
 const logger = require("../config/logger");
 const {
   redistributePipelineLeads,
@@ -63,6 +64,15 @@ const USER_SELECTABLE_FIELDS = [
   "liveLocation",
   "createdAt",
   "updatedAt",
+];
+const USER_ROLE_VALUES = Object.values(USER_ROLES);
+const LEADERBOARD_ADMIN_ROLE_OPTIONS = [
+  USER_ROLES.MANAGER,
+  USER_ROLES.ASSISTANT_MANAGER,
+  USER_ROLES.TEAM_LEADER,
+  USER_ROLES.EXECUTIVE,
+  USER_ROLES.FIELD_EXECUTIVE,
+  USER_ROLES.CHANNEL_PARTNER,
 ];
 
 const toFiniteNumber = (value) => {
@@ -217,6 +227,155 @@ const buildProfilePerformanceSummary = async (userDoc) => {
     statusBreakdown,
     recentLeads,
   };
+};
+
+const parseWindowDays = (value, fallback = 30, max = 365) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+};
+
+const resolveLeaderboardRoleForActor = ({ actorRole, requestedRole }) => {
+  const role = String(actorRole || "").trim().toUpperCase();
+  const requested = String(requestedRole || "").trim().toUpperCase();
+
+  if (!role) return null;
+  if (role !== USER_ROLES.ADMIN) return role;
+
+  if (!requested) {
+    return USER_ROLES.MANAGER;
+  }
+
+  if (!USER_ROLE_VALUES.includes(requested)) {
+    return null;
+  }
+
+  if (!LEADERBOARD_ADMIN_ROLE_OPTIONS.includes(requested)) {
+    return null;
+  }
+
+  return requested;
+};
+
+const normalizeOwnerIds = (ownerIds = []) => {
+  const deduped = new Map();
+
+  ownerIds.forEach((ownerId) => {
+    if (ownerId === null || ownerId === undefined) return;
+
+    if (typeof ownerId === "object" && ownerId._bsontype === "ObjectId") {
+      const key = String(ownerId);
+      if (!deduped.has(key)) deduped.set(key, ownerId);
+      return;
+    }
+
+    const key = String(ownerId || "").trim();
+    if (!isValidObjectId(key)) return;
+    if (!deduped.has(key)) {
+      deduped.set(key, new mongoose.Types.ObjectId(key));
+    }
+  });
+
+  return [...deduped.values()];
+};
+
+const toLeaderboardRate = (closedLeads, totalLeads) => {
+  const total = Number(totalLeads || 0);
+  if (!total) return 0;
+  return Math.round((Number(closedLeads || 0) / total) * 1000) / 10;
+};
+
+const sortLeaderboardRows = (rows = []) =>
+  [...rows].sort((left, right) => {
+    if (right.closedLeads !== left.closedLeads) {
+      return right.closedLeads - left.closedLeads;
+    }
+    if (right.conversionRate !== left.conversionRate) {
+      return right.conversionRate - left.conversionRate;
+    }
+    if (right.totalLeads !== left.totalLeads) {
+      return right.totalLeads - left.totalLeads;
+    }
+    if (right.siteVisits !== left.siteVisits) {
+      return right.siteVisits - left.siteVisits;
+    }
+    return String(left.name || "").localeCompare(String(right.name || ""));
+  });
+
+const rankLeaderboardRows = (rows = []) => {
+  const sorted = sortLeaderboardRows(rows);
+  let previousKey = "";
+  let currentRank = 0;
+
+  return sorted.map((row, index) => {
+    const key = [
+      row.closedLeads,
+      row.conversionRate,
+      row.totalLeads,
+      row.siteVisits,
+    ].join(":");
+
+    if (key !== previousKey) {
+      currentRank = index + 1;
+      previousKey = key;
+    }
+
+    return {
+      ...row,
+      rank: currentRank,
+    };
+  });
+};
+
+const buildLeadPerformanceRowsByOwnerIds = async ({
+  ownerField,
+  ownerIds = [],
+  sinceDate = null,
+}) => {
+  const normalizedOwnerIds = normalizeOwnerIds(ownerIds);
+  if (!ownerField || !normalizedOwnerIds.length) {
+    return new Map();
+  }
+
+  const match = {
+    [ownerField]: { $in: normalizedOwnerIds },
+  };
+
+  if (sinceDate instanceof Date && !Number.isNaN(sinceDate.getTime())) {
+    // Use updatedAt so closures in the selected window are reflected immediately.
+    match.updatedAt = { $gte: sinceDate };
+  }
+
+  const rows = await Lead.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: `$${ownerField}`,
+        totalLeads: { $sum: 1 },
+        closedLeads: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "CLOSED"] }, 1, 0],
+          },
+        },
+        siteVisits: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "SITE_VISIT"] }, 1, 0],
+          },
+        },
+      },
+    },
+  ]);
+
+  return new Map(
+    rows.map((row) => [
+      String(row._id),
+      {
+        totalLeads: Number(row.totalLeads || 0),
+        closedLeads: Number(row.closedLeads || 0),
+        siteVisits: Number(row.siteVisits || 0),
+      },
+    ]),
+  );
 };
 
 const toProfileView = (user) => ({
@@ -492,6 +651,167 @@ exports.getUsers = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "getUsers failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getRoleLeaderboard = async (req, res) => {
+  try {
+    if (!req.user.companyId) {
+      return res.status(403).json({ message: "Company context is required" });
+    }
+
+    const actorRole = String(req.user.role || "").trim().toUpperCase();
+    if (!actorRole) {
+      return res.status(400).json({ message: "Role context is required" });
+    }
+    const selectedRole = resolveLeaderboardRoleForActor({
+      actorRole,
+      requestedRole: req.query?.role,
+    });
+    if (!selectedRole) {
+      return res.status(400).json({ message: "Invalid role filter" });
+    }
+
+    const windowDays = parseWindowDays(req.query?.windowDays, 30, 365);
+    const sinceDate = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
+
+    const peerQuery = {
+      companyId: req.user.companyId,
+      role: selectedRole,
+      isActive: true,
+    };
+
+    const peers = await User.find(peerQuery)
+      .select("_id name role")
+      .sort({ name: 1 })
+      .lean();
+
+    if (!peers.length) {
+      return res.json({
+        role: selectedRole,
+        roleLabel: ROLE_LABELS[selectedRole] || selectedRole,
+        windowDays,
+        since: sinceDate.toISOString(),
+        count: 0,
+        leaderboard: [],
+      });
+    }
+
+    const peerIds = peers.map((peer) => peer._id);
+    const metricsByPeerId = new Map(
+      peerIds.map((peerId) => [
+        String(peerId),
+        {
+          totalLeads: 0,
+          closedLeads: 0,
+          siteVisits: 0,
+        },
+      ]),
+    );
+
+    if (EXECUTIVE_ROLES.includes(selectedRole)) {
+      const assignedMetricsByOwnerId = await buildLeadPerformanceRowsByOwnerIds({
+        ownerField: "assignedTo",
+        ownerIds: peerIds,
+        sinceDate,
+      });
+
+      assignedMetricsByOwnerId.forEach((metrics, ownerId) => {
+        metricsByPeerId.set(String(ownerId), metrics);
+      });
+    } else if (isManagementRole(selectedRole)) {
+      const managementTeams = await Promise.all(
+        peers.map(async (peer) => ({
+          peerId: String(peer._id),
+          executiveIds: await getDescendantExecutiveIds({
+            rootUserId: peer._id,
+            companyId: req.user.companyId,
+          }),
+        })),
+      );
+
+      const allExecutiveIds = [
+        ...new Map(
+          managementTeams
+            .flatMap((row) => row.executiveIds)
+            .map((executiveId) => [String(executiveId), executiveId]),
+        ).values(),
+      ];
+      const assignedMetricsByOwnerId = await buildLeadPerformanceRowsByOwnerIds({
+        ownerField: "assignedTo",
+        ownerIds: allExecutiveIds,
+        sinceDate,
+      });
+
+      managementTeams.forEach((teamRow) => {
+        const summary = {
+          totalLeads: 0,
+          closedLeads: 0,
+          siteVisits: 0,
+        };
+
+        teamRow.executiveIds.forEach((executiveId) => {
+          const metrics = assignedMetricsByOwnerId.get(String(executiveId));
+          if (!metrics) return;
+          summary.totalLeads += Number(metrics.totalLeads || 0);
+          summary.closedLeads += Number(metrics.closedLeads || 0);
+          summary.siteVisits += Number(metrics.siteVisits || 0);
+        });
+
+        metricsByPeerId.set(teamRow.peerId, summary);
+      });
+    } else if ([USER_ROLES.CHANNEL_PARTNER, USER_ROLES.ADMIN].includes(selectedRole)) {
+      const creatorMetricsByOwnerId = await buildLeadPerformanceRowsByOwnerIds({
+        ownerField: "createdBy",
+        ownerIds: peerIds,
+        sinceDate,
+      });
+
+      creatorMetricsByOwnerId.forEach((metrics, ownerId) => {
+        metricsByPeerId.set(String(ownerId), metrics);
+      });
+    }
+
+    const me = String(req.user._id || "");
+    const rows = peers.map((peer) => {
+      const metrics = metricsByPeerId.get(String(peer._id)) || {
+        totalLeads: 0,
+        closedLeads: 0,
+        siteVisits: 0,
+      };
+
+      const totalLeads = Number(metrics.totalLeads || 0);
+      const closedLeads = Number(metrics.closedLeads || 0);
+      const siteVisits = Number(metrics.siteVisits || 0);
+
+      return {
+        userId: peer._id,
+        name: peer.name || "Unknown User",
+        role: peer.role || selectedRole,
+        totalLeads,
+        closedLeads,
+        siteVisits,
+        conversionRate: toLeaderboardRate(closedLeads, totalLeads),
+        isSelf: String(peer._id) === me,
+      };
+    });
+
+    const leaderboard = rankLeaderboardRows(rows);
+    return res.json({
+      role: selectedRole,
+      roleLabel: ROLE_LABELS[selectedRole] || selectedRole,
+      windowDays,
+      since: sinceDate.toISOString(),
+      count: leaderboard.length,
+      leaderboard,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getRoleLeaderboard failed",
     });
     return res.status(500).json({ message: "Server error" });
   }

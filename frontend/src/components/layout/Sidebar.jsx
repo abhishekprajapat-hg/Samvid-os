@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
     LayoutGrid, Users, Building2, Map, LogOut,
     PieChart, Settings, ClipboardList, Calendar,
-    Navigation, ShieldCheck, Briefcase, Hexagon, Moon, Sun, MessageSquare, UserCircle2
+    Navigation, ShieldCheck, Briefcase, Hexagon, Moon, Sun, MessageSquare, UserCircle2, Trophy
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -15,6 +15,7 @@ const MENU_CONFIG = {
         { name: 'Schedule', icon: Calendar, path: '/calendar' },
         { name: 'Finance', icon: PieChart, path: '/finance' },
         { name: 'Reports', icon: ClipboardList, path: '/reports' },
+        { name: 'Leaderboard', icon: Trophy, path: '/leaderboard' },
         { name: 'Empire', icon: Building2, path: '/inventory' },
         { name: 'Field Ops', icon: Map, path: '/map' },
         { name: 'Targets', icon: PieChart, path: '/targets' },
@@ -30,6 +31,7 @@ const MENU_CONFIG = {
         { name: 'Inventory', icon: Building2, path: '/inventory' },
         { name: 'Field Ops', icon: Map, path: '/map' },
         { name: 'Reports', icon: ClipboardList, path: '/reports' },
+        { name: 'Leaderboard', icon: Trophy, path: '/leaderboard' },
         { name: 'Targets', icon: PieChart, path: '/targets' },
         { name: 'Access', icon: ShieldCheck, path: '/admin/users' },
         { name: 'Profile', icon: UserCircle2, path: '/profile' },
@@ -42,6 +44,7 @@ const MENU_CONFIG = {
         { name: 'Chat', icon: MessageSquare, path: '/chat' },
         { name: 'Schedule', icon: Calendar, path: '/calendar' },
         { name: 'Targets', icon: PieChart, path: '/targets' },
+        { name: 'Leaderboard', icon: Trophy, path: '/leaderboard' },
         { name: 'Profile', icon: UserCircle2, path: '/profile' },
     ],
     field_agent: [
@@ -52,9 +55,11 @@ const MENU_CONFIG = {
         { name: 'Field Ops', icon: Navigation, path: '/map' },
         { name: 'Schedule', icon: Calendar, path: '/calendar' },
         { name: 'Targets', icon: PieChart, path: '/targets' },
+        { name: 'Leaderboard', icon: Trophy, path: '/leaderboard' },
         { name: 'Profile', icon: UserCircle2, path: '/profile' },
     ],
     partner: [
+        { name: 'Leaderboard', icon: Trophy, path: '/leaderboard' },
         { name: 'Profile', icon: UserCircle2, path: '/profile' },
     ]
 };

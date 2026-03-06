@@ -11,6 +11,12 @@ router.get(
   userController.getUsers
 );
 
+router.get(
+  "/leaderboard",
+  authMiddleware.protect,
+  userController.getRoleLeaderboard
+);
+
 router.post(
   "/create",
   writeLimiter,

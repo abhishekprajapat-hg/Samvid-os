@@ -22,6 +22,7 @@ import {
   Bell,
   UserCircle2,
   TerminalSquare,
+  Trophy,
 } from "lucide-react";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import { useChatNotifications } from "../../context/useChatNotifications";
@@ -33,6 +34,7 @@ const MENU_CONFIG = {
     { name: "Schedule", icon: Calendar, path: "/calendar" },
     { name: "Finance", icon: PieChart, path: "/finance" },
     { name: "Reports", icon: ClipboardList, path: "/reports" },
+    { name: "Leaderboard", icon: Trophy, path: "/leaderboard" },
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Alerts", icon: Bell, path: "/admin/notifications" },
     { name: "Console", icon: TerminalSquare, path: "/admin/console" },
@@ -52,6 +54,7 @@ const MENU_CONFIG = {
     { name: "Field Ops", icon: Map, path: "/map" },
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Reports", icon: ClipboardList, path: "/reports" },
+    { name: "Leaderboard", icon: Trophy, path: "/leaderboard" },
     { name: "Targets", icon: PieChart, path: "/targets" },
     { name: "Access", icon: ShieldCheck, path: "/admin/users" },
     { name: "Profile", icon: UserCircle2, path: "/profile" },
@@ -65,6 +68,7 @@ const MENU_CONFIG = {
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Schedule", icon: Calendar, path: "/calendar" },
     { name: "Targets", icon: PieChart, path: "/targets" },
+    { name: "Leaderboard", icon: Trophy, path: "/leaderboard" },
     { name: "Profile", icon: UserCircle2, path: "/profile" },
   ],
   field_agent: [
@@ -76,6 +80,7 @@ const MENU_CONFIG = {
     { name: "Field Ops", icon: Navigation, path: "/map" },
     { name: "Schedule", icon: Calendar, path: "/calendar" },
     { name: "Targets", icon: PieChart, path: "/targets" },
+    { name: "Leaderboard", icon: Trophy, path: "/leaderboard" },
     { name: "Profile", icon: UserCircle2, path: "/profile" },
   ],
   partner: [
@@ -113,6 +118,7 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
       ? [{ name: "Inventory", icon: Building2, path: "/inventory" }]
       : []),
     { name: "Finance", icon: PieChart, path: "/finance" },
+    { name: "Leaderboard", icon: Trophy, path: "/leaderboard" },
     { name: "Profile", icon: UserCircle2, path: "/profile" },
   ];
   const currentMenu = normalizedRole === "partner"

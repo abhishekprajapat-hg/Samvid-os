@@ -35,6 +35,7 @@ const InventoryDetails = lazy(() => import("./modules/inventory/InventoryDetails
 const FinancialCore = lazy(() => import("./modules/finance/FinancialCore"));
 const FieldOps = lazy(() => import("./modules/field/FieldOps"));
 const IntelligenceReports = lazy(() => import("./modules/reports/IntelligenceReports"));
+const RoleLeaderboard = lazy(() => import("./modules/reports/RoleLeaderboard"));
 const MasterSchedule = lazy(() => import("./modules/calendar/MasterSchedule"));
 const SystemSettings = lazy(() => import("./modules/admin/SystemSettings"));
 const DataUseNotice = lazy(() => import("./modules/legal/DataUseNotice"));
@@ -146,6 +147,14 @@ const resolvePageHeader = (pathname, userRole) => {
       title: "Reports Command Center",
       subtitle: "Funnel analytics, team performance and business intelligence",
       scopeLabel: "Reports",
+    };
+  }
+
+  if (pathname.startsWith("/leaderboard")) {
+    return {
+      title: "Leaderboard Command Center",
+      subtitle: "Role-level ranking, peer comparison and conversion momentum",
+      scopeLabel: "Leaderboard",
     };
   }
 
@@ -687,6 +696,10 @@ export default function App() {
                         <Route
                           path="/reports"
                           element={canAccess(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]) ? <IntelligenceReports /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/leaderboard"
+                          element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <RoleLeaderboard /> : <Navigate to="/" />}
                         />
                         <Route
                           path="/calendar"
