@@ -27,12 +27,32 @@ const configuredOrigins = (process.env.CORS_ORIGIN || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+const isLoopbackOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || "").trim());
+
+const isLanOrigin = (origin) =>
+  /^https?:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/i.test(String(origin || "").trim());
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (configuredOrigins.includes("*")) return true;
+  if (configuredOrigins.includes(origin)) return true;
+  if (isLoopbackOrigin(origin) || isLanOrigin(origin)) return true;
+  return false;
+};
+
 app.use(helmet());
 app.use(compression({ threshold: 1024 }));
 app.use(
   cors({
-    origin: configuredOrigins.length ? configuredOrigins : "*",
-    credentials: configuredOrigins.length > 0,
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true,
   }),
 );
 app.use(attachRequestId);

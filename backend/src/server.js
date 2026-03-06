@@ -29,11 +29,31 @@ const configuredOrigins = (process.env.CORS_ORIGIN || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 
+const isLoopbackOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || "").trim());
+
+const isLanOrigin = (origin) =>
+  /^https?:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/i.test(String(origin || "").trim());
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (configuredOrigins.includes("*")) return true;
+  if (configuredOrigins.includes(origin)) return true;
+  if (isLoopbackOrigin(origin) || isLanOrigin(origin)) return true;
+  return false;
+};
+
 const io = new Server(httpServer, {
   cors: {
-    origin: configuredOrigins.length ? configuredOrigins : "*",
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("Not allowed by CORS"));
+    },
     methods: ["GET", "POST"],
-    credentials: configuredOrigins.length > 0,
+    credentials: true,
   },
 });
 
