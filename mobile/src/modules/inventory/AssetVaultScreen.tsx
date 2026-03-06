@@ -84,9 +84,24 @@ const buildDefaultImageSet = (seed: string) => {
 export const AssetVaultScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const canManage = role === "ADMIN";
   const canRequestStatusChange = role === "FIELD_EXECUTIVE";
+  const isChannelPartner = role === "CHANNEL_PARTNER";
+  const canChannelPartnerViewInventory = Boolean((user as any)?.canViewInventory);
+
+  if (isChannelPartner && !canChannelPartnerViewInventory) {
+    return (
+      <Screen title="Asset Vault" subtitle="Inventory + Requests">
+        <View style={styles.requestBox}>
+          <Text style={styles.requestTitle}>Inventory access disabled</Text>
+          <Text style={styles.meta}>
+            Aapke account me inventory access disabled hai. Admin se `Can View Inventory` enable karwao.
+          </Text>
+        </View>
+      </Screen>
+    );
+  }
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

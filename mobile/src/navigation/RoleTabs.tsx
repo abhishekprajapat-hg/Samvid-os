@@ -57,7 +57,7 @@ const getTabIconName = (routeName: string, focused: boolean) => {
 };
 
 const RoleMainTabs = ({ role }: { role: UserRole }) => {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const insets = useSafeAreaInsets();
   const bottomSpacing = Math.max(insets.bottom, 10);
 
@@ -107,6 +107,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
   }
 
   if (role === "CHANNEL_PARTNER") {
+    const canViewInventory = Boolean((user as any)?.canViewInventory);
     return (
       <Tab.Navigator
         screenOptions={({ route }) => ({
@@ -121,6 +122,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         })}
       >
         <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
+        {canViewInventory ? <Tab.Screen name="Inventory" component={AssetVaultScreen} /> : null}
         <Tab.Screen name="More" component={MoreMenuScreen} />
       </Tab.Navigator>
     );

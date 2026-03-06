@@ -138,8 +138,9 @@ export const LeadsMatrixScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
-  const { role } = useAuth();
-  const canManage = role === "ADMIN" || role === "MANAGER";
+  const { role, user } = useAuth();
+  const canManage = ["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"].includes(String(role || ""));
+  const currentUserId = String(user?._id || (user as any)?.id || "");
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -230,9 +231,24 @@ export const LeadsMatrixScreen = () => {
     return () => clearTimeout(timer);
   }, [success]);
 
+  const scopedLeads = useMemo(() => {
+    const roleKey = String(role || "");
+    if (!["EXECUTIVE", "FIELD_EXECUTIVE"].includes(roleKey)) {
+      return leads;
+    }
+    return leads.filter((lead) => {
+      const assignedId =
+        typeof lead.assignedTo === "object"
+          ? String(lead.assignedTo?._id || "")
+          : String(lead.assignedTo || "");
+      const createdById = String((lead as any)?.createdBy?._id || (lead as any)?.createdBy || "");
+      return assignedId === currentUserId || createdById === currentUserId;
+    });
+  }, [currentUserId, leads, role]);
+
   const filtered = useMemo(() => {
     const key = query.trim().toLowerCase();
-    return leads.filter((lead) => {
+    return scopedLeads.filter((lead) => {
       const status = String(lead.status || "");
       const dueFollowUp =
         !!lead.nextFollowUp && !Number.isNaN(new Date(lead.nextFollowUp).getTime()) && new Date(lead.nextFollowUp) <= new Date();
@@ -252,16 +268,16 @@ export const LeadsMatrixScreen = () => {
 
       return statusMatch && textMatch;
     });
-  }, [leads, query, statusFilter]);
+  }, [query, scopedLeads, statusFilter]);
 
   const metrics = useMemo(() => {
-    const total = leads.length;
-    const fresh = leads.filter((lead) => lead.status === "NEW").length;
-    const interested = leads.filter((lead) => ["INTERESTED", "SITE_VISIT"].includes(String(lead.status))).length;
-    const closed = leads.filter((lead) => lead.status === "CLOSED").length;
-    const dueFollowUps = leads.filter((lead) => lead.nextFollowUp && new Date(lead.nextFollowUp) <= new Date()).length;
+    const total = scopedLeads.length;
+    const fresh = scopedLeads.filter((lead) => lead.status === "NEW").length;
+    const interested = scopedLeads.filter((lead) => ["INTERESTED", "SITE_VISIT"].includes(String(lead.status))).length;
+    const closed = scopedLeads.filter((lead) => lead.status === "CLOSED").length;
+    const dueFollowUps = scopedLeads.filter((lead) => lead.nextFollowUp && new Date(lead.nextFollowUp) <= new Date()).length;
     return { total, fresh, interested, closed, dueFollowUps };
-  }, [leads]);
+  }, [scopedLeads]);
 
   const showEstimatedRevenueContext = String(route.params?.highlightMetric || "") === "ESTIMATED_REVENUE";
   const estimatedRevenueValue = Number(route.params?.estimatedRevenue || 0);
@@ -272,8 +288,8 @@ export const LeadsMatrixScreen = () => {
     [users],
   );
   const selectedProposalLead = useMemo(
-    () => leads.find((row) => String(row._id) === proposalLeadId) || null,
-    [leads, proposalLeadId],
+    () => scopedLeads.find((row) => String(row._id) === proposalLeadId) || null,
+    [scopedLeads, proposalLeadId],
   );
   const selectedProposalAssets = useMemo(
     () =>
@@ -966,7 +982,7 @@ export const LeadsMatrixScreen = () => {
               </Pressable>
               {proposalLeadDropdownOpen ? (
                 <ScrollView style={styles.selectDropdown}>
-                  {leads.map((row) => {
+                  {scopedLeads.map((row) => {
                     const id = String(row._id || "");
                     const active = proposalLeadId === id;
                     return (

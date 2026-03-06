@@ -52,8 +52,10 @@ const formatActionLabel = (activity: InventoryActivity) => {
 export const InventoryDetailsScreen = () => {
   const route = useRoute<any>();
   const assetId = String(route.params?.assetId || "");
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const canManage = role === "ADMIN";
+  const isChannelPartner = role === "CHANNEL_PARTNER";
+  const canChannelPartnerViewInventory = Boolean((user as any)?.canViewInventory);
   const { width: windowWidth } = useWindowDimensions();
 
   const [loading, setLoading] = useState(true);
@@ -188,6 +190,14 @@ export const InventoryDetailsScreen = () => {
     return (
       <View style={styles.center}>
         <Text style={styles.meta}>Asset not found</Text>
+      </View>
+    );
+  }
+
+  if (isChannelPartner && !canChannelPartnerViewInventory) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.meta}>Inventory access disabled for this account.</Text>
       </View>
     );
   }
