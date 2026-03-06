@@ -100,6 +100,7 @@ const MAX_MEDIA_SIZE_BYTES = 25 * 1024 * 1024;
 const TYPING_IDLE_TIMEOUT_MS = 1200;
 const REMOTE_TYPING_TIMEOUT_MS = 3200;
 const CALL_SIGNAL_QUEUE_LIMIT = 60;
+const CALL_RING_TIMEOUT_MS = 45000;
 
 const DEFAULT_WEBRTC_ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302"] }];
 
@@ -130,6 +131,11 @@ const CALL_PHASES = {
   DIALING: "dialing",
   CONNECTING: "connecting",
   ACTIVE: "active",
+};
+
+const CALL_TONE_TYPES = {
+  INCOMING: "incoming",
+  OUTGOING: "outgoing",
 };
 
 const detectMediaKind = ({ kind, mimeType = "" } = {}) => {
@@ -407,6 +413,7 @@ const normalizeCallReason = (reason) => {
   const value = toId(reason).toLowerCase();
   if (value === "busy") return "User is busy on another call";
   if (value === "disconnected") return "Call ended due to network disconnect";
+  if (value === "missed" || value === "no-answer" || value === "no_answer") return "No answer";
   if (value === "rejected") return "Call was declined";
   return "Call ended";
 };
@@ -504,8 +511,10 @@ const TeamChat = ({ theme = "light" }) => {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
-  const ringtoneContextRef = useRef(null);
-  const ringtoneIntervalRef = useRef(null);
+  const callToneContextRef = useRef(null);
+  const callToneIntervalRef = useRef(null);
+  const callToneTypeRef = useRef("");
+  const outgoingCallTimeoutRef = useRef(null);
   const queuedSignalsByCallRef = useRef(new Map());
   const activeCallRef = useRef(null);
   const incomingCallRef = useRef(null);
@@ -591,6 +600,13 @@ const TeamChat = ({ theme = "light" }) => {
       setMobileListMode("chats");
     }
   }, [activeCall, incomingCall]);
+
+  const clearOutgoingCallTimeout = useCallback(() => {
+    if (outgoingCallTimeoutRef.current) {
+      clearTimeout(outgoingCallTimeoutRef.current);
+      outgoingCallTimeoutRef.current = null;
+    }
+  }, []);
 
   const emitConversationRead = useCallback(
     async (conversationId, options = {}) => {
@@ -731,71 +747,123 @@ const TeamChat = ({ theme = "light" }) => {
     }
   }, []);
 
-  const stopIncomingRingtone = useCallback(() => {
-    if (ringtoneIntervalRef.current) {
-      clearInterval(ringtoneIntervalRef.current);
-      ringtoneIntervalRef.current = null;
+  const stopCallTone = useCallback(() => {
+    if (callToneIntervalRef.current) {
+      clearInterval(callToneIntervalRef.current);
+      callToneIntervalRef.current = null;
     }
+    callToneTypeRef.current = "";
 
-    const audioContext = ringtoneContextRef.current;
+    const audioContext = callToneContextRef.current;
     if (audioContext) {
       audioContext.close?.().catch(() => null);
-      ringtoneContextRef.current = null;
+      callToneContextRef.current = null;
     }
   }, []);
 
-  const playIncomingRingtonePulse = useCallback((audioContext) => {
+  const playTonePulse = useCallback((audioContext, { frequency = 880, duration = 0.24, gain = 0.16, offset = 0 }) => {
     if (!audioContext) return;
-    const now = audioContext.currentTime;
+    const startAt = audioContext.currentTime + Math.max(0, Number(offset || 0));
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
 
     oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(890, now);
+    oscillator.frequency.setValueAtTime(frequency, startAt);
 
-    gainNode.gain.setValueAtTime(0.0001, now);
-    gainNode.gain.exponentialRampToValueAtTime(0.16, now + 0.03);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+    gainNode.gain.setValueAtTime(0.0001, startAt);
+    gainNode.gain.exponentialRampToValueAtTime(gain, startAt + 0.03);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + Math.max(0.08, duration));
 
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
 
-    oscillator.start(now);
-    oscillator.stop(now + 0.3);
+    oscillator.start(startAt);
+    oscillator.stop(startAt + Math.max(0.12, duration + 0.02));
   }, []);
 
-  const startIncomingRingtone = useCallback(async () => {
-    stopIncomingRingtone();
+  const playIncomingTonePattern = useCallback((audioContext) => {
+    playTonePulse(audioContext, { frequency: 860, duration: 0.24, gain: 0.18, offset: 0 });
+    playTonePulse(audioContext, { frequency: 660, duration: 0.22, gain: 0.16, offset: 0.34 });
+    playTonePulse(audioContext, { frequency: 860, duration: 0.24, gain: 0.18, offset: 0.7 });
 
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+      navigator.vibrate?.([180, 90, 220]);
+    }
+  }, [playTonePulse]);
+
+  const playOutgoingTonePattern = useCallback((audioContext) => {
+    playTonePulse(audioContext, { frequency: 470, duration: 0.26, gain: 0.14, offset: 0 });
+    playTonePulse(audioContext, { frequency: 470, duration: 0.26, gain: 0.14, offset: 0.42 });
+  }, [playTonePulse]);
+
+  const startCallTone = useCallback(async (toneType) => {
+    const normalizedToneType = toId(toneType).toLowerCase();
+    if (![CALL_TONE_TYPES.INCOMING, CALL_TONE_TYPES.OUTGOING].includes(normalizedToneType)) {
+      return;
+    }
+
+    if (callToneTypeRef.current === normalizedToneType && callToneIntervalRef.current) {
+      return;
+    }
+
+    stopCallTone();
     if (typeof window === "undefined") return;
+
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextClass) return;
 
     const audioContext = new AudioContextClass();
-    ringtoneContextRef.current = audioContext;
+    callToneContextRef.current = audioContext;
+    callToneTypeRef.current = normalizedToneType;
 
     if (audioContext.state === "suspended") {
       await audioContext.resume().catch(() => null);
     }
 
-    playIncomingRingtonePulse(audioContext);
-    ringtoneIntervalRef.current = setInterval(() => {
-      playIncomingRingtonePulse(audioContext);
-    }, 900);
-  }, [playIncomingRingtonePulse, stopIncomingRingtone]);
+    const playPattern = () => {
+      if (normalizedToneType === CALL_TONE_TYPES.INCOMING) {
+        playIncomingTonePattern(audioContext);
+      } else {
+        playOutgoingTonePattern(audioContext);
+      }
+    };
+
+    playPattern();
+    callToneIntervalRef.current = setInterval(
+      playPattern,
+      normalizedToneType === CALL_TONE_TYPES.INCOMING ? 1900 : 1450,
+    );
+  }, [playIncomingTonePattern, playOutgoingTonePattern, stopCallTone]);
+
+  const activeCallToneType = useMemo(() => {
+    if (incomingCall) {
+      return CALL_TONE_TYPES.INCOMING;
+    }
+
+    const currentCall = activeCall;
+    if (
+      currentCall
+      && currentCall.direction === "outgoing"
+      && currentCall.phase === CALL_PHASES.DIALING
+    ) {
+      return CALL_TONE_TYPES.OUTGOING;
+    }
+
+    return "";
+  }, [activeCall, incomingCall]);
 
   useEffect(() => {
-    if (incomingCall) {
-      startIncomingRingtone().catch(() => null);
+    if (!activeCallToneType) {
+      stopCallTone();
       return;
     }
 
-    stopIncomingRingtone();
-  }, [incomingCall, startIncomingRingtone, stopIncomingRingtone]);
+    startCallTone(activeCallToneType).catch(() => null);
+  }, [activeCallToneType, startCallTone, stopCallTone]);
 
   useEffect(() => () => {
-    stopIncomingRingtone();
-  }, [stopIncomingRingtone]);
+    stopCallTone();
+  }, [stopCallTone]);
 
   const stopMediaTracks = useCallback(() => {
     const localStream = localStreamRef.current;
@@ -835,13 +903,14 @@ const TeamChat = ({ theme = "light" }) => {
   }, []);
 
   const clearActiveCallLocally = useCallback((callId = "") => {
-    stopIncomingRingtone();
+    clearOutgoingCallTimeout();
+    stopCallTone();
     clearQueuedCallSignals(callId);
     closePeerConnection();
     stopMediaTracks();
     setActiveCall(null);
     setIncomingCall(null);
-  }, [clearQueuedCallSignals, closePeerConnection, stopIncomingRingtone, stopMediaTracks]);
+  }, [clearOutgoingCallTimeout, clearQueuedCallSignals, closePeerConnection, stopCallTone, stopMediaTracks]);
 
   const emitCallAck = useCallback(async (eventName, payload = {}) => {
     const socket = socketRef.current;
@@ -1317,7 +1386,7 @@ const TeamChat = ({ theme = "light" }) => {
               ...prev,
               callId: resolvedCallId,
               roomId: resolvedRoomId,
-              phase: CALL_PHASES.CONNECTING,
+              phase: CALL_PHASES.DIALING,
             }
           : prev);
 
@@ -1437,6 +1506,34 @@ const TeamChat = ({ theme = "light" }) => {
         }
       });
   }, [endActiveCall, loadCallHistoryForConversation]);
+
+  useEffect(() => {
+    clearOutgoingCallTimeout();
+
+    const currentCall = activeCall;
+    if (!currentCall) return undefined;
+    if (currentCall.direction !== "outgoing") return undefined;
+    if (currentCall.phase !== CALL_PHASES.DIALING) return undefined;
+
+    outgoingCallTimeoutRef.current = setTimeout(() => {
+      const liveCall = activeCallRef.current;
+      if (!liveCall) return;
+      if (toId(liveCall.callId) !== toId(currentCall.callId)) return;
+      if (liveCall.phase !== CALL_PHASES.DIALING) return;
+
+      setCallError("No answer");
+      const roomId = toId(liveCall.roomId || selectedConversationRef.current);
+      endActiveCall({ notifyRemote: true, reason: "missed" })
+        .catch(() => null)
+        .finally(() => {
+          if (roomId) {
+            loadCallHistoryForConversation(roomId).catch(() => null);
+          }
+        });
+    }, CALL_RING_TIMEOUT_MS);
+
+    return clearOutgoingCallTimeout;
+  }, [activeCall, clearOutgoingCallTimeout, endActiveCall, loadCallHistoryForConversation]);
 
   useEffect(() => {
     const nextRoomId = toId(selectedConversationId);
@@ -1763,6 +1860,8 @@ const TeamChat = ({ theme = "light" }) => {
       if (!currentCall || toId(currentCall.callId) !== callId) return;
 
       setCallError("");
+      clearOutgoingCallTimeout();
+      stopCallTone();
       setActiveCall((prev) =>
         prev
           ? {
@@ -1884,6 +1983,7 @@ const TeamChat = ({ theme = "light" }) => {
     applyCallSignal,
     clearActiveCallLocally,
     clearLocalTypingStopTimer,
+    clearOutgoingCallTimeout,
     clearQueuedCallSignals,
     currentUser.id,
     emitConversationRead,
@@ -1891,6 +1991,7 @@ const TeamChat = ({ theme = "light" }) => {
     loadMessenger,
     loadCallHistoryForConversation,
     queueCallSignal,
+    stopCallTone,
     isMobileViewport,
   ]);
 
