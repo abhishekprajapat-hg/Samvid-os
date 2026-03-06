@@ -87,6 +87,9 @@ export const getRoleLeaderboard = async (params = {}) => {
   return {
     role: res.data?.role || "",
     roleLabel: res.data?.roleLabel || "",
+    allowedRoleFilters: Array.isArray(res.data?.allowedRoleFilters)
+      ? res.data.allowedRoleFilters
+      : [],
     windowDays: Number(res.data?.windowDays || 30),
     since: res.data?.since || "",
     count: Number(res.data?.count || 0),

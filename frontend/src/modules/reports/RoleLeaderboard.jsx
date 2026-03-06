@@ -16,15 +16,6 @@ const WINDOW_OPTIONS = [
   { label: "Last 30 Days", value: 30 },
   { label: "Last 90 Days", value: 90 },
 ];
-const ROLE_FILTER_OPTIONS = [
-  { label: "Manager", value: "MANAGER" },
-  { label: "Assistant Manager", value: "ASSISTANT_MANAGER" },
-  { label: "Team Leader", value: "TEAM_LEADER" },
-  { label: "Executive", value: "EXECUTIVE" },
-  { label: "Field Executive", value: "FIELD_EXECUTIVE" },
-  { label: "Channel Partner", value: "CHANNEL_PARTNER" },
-];
-
 const formatPercent = (value) => {
   const numeric = Number(value || 0);
   if (!Number.isFinite(numeric)) return "0%";
@@ -49,11 +40,8 @@ const RoleLeaderboard = () => {
   const [viewerRole] = useState(() =>
     String(localStorage.getItem("role") || "").trim().toUpperCase(),
   );
-  const isAdminViewer = viewerRole === "ADMIN";
+  const [selectedRole, setSelectedRole] = useState(viewerRole || "");
   const [windowDays, setWindowDays] = useState(30);
-  const [selectedRole, setSelectedRole] = useState(
-    isAdminViewer ? "MANAGER" : (viewerRole || "EXECUTIVE"),
-  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -62,6 +50,7 @@ const RoleLeaderboard = () => {
     roleLabel: "",
     count: 0,
     leaderboard: [],
+    allowedRoleFilters: [],
   });
 
   const loadLeaderboard = async (days, roleFilter, { quiet = false } = {}) => {
@@ -75,14 +64,21 @@ const RoleLeaderboard = () => {
     try {
       const payload = await getRoleLeaderboard({
         windowDays: days,
-        ...(isAdminViewer ? { role: roleFilter } : {}),
+        ...(roleFilter ? { role: roleFilter } : {}),
       });
       setData({
         role: payload.role,
         roleLabel: payload.roleLabel,
         count: payload.count,
         leaderboard: payload.leaderboard,
+        allowedRoleFilters: payload.allowedRoleFilters || [],
       });
+
+      const normalizedRequested = String(roleFilter || "").trim().toUpperCase();
+      const normalizedResolved = String(payload.role || "").trim().toUpperCase();
+      if (normalizedResolved && normalizedRequested !== normalizedResolved) {
+        setSelectedRole(normalizedResolved);
+      }
     } catch (fetchError) {
       setError(toErrorMessage(fetchError, "Leaderboard load failed"));
     } finally {
@@ -101,6 +97,7 @@ const RoleLeaderboard = () => {
     [rows],
   );
   const topRow = rows[0] || null;
+  const roleFilterOptions = data.allowedRoleFilters || [];
 
   const handleRefresh = () => {
     loadLeaderboard(windowDays, selectedRole, { quiet: true });
@@ -119,7 +116,7 @@ const RoleLeaderboard = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {isAdminViewer ? (
+          {roleFilterOptions.length > 1 ? (
             <>
               <label className="sr-only" htmlFor="leaderboard-role">
                 Select role filter
@@ -130,7 +127,7 @@ const RoleLeaderboard = () => {
                 onChange={(event) => setSelectedRole(event.target.value)}
                 className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
               >
-                {ROLE_FILTER_OPTIONS.map((option) => (
+                {roleFilterOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>

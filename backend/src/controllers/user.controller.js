@@ -66,14 +66,37 @@ const USER_SELECTABLE_FIELDS = [
   "updatedAt",
 ];
 const USER_ROLE_VALUES = Object.values(USER_ROLES);
-const LEADERBOARD_ADMIN_ROLE_OPTIONS = [
-  USER_ROLES.MANAGER,
-  USER_ROLES.ASSISTANT_MANAGER,
-  USER_ROLES.TEAM_LEADER,
-  USER_ROLES.EXECUTIVE,
-  USER_ROLES.FIELD_EXECUTIVE,
-  USER_ROLES.CHANNEL_PARTNER,
-];
+const LEADERBOARD_ROLE_OPTIONS_BY_ACTOR = Object.freeze({
+  [USER_ROLES.ADMIN]: [
+    USER_ROLES.MANAGER,
+    USER_ROLES.ASSISTANT_MANAGER,
+    USER_ROLES.TEAM_LEADER,
+    USER_ROLES.EXECUTIVE,
+    USER_ROLES.FIELD_EXECUTIVE,
+    USER_ROLES.CHANNEL_PARTNER,
+  ],
+  [USER_ROLES.MANAGER]: [
+    USER_ROLES.MANAGER,
+    USER_ROLES.ASSISTANT_MANAGER,
+    USER_ROLES.TEAM_LEADER,
+    USER_ROLES.EXECUTIVE,
+    USER_ROLES.FIELD_EXECUTIVE,
+  ],
+  [USER_ROLES.ASSISTANT_MANAGER]: [
+    USER_ROLES.ASSISTANT_MANAGER,
+    USER_ROLES.TEAM_LEADER,
+    USER_ROLES.EXECUTIVE,
+    USER_ROLES.FIELD_EXECUTIVE,
+  ],
+  [USER_ROLES.TEAM_LEADER]: [
+    USER_ROLES.TEAM_LEADER,
+    USER_ROLES.EXECUTIVE,
+    USER_ROLES.FIELD_EXECUTIVE,
+  ],
+  [USER_ROLES.EXECUTIVE]: [USER_ROLES.EXECUTIVE],
+  [USER_ROLES.FIELD_EXECUTIVE]: [USER_ROLES.FIELD_EXECUTIVE],
+  [USER_ROLES.CHANNEL_PARTNER]: [USER_ROLES.CHANNEL_PARTNER],
+});
 
 const toFiniteNumber = (value) => {
   const parsed = Number(value);
@@ -235,27 +258,35 @@ const parseWindowDays = (value, fallback = 30, max = 365) => {
   return Math.min(parsed, max);
 };
 
-const resolveLeaderboardRoleForActor = ({ actorRole, requestedRole }) => {
+const getLeaderboardAllowedRolesForActor = (actorRole) => {
   const role = String(actorRole || "").trim().toUpperCase();
+  if (!role) return [];
+  const options = LEADERBOARD_ROLE_OPTIONS_BY_ACTOR[role] || [];
+  return options.filter((option) => USER_ROLE_VALUES.includes(option));
+};
+
+const resolveLeaderboardRoleForActor = ({
+  actorRole,
+  requestedRole,
+  allowedRoles = [],
+}) => {
   const requested = String(requestedRole || "").trim().toUpperCase();
 
-  if (!role) return null;
-  if (role !== USER_ROLES.ADMIN) return role;
+  if (!allowedRoles.length) return null;
+  if (!requested) return allowedRoles[0];
 
-  if (!requested) {
-    return USER_ROLES.MANAGER;
-  }
-
-  if (!USER_ROLE_VALUES.includes(requested)) {
-    return null;
-  }
-
-  if (!LEADERBOARD_ADMIN_ROLE_OPTIONS.includes(requested)) {
+  if (!allowedRoles.includes(requested)) {
     return null;
   }
 
   return requested;
 };
+
+const toLeaderboardRoleFilterOptions = (roles = []) =>
+  roles.map((role) => ({
+    value: role,
+    label: ROLE_LABELS[role] || role,
+  }));
 
 const normalizeOwnerIds = (ownerIds = []) => {
   const deduped = new Map();
@@ -666,9 +697,14 @@ exports.getRoleLeaderboard = async (req, res) => {
     if (!actorRole) {
       return res.status(400).json({ message: "Role context is required" });
     }
+    const allowedRoleFilters = getLeaderboardAllowedRolesForActor(actorRole);
+    if (!allowedRoleFilters.length) {
+      return res.status(403).json({ message: "Role does not have leaderboard access" });
+    }
     const selectedRole = resolveLeaderboardRoleForActor({
       actorRole,
       requestedRole: req.query?.role,
+      allowedRoles: allowedRoleFilters,
     });
     if (!selectedRole) {
       return res.status(400).json({ message: "Invalid role filter" });
@@ -677,13 +713,11 @@ exports.getRoleLeaderboard = async (req, res) => {
     const windowDays = parseWindowDays(req.query?.windowDays, 30, 365);
     const sinceDate = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
-    const peerQuery = {
+    const peers = await User.find({
       companyId: req.user.companyId,
       role: selectedRole,
       isActive: true,
-    };
-
-    const peers = await User.find(peerQuery)
+    })
       .select("_id name role")
       .sort({ name: 1 })
       .lean();
@@ -692,6 +726,7 @@ exports.getRoleLeaderboard = async (req, res) => {
       return res.json({
         role: selectedRole,
         roleLabel: ROLE_LABELS[selectedRole] || selectedRole,
+        allowedRoleFilters: toLeaderboardRoleFilterOptions(allowedRoleFilters),
         windowDays,
         since: sinceDate.toISOString(),
         count: 0,
@@ -802,6 +837,7 @@ exports.getRoleLeaderboard = async (req, res) => {
     return res.json({
       role: selectedRole,
       roleLabel: ROLE_LABELS[selectedRole] || selectedRole,
+      allowedRoleFilters: toLeaderboardRoleFilterOptions(allowedRoleFilters),
       windowDays,
       since: sinceDate.toISOString(),
       count: leaderboard.length,
