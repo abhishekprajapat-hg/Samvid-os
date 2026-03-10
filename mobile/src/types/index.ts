@@ -52,6 +52,23 @@ export interface InventoryAsset {
   category?: string;
   status?: string;
   reservationReason?: string;
+  reservationLeadId?: string;
+  reservationLead?: {
+    _id?: string;
+    name?: string;
+    phone?: string;
+    status?: string;
+  } | null;
+  saleDetails?: {
+    leadId?: string | { _id?: string; name?: string; phone?: string };
+    paymentMode?: string;
+    paymentType?: string;
+    totalAmount?: number;
+    remainingAmount?: number;
+    paymentReference?: string;
+    note?: string;
+    soldAt?: string;
+  } | null;
   amenities?: string[];
   images?: string[];
   documents?: string[];
@@ -104,6 +121,7 @@ export interface ChatConversation {
   lastMessage?: string;
   lastMessageAt?: string;
   updatedAt?: string;
+  unreadCount?: number;
 }
 
 export interface ChatCallLog {

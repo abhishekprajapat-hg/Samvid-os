@@ -81,28 +81,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const restore = async () => {
+      const expired = await sessionStorage.isSessionExpired();
+      if (expired) {
+        await sessionStorage.clearSession();
+        setToken(null);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
       const [storedToken, storedUser] = await Promise.all([
         sessionStorage.getToken(),
         sessionStorage.getUser(),
       ]);
 
       if (storedToken && storedUser) {
+        setToken(storedToken);
+        setUser(storedUser);
         try {
           const me = await getCurrentUser();
           if (me?.user) {
-            setToken(storedToken);
             setUser(me.user as User);
             const storedRefreshToken = await sessionStorage.getRefreshToken();
             await sessionStorage.setSession(storedToken, me.user as User, storedRefreshToken);
-          } else {
+          }
+        } catch (error: any) {
+          const status = Number(error?.response?.status || 0);
+          if (status === 401 || status === 403) {
             await sessionStorage.clearSession();
             setToken(null);
             setUser(null);
           }
-        } catch {
-          await sessionStorage.clearSession();
-          setToken(null);
-          setUser(null);
         }
       } else {
         setToken(null);
@@ -114,6 +123,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     restore();
   }, []);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    sessionStorage.getRemainingSessionMs().then((remaining) => {
+      if (remaining === null) return;
+      if (remaining <= 0) {
+        sessionStorage.clearSession().then(() => {
+          setToken(null);
+          setUser(null);
+        });
+        return;
+      }
+      timer = setTimeout(() => {
+        sessionStorage.clearSession().then(() => {
+          setToken(null);
+          setUser(null);
+        });
+      }, remaining);
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [token, user]);
 
   const login = async ({ email, password, portal = "GENERAL" }: { email: string; password: string; portal?: "GENERAL" | "ADMIN" }) => {
     const payload = await loginUser({ email, password, portal });

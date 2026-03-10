@@ -1,865 +1,345 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  FlatList,
-  Modal,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "../../components/common/Screen";
-import {
-  addLeadDiaryEntry,
-  getAllLeads,
-  getLeadDiary,
-  updateLeadDiaryEntry,
-  updateLeadStatus,
-  type LeadDiaryEntry,
-} from "../../services/leadService";
+import { useAuth } from "../../context/AuthContext";
+import { addLeadDiaryEntry, getAllLeads, getLeadDiary, updateLeadStatus, type LeadDiaryEntry } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
-import { formatDateTime } from "../../utils/date";
 import type { Lead } from "../../types";
 
-const SCHEDULE_FILTERS = ["ALL", "TODAY", "OVERDUE", "NEXT_48H"];
-
-type PickerState = {
-  leadId: string;
-  date: Date;
-  mode: "date" | "time";
-} | null;
-
-const pad2 = (value: number) => String(value).padStart(2, "0");
-const toDateInputValue = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
-const toTimeInputValue = (value: Date) => `${pad2(value.getHours())}:${pad2(value.getMinutes())}`;
-
-const toDate = (value?: string) => {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
-};
+const WEEK = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const toDate = (v?: string | null) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d : null; };
+const sameDay = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+const k = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const fmt = (v?: string | null) => { const d = toDate(v); return d ? d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "-"; };
+const fmtFollowUpInput = (d: Date) =>
+  `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()} ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }).toUpperCase()}`;
+const grid = (c: Date) => { const s = new Date(c.getFullYear(), c.getMonth(), 1); s.setDate(1 - s.getDay()); return Array.from({ length: 42 }, (_, i) => { const d = new Date(s); d.setDate(s.getDate() + i); return d; }); };
+const roleText = (r?: string | null) => String(r || "USER").replaceAll("_", " ").toUpperCase();
+const toIsoDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const to24Time = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+const toLocalDateTimeValue = (d: Date) => `${toIsoDate(d)}T${to24Time(d)}`;
 
 export const MasterScheduleScreen = () => {
+  const { width } = useWindowDimensions();
+  const isCompact = width < 980;
+  const { role } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [savingId, setSavingId] = useState("");
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
-  const [filter, setFilter] = useState("ALL");
-  const [query, setQuery] = useState("");
+  const [ok, setOk] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [draftMap, setDraftMap] = useState<Record<string, Date>>({});
-  const [pickerState, setPickerState] = useState<PickerState>(null);
-  const [webPickerVisible, setWebPickerVisible] = useState(false);
-  const [webPickerLeadId, setWebPickerLeadId] = useState("");
-  const [webPickerDate, setWebPickerDate] = useState("");
-  const [webPickerTime, setWebPickerTime] = useState("");
-  const [diaryModalLead, setDiaryModalLead] = useState<Lead | null>(null);
-  const [diaryEntries, setDiaryEntries] = useState<LeadDiaryEntry[]>([]);
-  const [diaryLoading, setDiaryLoading] = useState(false);
-  const [diaryDraft, setDiaryDraft] = useState("");
-  const [showAllDiaryEntries, setShowAllDiaryEntries] = useState(false);
-  const [editingDiaryEntryId, setEditingDiaryEntryId] = useState("");
-  const [diaryEditDraft, setDiaryEditDraft] = useState("");
-  const [updatingDiaryEntry, setUpdatingDiaryEntry] = useState(false);
-  const [isDiaryListening, setIsDiaryListening] = useState(false);
-  const [isDiaryMicSupported, setIsDiaryMicSupported] = useState(false);
-  const diaryRecognitionRef = useRef<any>(null);
-  const lastDiaryTranscriptRef = useRef("");
+  const [month, setMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [selectedLeadId, setSelectedLeadId] = useState("");
+  const [leadPicker, setLeadPicker] = useState(false);
+  const [leadSearch, setLeadSearch] = useState("");
+  const [scheduleAt, setScheduleAt] = useState(new Date());
+  const [nativeMode, setNativeMode] = useState<"date" | "time" | null>(null);
+  const [scheduleNote, setScheduleNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState("");
+  const [detailsLead, setDetailsLead] = useState<Lead | null>(null);
+  const [diary, setDiary] = useState<Record<string, LeadDiaryEntry[]>>({});
+  const [diaryLoading, setDiaryLoading] = useState<Record<string, boolean>>({});
+  const [diaryDraft, setDiaryDraft] = useState<Record<string, string>>({});
+  const [diarySavingLead, setDiarySavingLead] = useState("");
+  const [webCalendarPickerVisible, setWebCalendarPickerVisible] = useState(false);
+  const [webCalendarValue, setWebCalendarValue] = useState("");
+  const webCalendarInputRef = useRef<any>(null);
 
-  const load = async (silent = false) => {
+  const load = useCallback(async (silent = false) => {
     try {
-      if (silent) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-
+      if (silent) setRefreshing(true); else setLoading(true);
       setError("");
       const rows = await getAllLeads();
-      setLeads(rows || []);
-
-      const nextDraft: Record<string, Date> = {};
-      (rows || []).forEach((lead) => {
-        nextDraft[lead._id] = toDate(lead.nextFollowUp) || new Date();
-      });
-      setDraftMap(nextDraft);
+      setLeads(Array.isArray(rows) ? rows : []);
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load schedule"));
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setLoading(false); setRefreshing(false);
     }
-  };
-
-  useEffect(() => {
-    load();
   }, []);
 
-  useEffect(() => {
-    if (!success) return;
-    const timer = setTimeout(() => setSuccess(""), 1500);
-    return () => clearTimeout(timer);
-  }, [success]);
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (!ok) return; const t = setTimeout(() => setOk(""), 1500); return () => clearTimeout(t); }, [ok]);
 
-  useEffect(() => {
-    const win = globalThis as any;
-    const SpeechRecognition = win?.SpeechRecognition || win?.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setIsDiaryMicSupported(false);
-      diaryRecognitionRef.current = null;
-      return;
-    }
+  const followUps = useMemo(() => leads.filter((l) => Boolean(toDate(l.nextFollowUp))), [leads]);
+  const byDay = useMemo(() => {
+    const m = new Map<string, number>();
+    followUps.forEach((l) => { const d = toDate(l.nextFollowUp); if (d) m.set(k(d), (m.get(k(d)) || 0) + 1); });
+    return m;
+  }, [followUps]);
+  const dayRows = useMemo(() => followUps.filter((l) => { const d = toDate(l.nextFollowUp); return Boolean(d && sameDay(d, selectedDate)); }), [followUps, selectedDate]);
+  const leadRows = useMemo(() => {
+    const q = leadSearch.trim().toLowerCase();
+    const rows = [...leads].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+    if (!q) return rows;
+    return rows.filter((l) => [l.name, l.phone, l.city, l.projectInterested].map((v) => String(v || "").toLowerCase()).some((v) => v.includes(q)));
+  }, [leadSearch, leads]);
+  const selectedLead = useMemo(() => leads.find((l) => String(l._id) === String(selectedLeadId)) || null, [leads, selectedLeadId]);
 
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.lang = "en-IN";
-      recognition.continuous = false;
-      recognition.interimResults = false;
-
-      recognition.onstart = () => {
-        lastDiaryTranscriptRef.current = "";
-        setIsDiaryListening(true);
-      };
-      recognition.onend = () => {
-        setIsDiaryListening(false);
-      };
-      recognition.onerror = () => {
-        setIsDiaryListening(false);
-      };
-      recognition.onresult = (event: any) => {
-        const chunks = [];
-        for (let index = event?.resultIndex || 0; index < (event?.results?.length || 0); index += 1) {
-          if (!event.results[index]?.isFinal) continue;
-          const transcript = String(event.results[index]?.[0]?.transcript || "").trim();
-          if (transcript) chunks.push(transcript);
-        }
-        const incomingText = chunks.join(" ").replace(/\s+/g, " ").trim();
-        if (!incomingText) return;
-
-        setDiaryDraft((prev) => {
-          const normalizedPrev = String(prev || "").trimEnd();
-          if (!normalizedPrev) {
-            lastDiaryTranscriptRef.current = incomingText;
-            return incomingText;
-          }
-          const lastIncoming = lastDiaryTranscriptRef.current;
-          if (incomingText === lastIncoming || normalizedPrev.endsWith(incomingText)) {
-            return normalizedPrev;
-          }
-          lastDiaryTranscriptRef.current = incomingText;
-          return `${normalizedPrev} ${incomingText}`;
-        });
-      };
-
-      diaryRecognitionRef.current = recognition;
-      setIsDiaryMicSupported(true);
-    } catch {
-      setIsDiaryMicSupported(false);
-      diaryRecognitionRef.current = null;
-    }
-
-    return () => {
-      if (!diaryRecognitionRef.current) return;
-      try {
-        diaryRecognitionRef.current.stop();
-      } catch {}
-    };
-  }, []);
-
-  const scoped = useMemo(() => {
-    const now = new Date();
-    const plus48 = new Date(now.getTime() + 48 * 60 * 60 * 1000);
-    const key = query.trim().toLowerCase();
-
-    return leads
-      .filter((lead) => ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"].includes(String(lead.status || "")))
-      .filter((lead) => {
-        const followUp = toDate(lead.nextFollowUp);
-
-        if (filter === "TODAY") {
-          if (!followUp) return false;
-          return followUp.toDateString() === now.toDateString();
-        }
-
-        if (filter === "OVERDUE") {
-          return Boolean(followUp && followUp < now);
-        }
-
-        if (filter === "NEXT_48H") {
-          return Boolean(followUp && followUp >= now && followUp <= plus48);
-        }
-
-        return true;
-      })
-      .filter((lead) => {
-        if (!key) return true;
-        return [lead.name, lead.phone, lead.city, lead.projectInterested]
-          .map((v) => String(v || "").toLowerCase())
-          .some((v) => v.includes(key));
-      })
-      .sort((a, b) => {
-        const da = toDate(a.nextFollowUp)?.getTime() || Number.MAX_SAFE_INTEGER;
-        const db = toDate(b.nextFollowUp)?.getTime() || Number.MAX_SAFE_INTEGER;
-        return da - db;
-      });
-  }, [filter, leads, query]);
-
-  const openPicker = (leadId: string, mode: "date" | "time") => {
-    const current = draftMap[leadId] || new Date();
-    if (Platform.OS === "web") {
-      setWebPickerLeadId(leadId);
-      setWebPickerDate(toDateInputValue(current));
-      setWebPickerTime(toTimeInputValue(current));
-      setWebPickerVisible(true);
-      return;
-    }
-    setPickerState({ leadId, date: current, mode });
-  };
-
-  const applyWebPicker = () => {
-    if (!webPickerLeadId || !webPickerDate || !webPickerTime) {
-      setError("Please select both date and time");
-      return;
-    }
-    const parsed = new Date(`${webPickerDate}T${webPickerTime}:00`);
-    if (Number.isNaN(parsed.getTime())) {
-      setError("Please select a valid date/time");
-      return;
-    }
-    setDraftMap((prev) => ({
-      ...prev,
-      [webPickerLeadId]: parsed,
-    }));
-    setWebPickerVisible(false);
-    setWebPickerLeadId("");
-  };
-
-  const onPickerChange = (event: DateTimePickerEvent, selected?: Date) => {
-    const state = pickerState;
-    if (!state) return;
-
-    if (event.type === "dismissed") {
-      setPickerState(null);
-      return;
-    }
-
-    const nextDate = selected || state.date;
-
-    if (state.mode === "date") {
-      const withDate = new Date(state.date);
-      withDate.setFullYear(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate());
-
-      setDraftMap((prev) => ({
-        ...prev,
-        [state.leadId]: withDate,
-      }));
-
-      setPickerState({ leadId: state.leadId, date: withDate, mode: "time" });
-      return;
-    }
-
-    const withTime = new Date(state.date);
-    withTime.setHours(nextDate.getHours(), nextDate.getMinutes(), 0, 0);
-
-    setDraftMap((prev) => ({
-      ...prev,
-      [state.leadId]: withTime,
-    }));
-    setPickerState(null);
-  };
-
-  const scheduleLead = async (lead: Lead) => {
-    const leadId = String(lead?._id || "");
+  const loadDiary = useCallback(async (leadId: string, force = false) => {
     if (!leadId) return;
-    const selectedDate = draftMap[leadId];
-    if (!selectedDate || Number.isNaN(selectedDate.getTime())) {
-      setError("Please select a valid follow-up date/time");
-      return;
-    }
-
+    if (!force && diary[leadId]) return;
     try {
-      setSavingId(leadId);
-      setError("");
-      const updated = await updateLeadStatus(leadId, {
-        status: String(lead.status || "NEW"),
-        nextFollowUp: selectedDate.toISOString(),
-      });
-
-      setLeads((prev) => prev.map((lead) => (lead._id === updated._id ? updated : lead)));
-      setDraftMap((prev) => ({ ...prev, [leadId]: new Date(updated.nextFollowUp || selectedDate) }));
-      setSuccess("Follow-up scheduled");
-    } catch (e) {
-      setError(toErrorMessage(e, "Failed to schedule follow-up"));
-    } finally {
-      setSavingId("");
-    }
-  };
-
-  const openLeadDiary = async (lead: Lead) => {
-    setDiaryModalLead(lead);
-    setDiaryEntries([]);
-    setDiaryDraft("");
-    setEditingDiaryEntryId("");
-    setDiaryEditDraft("");
-    setShowAllDiaryEntries(false);
-    try {
-      setDiaryLoading(true);
-      const entries = await getLeadDiary(lead._id);
-      setDiaryEntries(Array.isArray(entries) ? entries : []);
+      setDiaryLoading((p) => ({ ...p, [leadId]: true }));
+      const rows = await getLeadDiary(leadId);
+      setDiary((p) => ({ ...p, [leadId]: Array.isArray(rows) ? rows : [] }));
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load lead diary"));
     } finally {
-      setDiaryLoading(false);
+      setDiaryLoading((p) => ({ ...p, [leadId]: false }));
     }
-  };
+  }, [diary]);
 
-  const closeLeadDiary = () => {
-    setDiaryModalLead(null);
-    setDiaryEntries([]);
-    setDiaryDraft("");
-    setEditingDiaryEntryId("");
-    setDiaryEditDraft("");
-    setShowAllDiaryEntries(false);
-    if (diaryRecognitionRef.current && isDiaryListening) {
+  useEffect(() => { dayRows.forEach((r) => { loadDiary(r._id); }); }, [dayRows, loadDiary]);
+
+  useEffect(() => {
+    if (!webCalendarPickerVisible || Platform.OS !== "web") return;
+    const timer = setTimeout(() => {
+      const node = webCalendarInputRef.current as any;
       try {
-        diaryRecognitionRef.current.stop();
-      } catch {}
-    }
-  };
+        if (node?.showPicker) node.showPicker();
+        else node?.focus?.();
+      } catch {
+        node?.focus?.();
+      }
+    }, 10);
+    return () => clearTimeout(timer);
+  }, [webCalendarPickerVisible]);
 
-  const handleDiaryVoiceToggle = () => {
-    if (!isDiaryMicSupported || !diaryRecognitionRef.current) {
-      setError("Voice input not supported on this device/browser");
+  const openDatePicker = () => {
+    if (Platform.OS === "web") {
+      setWebCalendarValue(toLocalDateTimeValue(scheduleAt || new Date()));
+      setWebCalendarPickerVisible(true);
       return;
     }
-    try {
-      if (isDiaryListening) {
-        diaryRecognitionRef.current.stop();
-      } else {
-        diaryRecognitionRef.current.start();
-      }
-    } catch {
-      setError("Unable to start voice input");
-    }
+    setNativeMode("date");
   };
 
-  const saveLeadDiary = async () => {
-    if (!diaryModalLead?._id) return;
-    const note = diaryDraft.trim();
-    if (!note) {
-      setError("Diary note cannot be empty");
-      return;
-    }
+  const onNative = (event: DateTimePickerEvent, picked?: Date) => {
+    if (event.type === "dismissed") { setNativeMode(null); return; }
+    const d = picked || scheduleAt;
+    if (nativeMode === "date") { const n = new Date(scheduleAt); n.setFullYear(d.getFullYear(), d.getMonth(), d.getDate()); setScheduleAt(n); setNativeMode("time"); return; }
+    const n = new Date(scheduleAt); n.setHours(d.getHours(), d.getMinutes(), 0, 0); setScheduleAt(n); setNativeMode(null);
+  };
+
+  const saveFollowUp = async () => {
+    if (!selectedLeadId) { setError("Please select lead for follow-up"); return; }
+    const lead = leads.find((l) => String(l._id) === String(selectedLeadId));
+    if (!lead) { setError("Lead not found"); return; }
     try {
-      setSavingId(diaryModalLead._id);
-      const entry = await addLeadDiaryEntry(diaryModalLead._id, { note });
-      if (entry?._id) {
-        setDiaryEntries((prev) => [entry, ...prev]);
+      setSaving(true); setError("");
+      const updated = await updateLeadStatus(lead._id, { status: String(lead.status || "NEW"), nextFollowUp: scheduleAt.toISOString() });
+      setLeads((p) => p.map((r) => (String(r._id) === String(updated._id) ? updated : r)));
+      const note = scheduleNote.trim();
+      if (note) {
+        const e = await addLeadDiaryEntry(lead._id, { note });
+        if (e?._id) setDiary((p) => ({ ...p, [lead._id]: [e, ...(p[lead._id] || [])] }));
       }
-      setDiaryDraft("");
-      setSuccess("Diary note added");
+      setScheduleNote(""); setSelectedDate(new Date(scheduleAt)); setMonth(new Date(scheduleAt)); setOk("Follow-up saved");
     } catch (e) {
-      setError(toErrorMessage(e, "Failed to save diary note"));
-    } finally {
-      setSavingId("");
-    }
+      setError(toErrorMessage(e, "Failed to save follow-up"));
+    } finally { setSaving(false); }
   };
 
-  const startEditDiary = (entry: LeadDiaryEntry) => {
-    setEditingDiaryEntryId(String(entry._id || ""));
-    setDiaryEditDraft(String(entry.note || entry.conversation || entry.visitDetails || entry.nextStep || entry.conversionDetails || ""));
-  };
-
-  const cancelEditDiary = () => {
-    setEditingDiaryEntryId("");
-    setDiaryEditDraft("");
-  };
-
-  const updateDiary = async () => {
-    if (!diaryModalLead?._id || !editingDiaryEntryId) return;
-    const note = diaryEditDraft.trim();
-    if (!note) {
-      setError("Diary note cannot be empty");
-      return;
-    }
+  const deleteFollowUp = async (lead: Lead) => {
     try {
-      setUpdatingDiaryEntry(true);
-      const updated = await updateLeadDiaryEntry(diaryModalLead._id, editingDiaryEntryId, { note });
-      if (updated?._id) {
-        setDiaryEntries((prev) => prev.map((entry) => (String(entry._id) === String(updated._id) ? updated : entry)));
-      }
-      setSuccess("Diary note updated");
-      cancelEditDiary();
+      setDeletingId(lead._id); setError("");
+      const updated = await updateLeadStatus(lead._id, { status: String(lead.status || "NEW"), nextFollowUp: null as any });
+      setLeads((p) => p.map((r) => (String(r._id) === String(updated._id) ? updated : r)));
+      setOk("Follow-up deleted");
     } catch (e) {
-      setError(toErrorMessage(e, "Failed to update diary note"));
-    } finally {
-      setUpdatingDiaryEntry(false);
-    }
+      setError(toErrorMessage(e, "Failed to delete follow-up"));
+    } finally { setDeletingId(""); }
   };
 
-  const visibleDiaryEntries = showAllDiaryEntries ? diaryEntries : diaryEntries.slice(0, 4);
+  const saveDiary = async (lead: Lead) => {
+    const note = String(diaryDraft[lead._id] || "").trim();
+    if (!note) return;
+    try {
+      setDiarySavingLead(lead._id);
+      const entry = await addLeadDiaryEntry(lead._id, { note });
+      if (entry?._id) setDiary((p) => ({ ...p, [lead._id]: [entry, ...(p[lead._id] || [])] }));
+      setDiaryDraft((p) => ({ ...p, [lead._id]: "" }));
+      setOk("Lead diary updated");
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to save lead diary"));
+    } finally { setDiarySavingLead(""); }
+  };
+
+  const doCall = async (phone?: string) => { const p = String(phone || "").trim(); if (!p) return setError("Phone not available"); Linking.openURL(`tel:${p}`).catch(() => setError("Call failed")); };
+  const doWhatsApp = async (phone?: string) => { const p = String(phone || "").replace(/[^\d+]/g, ""); if (!p) return setError("Phone not available"); const app = `whatsapp://send?phone=${p}`; const web = `https://wa.me/${p.replace("+", "")}`; const okApp = await Linking.canOpenURL(app).catch(() => false); Linking.openURL(okApp ? app : web).catch(() => setError("WhatsApp failed")); };
+  const doEmail = async (email?: string) => { const e = String(email || "").trim(); if (!e) return setError("Email not available"); Linking.openURL(`mailto:${e}`).catch(() => setError("Email failed")); };
+  const doMap = async (lead: Lead) => { const q = encodeURIComponent(`${lead.projectInterested || ""} ${lead.city || ""}`.trim() || lead.name || "location"); Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${q}`).catch(() => setError("Map failed")); };
 
   return (
     <Screen title="Master Schedule" subtitle="Follow-up Calendar" loading={loading} error={error}>
-      {success ? <Text style={styles.success}>{success}</Text> : null}
+      {ok ? <Text style={styles.ok}>{ok}</Text> : null}
+      <ScrollView contentContainerStyle={styles.wrap} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />} showsVerticalScrollIndicator={false}>
+        <View style={styles.top}>
+          <Text style={styles.topTitle}>Schedule Command Center</Text>
+          <Text style={styles.topMeta}>ROLE: {roleText(role)}</Text>
+        </View>
 
-      <TextInput
-        style={styles.search}
-        placeholder="Search lead name, phone, city"
-        value={query}
-        onChangeText={setQuery}
-      />
-
-      <View style={styles.filtersRow}>
-        {SCHEDULE_FILTERS.map((item) => (
-          <Pressable
-            key={item}
-            style={[styles.filterChip, filter === item && styles.filterChipActive]}
-            onPress={() => setFilter(item)}
-          >
-            <Text style={[styles.filterText, filter === item && styles.filterTextActive]}>{item}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <FlatList
-        data={scoped}
-        keyExtractor={(item) => item._id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
-        ListEmptyComponent={<Text style={styles.empty}>No leads in selected schedule bucket</Text>}
-        renderItem={({ item }) => {
-          const draft = draftMap[item._id] || new Date();
-
-          return (
+        <View style={[styles.row, isCompact && styles.rowCompact]}>
+          <View style={[styles.left, isCompact && styles.colCompact]}>
             <View style={styles.card}>
-              <Text style={styles.name}>{item.name}</Text>
-              <Text style={styles.meta}>{item.phone} | {item.city || "-"}</Text>
-              <Text style={styles.meta}>Status: {item.status || "NEW"}</Text>
-              <Text style={styles.meta}>Current Follow-up: {formatDateTime(item.nextFollowUp)}</Text>
-
-              <View style={styles.pickersRow}>
-                <Pressable style={styles.pickerBtn} onPress={() => openPicker(item._id, "date")}>
-                  <Text style={styles.pickerText}>Date: {draft.toLocaleDateString("en-IN")}</Text>
-                </Pressable>
-                <Pressable style={styles.pickerBtn} onPress={() => openPicker(item._id, "time")}>
-                  <Text style={styles.pickerText}>Time: {draft.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</Text>
-                </Pressable>
+              <View style={styles.monthHead}>
+                <Text style={styles.h1}>{month.toLocaleString("en-IN", { month: "long", year: "numeric" })}</Text>
+                <View style={styles.navRow}>
+                  <Pressable style={styles.navBtn} onPress={() => setMonth((p) => new Date(p.getFullYear(), p.getMonth() - 1, 1))}><Ionicons name="chevron-back" size={15} color="#334155" /></Pressable>
+                  <Pressable style={styles.navBtn} onPress={() => setMonth((p) => new Date(p.getFullYear(), p.getMonth() + 1, 1))}><Ionicons name="chevron-forward" size={15} color="#334155" /></Pressable>
+                </View>
               </View>
+              <View style={styles.week}>{WEEK.map((d) => <Text key={d} style={styles.weekText}>{d}</Text>)}</View>
+              <View style={styles.grid}>
+                {grid(month).map((d) => {
+                  const inMonth = d.getMonth() === month.getMonth();
+                  const sel = sameDay(d, selectedDate);
+                  const count = byDay.get(k(d)) || 0;
+                  return (
+                    <Pressable key={k(d)} style={[styles.day, !inMonth && styles.dayMuted, sel && styles.daySel]} onPress={() => setSelectedDate(d)}>
+                      <Text style={[styles.dayText, !inMonth && styles.dayTextMuted]}>{d.getDate()}</Text>
+                      {count > 0 ? <Text style={styles.badge}>{count}</Text> : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          </View>
 
-              <Pressable
-                style={styles.saveBtn}
-                onPress={() => scheduleLead(item)}
-                disabled={savingId === item._id}
-              >
-                {savingId === item._id ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Schedule</Text>}
+          <View style={[styles.right, isCompact && styles.colCompact]}>
+            <View style={styles.card}>
+              <View style={styles.headRow}>
+                <Text style={styles.h2}>Schedule Follow-up</Text>
+                <View style={styles.tools}>
+                  <Pressable style={styles.tool} onPress={() => load(true)}><Text style={styles.toolText}>Refresh</Text></Pressable>
+                  <Pressable style={styles.tool} onPress={() => { const n = new Date(); setSelectedDate(n); setMonth(new Date(n.getFullYear(), n.getMonth(), 1)); }}><Text style={styles.toolText}>Today</Text></Pressable>
+                </View>
+              </View>
+              <Pressable style={styles.inputBtn} onPress={() => setLeadPicker(true)}>
+                <Text style={styles.inputBtnText}>{selectedLead ? `${selectedLead.name} (${selectedLead.phone || "-"})` : "Select lead for follow-up"}</Text>
+                <Ionicons name="chevron-down" size={14} color="#334155" />
               </Pressable>
-
-              <Pressable
-                style={styles.diaryBtn}
-                onPress={() => openLeadDiary(item)}
-              >
-                <Text style={styles.diaryBtnText}>Lead Diary</Text>
+              <Pressable style={styles.inputBtn} onPress={openDatePicker}>
+                <Text style={styles.inputBtnText}>{fmtFollowUpInput(scheduleAt)}</Text>
+                <Ionicons name="calendar-outline" size={14} color="#334155" />
+              </Pressable>
+              <TextInput style={styles.textarea} placeholder="Lead diary note while scheduling (optional)" value={scheduleNote} onChangeText={setScheduleNote} multiline />
+              <Pressable style={[styles.save, saving && styles.disabled]} onPress={saveFollowUp} disabled={saving}>
+                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveText}>Save Follow-up</Text>}
               </Pressable>
             </View>
-          );
-        }}
-      />
 
-      {pickerState ? (
-        <DateTimePicker
-          value={pickerState.date}
-          mode={pickerState.mode}
-          onChange={onPickerChange}
-          is24Hour
-        />
-      ) : null}
+            <View style={styles.card}>
+              <Text style={styles.h2}>{selectedDate.toLocaleDateString("en-IN", { weekday: "long", day: "2-digit", month: "long" })}</Text>
+              <Text style={styles.meta}>{dayRows.length} items</Text>
+              {dayRows.length === 0 ? <Text style={styles.empty}>No follow-ups on selected date</Text> : dayRows.map((lead) => (
+                <View key={lead._id} style={styles.fu}>
+                  <View style={styles.fuHead}>
+                    <Text style={styles.fuName}>{lead.name}</Text>
+                    <View style={styles.act}>
+                      <Pressable style={styles.icon} onPress={() => { setDetailsLead(lead); loadDiary(lead._id, true); }}><Ionicons name="document-text-outline" size={12} color="#334155" /></Pressable>
+                      <Pressable style={styles.icon} onPress={() => deleteFollowUp(lead)} disabled={deletingId === lead._id}>{deletingId === lead._id ? <ActivityIndicator size="small" color="#dc2626" /> : <Ionicons name="trash-outline" size={12} color="#dc2626" />}</Pressable>
+                    </View>
+                  </View>
+                  <Text style={styles.meta}>• {fmt(lead.nextFollowUp)}</Text>
+                  <Text style={styles.meta}>• {lead.phone || "-"}</Text>
+                  <Text style={styles.meta}>• Assigned: {lead.assignedTo?.name || "-"}</Text>
+                  <Text style={styles.meta}>• {lead.status || "NEW"}</Text>
+                  <View style={styles.diaryBox}>
+                    <Text style={styles.diaryTitle}>Lead Diary</Text>
+                    <TextInput style={styles.diaryInput} placeholder={`Add diary note for ${lead.name}`} value={diaryDraft[lead._id] || ""} onChangeText={(v) => setDiaryDraft((p) => ({ ...p, [lead._id]: v }))} multiline />
+                    <Pressable style={[styles.addDiary, (!String(diaryDraft[lead._id] || "").trim() || diarySavingLead === lead._id) && styles.disabled]} onPress={() => saveDiary(lead)} disabled={!String(diaryDraft[lead._id] || "").trim() || diarySavingLead === lead._id}>
+                      {diarySavingLead === lead._id ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.addDiaryText}>Add Note</Text>}
+                    </Pressable>
+                    {diaryLoading[lead._id] ? <ActivityIndicator size="small" color="#334155" /> : (diary[lead._id] || []).length === 0 ? <Text style={styles.emptyInline}>No diary notes yet</Text> : (
+                      <View style={styles.diaryList}>{(diary[lead._id] || []).map((e) => <View key={e._id} style={styles.diaryItem}><Text style={styles.diaryItemText}>{String(e.note || "-")}</Text><Text style={styles.diaryItemMeta}>{fmt(e.createdAt)} {e.createdBy?.name ? `| ${e.createdBy.name}` : ""}</Text></View>)}</View>
+                    )}
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+        </View>
+      </ScrollView>
 
-      <Modal visible={webPickerVisible} transparent animationType="fade" onRequestClose={() => setWebPickerVisible(false)}>
-        <View style={styles.modalWrap}>
+      {nativeMode ? <DateTimePicker value={scheduleAt} mode={nativeMode} is24Hour onChange={onNative} /> : null}
+      <Modal visible={webCalendarPickerVisible} transparent animationType="fade" onRequestClose={() => setWebCalendarPickerVisible(false)}>
+        <View style={styles.modal}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Follow-up Date & Time</Text>
-            {/* web-only input type fallback for reliable browser selection */}
-            {/* @ts-ignore */}
-            <TextInput style={styles.search} value={webPickerDate} onChangeText={setWebPickerDate} placeholder="YYYY-MM-DD" type="date" />
-            {/* @ts-ignore */}
-            <TextInput style={styles.search} value={webPickerTime} onChangeText={setWebPickerTime} placeholder="HH:mm" type="time" />
-            <View style={styles.editActions}>
-              <Pressable style={styles.secondaryBtn} onPress={() => setWebPickerVisible(false)}>
-                <Text style={styles.secondaryBtnText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.addBtn} onPress={applyWebPicker}>
-                <Text style={styles.addBtnText}>Apply</Text>
+            <View style={styles.headRow}>
+              <Text style={styles.h2}>Select Follow-up</Text>
+              <Pressable style={styles.icon} onPress={() => setWebCalendarPickerVisible(false)}>
+                <Ionicons name="close" size={14} color="#334155" />
               </Pressable>
             </View>
+            <input
+              ref={webCalendarInputRef}
+              type="datetime-local"
+              value={webCalendarValue}
+              onChange={(event: any) => {
+                const value = String(event?.target?.value || "");
+                setWebCalendarValue(value);
+                const next = new Date(value);
+                if (!Number.isNaN(next.getTime())) {
+                  setScheduleAt(next);
+                }
+                setWebCalendarPickerVisible(false);
+              }}
+              onBlur={() => setWebCalendarPickerVisible(false)}
+              style={styles.webNativeDateTimeInput as any}
+            />
           </View>
         </View>
       </Modal>
-
-      <Modal
-        visible={Boolean(diaryModalLead)}
-        transparent
-        animationType="slide"
-        onRequestClose={closeLeadDiary}
-      >
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Lead Diary</Text>
-            <Text style={styles.modalMeta}>{diaryModalLead?.name || "-"}</Text>
-            <TextInput
-              style={styles.diaryInput}
-              placeholder="Add conversation notes, visit details, objections, next step..."
-              value={diaryDraft}
-              onChangeText={setDiaryDraft}
-              multiline
-              maxLength={2000}
-            />
-            <View style={styles.diaryActions}>
-              <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={!isDiaryMicSupported || Boolean(savingId)}>
-                <Text style={styles.voiceBtnText}>{isDiaryListening ? "Stop Voice" : "Voice"}</Text>
-              </Pressable>
-              <Pressable style={[styles.addBtn, (!diaryDraft.trim() || Boolean(savingId)) && styles.addBtnDisabled]} onPress={saveLeadDiary} disabled={!diaryDraft.trim() || Boolean(savingId)}>
-                {Boolean(savingId) ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.addBtnText}>Add Note</Text>}
-              </Pressable>
-            </View>
-            <Text style={styles.counterText}>{diaryDraft.length}/2000</Text>
-
-            {diaryLoading ? (
-              <View style={styles.loadingWrap}>
-                <ActivityIndicator color="#0f172a" />
-              </View>
-            ) : (
-              <ScrollView style={styles.diaryList}>
-                {diaryEntries.length > 4 ? (
-                  <Pressable onPress={() => setShowAllDiaryEntries((prev) => !prev)} style={styles.moreBtn}>
-                    <Text style={styles.moreBtnText}>{showAllDiaryEntries ? "Show less" : "See more"}</Text>
-                  </Pressable>
-                ) : null}
-                {visibleDiaryEntries.length === 0 ? (
-                  <Text style={styles.empty}>No diary notes yet</Text>
-                ) : (
-                  visibleDiaryEntries.map((entry) => (
-                    <View key={entry._id} style={styles.diaryCard}>
-                      {String(editingDiaryEntryId) === String(entry._id) ? (
-                        <>
-                          <TextInput
-                            style={[styles.diaryInput, styles.editInput]}
-                            value={diaryEditDraft}
-                            onChangeText={setDiaryEditDraft}
-                            multiline
-                            maxLength={2000}
-                          />
-                          <View style={styles.editActions}>
-                            <Pressable style={styles.secondaryBtn} onPress={cancelEditDiary} disabled={updatingDiaryEntry}>
-                              <Text style={styles.secondaryBtnText}>Cancel</Text>
-                            </Pressable>
-                            <Pressable style={[styles.addBtn, (!diaryEditDraft.trim() || updatingDiaryEntry) && styles.addBtnDisabled]} onPress={updateDiary} disabled={!diaryEditDraft.trim() || updatingDiaryEntry}>
-                              <Text style={styles.addBtnText}>{updatingDiaryEntry ? "Saving..." : "Save"}</Text>
-                            </Pressable>
-                          </View>
-                        </>
-                      ) : (
-                        <>
-                          <Text style={styles.diaryText}>{String(entry.note || "-")}</Text>
-                          <View style={styles.diaryMetaRow}>
-                            <Text style={styles.modalMeta}>
-                              {formatDateTime(entry.createdAt)} {entry.createdBy?.name ? `| ${entry.createdBy.name}` : ""}
-                              {entry.isEdited ? " | Edited" : ""}
-                            </Text>
-                            <Pressable style={styles.secondaryBtn} onPress={() => startEditDiary(entry)}>
-                              <Text style={styles.secondaryBtnText}>Edit</Text>
-                            </Pressable>
-                          </View>
-                        </>
-                      )}
-                    </View>
-                  ))
-                )}
-              </ScrollView>
-            )}
-
-            <Pressable style={styles.closeBtn} onPress={closeLeadDiary}>
-              <Text style={styles.closeBtnText}>Close</Text>
-            </Pressable>
-          </View>
-        </View>
+      <Modal visible={leadPicker} transparent animationType="fade" onRequestClose={() => setLeadPicker(false)}>
+        <View style={styles.modal}><View style={styles.modalCard}><Text style={styles.h2}>Select Lead</Text><TextInput style={styles.modalInput} value={leadSearch} onChangeText={setLeadSearch} placeholder="Search lead" /><ScrollView style={{ maxHeight: 340, marginTop: 8 }}>{leadRows.map((lead) => <Pressable key={lead._id} style={[styles.leadRow, String(selectedLeadId) === String(lead._id) && styles.leadRowA]} onPress={() => { setSelectedLeadId(lead._id); setLeadPicker(false); }}><Text style={styles.leadName}>{lead.name}</Text><Text style={styles.leadMeta}>{lead.phone || "-"} | {lead.city || "-"}</Text></Pressable>)}{leadRows.length === 0 ? <Text style={styles.empty}>No lead found</Text> : null}</ScrollView><Pressable style={styles.modalBtn} onPress={() => setLeadPicker(false)}><Text style={styles.modalBtnText}>Close</Text></Pressable></View></View>
+      </Modal>
+      <Modal visible={Boolean(detailsLead)} transparent animationType="slide" onRequestClose={() => setDetailsLead(null)}>
+        <View style={styles.modal}><View style={styles.modalCard}><View style={styles.headRow}><Text style={styles.h2}>Follow-up Details</Text><Pressable style={styles.icon} onPress={() => setDetailsLead(null)}><Ionicons name="close" size={14} color="#334155" /></Pressable></View>
+          <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsContent} showsVerticalScrollIndicator={false}>
+          {detailsLead ? <>
+            <Pressable style={styles.del} onPress={() => deleteFollowUp(detailsLead)}><Text style={styles.delText}>Delete Follow-up</Text></Pressable>
+            <View style={styles.block}><Text style={styles.blockTitle}>Schedule</Text><Text style={styles.blockText}>Follow-up: {fmt(detailsLead.nextFollowUp)}</Text><Text style={styles.blockText}>Status: {detailsLead.status || "NEW"}</Text><Text style={styles.blockText}>Assigned: {detailsLead.assignedTo?.name || "-"}</Text></View>
+            <View style={styles.block}><Text style={styles.blockTitle}>Lead Info</Text><Text style={styles.blockText}>Phone: {detailsLead.phone || "-"}</Text><Text style={styles.blockText}>Email: {(detailsLead as any)?.email || "-"}</Text><Text style={styles.blockText}>City: {detailsLead.city || "-"}</Text><Text style={styles.blockText}>Project: {detailsLead.projectInterested || "-"}</Text></View>
+            <View style={styles.block}><Text style={styles.blockTitle}>Contact Actions</Text><View style={styles.contact}><Pressable style={styles.contactActionItem} onPress={() => doCall(detailsLead.phone)}><View style={styles.contactIconBtn}><Ionicons name="call-outline" size={18} color="#334155" /></View><Text style={styles.contactActionLabel}>Call</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doWhatsApp(detailsLead.phone)}><View style={styles.contactIconBtn}><Ionicons name="logo-whatsapp" size={18} color="#16a34a" /></View><Text style={styles.contactActionLabel}>WhatsApp</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doEmail((detailsLead as any)?.email)}><View style={styles.contactIconBtn}><Ionicons name="mail-outline" size={18} color="#334155" /></View><Text style={styles.contactActionLabel}>Email</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doMap(detailsLead)}><View style={styles.contactIconBtn}><Ionicons name="location-outline" size={18} color="#334155" /></View><Text style={styles.contactActionLabel}>Maps</Text></Pressable></View></View>
+            <View style={styles.block}><Text style={styles.blockTitle}>Lead Diary Activity</Text>{diaryLoading[detailsLead._id] ? <ActivityIndicator size="small" color="#334155" /> : (diary[detailsLead._id] || []).length === 0 ? <Text style={styles.emptyInline}>No diary notes yet</Text> : <ScrollView style={{ maxHeight: 170 }}>{(diary[detailsLead._id] || []).map((e) => <View key={e._id} style={styles.diaryItem}><Text style={styles.diaryItemText}>{String(e.note || "-")}</Text><Text style={styles.diaryItemMeta}>{fmt(e.createdAt)} {e.createdBy?.name ? `| ${e.createdBy.name}` : ""}</Text></View>)}</ScrollView>}</View>
+          </> : null}
+          </ScrollView>
+        </View></View>
       </Modal>
     </Screen>
   );
 };
 
 const styles = StyleSheet.create({
-  success: {
-    marginBottom: 10,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#86efac",
-    borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
-  },
-  search: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
-    height: 44,
-    marginBottom: 10,
-  },
-  filtersRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 10,
-    flexWrap: "wrap",
-  },
-  filterChip: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 18,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: "#fff",
-  },
-  filterChipActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
-  },
-  filterText: {
-    fontSize: 12,
-    color: "#334155",
-  },
-  filterTextActive: {
-    color: "#fff",
-  },
-  empty: {
-    textAlign: "center",
-    color: "#64748b",
-    marginTop: 18,
-  },
-  card: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-    marginBottom: 8,
-  },
-  name: {
-    fontWeight: "700",
-    color: "#0f172a",
-    fontSize: 16,
-  },
-  meta: {
-    marginTop: 3,
-    color: "#64748b",
-    fontSize: 12,
-  },
-  pickersRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 10,
-  },
-  pickerBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 9,
-    height: 36,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#fff",
-  },
-  pickerText: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  saveBtn: {
-    marginTop: 8,
-    height: 38,
-    borderRadius: 9,
-    backgroundColor: "#0f172a",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  saveText: {
-    color: "#fff",
-    fontWeight: "700",
-  },
-  diaryBtn: {
-    marginTop: 8,
-    height: 36,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff",
-  },
-  diaryBtnText: {
-    color: "#334155",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  modalWrap: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.45)",
-    justifyContent: "flex-end",
-    padding: 12,
-  },
-  modalCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 14,
-    backgroundColor: "#fff",
-    padding: 12,
-    maxHeight: "88%",
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#0f172a",
-  },
-  modalMeta: {
-    marginTop: 4,
-    fontSize: 12,
-    color: "#64748b",
-  },
-  diaryInput: {
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    minHeight: 84,
-    textAlignVertical: "top",
-  },
-  diaryActions: {
-    marginTop: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 8,
-  },
-  voiceBtn: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
-    height: 34,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  voiceBtnText: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  addBtn: {
-    borderRadius: 8,
-    backgroundColor: "#0f172a",
-    paddingHorizontal: 12,
-    height: 34,
-    alignItems: "center",
-    justifyContent: "center",
-    minWidth: 90,
-  },
-  addBtnDisabled: {
-    opacity: 0.6,
-  },
-  addBtnText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  counterText: {
-    marginTop: 6,
-    color: "#64748b",
-    fontSize: 11,
-  },
-  loadingWrap: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 14,
-  },
-  diaryList: {
-    marginTop: 8,
-  },
-  moreBtn: {
-    alignSelf: "flex-end",
-    marginBottom: 6,
-  },
-  moreBtnText: {
-    color: "#2563eb",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  diaryCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    backgroundColor: "#f8fafc",
-    padding: 10,
-    marginBottom: 8,
-  },
-  diaryText: {
-    color: "#334155",
-    fontSize: 12,
-  },
-  diaryMetaRow: {
-    marginTop: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  editInput: {
-    marginTop: 0,
-    minHeight: 72,
-  },
-  editActions: {
-    marginTop: 6,
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
-  secondaryBtn: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    paddingHorizontal: 10,
-    height: 30,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryBtnText: {
-    color: "#334155",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  closeBtn: {
-    marginTop: 6,
-    height: 36,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff",
-  },
-  closeBtnText: {
-    color: "#334155",
-    fontWeight: "700",
-    fontSize: 12,
-  },
+  wrap: { gap: 8, paddingBottom: 12 }, ok: { marginBottom: 8, borderWidth: 1, borderColor: "#86efac", borderRadius: 10, backgroundColor: "#f0fdf4", color: "#166534", padding: 8, fontSize: 12, fontWeight: "700" },
+  top: { borderWidth: 1, borderColor: "#0f3c5a", borderRadius: 12, backgroundColor: "#144766", padding: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  topTitle: { color: "#fff", fontSize: 20, fontWeight: "800" }, topMeta: { color: "#d8f1ff", fontSize: 11, fontWeight: "700" },
+  row: { flexDirection: "row", gap: 10, alignItems: "flex-start" }, rowCompact: { flexDirection: "column", gap: 8 }, left: { flex: 1.2, minWidth: 0 }, right: { flex: 0.8, minWidth: 0, gap: 10 }, colCompact: { width: "100%", flexGrow: 0, flexShrink: 0, flexBasis: "auto" },
+  card: { borderWidth: 1, borderColor: "#d6e3ef", borderRadius: 12, backgroundColor: "#fff", padding: 10 },
+  monthHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, h1: { fontSize: 20, fontWeight: "800", color: "#0f172a" }, h2: { fontSize: 16, fontWeight: "800", color: "#0f172a" },
+  navRow: { flexDirection: "row", gap: 6 }, navBtn: { width: 30, height: 30, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
+  week: { marginTop: 8, flexDirection: "row", borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#e2e8f0", paddingVertical: 6 }, weekText: { flex: 1, textAlign: "center", color: "#64748b", fontSize: 10, fontWeight: "700" },
+  grid: { flexDirection: "row", flexWrap: "wrap" }, day: { width: "14.285%", minHeight: 68, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#e2e8f0", padding: 6, backgroundColor: "#fff" }, dayMuted: { backgroundColor: "#f8fafc" }, daySel: { backgroundColor: "#e0f2fe" }, dayText: { color: "#0f172a", fontSize: 12, fontWeight: "700" }, dayTextMuted: { color: "#94a3b8" }, badge: { marginTop: 4, alignSelf: "flex-end", color: "#0284c7", fontSize: 11, fontWeight: "800" },
+  headRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, tools: { flexDirection: "row", gap: 8 }, tool: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 10, minHeight: 30, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, toolText: { color: "#334155", fontSize: 12, fontWeight: "700" },
+  inputBtn: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }, inputBtnText: { color: "#0f172a", fontSize: 13, fontWeight: "600", flex: 1 },
+  textarea: { marginTop: 8, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, minHeight: 62, textAlignVertical: "top" },
+  save: { marginTop: 8, minHeight: 38, borderRadius: 10, backgroundColor: "#0284c7", alignItems: "center", justifyContent: "center" }, saveText: { color: "#fff", fontSize: 13, fontWeight: "800" }, disabled: { opacity: 0.6 },
+  meta: { marginTop: 3, color: "#64748b", fontSize: 12 }, empty: { textAlign: "center", color: "#64748b", marginTop: 10, fontSize: 12 },
+  fu: { marginTop: 8, borderWidth: 1, borderColor: "#7dd3fc", borderRadius: 10, backgroundColor: "#f0f9ff", padding: 8 }, fuHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, fuName: { flex: 1, color: "#0f172a", fontSize: 15, fontWeight: "700" }, act: { flexDirection: "row", gap: 6 }, icon: { width: 26, height: 26, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
+  diaryBox: { marginTop: 8, borderWidth: 1, borderColor: "#bfdbfe", borderRadius: 10, backgroundColor: "#fff", padding: 8 }, diaryTitle: { color: "#0f172a", fontSize: 13, fontWeight: "700" }, diaryInput: { marginTop: 6, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, minHeight: 52, paddingHorizontal: 8, paddingVertical: 6, textAlignVertical: "top" },
+  addDiary: { marginTop: 6, alignSelf: "flex-end", minWidth: 90, height: 30, borderRadius: 8, backgroundColor: "#38bdf8", alignItems: "center", justifyContent: "center" }, addDiaryText: { color: "#fff", fontSize: 12, fontWeight: "700" }, emptyInline: { color: "#64748b", fontSize: 12, marginTop: 8 },
+  diaryList: { marginTop: 8, gap: 6 }, diaryItem: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#f8fafc", padding: 8 }, diaryItemText: { color: "#334155", fontSize: 12 }, diaryItemMeta: { marginTop: 3, color: "#64748b", fontSize: 10 },
+  modal: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 12 }, modalCard: { borderWidth: 1, borderColor: "#dbe3ee", borderRadius: 12, backgroundColor: "#fff", padding: 12, maxHeight: "88%" }, modalInput: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, paddingHorizontal: 10, backgroundColor: "#fff" }, detailsScroll: { marginTop: 8, maxHeight: "88%" }, detailsContent: { paddingBottom: 6 },
+  webNativeDateTimeInput: { marginTop: 10, width: "100%", minHeight: 40, border: "1px solid #cbd5e1", borderRadius: 9, padding: "8px 10px", fontSize: 14, color: "#0f172a", backgroundColor: "#fff" },
+  modalRow: { marginTop: 10, flexDirection: "row", justifyContent: "flex-end", gap: 8 }, modalBtn: { minWidth: 88, height: 34, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, modalBtnText: { color: "#334155", fontSize: 12, fontWeight: "700" },
+  leadRow: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 10, backgroundColor: "#fff", padding: 10, marginBottom: 6 }, leadRowA: { borderColor: "#38bdf8", backgroundColor: "#f0f9ff" }, leadName: { color: "#0f172a", fontSize: 14, fontWeight: "700" }, leadMeta: { marginTop: 3, color: "#64748b", fontSize: 11 },
+  del: { marginTop: 8, alignSelf: "flex-end", minWidth: 120, height: 34, borderWidth: 1, borderColor: "#fca5a5", borderRadius: 9, backgroundColor: "#fff1f2", alignItems: "center", justifyContent: "center" }, delText: { color: "#dc2626", fontSize: 12, fontWeight: "700" },
+  block: { marginTop: 10, borderWidth: 1, borderColor: "#dbe3ee", borderRadius: 10, backgroundColor: "#f8fafc", padding: 10 }, blockTitle: { color: "#0f172a", fontSize: 13, fontWeight: "800", marginBottom: 6 }, blockText: { color: "#334155", fontSize: 12, marginTop: 2 },
+  contact: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, contactActionItem: { alignItems: "center", minWidth: 68, gap: 4 }, contactIconBtn: { width: 44, height: 44, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, contactActionLabel: { color: "#334155", fontSize: 11, fontWeight: "700" }, contactBtn: { flexGrow: 1, minWidth: 110, height: 36, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, contactText: { color: "#334155", fontSize: 12, fontWeight: "700" },
 });

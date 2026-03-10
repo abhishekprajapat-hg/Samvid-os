@@ -18,6 +18,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
+import { useNavigation } from "@react-navigation/native";
 import { useAuth } from "../../context/AuthContext";
 import { createUser, deleteUser, getUsers, rebalanceExecutives, updateUserById } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
@@ -575,16 +576,19 @@ export const TeamManagerScreen = () => {
                   : item.createdBy ? String(item.createdBy) : "-";
 
               return (
-                <AppCard style={styles.card as object}>
-                  <Text style={styles.name}>{item.name || "Unnamed Lead"}</Text>
-                  <Text style={styles.meta}>Phone: {item.phone || "-"}</Text>
-                  <Text style={styles.meta}>Email: {item.email || "-"}</Text>
-                  <Text style={styles.meta}>Project: {item.projectInterested || "-"}</Text>
-                  <Text style={styles.meta}>Status: {item.status || "-"}</Text>
-                  <Text style={styles.meta}>Assigned To: {assignedName || "Unassigned"}</Text>
-                  <Text style={styles.meta}>Created By: {createdByName}</Text>
-                  <Text style={styles.meta}>Next Follow-up: {item.nextFollowUp || "-"}</Text>
-                </AppCard>
+                <Pressable onPress={() => navigation.navigate("LeadDetails", { leadId: String(item._id || "") })}>
+                  <AppCard style={styles.card as object}>
+                    <Text style={styles.name}>{item.name || "Unnamed Lead"}</Text>
+                    <Text style={styles.meta}>Phone: {item.phone || "-"}</Text>
+                    <Text style={styles.meta}>Email: {item.email || "-"}</Text>
+                    <Text style={styles.meta}>Project: {item.projectInterested || "-"}</Text>
+                    <Text style={styles.meta}>Status: {item.status || "-"}</Text>
+                    <Text style={styles.meta}>Assigned To: {assignedName || "Unassigned"}</Text>
+                    <Text style={styles.meta}>Created By: {createdByName}</Text>
+                    <Text style={styles.meta}>Next Follow-up: {item.nextFollowUp || "-"}</Text>
+                    <Text style={styles.meta}>Tap to open full details + diary</Text>
+                  </AppCard>
+                </Pressable>
               );
             }}
             ListEmptyComponent={<Text style={styles.emptyText}>No leads found for this filter.</Text>}

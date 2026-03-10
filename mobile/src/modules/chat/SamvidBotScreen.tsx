@@ -12,12 +12,6 @@ type BotMessage = {
   text: string;
 };
 
-const quickPrompts = [
-  "Show sold properties and through whom sold",
-  "Show interested leads assigned to my team",
-  "Who is top performer right now",
-];
-
 const uid = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 export const SamvidBotScreen = () => {
@@ -30,7 +24,7 @@ export const SamvidBotScreen = () => {
     {
       id: uid(),
       role: "bot",
-      text: "Namaste, main Samvid hoon. Aap inventory, lead, sold/interested status, ya best performance puch sakte hain.",
+      text: "Hello, I am Samvid bot. How can I help you.",
     },
   ]);
 
@@ -103,17 +97,13 @@ export const SamvidBotScreen = () => {
     try {
       const response = await askSamvid(query);
       const answer = String(response.answer || "No response").trim() || "No response";
-      const data = response.data || {};
-      const dataSummary = Object.keys(data).length
-        ? `\n\nData keys: ${Object.keys(data).join(", ")}`
-        : "";
 
       setMessages((prev) => [
         ...prev,
         {
           id: uid(),
           role: "bot",
-          text: `${answer}${dataSummary}`,
+          text: answer,
         },
       ]);
     } catch (e) {
@@ -173,32 +163,27 @@ export const SamvidBotScreen = () => {
           ))}
         </ScrollView>
 
-        <View style={styles.quickPrompts}>
-          {quickPrompts.map((prompt) => (
-            <Pressable key={prompt} style={styles.quickPromptBtn} onPress={() => sendQuery(prompt)} disabled={loading}>
-              <Text style={styles.quickPromptText}>{prompt}</Text>
+        <View style={styles.composer}>
+          <View style={styles.inputRow}>
+            <View style={styles.inputWrap}>
+              <AppInput
+                value={input}
+                onChangeText={setInput}
+                placeholder="Ask Samvid..."
+                style={styles.chatInput as object}
+              />
+            </View>
+            <Pressable
+              style={[styles.voiceBtn, (!isMicSupported || loading) && styles.voiceBtnDisabled]}
+              onPress={toggleVoice}
+              disabled={!isMicSupported || loading}
+            >
+              <Ionicons name={isListening ? "mic" : "mic-outline"} size={18} color="#0f172a" />
             </Pressable>
-          ))}
-        </View>
-
-        <View style={styles.inputRow}>
-          <View style={styles.inputWrap}>
-            <AppInput
-              value={input}
-              onChangeText={setInput}
-              placeholder="Ask Samvid..."
-            />
           </View>
-          <Pressable
-            style={[styles.voiceBtn, (!isMicSupported || loading) && styles.voiceBtnDisabled]}
-            onPress={toggleVoice}
-            disabled={!isMicSupported || loading}
-          >
-            <Ionicons name={isListening ? "mic" : "mic-outline"} size={18} color="#0f172a" />
-          </Pressable>
-        </View>
 
-        <AppButton title={loading ? "Thinking..." : "Send"} onPress={() => sendQuery()} disabled={!canSend} />
+          <AppButton title={loading ? "Thinking..." : "Send"} onPress={() => sendQuery()} disabled={!canSend} />
+        </View>
       </AppCard>
     </Screen>
   );
@@ -207,13 +192,15 @@ export const SamvidBotScreen = () => {
 const styles = StyleSheet.create({
   card: {
     flex: 1,
+    minHeight: 0,
     marginBottom: 12,
   },
   chatArea: {
-    maxHeight: 420,
-    minHeight: 320,
+    flex: 1,
+    minHeight: 180,
   },
   chatContent: {
+    flexGrow: 1,
     paddingBottom: 8,
     gap: 8,
   },
@@ -250,43 +237,35 @@ const styles = StyleSheet.create({
   botBubbleText: {
     color: "#0f172a",
   },
-  quickPrompts: {
+  composer: {
     marginTop: 8,
-    marginBottom: 8,
-    gap: 6,
-  },
-  quickPromptBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#e2e8f0",
     borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    padding: 8,
     backgroundColor: "#fff",
-  },
-  quickPromptText: {
-    color: "#334155",
-    fontSize: 11,
-    fontWeight: "600",
   },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   inputWrap: {
     flex: 1,
   },
+  chatInput: {
+    marginBottom: 0,
+  },
   voiceBtn: {
-    width: 46,
-    height: 46,
+    width: 42,
+    height: 42,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: "#cbd5e1",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#fff",
-    marginBottom: 8,
   },
   voiceBtnDisabled: {
     opacity: 0.45,

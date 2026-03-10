@@ -17,8 +17,9 @@ const resolveWebDevHost = () => {
 };
 
 const resolveSocketUrl = () => {
+  const useLocalDevApi = isTruthy(process.env.EXPO_PUBLIC_USE_LOCAL_API || "");
   const disableWebLocalApi = isTruthy(process.env.EXPO_PUBLIC_DISABLE_WEB_LOCAL_API || "");
-  if (__DEV__ && !disableWebLocalApi) {
+  if (__DEV__ && useLocalDevApi && !disableWebLocalApi) {
     const webHost = resolveWebDevHost();
     if (webHost) return `http://${webHost}:${resolveLocalApiPort()}`;
   }
@@ -26,7 +27,6 @@ const resolveSocketUrl = () => {
   const explicit = (process.env.EXPO_PUBLIC_SOCKET_URL || process.env.EXPO_PUBLIC_API_ORIGIN || "").trim();
   if (explicit) return explicit;
 
-  const useLocalDevApi = isTruthy(process.env.EXPO_PUBLIC_USE_LOCAL_API || "");
   if (!__DEV__ || !useLocalDevApi) return DEFAULT_SOCKET_URL;
 
   const hostUri =

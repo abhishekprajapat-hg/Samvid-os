@@ -227,16 +227,11 @@ const LeadDetailsRebuiltContent = ({
   propertyActionType,
   propertyActionInventoryId,
   canManageLeadProperties,
-  canUpdateRelatedPropertyStatus,
-  propertyStatusActionInventoryId,
-  propertyStatusRequiresApproval,
-  inventoryStatusOptions,
   toInventoryApiStatus,
   toInventoryStatusLabel,
   onSelectRelatedProperty,
   onOpenRelatedProperty,
   onRemoveRelatedProperty,
-  onUpdateRelatedPropertyStatus,
   availableRelatedInventoryOptions,
   relatedInventoryDraft,
   setRelatedInventoryDraft,
@@ -604,6 +599,18 @@ const LeadDetailsRebuiltContent = ({
   );
   const hasMoreDiaryEntries = normalizedDiaryEntries.length > visibleDiaryEntries.length;
   const hasMoreActivities = normalizedActivities.length > visibleActivities.length;
+  const sortedLinkableInventoryOptions = React.useMemo(
+    () =>
+      [...(Array.isArray(availableRelatedInventoryOptions) ? availableRelatedInventoryOptions : [])]
+        .sort((a, b) => {
+          const aLabel = String(getInventoryLeadLabel(a) || a?.title || a?._id || "").toLowerCase();
+          const bLabel = String(getInventoryLeadLabel(b) || b?.title || b?._id || "").toLowerCase();
+          const aText = `${aLabel} ${String(a?.location || "").toLowerCase()}`;
+          const bText = `${bLabel} ${String(b?.location || "").toLowerCase()}`;
+          return aText.localeCompare(bText);
+        }),
+    [availableRelatedInventoryOptions, getInventoryLeadLabel],
+  );
 
   const selectedPropertyCount = selectedProposalProperties.length;
   const proposalSubjectPropertyLabel = React.useMemo(() => {
@@ -664,15 +671,10 @@ const LeadDetailsRebuiltContent = ({
   );
 
   const proposalText = React.useMemo(() => {
-    const proposalDate = new Date().toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-    const validityDays = String(proposalValidityDays || "7").trim();
-    const preparedBy = String(selectedLead?.assignedTo?.name || "Samvid Sales Team").trim();
+    const now = new Date();
+    const proposalDate = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
+    const validityDays = String(proposalValidityDays || "7").trim() || "7";
     const clientName = String(selectedLead?.name || "Client").trim();
-    const clientPhone = String(selectedLead?.phone || "").trim();
 
     const lines = [
       "SAMVID REALTY - PROPERTY PROPOSAL",
@@ -680,7 +682,6 @@ const LeadDetailsRebuiltContent = ({
       "",
       `Dear ${clientName},`,
       "Thank you for your interest. Please find your selected property proposal below:",
-      "",
       `Selected Properties: ${selectedPropertyCount}`,
     ];
 
@@ -688,29 +689,17 @@ const LeadDetailsRebuiltContent = ({
       const inventory = property.inventory || {};
       lines.push("");
       lines.push(`Property ${index + 1}: ${property.label}`);
-      lines.push(`Project: ${String(inventory?.projectName || selectedLead?.projectInterested || "").trim() || "-"}`);
-      lines.push(`Tower: ${String(inventory?.towerName || "").trim() || "-"}`);
-      lines.push(`Unit: ${String(inventory?.unitNumber || "").trim() || "-"}`);
+      lines.push(`Project: ${String(inventory?.projectName || selectedLead?.projectInterested || "-").trim() || "-"}`);
+      lines.push(`Location: ${String(inventory?.location || selectedLead?.city || "-").trim() || "-"}`);
       lines.push(`Property Type: ${String(inventory?.type || "Sale").trim() || "-"}`);
       lines.push(`Category: ${String(inventory?.category || "Apartment").trim() || "-"}`);
-      lines.push(`Location: ${String(inventory?.location || selectedLead?.city || "").trim() || "-"}`);
-      lines.push(`Current Status: ${property.statusLabel || "-"}`);
-      lines.push(`Quoted Price: ${formatCurrencyInr(inventory?.price)}`);
-      lines.push(`Images Attached: ${property.imageUrls.length}`);
+      lines.push(`Price: ${formatCurrencyInr(inventory?.price)}`);
     });
 
     lines.push("");
-    lines.push(`Proposal Validity: ${validityDays || "7"} day(s)`);
-    lines.push(`Prepared By: ${preparedBy}`);
-    if (clientPhone) lines.push(`Client Contact: ${clientPhone}`);
-    lines.push("");
-    lines.push(
-      proposalSpecialNote
-        ? `Special Note: ${proposalSpecialNote}`
-        : "Special Note: Final commercial terms subject to documentation and availability at booking time.",
-    );
-    lines.push("");
-    lines.push("Please reply on this message to confirm site visit/booking discussion.");
+    lines.push(`Validity: ${validityDays} day(s)`);
+    if (proposalSpecialNote) lines.push(`Special Note: ${proposalSpecialNote}`);
+    lines.push("", "Regards,", "Samvid Realty");
 
     if (!selectedProposalProperties.length) {
       return [
@@ -857,86 +846,15 @@ const LeadDetailsRebuiltContent = ({
       cursorY += (lines.length * lineHeight) + spacing;
     };
 
-    const proposalDate = new Date().toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
+    const lines = String(proposalText || "").split("\n");
+    lines.forEach((line) => {
+      const isTitle = line.trim() === "SAMVID REALTY - PROPERTY PROPOSAL";
+      addText(line, {
+        fontSize: isTitle ? 14 : 11,
+        bold: isTitle,
+        spacing: isTitle ? 8 : 4,
+      });
     });
-    addText("SAMVID REALTY", { fontSize: 16, bold: true, spacing: 2 });
-    addText("Property Proposal", { fontSize: 13, bold: true, spacing: 10 });
-    addText(`Date: ${proposalDate}`, { fontSize: 10, color: [71, 85, 105], spacing: 8 });
-    addText(`Client: ${String(selectedLead?.name || "Client").trim()}`, { fontSize: 10, spacing: 2 });
-    if (selectedLead?.phone) {
-      addText(`Phone: ${String(selectedLead.phone).trim()}`, { fontSize: 10, spacing: 2 });
-    }
-    if (selectedLead?.email) {
-      addText(`Email: ${String(selectedLead.email).trim()}`, { fontSize: 10, spacing: 10 });
-    }
-
-    for (let propertyIndex = 0; propertyIndex < selectedProposalProperties.length; propertyIndex += 1) {
-      const property = selectedProposalProperties[propertyIndex];
-      const inventory = property.inventory || {};
-      addText(`Property ${propertyIndex + 1}: ${property.label}`, { fontSize: 12, bold: true, spacing: 4 });
-      addText(`Status: ${property.statusLabel || "-"}`, { fontSize: 10, indent: 8, spacing: 2 });
-      addText(`Type: ${String(inventory?.type || "Sale").trim() || "-"}`, { fontSize: 10, indent: 8, spacing: 2 });
-      addText(`Category: ${String(inventory?.category || "Apartment").trim() || "-"}`, { fontSize: 10, indent: 8, spacing: 2 });
-      addText(`Location: ${String(inventory?.location || selectedLead?.city || "-").trim() || "-"}`, { fontSize: 10, indent: 8, spacing: 2 });
-      addText(`Quoted Price: ${formatCurrencyInr(inventory?.price)}`, { fontSize: 10, indent: 8, spacing: 6 });
-
-      const imageUrlsForPdf = property.imageUrls.slice(0, PROPOSAL_MAX_IMAGES_PER_PROPERTY);
-      if (!imageUrlsForPdf.length) {
-        addText("No images attached for this property.", { fontSize: 9, indent: 8, color: [100, 116, 139], spacing: 8 });
-      } else {
-        addText(`Images (${imageUrlsForPdf.length})`, { fontSize: 10, bold: true, indent: 8, spacing: 4 });
-        let addedImageCount = 0;
-        for (let imageIndex = 0; imageIndex < imageUrlsForPdf.length; imageIndex += 1) {
-          const imageUrl = imageUrlsForPdf[imageIndex];
-          try {
-            const { dataUrl, format } = await fetchPdfImageSource(imageUrl);
-            const imageMeta = doc.getImageProperties(dataUrl);
-            const imageWidth = contentWidth - 16;
-            let imageHeight = imageWidth;
-            if (Number.isFinite(imageMeta.width) && Number.isFinite(imageMeta.height) && imageMeta.width > 0) {
-              imageHeight = (imageMeta.height / imageMeta.width) * imageWidth;
-            }
-            imageHeight = Math.min(260, Math.max(120, imageHeight));
-            ensureSpace(imageHeight + 18);
-            doc.addImage(dataUrl, format, margin + 8, cursorY, imageWidth, imageHeight);
-            cursorY += imageHeight + 10;
-            addText(`Image ${imageIndex + 1}`, { fontSize: 8, indent: 8, color: [100, 116, 139], spacing: 6 });
-            addedImageCount += 1;
-          } catch {
-            addText(`Image ${imageIndex + 1}: unavailable in PDF`, { fontSize: 9, indent: 8, color: [100, 116, 139], spacing: 3 });
-          }
-        }
-        if (!addedImageCount) {
-          addText("Images could not be embedded due to source restrictions.", { fontSize: 9, indent: 8, color: [100, 116, 139], spacing: 6 });
-        }
-      }
-
-      if (property.imageUrls.length > imageUrlsForPdf.length) {
-        addText(
-          `+${property.imageUrls.length - imageUrlsForPdf.length} more image(s) available in system.`,
-          { fontSize: 8, indent: 8, color: [100, 116, 139], spacing: 6 },
-        );
-      }
-
-      if (propertyIndex < selectedProposalProperties.length - 1) {
-        ensureSpace(14);
-        doc.setDrawColor(203, 213, 225);
-        doc.line(margin, cursorY, pageWidth - margin, cursorY);
-        cursorY += 14;
-      }
-    }
-
-    addText(`Proposal Validity: ${String(proposalValidityDays || "7").trim() || "7"} day(s)`, { fontSize: 10, spacing: 2 });
-    addText(`Prepared By: ${String(selectedLead?.assignedTo?.name || "Samvid Sales Team").trim()}`, { fontSize: 10, spacing: 2 });
-    addText(
-      proposalSpecialNote
-        ? `Special Note: ${proposalSpecialNote}`
-        : "Special Note: Final commercial terms subject to documentation and availability at booking time.",
-      { fontSize: 9, color: [71, 85, 105], spacing: 6 },
-    );
 
     return doc.output("blob");
   };
@@ -1128,42 +1046,39 @@ const LeadDetailsRebuiltContent = ({
     setIsGeneratingProposalPdf(true);
     try {
       const pdfFile = await buildProposalPdfFile();
-      if (!pdfFile) {
-        showProposalActionMessage("Unable to generate proposal PDF");
-        return;
-      }
-
       if (pdfFile instanceof File && canUseNativeShare) {
         const shared = await shareFilesWithNativeFallback([pdfFile], {
           title: proposalSubject,
           text: proposalText,
         });
         if (shared) {
-          showProposalActionMessage("Proposal PDF ready. Choose WhatsApp in share sheet.");
+          showProposalActionMessage("Proposal ready. Choose WhatsApp in share options.");
           return;
         }
       }
-
-      const fallbackDownload = toPdfDownloadPayload(pdfFile);
-      if (fallbackDownload) {
-        triggerDownloadBlob(fallbackDownload.blob, fallbackDownload.fileName);
-        showProposalActionMessage("Direct PDF share unavailable. PDF downloaded for WhatsApp attach.");
-        return;
-      }
-    } catch (error) {
-      if (String(error?.name || "") === "AbortError") return;
-      console.error("WhatsApp PDF share failed", error);
+    } catch {
+      // fallback handled below
     } finally {
       setIsGeneratingProposalPdf(false);
     }
 
     if (proposalWhatsAppHref && typeof window !== "undefined") {
       window.open(proposalWhatsAppHref, "_blank", "noopener,noreferrer");
+      showProposalActionMessage("Opening WhatsApp chat");
       return;
     }
 
     await handleCopyProposal();
-    showProposalActionMessage("WhatsApp direct share unavailable. Proposal copied.");
+    showProposalActionMessage("WhatsApp unavailable. Proposal copied.");
+  };
+
+  const handleShareByEmail = () => {
+    if (!selectedProposalProperties.length) {
+      showProposalActionMessage("Select at least one property");
+      return;
+    }
+    if (typeof window === "undefined") return;
+    window.location.href = proposalMailHref;
   };
 
   const handleNativeShareProposal = async () => {
@@ -1349,12 +1264,10 @@ const LeadDetailsRebuiltContent = ({
                   const inventoryId = inventoryRow.id;
                   const inventoryLabel = inventoryRow.label;
                   const inventoryLocation = inventoryRow.location;
-                  const inventoryStatus = inventoryRow.status;
                   const inventoryStatusLabel = inventoryRow.statusLabel;
                   const isActiveProperty = normalizedActiveInventoryId === inventoryId;
                   const isSelectingThisProperty = propertyActionType === "select" && String(propertyActionInventoryId || "") === String(inventoryId || "");
                   const isRemovingThisProperty = propertyActionType === "remove" && String(propertyActionInventoryId || "") === String(inventoryId || "");
-                  const isUpdatingThisPropertyStatus = String(propertyStatusActionInventoryId || "") === String(inventoryId || "");
                   return (
                     <div
                       key={inventoryId || `${inventoryLabel || "inventory"}-${rowIndex}`}
@@ -1386,23 +1299,6 @@ const LeadDetailsRebuiltContent = ({
                           </div>
                         ) : null}
                       </div>
-                      {canUpdateRelatedPropertyStatus && inventoryId && isClosedDealFlow ? (
-                        <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                          <select
-                            value={inventoryStatus}
-                            onChange={(event) => onUpdateRelatedPropertyStatus(inventoryId, event.target.value)}
-                            disabled={isUpdatingThisPropertyStatus}
-                            className={`h-8 rounded-lg border px-2 text-[11px] font-semibold ${input}`}
-                          >
-                            {inventoryStatusOptions.map((statusOption) => (
-                              <option key={statusOption.value} value={statusOption.value}>{statusOption.label}</option>
-                            ))}
-                          </select>
-                          {propertyStatusRequiresApproval ? (
-                            <div className={`mt-1 text-[10px] ${isDark ? "text-emerald-200" : "text-emerald-700"}`}>Status update goes for admin approval.</div>
-                          ) : null}
-                        </div>
-                      ) : null}
                     </div>
                   );
                 })}
@@ -1425,12 +1321,26 @@ const LeadDetailsRebuiltContent = ({
                     onChange={(event) => setRelatedInventoryDraft(String(event.target.value || ""))}
                     className={`h-9 min-w-0 flex-1 rounded-lg border px-2 text-xs ${input}`}
                   >
-                    <option value="">Select property to link</option>
-                    {availableRelatedInventoryOptions.map((inventory) => (
-                      <option key={inventory._id} value={inventory._id}>
-                        {getInventoryLeadLabel(inventory) || inventory._id}
-                      </option>
-                    ))}
+                    <option value="">
+                      {sortedLinkableInventoryOptions.length
+                        ? "Select property to link"
+                        : "No properties found"}
+                    </option>
+                    {sortedLinkableInventoryOptions.map((inventory) => {
+                      const inventoryId = String(inventory?._id || "");
+                      const inventoryLabel = getInventoryLeadLabel(inventory)
+                        || String(inventory?.title || "").trim()
+                        || inventoryId;
+                      const inventoryLocation = String(inventory?.location || "").trim();
+
+                      return (
+                        <option key={inventoryId} value={inventoryId}>
+                          {[inventoryLabel, inventoryLocation ? `(${inventoryLocation})` : ""]
+                            .filter(Boolean)
+                            .join(" ")}
+                        </option>
+                      );
+                    })}
                   </select>
                   <button
                     type="button"
@@ -1642,9 +1552,9 @@ const LeadDetailsRebuiltContent = ({
                   <button
                     type="button"
                     onClick={handleShareToWhatsApp}
-                    disabled={isGeneratingProposalPdf || (!canUseNativeShare && !proposalWhatsAppHref) || !selectedPropertyCount}
+                    disabled={isGeneratingProposalPdf || (!proposalWhatsAppHref && !canUseNativeShare) || !selectedPropertyCount}
                     className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${
-                      !isGeneratingProposalPdf && selectedPropertyCount && (canUseNativeShare || proposalWhatsAppHref)
+                      !isGeneratingProposalPdf && selectedPropertyCount && (proposalWhatsAppHref || canUseNativeShare)
                         ? button
                         : `${input} cursor-not-allowed opacity-60`
                     }`}
@@ -1652,28 +1562,30 @@ const LeadDetailsRebuiltContent = ({
                     {WhatsAppIcon ? <WhatsAppIcon size={12} /> : null}
                     WhatsApp
                   </button>
-                  <a
-                    href={proposalMailHref}
-                    className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${button}`}
+                  <button
+                    type="button"
+                    onClick={handleShareByEmail}
+                    disabled={!selectedPropertyCount}
+                    className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${
+                      selectedPropertyCount ? button : `${input} cursor-not-allowed opacity-60`
+                    }`}
                   >
                     <Mail size={12} />
                     Email
-                  </a>
-                  {canUseNativeShare ? (
-                    <button
-                      type="button"
-                      onClick={handleNativeShareProposal}
-                      disabled={isGeneratingProposalPdf || !selectedPropertyCount}
-                      className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${
-                        isGeneratingProposalPdf || !selectedPropertyCount
-                          ? `${input} cursor-not-allowed opacity-60`
-                          : button
-                      }`}
-                    >
-                      {isGeneratingProposalPdf ? <Loader size={12} className="animate-spin" /> : <Send size={12} />}
-                      Share PDF
-                    </button>
-                  ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNativeShareProposal}
+                    disabled={isGeneratingProposalPdf || !selectedPropertyCount}
+                    className={`inline-flex h-9 items-center justify-center gap-1 rounded-lg border text-xs font-semibold ${
+                      isGeneratingProposalPdf || !selectedPropertyCount
+                        ? `${input} cursor-not-allowed opacity-60`
+                        : button
+                    }`}
+                  >
+                    {isGeneratingProposalPdf ? <Loader size={12} className="animate-spin" /> : <Send size={12} />}
+                    Share PDF
+                  </button>
                   {canUseNativeShare && proposalImageEntries.length ? (
                     <button
                       type="button"

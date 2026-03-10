@@ -83,6 +83,12 @@ const inventoryRequestSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    relatedLead: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Lead",
+      default: null,
+      index: true,
+    },
   },
   { timestamps: true },
 );

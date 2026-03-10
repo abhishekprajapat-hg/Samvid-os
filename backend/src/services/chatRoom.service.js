@@ -279,6 +279,42 @@ const isOnOrBeforeMarker = ({ value, marker }) => {
   return timestamp.getTime() <= marker.getTime();
 };
 
+const isMessageDeletedForUser = ({ message, userId }) => {
+  if (!message || !userId) return false;
+  if (message.deletedForEveryoneAt) return true;
+  return (message.deletedForUsers || []).some(
+    (row) => toObjectIdString(row.user) === toObjectIdString(userId),
+  );
+};
+
+const rebuildRoomLastMessage = async ({ roomId }) => {
+  const room = await ChatRoom.findById(roomId);
+  if (!room) {
+    throw createHttpError(404, "Chat room not found");
+  }
+
+  const latestVisibleMessage = await ChatMessage.findOne({
+    room: room._id,
+    deletedForEveryoneAt: null,
+  })
+    .sort({ createdAt: -1 })
+    .select("text sender createdAt")
+    .lean();
+
+  if (latestVisibleMessage) {
+    room.lastMessage = String(latestVisibleMessage.text || "").trim();
+    room.lastMessageAt = latestVisibleMessage.createdAt || new Date();
+    room.lastMessageSender = latestVisibleMessage.sender || null;
+  } else {
+    room.lastMessage = "";
+    room.lastMessageAt = new Date();
+    room.lastMessageSender = null;
+  }
+
+  await room.save();
+  return applyRoomPopulates(ChatRoom.findById(room._id)).lean();
+};
+
 const toRoomDto = (room, viewerId = null) => {
   const rawLastMessageAt = room.lastMessageAt || room.updatedAt || null;
   const clearMarker = viewerId ? getUserClearedAt(room.clearedMessagesAt, viewerId) : null;
@@ -393,6 +429,55 @@ const resetUnreadCountForUser = ({ room, userId }) => {
     user,
     count,
   }));
+};
+
+const countUnreadMessagesForUser = async ({ room, userId }) => {
+  const query = {
+    room: room._id,
+    sender: { $ne: userId },
+    "seenBy.user": { $ne: userId },
+    deletedForEveryoneAt: null,
+    "deletedForUsers.user": { $ne: userId },
+  };
+
+  const clearedAt = getUserClearedAt(room.clearedMessagesAt, userId);
+  if (clearedAt) {
+    query.createdAt = { $gt: clearedAt };
+  }
+
+  return ChatMessage.countDocuments(query);
+};
+
+const syncUnreadCountForUser = async ({ room, userId }) => {
+  const normalizedUserId = toObjectIdString(userId);
+  if (!normalizedUserId) return 0;
+
+  const unreadCount = await countUnreadMessagesForUser({
+    room,
+    userId: normalizedUserId,
+  });
+
+  const unreadByUserId = new Map(
+    (room.unreadCounts || []).map((row) => [
+      toObjectIdString(row.user),
+      Number(row.count || 0),
+    ]),
+  );
+
+  unreadByUserId.set(normalizedUserId, unreadCount);
+  room.unreadCounts = [...unreadByUserId.entries()].map(([user, count]) => ({
+    user,
+    count,
+  }));
+
+  return unreadCount;
+};
+
+const syncUnreadCountsForRoom = async ({ room }) => {
+  const participantIds = uniqueIds(room?.participants || []);
+  for (const participantId of participantIds) {
+    await syncUnreadCountForUser({ room, userId: participantId });
+  }
 };
 
 const ensureRoomMembership = async ({ room, user, requireParticipantForSend = false }) => {
@@ -1135,7 +1220,11 @@ const sendDirectMessage = async ({
 const getRoomMessages = async ({ user, roomId, limit, before }) => {
   const room = await getRoomByIdForUser({ user, roomId });
   const resolvedLimit = toPositiveInt(limit, 60, 200);
-  const query = { room: room._id };
+  const query = {
+    room: room._id,
+    deletedForEveryoneAt: null,
+    "deletedForUsers.user": { $ne: user._id },
+  };
   const createdAtQuery = {};
   const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
 
@@ -1175,6 +1264,8 @@ const markRoomAsRead = async ({ user, roomId }) => {
     room: room._id,
     sender: { $ne: user._id },
     "seenBy.user": { $ne: user._id },
+    deletedForEveryoneAt: null,
+    "deletedForUsers.user": { $ne: user._id },
   };
   const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
   if (clearedAt) {
@@ -1206,7 +1297,10 @@ const markMessageDelivered = async ({ user, messageId }) => {
   });
 
   const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
-  if (isOnOrBeforeMarker({ value: message.createdAt, marker: clearedAt })) {
+  if (
+    isOnOrBeforeMarker({ value: message.createdAt, marker: clearedAt })
+    || isMessageDeletedForUser({ message, userId: user._id })
+  ) {
     throw createHttpError(404, "Message not found");
   }
 
@@ -1240,7 +1334,10 @@ const markMessageSeen = async ({ user, messageId }) => {
   });
 
   const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
-  if (isOnOrBeforeMarker({ value: message.createdAt, marker: clearedAt })) {
+  if (
+    isOnOrBeforeMarker({ value: message.createdAt, marker: clearedAt })
+    || isMessageDeletedForUser({ message, userId: user._id })
+  ) {
     throw createHttpError(404, "Message not found");
   }
 
@@ -1269,6 +1366,118 @@ const markMessageSeen = async ({ user, messageId }) => {
   return {
     roomId: room._id,
     message: toMessageDto(populatedMessage),
+  };
+};
+
+const deleteMessageForUser = async ({ user, messageId, scope = "self" }) => {
+  ensureObjectId(messageId, "message id");
+  const normalizedScope = sanitizeText(scope).toLowerCase() === "everyone"
+    ? "everyone"
+    : "self";
+
+  const message = await ChatMessage.findById(messageId);
+  if (!message) {
+    throw createHttpError(404, "Message not found");
+  }
+
+  const room = await getRoomByIdForUser({
+    user,
+    roomId: message.room,
+  });
+
+  if (normalizedScope === "everyone") {
+    if (!isAdminRole(user.role)) {
+      throw createHttpError(403, "Only admin can delete messages for everyone");
+    }
+    if (toObjectIdString(message.sender) !== toObjectIdString(user._id)) {
+      throw createHttpError(403, "You can delete for everyone only your own messages");
+    }
+
+    if (!message.deletedForEveryoneAt) {
+      const deletedAt = new Date();
+      message.deletedForEveryoneAt = deletedAt;
+      message.deletedForEveryoneBy = user._id;
+      await message.save();
+
+      const roomDoc = await ChatRoom.findById(room._id);
+      if (!roomDoc) {
+        throw createHttpError(404, "Chat room not found");
+      }
+
+      await syncUnreadCountsForRoom({ room: roomDoc });
+      await roomDoc.save();
+    }
+
+    const rebuiltRoom = await rebuildRoomLastMessage({ roomId: room._id });
+    return {
+      roomId: room._id,
+      messageId: message._id,
+      scope: normalizedScope,
+      deletedBy: user._id,
+      deletedAt: message.deletedForEveryoneAt,
+      room: toRoomDto(rebuiltRoom, user._id),
+      participantIds: (rebuiltRoom?.participants || []).map((participant) => participant._id),
+    };
+  }
+
+  const clearedAt = getUserClearedAt(room.clearedMessagesAt, user._id);
+  if (
+    isOnOrBeforeMarker({ value: message.createdAt, marker: clearedAt })
+    || isMessageDeletedForUser({ message, userId: user._id })
+  ) {
+    throw createHttpError(404, "Message not found");
+  }
+
+  const deletedAt = new Date();
+  message.deletedForUsers.push({ user: user._id, at: deletedAt });
+  await message.save();
+
+  const roomDoc = await ChatRoom.findById(room._id);
+  if (!roomDoc) {
+    throw createHttpError(404, "Chat room not found");
+  }
+  await syncUnreadCountForUser({ room: roomDoc, userId: user._id });
+  await roomDoc.save();
+
+  const populatedRoom = await applyRoomPopulates(ChatRoom.findById(room._id)).lean();
+  return {
+    roomId: room._id,
+    messageId: message._id,
+    scope: normalizedScope,
+    deletedBy: user._id,
+    deletedAt,
+    room: toRoomDto(populatedRoom, user._id),
+  };
+};
+
+const clearRoomMessagesForUser = async ({ user, roomId }) => {
+  const room = await getRoomByIdForUser({ user, roomId });
+  const now = new Date();
+  const clearedRows = Array.isArray(room.clearedMessagesAt) ? [...room.clearedMessagesAt] : [];
+  const rowIndex = clearedRows.findIndex(
+    (row) => toObjectIdString(row.user) === toObjectIdString(user._id),
+  );
+
+  if (rowIndex >= 0) {
+    clearedRows[rowIndex] = {
+      ...clearedRows[rowIndex],
+      user: clearedRows[rowIndex].user || user._id,
+      at: now,
+    };
+  } else {
+    clearedRows.push({ user: user._id, at: now });
+  }
+
+  room.clearedMessagesAt = clearedRows;
+  resetUnreadCountForUser({ room, userId: user._id });
+  await room.save();
+
+  const populatedRoom = await applyRoomPopulates(ChatRoom.findById(room._id)).lean();
+  return {
+    roomId: room._id,
+    userId: user._id,
+    clearedAt: now,
+    room: toRoomDto(populatedRoom, user._id),
   };
 };
 
@@ -1341,6 +1550,8 @@ module.exports = {
   markRoomAsRead,
   markMessageDelivered,
   markMessageSeen,
+  deleteMessageForUser,
+  clearRoomMessagesForUser,
   listEscalationRooms,
   listEscalationLogs,
   getRoomByIdForUser,

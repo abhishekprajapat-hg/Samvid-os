@@ -71,7 +71,7 @@ router.get(
 router.post(
   "/update/:inventoryId",
   writeLimiter,
-  authMiddleware.checkRole(["FIELD_EXECUTIVE", "EXECUTIVE"]),
+  authMiddleware.checkRole(["FIELD_EXECUTIVE", "EXECUTIVE", "TEAM_LEADER", "ASSISTANT_MANAGER", "MANAGER"]),
   inventoryRequestController.updateRequest,
 );
 

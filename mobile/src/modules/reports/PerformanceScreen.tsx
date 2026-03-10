@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
 import Svg, { Circle, Line, Polyline, Rect, Text as SvgText } from "react-native-svg";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
@@ -189,8 +190,10 @@ const WebDateInput = ({
 };
 
 export const PerformanceScreen = () => {
-  const { role } = useAuth();
+  const navigation = useNavigation<any>();
+  const { role, user } = useAuth();
   const isAdmin = role === "ADMIN";
+  const loggedInUserId = String(user?._id || user?.id || "");
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -416,9 +419,21 @@ export const PerformanceScreen = () => {
       .slice(0, 10);
   }, [users, scopedLeads]);
 
+  const pinnedLeaderboard = useMemo(() => {
+    if (!loggedInUserId) return leaderboard;
+    const idx = leaderboard.findIndex((row) => String(row.id || "") === loggedInUserId);
+    if (idx <= 0) return leaderboard;
+    const currentUserRow = leaderboard[idx];
+    return [
+      currentUserRow,
+      ...leaderboard.slice(0, idx),
+      ...leaderboard.slice(idx + 1),
+    ];
+  }, [leaderboard, loggedInUserId]);
+
   const selectedLeaderboardRow = useMemo(
-    () => leaderboard.find((row) => row.id === selectedLeaderboardUserId) || null,
-    [leaderboard, selectedLeaderboardUserId],
+    () => pinnedLeaderboard.find((row) => row.id === selectedLeaderboardUserId) || null,
+    [pinnedLeaderboard, selectedLeaderboardUserId],
   );
 
   const selectedLeaderboardLeads = useMemo(() => {
@@ -570,6 +585,14 @@ export const PerformanceScreen = () => {
     setCustomFromDate(parsedFrom);
     setCustomToDate(parsedTo);
     setWebCustomPickerVisible(false);
+  };
+
+  const openLeadDetails = (leadId?: string) => {
+    const resolvedLeadId = String(leadId || "").trim();
+    if (!resolvedLeadId) return;
+    setLeaderboardDetailsVisible(false);
+    setMetricDetailsVisible(false);
+    navigation.navigate("LeadDetails", { leadId: resolvedLeadId });
   };
 
   return (
@@ -725,66 +748,6 @@ export const PerformanceScreen = () => {
         </View>
 
         <AppCard style={styles.sectionCard as object}>
-          <Text style={styles.sectionTitle}>Role Performance Graph</Text>
-          <Text style={styles.sectionSubTitle}>
-            {range === "ALL" ? "Weekly throughput across all data" : `Weekly throughput for ${periodLabel}`}
-          </Text>
-          <View style={styles.graphSplit}>
-            <View style={styles.velocityPanel}>
-              <Text style={styles.metricLabel}>Close Velocity</Text>
-              <View style={styles.velocityScoreRow}>
-                <CircularScore percent={snapshot.totalLeads ? (snapshot.closed / snapshot.totalLeads) * 100 : 0} />
-                <View style={styles.velocityTextWrap}>
-                  <Text style={styles.velocityPercent}>
-                    {Math.round(snapshot.totalLeads ? (snapshot.closed / snapshot.totalLeads) * 100 : 0)}%
-                  </Text>
-                  <Text style={styles.meta}>Closed {snapshot.closed} / Created {snapshot.totalLeads}</Text>
-                </View>
-              </View>
-            </View>
-            <View style={styles.chartPanel}>
-              <MiniLineChart rows={snapshot.weekly} />
-            </View>
-          </View>
-        </AppCard>
-
-        <AppCard style={styles.sectionCard as object}>
-          <Text style={styles.sectionTitle}>Live Leaderboard</Text>
-          <Text style={styles.sectionSubTitle}>Who is doing how much work (% score)</Text>
-          {leaderboard.length === 0 ? (
-            <Text style={styles.meta}>No visible users found for selected range.</Text>
-          ) : (
-            leaderboard.map((row, index) => (
-              <Pressable
-                key={`${row.id}-${index}`}
-                style={styles.leaderRow}
-                onPress={() => {
-                  setSelectedLeaderboardUserId(row.id);
-                  setLeaderboardDetailsVisible(true);
-                }}
-              >
-                <View style={styles.leaderTopRow}>
-                  <View style={styles.leaderRank}>
-                    <Text style={styles.leaderRankText}>#{index + 1}</Text>
-                  </View>
-                  <View style={styles.leaderInfo}>
-                    <Text style={styles.leaderName}>{row.name}</Text>
-                    <Text style={styles.meta}>{row.role}</Text>
-                  </View>
-                  <View style={styles.leaderScoreWrap}>
-                    <CircularScore percent={row.scorePercent} />
-                  </View>
-                </View>
-                <Text style={styles.meta}>Leads {row.assigned} | Visits {row.visits} | Closed {row.closed}</Text>
-                <View style={styles.leaderTrack}>
-                  <View style={[styles.leaderFill, { width: `${clampPercent(row.scorePercent)}%` }]} />
-                </View>
-              </Pressable>
-            ))
-          )}
-        </AppCard>
-
-        <AppCard style={styles.sectionCard as object}>
           <Text style={styles.sectionTitle}>Hierarchy Targets</Text>
           <Text style={styles.sectionSubTitle}>Monthly assignment + progress tracking</Text>
           <Text style={styles.meta}>Target month: {month}</Text>
@@ -923,7 +886,12 @@ export const PerformanceScreen = () => {
                 <Text style={styles.meta}>No assigned leads in selected range.</Text>
               ) : (
                 selectedLeaderboardLeads.map((lead) => (
-                  <View key={String(lead._id)} style={styles.targetRow}>
+                  <Pressable
+                    key={String(lead._id)}
+                    style={styles.targetRow}
+                    onPress={() => openLeadDetails(String(lead._id || ""))}
+                    disabled={!lead?._id}
+                  >
                     <Text style={styles.targetName}>{lead.name || "Lead"}</Text>
                     <Text style={styles.meta}>Status: {String(lead.status || "-")}</Text>
                     <Text style={styles.meta}>Phone: {String(lead.phone || "-")}</Text>
@@ -931,7 +899,7 @@ export const PerformanceScreen = () => {
                     <Text style={styles.meta}>
                       Updated: {lead.updatedAt ? new Date(lead.updatedAt).toLocaleString("en-IN") : "-"}
                     </Text>
-                  </View>
+                  </Pressable>
                 ))
               )}
             </ScrollView>
@@ -952,7 +920,12 @@ export const PerformanceScreen = () => {
                 <Text style={styles.meta}>No related data in selected range.</Text>
               ) : (
                 selectedMetricLeads.map((lead) => (
-                  <View key={String(lead._id)} style={styles.targetRow}>
+                  <Pressable
+                    key={String(lead._id)}
+                    style={styles.targetRow}
+                    onPress={() => openLeadDetails(String(lead._id || ""))}
+                    disabled={!lead?._id}
+                  >
                     <Text style={styles.targetName}>{lead.name || "Lead"}</Text>
                     <Text style={styles.meta}>Status: {String(lead.status || "-")}</Text>
                     <Text style={styles.meta}>Phone: {String(lead.phone || "-")}</Text>
@@ -967,7 +940,7 @@ export const PerformanceScreen = () => {
                         </Text>
                       ))
                       : null}
-                  </View>
+                  </Pressable>
                 ))
               )}
             </ScrollView>

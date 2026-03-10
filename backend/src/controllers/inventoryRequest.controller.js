@@ -39,6 +39,7 @@ exports.updateRequest = async (req, res) => {
       inventoryId: req.params.inventoryId,
       payload: req.body?.proposedData || req.body?.proposedChanges || req.body,
       requestNote: req.body?.requestNote,
+      relatedLeadId: req.body?.relatedLeadId || req.body?.leadId,
       io: req.app.get("io"),
     });
 

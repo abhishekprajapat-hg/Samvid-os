@@ -143,6 +143,20 @@ const chatMessageSchema = new mongoose.Schema(
       type: [recipientStatusSchema],
       default: [],
     },
+    deletedForUsers: {
+      type: [recipientStatusSchema],
+      default: [],
+    },
+    deletedForEveryoneAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
+    deletedForEveryoneBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
     sharedProperty: {
       type: sharedPropertySchema,
       default: null,

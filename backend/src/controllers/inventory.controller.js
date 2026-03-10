@@ -26,6 +26,7 @@ const INVENTORY_SELECTABLE_FIELDS = [
   "category",
   "status",
   "reservationReason",
+  "reservationLeadId",
   "saleDetails",
   "location",
   "siteLocation",
@@ -73,6 +74,15 @@ const toLegacyAsset = (inventory, role) => {
     category: toLegacyCategory(inventory.category),
     status: toLegacyStatus(inventory.status),
     reservationReason: inventory.reservationReason || "",
+    reservationLeadId: inventory.reservationLeadId?._id || inventory.reservationLeadId || null,
+    reservationLead: inventory.reservationLeadId
+      ? {
+        _id: inventory.reservationLeadId._id || inventory.reservationLeadId,
+        name: inventory.reservationLeadId.name || "",
+        phone: inventory.reservationLeadId.phone || "",
+        status: inventory.reservationLeadId.status || "",
+      }
+      : null,
     saleDetails: inventory.saleDetails || null,
     siteLocation: inventory.siteLocation || { lat: null, lng: null },
     images: Array.isArray(inventory.images) ? inventory.images : [],
@@ -104,6 +114,15 @@ const toFieldExecutiveInventoryView = (inventory) => ({
   category: toLegacyCategory(inventory.category),
   status: inventory.status,
   reservationReason: inventory.reservationReason || "",
+  reservationLeadId: inventory.reservationLeadId?._id || inventory.reservationLeadId || null,
+  reservationLead: inventory.reservationLeadId
+    ? {
+      _id: inventory.reservationLeadId._id || inventory.reservationLeadId,
+      name: inventory.reservationLeadId.name || "",
+      phone: inventory.reservationLeadId.phone || "",
+      status: inventory.reservationLeadId.status || "",
+    }
+    : null,
   saleDetails: inventory.saleDetails || null,
   location: inventory.location,
   siteLocation: inventory.siteLocation || { lat: null, lng: null },

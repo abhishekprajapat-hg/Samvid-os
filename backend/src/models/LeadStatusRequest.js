@@ -22,7 +22,7 @@ const leadStatusRequestSchema = new mongoose.Schema(
     },
     proposedStatus: {
       type: String,
-      enum: ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "CLOSED", "LOST"],
+      enum: ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED", "CLOSED", "LOST"],
       required: true,
     },
     proposedNextFollowUp: {
@@ -87,6 +87,19 @@ const leadStatusRequestSchema = new mongoose.Schema(
       size: { type: Number, default: 0 },
       storagePath: { type: String, trim: true, default: "" },
     },
+    closureDocuments: [
+      {
+        url: { type: String, trim: true, required: true },
+        kind: {
+          type: String,
+          enum: ["image", "pdf", "file"],
+          default: "file",
+        },
+        mimeType: { type: String, trim: true, default: "" },
+        name: { type: String, trim: true, default: "" },
+        size: { type: Number, default: 0 },
+      },
+    ],
     requestNote: {
       type: String,
       required: true,

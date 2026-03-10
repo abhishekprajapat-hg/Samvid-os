@@ -3,6 +3,7 @@ const User = require("../models/User");
 const Inventory = require("../models/Inventory");
 const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
+const LeadStatusRequest = require("../models/LeadStatusRequest");
 const logger = require("../config/logger");
 const {
   autoAssignLead,
@@ -137,11 +138,13 @@ const SITE_VISIT_MAX_LOCATION_STALE_MINUTES =
 const MAX_LEAD_DIARY_NOTE_LENGTH = 2000;
 const MAX_PAYMENT_NOTE_LENGTH = 1000;
 const MAX_PAYMENT_REFERENCE_LENGTH = 120;
+const PERFORMANCE_WEEK_BUCKETS = 8;
 const MAX_CLOSURE_DOCUMENTS = 20;
 const MAX_CLOSURE_DOCUMENT_URL_LENGTH = 2048;
 const MAX_CLOSURE_DOCUMENT_NAME_LENGTH = 180;
 const MAX_CLOSURE_DOCUMENT_MIME_LENGTH = 120;
 const MAX_CLOSURE_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024;
+const MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH = 500;
 
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -647,6 +650,209 @@ const buildLeadQueryForUser = async (user) => {
   return null;
 };
 
+const normalizeDateBoundary = (rawValue, boundary = "start") => {
+  if (!rawValue) return null;
+  const parsed = new Date(String(rawValue));
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (boundary === "end") {
+    parsed.setHours(23, 59, 59, 999);
+  } else {
+    parsed.setHours(0, 0, 0, 0);
+  }
+  return parsed;
+};
+
+const parsePerformanceRange = (query = {}) => {
+  const normalizedRange = String(query?.range || "ALL")
+    .trim()
+    .toUpperCase();
+
+  if (normalizedRange === "ALL") {
+    return {
+      range: "ALL",
+      startAt: null,
+      endAt: null,
+      periodLabel: "All data",
+    };
+  }
+
+  if (normalizedRange === "THIS_MONTH") {
+    const monthValue = String(query?.month || "").trim();
+    let targetMonthDate = new Date();
+
+    if (monthValue) {
+      if (!/^\d{4}-\d{2}$/.test(monthValue)) {
+        return { error: "month must be in YYYY-MM format" };
+      }
+      const [year, month] = monthValue.split("-").map((value) => Number.parseInt(value, 10));
+      targetMonthDate = new Date(year, month - 1, 1);
+    }
+
+    if (Number.isNaN(targetMonthDate.getTime())) {
+      return { error: "Invalid month value" };
+    }
+
+    const startAt = new Date(targetMonthDate.getFullYear(), targetMonthDate.getMonth(), 1, 0, 0, 0, 0);
+    const endAt = new Date(targetMonthDate.getFullYear(), targetMonthDate.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    return {
+      range: "THIS_MONTH",
+      startAt,
+      endAt,
+      periodLabel: targetMonthDate.toLocaleString("en-IN", { month: "long", year: "numeric" }),
+    };
+  }
+
+  if (normalizedRange === "CUSTOM") {
+    const startAt = normalizeDateBoundary(query?.from, "start");
+    const endAt = normalizeDateBoundary(query?.to, "end");
+
+    if (!startAt || !endAt) {
+      return { error: "from and to dates are required in YYYY-MM-DD format" };
+    }
+
+    if (endAt < startAt) {
+      return { error: "to date cannot be before from date" };
+    }
+
+    return {
+      range: "CUSTOM",
+      startAt,
+      endAt,
+      periodLabel: `${startAt.toLocaleDateString("en-IN")} to ${endAt.toLocaleDateString("en-IN")}`,
+    };
+  }
+
+  return { error: "Invalid range value" };
+};
+
+const getLeadTimelineDate = (lead) => {
+  const raw = lead?.updatedAt || lead?.createdAt;
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const toWeekBuckets = (anchorDate, weeks = PERFORMANCE_WEEK_BUCKETS) => {
+  const end = new Date(anchorDate);
+  end.setHours(23, 59, 59, 999);
+  const buckets = [];
+  for (let i = weeks - 1; i >= 0; i -= 1) {
+    const weekEnd = new Date(end);
+    weekEnd.setDate(end.getDate() - i * 7);
+    const weekStart = new Date(weekEnd);
+    weekStart.setDate(weekEnd.getDate() - 6);
+    weekStart.setHours(0, 0, 0, 0);
+    buckets.push({
+      label: `${weekStart.getDate()} ${weekStart.toLocaleString("en-IN", { month: "short" })}`,
+      start: weekStart,
+      end: weekEnd,
+      created: 0,
+      closed: 0,
+      open: 0,
+    });
+  }
+  return buckets;
+};
+
+const findWeekBucketIndex = (rawDate, buckets) => {
+  if (!rawDate) return -1;
+  const parsed = new Date(rawDate);
+  if (Number.isNaN(parsed.getTime())) return -1;
+  return buckets.findIndex((bucket) => parsed >= bucket.start && parsed <= bucket.end);
+};
+
+const buildCompanyPerformanceOverview = ({
+  leads,
+  users,
+  periodEndDate,
+}) => {
+  const totalLeads = leads.length;
+  const closed = leads.filter((lead) => String(lead.status || "").toUpperCase() === "CLOSED").length;
+  const closeVelocity = totalLeads > 0 ? (closed / totalLeads) * 100 : 0;
+
+  const anchorDate = periodEndDate
+    || leads
+      .map((lead) => getLeadTimelineDate(lead))
+      .filter((value) => value instanceof Date)
+      .sort((a, b) => b.getTime() - a.getTime())[0]
+    || new Date();
+
+  const weekBuckets = toWeekBuckets(anchorDate, PERFORMANCE_WEEK_BUCKETS);
+  leads.forEach((lead) => {
+    const createdIdx = findWeekBucketIndex(lead.createdAt, weekBuckets);
+    if (createdIdx >= 0) {
+      weekBuckets[createdIdx].created += 1;
+    }
+
+    if (String(lead.status || "").toUpperCase() === "CLOSED") {
+      const closedIdx = findWeekBucketIndex(lead.updatedAt || lead.createdAt, weekBuckets);
+      if (closedIdx >= 0) {
+        weekBuckets[closedIdx].closed += 1;
+      }
+    }
+  });
+  weekBuckets.forEach((bucket) => {
+    bucket.open = Math.max(0, bucket.created - bucket.closed);
+  });
+
+  const leaderboardRows = new Map();
+  users.forEach((user) => {
+    const role = String(user?.role || "").toUpperCase();
+    if (role === USER_ROLES.ADMIN) return;
+    const id = String(user?._id || "");
+    if (!id) return;
+    leaderboardRows.set(id, {
+      id,
+      name: String(user?.name || "User"),
+      role,
+      assigned: 0,
+      closed: 0,
+      visits: 0,
+      scorePercent: 0,
+    });
+  });
+
+  leads.forEach((lead) => {
+    const assigned = lead?.assignedTo;
+    if (!assigned || typeof assigned !== "object") return;
+    const id = String(assigned?._id || "");
+    if (!id) return;
+    const row = leaderboardRows.get(id);
+    if (!row) return;
+    row.assigned += 1;
+    const status = String(lead.status || "").toUpperCase();
+    if (status === "CLOSED") row.closed += 1;
+    if (status === "SITE_VISIT") row.visits += 1;
+  });
+
+  const leaderboard = Array.from(leaderboardRows.values())
+    .map((row) => {
+      const closeRate = row.assigned > 0 ? (row.closed / row.assigned) * 100 : 0;
+      const visitRate = row.assigned > 0 ? (row.visits / row.assigned) * 100 : 0;
+      return {
+        ...row,
+        scorePercent: Math.max(0, Math.min(100, Math.round(closeRate * 0.8 + visitRate * 0.2))),
+      };
+    })
+    .sort((a, b) => b.scorePercent - a.scorePercent || b.closed - a.closed || b.assigned - a.assigned);
+
+  return {
+    summary: {
+      totalLeads,
+      closed,
+      closeVelocity,
+    },
+    weekly: weekBuckets.map((row) => ({
+      label: row.label,
+      created: row.created,
+      closed: row.closed,
+      open: row.open,
+    })),
+    leaderboard,
+  };
+};
+
 const findAccessibleLeadById = async ({ leadId, user }) => {
   if (!isValidObjectId(leadId)) {
     return null;
@@ -852,6 +1058,75 @@ exports.getAllLeads = async (req, res) => {
   }
 };
 
+exports.getCompanyPerformanceOverview = async (req, res) => {
+  try {
+    if (!req.user?.companyId) {
+      return res.status(403).json({ message: "Company context is required" });
+    }
+
+    const rangeMeta = parsePerformanceRange(req.query || {});
+    if (rangeMeta?.error) {
+      return res.status(400).json({ message: rangeMeta.error });
+    }
+
+    const companyUsers = await User.find({ companyId: req.user.companyId })
+      .select("_id name role isActive")
+      .lean();
+
+    const companyUserIds = companyUsers
+      .map((user) => user?._id)
+      .filter(Boolean);
+
+    const leadScopeQuery = companyUserIds.length
+      ? {
+        $or: [
+          { assignedTo: { $in: companyUserIds } },
+          { createdBy: { $in: companyUserIds } },
+          { assignedManager: { $in: companyUserIds } },
+          { assignedExecutive: { $in: companyUserIds } },
+          { assignedFieldExecutive: { $in: companyUserIds } },
+        ],
+      }
+      : { _id: null };
+
+    const leadRows = await Lead.find(leadScopeQuery)
+      .select("_id status createdAt updatedAt assignedTo")
+      .populate({ path: "assignedTo", select: "name role" })
+      .lean();
+
+    const scopedLeads = leadRows.filter((lead) => {
+      const leadDate = getLeadTimelineDate(lead);
+      if (!leadDate) return false;
+      if (rangeMeta.startAt && leadDate < rangeMeta.startAt) return false;
+      if (rangeMeta.endAt && leadDate > rangeMeta.endAt) return false;
+      return true;
+    });
+
+    const leaderboardUsers = companyUsers.filter((user) => user?.isActive !== false);
+    const overview = buildCompanyPerformanceOverview({
+      leads: scopedLeads,
+      users: leaderboardUsers,
+      periodEndDate: rangeMeta.endAt || null,
+    });
+
+    return res.json({
+      overview: {
+        ...overview,
+        range: rangeMeta.range,
+        periodLabel: rangeMeta.periodLabel,
+        generatedAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getCompanyPerformanceOverview failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.assignLead = async (req, res) => {
   try {
     const { leadId } = req.params;
@@ -974,10 +1249,13 @@ exports.addRelatedPropertyToLead = async (req, res) => {
         companyId: req.user.companyId,
       }),
     )
-      .select("_id projectName towerName unitNumber location siteLocation")
+      .select("_id projectName towerName unitNumber location siteLocation status")
       .lean();
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
+    }
+    if (String(inventory.status || "").trim().toLowerCase() !== "available") {
+      return res.status(400).json({ message: "Only available properties can be linked" });
     }
 
     const lead = await Lead.findById(leadId);
@@ -1235,6 +1513,97 @@ exports.getLeadPaymentRequests = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "getLeadPaymentRequests failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateLeadBasics = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    if (!isValidObjectId(leadId)) {
+      return res.status(400).json({ message: "Invalid lead id" });
+    }
+
+    const accessibleLead = await findAccessibleLeadById({
+      leadId,
+      user: req.user,
+    });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const lead = await Lead.findById(leadId);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const nextName = String(req.body?.name || "").trim();
+    const nextPhone = String(req.body?.phone || "").trim();
+    const nextEmail = String(req.body?.email || "").trim();
+    const nextCity = String(req.body?.city || "").trim();
+    const nextProjectInterested = String(req.body?.projectInterested || "").trim();
+    const nextSource = String(req.body?.source || "").trim();
+
+    if (nextName && nextName.length < 2) {
+      return res.status(400).json({ message: "Name must be at least 2 characters" });
+    }
+
+    if (nextPhone && !/^\d{8,15}$/.test(nextPhone)) {
+      return res.status(400).json({ message: "Phone should be 8 to 15 digits" });
+    }
+
+    if (nextEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      return res.status(400).json({ message: "Email is invalid" });
+    }
+
+    const updates = [];
+    if (nextName && nextName !== String(lead.name || "")) {
+      lead.name = nextName;
+      updates.push("name");
+    }
+    if (nextPhone && nextPhone !== String(lead.phone || "")) {
+      lead.phone = nextPhone;
+      updates.push("phone");
+    }
+    if (req.body?.email !== undefined && nextEmail !== String(lead.email || "")) {
+      lead.email = nextEmail;
+      updates.push("email");
+    }
+    if (req.body?.city !== undefined && nextCity !== String(lead.city || "")) {
+      lead.city = nextCity;
+      updates.push("city");
+    }
+    if (req.body?.projectInterested !== undefined && nextProjectInterested !== String(lead.projectInterested || "")) {
+      lead.projectInterested = nextProjectInterested;
+      updates.push("projectInterested");
+    }
+    if (req.body?.source !== undefined && nextSource !== String(lead.source || "")) {
+      lead.source = nextSource;
+      updates.push("source");
+    }
+
+    if (!updates.length) {
+      return res.json({ message: "No profile changes", lead: await getLeadViewById(lead._id) });
+    }
+
+    await lead.save();
+    await LeadActivity.create({
+      lead: lead._id,
+      action: `Lead profile updated (${updates.join(", ")})`,
+      performedBy: req.user._id,
+    });
+
+    const populatedLead = await getLeadViewById(lead._id);
+    return res.json({
+      message: "Lead profile updated",
+      lead: populatedLead,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "updateLeadBasics failed",
     });
     return res.status(500).json({ message: "Server error" });
   }
@@ -1565,7 +1934,14 @@ exports.updateLeadStatus = async (req, res) => {
     lead.status = nextLeadStatus;
     lead.lastContactedAt = new Date();
 
-    if (nextFollowUp) {
+    const shouldClearNextFollowUp =
+      nextFollowUp === null
+      || String(nextFollowUp || "").trim().toLowerCase() === "null"
+      || String(nextFollowUp || "").trim() === "";
+
+    if (shouldClearNextFollowUp) {
+      lead.nextFollowUp = undefined;
+    } else if (nextFollowUp) {
       lead.nextFollowUp = new Date(nextFollowUp);
     }
 
@@ -1620,6 +1996,310 @@ exports.updateLeadStatus = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "updateLeadStatus failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.requestLeadStatusChange = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    if (!isValidObjectId(leadId)) {
+      return res.status(400).json({ message: "Invalid lead id" });
+    }
+
+    const accessibleLead = await findAccessibleLeadById({ leadId, user: req.user });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const proposedStatus = String(req.body?.status || "").trim().toUpperCase();
+    if (!LEAD_STATUS_VALUES.includes(proposedStatus)) {
+      return res.status(400).json({ message: "Invalid status" });
+    }
+
+    const requestNote = String(req.body?.requestNote || "").trim();
+    if (!requestNote) {
+      return res.status(400).json({ message: "Request note is required" });
+    }
+    if (requestNote.length > MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH) {
+      return res.status(400).json({
+        message: `Request note cannot exceed ${MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH} characters`,
+      });
+    }
+
+    let proposedNextFollowUp = null;
+    if (req.body?.nextFollowUp) {
+      const parsed = new Date(req.body.nextFollowUp);
+      if (Number.isNaN(parsed.getTime())) {
+        return res.status(400).json({ message: "Invalid nextFollowUp date" });
+      }
+      proposedNextFollowUp = parsed;
+    }
+
+    const payload = {
+      companyId: accessibleLead.companyId || req.user.companyId,
+      lead: accessibleLead._id,
+      requestedBy: req.user._id,
+      proposedStatus,
+      proposedNextFollowUp,
+      requestNote,
+      status: "pending",
+      proposedSaleMeta:
+        req.body?.saleMeta && typeof req.body.saleMeta === "object"
+          ? req.body.saleMeta
+          : undefined,
+      attachment:
+        req.body?.attachment && typeof req.body.attachment === "object"
+          ? req.body.attachment
+          : undefined,
+      closureDocuments: Array.isArray(req.body?.closureDocuments)
+        ? req.body.closureDocuments
+            .map((row) => ({
+              url: String(row?.url || "").trim(),
+              kind: String(row?.kind || "file").trim().toLowerCase(),
+              mimeType: String(row?.mimeType || "").trim(),
+              name: String(row?.name || "").trim(),
+              size: Number(row?.size || 0),
+            }))
+            .filter((row) => Boolean(row.url))
+        : undefined,
+    };
+
+    const created = await LeadStatusRequest.create(payload);
+
+    await LeadActivity.create({
+      lead: accessibleLead._id,
+      action: `Status approval requested: ${proposedStatus}`,
+      performedBy: req.user._id,
+    });
+
+    const request = await LeadStatusRequest.findById(created._id)
+      .populate("requestedBy", "name role")
+      .populate("lead", "name status nextFollowUp")
+      .lean();
+
+    return res.status(201).json({
+      message: "Status change request submitted",
+      request,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "requestLeadStatusChange failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getLeadStatusRequests = async (req, res) => {
+  try {
+    const query = {
+      companyId: req.user.companyId,
+    };
+    const leadId = String(req.query?.leadId || "").trim();
+    if (leadId) {
+      if (!isValidObjectId(leadId)) {
+        return res.status(400).json({ message: "Invalid lead id" });
+      }
+      const accessibleLead = await findAccessibleLeadById({ leadId, user: req.user });
+      if (!accessibleLead) {
+        return res.status(404).json({ message: "Lead not found" });
+      }
+      query.lead = leadId;
+    }
+
+    const requestedStatus = String(req.query?.status || "").trim().toLowerCase();
+    if (requestedStatus) {
+      const allowedStatuses = ["pending", "approved", "rejected"];
+      if (!allowedStatuses.includes(requestedStatus)) {
+        return res.status(400).json({ message: "Invalid request status filter" });
+      }
+      query.status = requestedStatus;
+    }
+
+    const isAdmin = req.user.role === USER_ROLES.ADMIN;
+    if (!isAdmin && !isManagementRole(req.user.role)) {
+      query.requestedBy = req.user._id;
+    }
+
+    const requests = await LeadStatusRequest.find(query)
+      .populate("requestedBy", "name role")
+      .populate("reviewedBy", "name role")
+      .populate("lead", "name status nextFollowUp")
+      .sort({ createdAt: -1 })
+      .limit(200)
+      .lean();
+
+    return res.json({ requests });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getLeadStatusRequests failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getPendingLeadStatusRequests = async (req, res) => {
+  try {
+    const query = {
+      companyId: req.user.companyId,
+      status: "pending",
+    };
+    const leadId = String(req.query?.leadId || "").trim();
+    if (leadId) {
+      if (!isValidObjectId(leadId)) {
+        return res.status(400).json({ message: "Invalid lead id" });
+      }
+      query.lead = leadId;
+    }
+
+    const requests = await LeadStatusRequest.find(query)
+      .populate("requestedBy", "name role")
+      .populate("lead", "name status nextFollowUp")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return res.json({ requests });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getPendingLeadStatusRequests failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.approveLeadStatusRequest = async (req, res) => {
+  try {
+    const requestId = String(req.params?.requestId || "").trim();
+    if (!isValidObjectId(requestId)) {
+      return res.status(400).json({ message: "Invalid request id" });
+    }
+
+    const request = await LeadStatusRequest.findOne({
+      _id: requestId,
+      companyId: req.user.companyId,
+      status: "pending",
+    });
+    if (!request) {
+      return res.status(404).json({ message: "Pending request not found" });
+    }
+
+    const lead = await Lead.findById(request.lead);
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    lead.status = request.proposedStatus;
+    if (request.proposedNextFollowUp) {
+      lead.nextFollowUp = request.proposedNextFollowUp;
+    }
+    if (Array.isArray(request.closureDocuments) && request.closureDocuments.length) {
+      lead.closureDocuments = request.closureDocuments.map((row) => ({
+        url: String(row?.url || "").trim(),
+        kind: String(row?.kind || "file").trim().toLowerCase(),
+        mimeType: String(row?.mimeType || "").trim(),
+        name: String(row?.name || "").trim(),
+        size: Number(row?.size || 0),
+        uploadedBy: request.requestedBy || null,
+      }));
+    }
+    await lead.save();
+
+    request.status = "approved";
+    request.reviewedBy = req.user._id;
+    request.reviewedAt = new Date();
+    request.reviewNote = String(req.body?.reviewNote || "").trim().slice(0, 500);
+    request.rejectionReason = "";
+    await request.save();
+
+    await LeadActivity.create({
+      lead: lead._id,
+      action: `Status request approved: ${request.proposedStatus}`,
+      performedBy: req.user._id,
+    });
+
+    const populatedLead = await getLeadViewById(lead._id);
+    const populatedRequest = await LeadStatusRequest.findById(request._id)
+      .populate("requestedBy", "name role")
+      .populate("reviewedBy", "name role")
+      .populate("lead", "name status nextFollowUp")
+      .lean();
+
+    return res.json({
+      message: "Lead status request approved",
+      lead: populatedLead,
+      request: populatedRequest,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "approveLeadStatusRequest failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.rejectLeadStatusRequest = async (req, res) => {
+  try {
+    const requestId = String(req.params?.requestId || "").trim();
+    if (!isValidObjectId(requestId)) {
+      return res.status(400).json({ message: "Invalid request id" });
+    }
+
+    const rejectionReason = String(req.body?.rejectionReason || "").trim();
+    if (!rejectionReason) {
+      return res.status(400).json({ message: "Rejection reason is required" });
+    }
+    if (rejectionReason.length > MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH) {
+      return res.status(400).json({
+        message: `Rejection reason cannot exceed ${MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH} characters`,
+      });
+    }
+
+    const request = await LeadStatusRequest.findOne({
+      _id: requestId,
+      companyId: req.user.companyId,
+      status: "pending",
+    });
+    if (!request) {
+      return res.status(404).json({ message: "Pending request not found" });
+    }
+
+    request.status = "rejected";
+    request.reviewedBy = req.user._id;
+    request.reviewedAt = new Date();
+    request.rejectionReason = rejectionReason;
+    request.reviewNote = String(req.body?.reviewNote || "").trim().slice(0, 500);
+    await request.save();
+
+    await LeadActivity.create({
+      lead: request.lead,
+      action: `Status request rejected: ${request.proposedStatus}`,
+      performedBy: req.user._id,
+    });
+
+    const populatedRequest = await LeadStatusRequest.findById(request._id)
+      .populate("requestedBy", "name role")
+      .populate("reviewedBy", "name role")
+      .populate("lead", "name status nextFollowUp")
+      .lean();
+
+    return res.json({
+      message: "Lead status request rejected",
+      request: populatedRequest,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "rejectLeadStatusRequest failed",
     });
     return res.status(500).json({ message: "Server error" });
   }

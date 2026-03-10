@@ -2,6 +2,7 @@ import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { ActivityIndicator, View } from "react-native";
 import { AuthProvider, useAuth } from "../context/AuthContext";
+import { RealtimeAlertsProvider } from "../context/RealtimeAlertsContext";
 import { AuthStack } from "./AuthStack";
 import { RoleTabs } from "./RoleTabs";
 
@@ -25,8 +26,10 @@ const AppShell = () => {
 
 export const RootNavigator = () => (
   <AuthProvider>
-    <NavigationContainer>
-      <AppShell />
-    </NavigationContainer>
+    <RealtimeAlertsProvider>
+      <NavigationContainer>
+        <AppShell />
+      </NavigationContainer>
+    </RealtimeAlertsProvider>
   </AuthProvider>
 );

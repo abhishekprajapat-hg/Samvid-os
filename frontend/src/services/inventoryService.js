@@ -2,6 +2,9 @@ import api from "./api";
 
 export const getInventoryAssets = async (params = {}) => {
   const res = await api.get("/inventory", { params });
+  if (Array.isArray(res.data?.inventory) && res.data.inventory.length) {
+    return res.data.inventory;
+  }
   return res.data?.assets || [];
 };
 

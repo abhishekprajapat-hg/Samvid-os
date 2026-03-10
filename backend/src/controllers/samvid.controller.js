@@ -17,6 +17,99 @@ const normalizeQuery = (value) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const SAMVID_STOP_WORDS = new Set([
+  "show",
+  "me",
+  "please",
+  "need",
+  "i",
+  "is",
+  "the",
+  "and",
+  "of",
+  "for",
+  "to",
+  "a",
+  "an",
+  "my",
+  "this",
+  "that",
+  "details",
+  "detail",
+  "info",
+  "information",
+  "about",
+  "who",
+  "what",
+  "where",
+  "all",
+  "through",
+  "whom",
+  "assigned",
+]);
+
+const buildSearchRegex = (value) => {
+  const cleaned = normalizeQuery(value).toLowerCase();
+  if (!cleaned) return null;
+  const tokens = cleaned
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !SAMVID_STOP_WORDS.has(token));
+  if (!tokens.length) return null;
+  return new RegExp(tokens.map((token) => escapeRegex(token)).join("|"), "i");
+};
+
+const startOfDay = (date) => {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+
+const endOfDay = (date) => {
+  const next = new Date(date);
+  next.setHours(23, 59, 59, 999);
+  return next;
+};
+
+const getDateRangeFromQuery = (query) => {
+  const q = String(query || "").toLowerCase();
+  const now = new Date();
+
+  if (/\b(this month|current month|is month|is mahine|iss month|iss mahine)\b/.test(q)) {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return {
+      label: now.toLocaleString("en-IN", { month: "long", year: "numeric" }),
+      start: startOfDay(start),
+      end: endOfDay(end),
+    };
+  }
+
+  if (/\b(this week|current week|is week|is hafte|iss week|iss hafte)\b/.test(q)) {
+    const day = now.getDay();
+    const diffToMonday = day === 0 ? 6 : day - 1;
+    const start = new Date(now);
+    start.setDate(now.getDate() - diffToMonday);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return {
+      label: "this week",
+      start: startOfDay(start),
+      end: endOfDay(end),
+    };
+  }
+
+  if (/\b(today|aaj)\b/.test(q)) {
+    return {
+      label: "today",
+      start: startOfDay(now),
+      end: endOfDay(now),
+    };
+  }
+
+  return null;
+};
+
 const formatMoney = (value) => {
   const amount = Number(value || 0);
   if (!Number.isFinite(amount)) return "0";
@@ -114,8 +207,12 @@ const detectIntent = (query) => {
   const hasSold = /\b(sold|sell|bik|sold out)\b/.test(q);
   const hasInterested = /\b(interested|interest|ruchi)\b/.test(q);
   const hasPerformance = /\b(best performance|top performance|top performer|best performer|performance best)\b/.test(q);
-  const hasInventory = /\b(inventory|property|unit|project|flat|tower)\b/.test(q);
-  const hasLead = /\b(lead|customer|client|prospect)\b/.test(q);
+  const hasInventory = /\b(inventory|property|properties|unit|project|flat|tower|asset|assets)\b/.test(q);
+  const hasLead = /\b(lead|leads|customer|customers|client|clients|prospect|prospects)\b/.test(q);
+  const hasDetail = /\b(detail|details|info|information)\b/.test(q);
+
+  if (hasDetail && hasInventory) return "asset_details";
+  if (hasDetail && hasLead) return "lead_details";
 
   if (hasSold && hasInterested) return "sales_interest_snapshot";
   if (hasPerformance) return "best_performer";
@@ -126,7 +223,13 @@ const detectIntent = (query) => {
   return "overview";
 };
 
-const queryInventory = async ({ user, query }) => {
+const queryInventory = async ({
+  user,
+  query,
+  forcedStatus = "",
+  limit = 12,
+  detailed = false,
+}) => {
   const scope = getInventoryScopeForUser(user);
   if (!scope) {
     return {
@@ -135,17 +238,24 @@ const queryInventory = async ({ user, query }) => {
     };
   }
 
-  const regex = new RegExp(escapeRegex(query), "i");
-  const rows = await Inventory.find({
-    ...scope,
-    $or: [
+  const regex = buildSearchRegex(query);
+  const filter = { ...scope };
+  if (regex) {
+    filter.$or = [
       { projectName: { $regex: regex } },
       { towerName: { $regex: regex } },
       { unitNumber: { $regex: regex } },
       { location: { $regex: regex } },
       { status: { $regex: regex } },
-    ],
-  })
+      { category: { $regex: regex } },
+      { type: { $regex: regex } },
+    ];
+  }
+  if (forcedStatus) {
+    filter.status = forcedStatus;
+  }
+
+  const rows = await Inventory.find(filter)
     .populate({
       path: "saleMeta.leadId",
       select: "name phone assignedTo createdBy",
@@ -155,7 +265,7 @@ const queryInventory = async ({ user, query }) => {
       ],
     })
     .sort({ updatedAt: -1 })
-    .limit(12)
+    .limit(Math.max(1, Math.min(Number(limit || 12), 25)))
     .lean();
 
   const items = rows.map((row) => {
@@ -180,13 +290,33 @@ const queryInventory = async ({ user, query }) => {
     };
   }
 
+  if (detailed) {
+    const previewLines = items
+      .slice(0, 5)
+      .map(
+        (row, index) =>
+          `${index + 1}. ${row.label} | Status: ${row.status} | Location: ${row.location} | Price: Rs ${formatMoney(row.price)}`,
+      )
+      .join("\n");
+    return {
+      answer: `${items.length} asset record mile:\n${previewLines}`,
+      data: { inventory: items },
+    };
+  }
+
   return {
     answer: `${items.length} matching inventory record mile. Top match: ${items[0].label} (${items[0].status}, Rs ${formatMoney(items[0].price)}).`,
     data: { inventory: items },
   };
 };
 
-const queryLeads = async ({ user, query, forcedStatus = "" }) => {
+const queryLeads = async ({
+  user,
+  query,
+  forcedStatus = "",
+  limit = 12,
+  detailed = false,
+}) => {
   const scope = await getLeadScopeForUser(user);
   if (!scope) {
     return {
@@ -195,17 +325,18 @@ const queryLeads = async ({ user, query, forcedStatus = "" }) => {
     };
   }
 
-  const regex = new RegExp(escapeRegex(query), "i");
-  const filter = {
-    ...scope,
-    $or: [
+  const regex = buildSearchRegex(query);
+  const filter = { ...scope };
+  if (regex) {
+    filter.$or = [
       { name: { $regex: regex } },
       { phone: { $regex: regex } },
       { city: { $regex: regex } },
       { projectInterested: { $regex: regex } },
       { status: { $regex: regex } },
-    ],
-  };
+      { email: { $regex: regex } },
+    ];
+  }
 
   if (forcedStatus) {
     filter.status = forcedStatus;
@@ -216,7 +347,7 @@ const queryLeads = async ({ user, query, forcedStatus = "" }) => {
     .populate("createdBy", "name role")
     .populate("inventoryId", "projectName towerName unitNumber status")
     .sort({ updatedAt: -1 })
-    .limit(12)
+    .limit(Math.max(1, Math.min(Number(limit || 12), 25)))
     .lean();
 
   const leads = rows.map((row) => ({
@@ -238,13 +369,27 @@ const queryLeads = async ({ user, query, forcedStatus = "" }) => {
     };
   }
 
+  if (detailed) {
+    const previewLines = leads
+      .slice(0, 5)
+      .map(
+        (row, index) =>
+          `${index + 1}. ${row.name} | ${row.phone} | Status: ${row.status} | Assigned: ${row.assignee} | Project: ${row.projectInterested}`,
+      )
+      .join("\n");
+    return {
+      answer: `${leads.length} lead record mile:\n${previewLines}`,
+      data: { leads },
+    };
+  }
+
   return {
     answer: `${leads.length} matching leads mile. Top result: ${leads[0].name} (${leads[0].status}) assigned to ${leads[0].assignee}.`,
     data: { leads },
   };
 };
 
-const queryBestPerformer = async ({ user }) => {
+const queryBestPerformer = async ({ user, query }) => {
   const scope = await getLeadScopeForUser(user);
   if (!scope) {
     return {
@@ -253,8 +398,20 @@ const queryBestPerformer = async ({ user }) => {
     };
   }
 
+  const dateRange = getDateRangeFromQuery(query);
+  const match = {
+    ...scope,
+    assignedTo: { $ne: null },
+  };
+  if (dateRange) {
+    match.updatedAt = {
+      $gte: dateRange.start,
+      $lte: dateRange.end,
+    };
+  }
+
   const rows = await Lead.aggregate([
-    { $match: { ...scope, assignedTo: { $ne: null } } },
+    { $match: match },
     {
       $group: {
         _id: "$assignedTo",
@@ -320,8 +477,88 @@ const queryBestPerformer = async ({ user }) => {
   });
 
   return {
-    answer: `Best performer abhi ${performers[0].name} hai (${performers[0].closedLeads} closed leads, ${performers[0].conversionRate}% conversion).`,
+    answer: `Best performer ${dateRange?.label ? `for ${dateRange.label}` : "right now"} is ${performers[0].name} (${performers[0].closedLeads} closed leads, ${performers[0].conversionRate}% conversion).`,
     data: { performers },
+  };
+};
+
+const extractEntitySearchTerm = (query, type) => {
+  const source = normalizeQuery(query).toLowerCase();
+  if (!source) return "";
+
+  const leadWords = /\b(lead|leads|customer|customers|client|clients|prospect|prospects)\b/g;
+  const assetWords = /\b(asset|assets|inventory|property|properties|unit|project|flat|tower)\b/g;
+  const genericWords = /\b(show|give|fetch|details|detail|info|information|about|please|need|i|me|this|that)\b/g;
+
+  const withoutEntityWords =
+    type === "lead"
+      ? source.replace(leadWords, " ")
+      : source.replace(assetWords, " ");
+
+  return normalizeQuery(withoutEntityWords.replace(genericWords, " "));
+};
+
+const queryLeadDetails = async ({ user, query }) => {
+  const searchTerm = extractEntitySearchTerm(query, "lead");
+  if (!searchTerm) {
+    return queryLeads({
+      user,
+      query: "",
+      limit: 5,
+      detailed: true,
+    });
+  }
+  return queryLeads({
+    user,
+    query: searchTerm,
+    limit: 10,
+    detailed: true,
+  });
+};
+
+const queryAssetDetails = async ({ user, query }) => {
+  const searchTerm = extractEntitySearchTerm(query, "asset");
+  if (!searchTerm) {
+    return queryInventory({
+      user,
+      query: "",
+      limit: 5,
+      detailed: true,
+    });
+  }
+  return queryInventory({
+    user,
+    query: searchTerm,
+    limit: 10,
+    detailed: true,
+  });
+};
+
+const querySmartAssistant = async ({ user, query }) => {
+  const [leadResult, inventoryResult] = await Promise.all([
+    queryLeads({ user, query, limit: 5, detailed: true }),
+    queryInventory({ user, query, limit: 5, detailed: true }),
+  ]);
+
+  const leadCount = Array.isArray(leadResult?.data?.leads) ? leadResult.data.leads.length : 0;
+  const inventoryCount = Array.isArray(inventoryResult?.data?.inventory) ? inventoryResult.data.inventory.length : 0;
+
+  if (leadCount && inventoryCount) {
+    return {
+      answer: `${leadResult.answer}\n\n${inventoryResult.answer}`,
+      data: {
+        leads: leadResult.data.leads,
+        inventory: inventoryResult.data.inventory,
+      },
+    };
+  }
+
+  if (leadCount) return leadResult;
+  if (inventoryCount) return inventoryResult;
+
+  return {
+    answer: "I can help with best performer, lead details, asset details, sold inventory, and interested leads. Please share a specific name, phone, project, or status.",
+    data: {},
   };
 };
 
@@ -416,7 +653,7 @@ const queryOverview = async ({ user }) => {
   });
 
   return {
-    answer: "Overview ready. Aap sold/interested/performance ya specific lead/inventory puch kar detail le sakte ho.",
+    answer: "Hello, I am Samvid bot. Ask me anything about best performer, lead details, asset details, sold inventory, interested leads, or company overview.",
     data: {
       inventoryByStatus,
       leadByStatus,
@@ -434,18 +671,35 @@ exports.askSamvid = async (req, res) => {
     const intent = detectIntent(query);
     let result = { answer: "", data: {} };
 
-    if (intent === "inventory_lookup" || intent === "sold_inventory") {
+    if (intent === "sold_inventory") {
+      result = await queryInventory({
+        user: req.user,
+        query,
+        forcedStatus: "Sold",
+        limit: 12,
+        detailed: true,
+      });
+    } else if (intent === "inventory_lookup") {
       result = await queryInventory({ user: req.user, query });
+    } else if (intent === "asset_details") {
+      result = await queryAssetDetails({ user: req.user, query });
     } else if (intent === "lead_lookup") {
       result = await queryLeads({ user: req.user, query });
+    } else if (intent === "lead_details") {
+      result = await queryLeadDetails({ user: req.user, query });
     } else if (intent === "interested_leads") {
-      result = await queryLeads({ user: req.user, query, forcedStatus: "INTERESTED" });
+      result = await queryLeads({ user: req.user, query, forcedStatus: "INTERESTED", detailed: true });
     } else if (intent === "best_performer") {
-      result = await queryBestPerformer({ user: req.user });
+      result = await queryBestPerformer({ user: req.user, query });
     } else if (intent === "sales_interest_snapshot") {
       result = await querySalesInterestedSnapshot({ user: req.user });
     } else {
-      result = await queryOverview({ user: req.user });
+      const overviewResult = await queryOverview({ user: req.user });
+      const smartResult = await querySmartAssistant({ user: req.user, query });
+      const hasSmartData = Object.values(smartResult?.data || {}).some(
+        (value) => Array.isArray(value) && value.length > 0,
+      );
+      result = hasSmartData ? smartResult : overviewResult;
     }
 
     return res.json({
@@ -453,11 +707,7 @@ exports.askSamvid = async (req, res) => {
       query,
       answer: result.answer,
       data: result.data,
-      suggestions: [
-        "Show sold properties and through whom sold",
-        "Show interested leads assigned to my team",
-        "Who is top performer this week",
-      ],
+      suggestions: [],
     });
   } catch (error) {
     logger.error({

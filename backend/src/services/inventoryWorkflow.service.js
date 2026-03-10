@@ -3,6 +3,8 @@ const Inventory = require("../models/Inventory");
 const InventoryRequest = require("../models/InventoryRequest");
 const InventoryActivity = require("../models/InventoryActivity");
 const Lead = require("../models/Lead");
+const LeadDiary = require("../models/leadDiary.model");
+const LeadActivity = require("../models/leadActivity.model");
 const User = require("../models/User");
 const {
   USER_ROLES,
@@ -29,6 +31,7 @@ const REQUEST_STATUS_APPROVED = "approved";
 const REQUEST_STATUS_REJECTED = "rejected";
 const MAX_SALE_PAYMENT_NOTE_LENGTH = 1000;
 const MAX_SALE_PAYMENT_REFERENCE_LENGTH = 120;
+const MAX_INVENTORY_REQUEST_NOTE_LENGTH = 500;
 const DEFAULT_SITE_VISIT_RADIUS_METERS =
   Number.parseInt(process.env.SITE_VISIT_RADIUS_METERS, 10) || 200;
 
@@ -327,6 +330,18 @@ const normalizeLegacyInventoryPayload = (payload = {}) => {
     }
   }
 
+  if (!Object.prototype.hasOwnProperty.call(normalized, "reservationLeadId")) {
+    const fallbackLeadId =
+      normalized.leadId
+      ?? normalized.relatedLeadId
+      ?? normalized.reservedForLeadId
+      ?? normalized.blockedForLeadId;
+
+    if (fallbackLeadId !== undefined) {
+      normalized.reservationLeadId = fallbackLeadId;
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(normalized, "type")) {
     normalized.type = normalizeLegacyType(normalized.type);
   }
@@ -391,6 +406,81 @@ const ensureSaleDetailsLeadExists = async (saleDetails) => {
   return lead;
 };
 
+const ensureReservationLeadExists = async (leadId) => {
+  const normalizedLeadId = toObjectIdString(leadId);
+  if (!normalizedLeadId) return null;
+  if (!isValidObjectId(normalizedLeadId)) {
+    throw createHttpError(400, "Invalid lead id");
+  }
+
+  const lead = await Lead.findById(normalizedLeadId)
+    .select("_id name phone status")
+    .lean();
+  if (!lead) {
+    throw createHttpError(400, "Selected lead not found");
+  }
+
+  return lead;
+};
+
+const toInventoryLabel = (inventory = {}) => {
+  const parts = [
+    sanitizeString(inventory.projectName),
+    sanitizeString(inventory.towerName),
+    sanitizeString(inventory.unitNumber),
+  ].filter(Boolean);
+  return parts.join(" - ") || "Inventory";
+};
+
+const appendLeadDiaryForInventory = async ({
+  leadId,
+  note,
+  actorId,
+  inventory,
+  eventTitle,
+}) => {
+  const normalizedLeadId = toObjectIdString(leadId);
+  if (!normalizedLeadId || !isValidObjectId(normalizedLeadId)) return;
+  const cleanNote = sanitizeString(note).slice(0, 1800);
+
+  const inventoryLabel = toInventoryLabel(inventory);
+  const finalNote = [
+    `${eventTitle}: ${inventoryLabel}`,
+    cleanNote,
+  ].filter(Boolean).join("\n");
+
+  if (!finalNote) return;
+
+  await LeadDiary.create({
+    lead: normalizedLeadId,
+    note: finalNote,
+    createdBy: actorId || null,
+  });
+
+  await LeadActivity.create({
+    lead: normalizedLeadId,
+    action: eventTitle,
+    performedBy: actorId || null,
+  });
+};
+
+const getInventoryRequestEventTitle = ({ status, stage }) => {
+  const normalized = String(status || "").trim();
+  const normalizedStage = String(stage || "sent").trim().toLowerCase();
+  const stageLabel = normalizedStage === "approved" ? "approved" : normalizedStage === "rejected" ? "rejected" : "sent";
+
+  if (normalized === "Blocked") {
+    return `Inventory block request ${stageLabel}`;
+  }
+  if (normalized === "Sold") {
+    return `Inventory sold request ${stageLabel}`;
+  }
+  if (normalized === "Available") {
+    return `Inventory available request ${stageLabel}`;
+  }
+  return `Inventory update request ${stageLabel}`;
+};
+
 const resolveDirectCreateTeamId = async ({ user, payload, companyId }) => {
   const requestedTeamId = payload?.teamId || null;
   if (requestedTeamId) {
@@ -434,6 +524,7 @@ const sanitizeInventoryPayload = ({
   mode = "create",
   currentStatus = "",
   currentReservationReason = "",
+  currentReservationLeadId = null,
   currentSaleDetails = null,
 }) => {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -524,6 +615,19 @@ const sanitizeInventoryPayload = ({
       return;
     }
 
+    if (field === "reservationLeadId") {
+      const leadId = toObjectIdString(value);
+      if (!leadId) {
+        safePayload[field] = null;
+        return;
+      }
+      if (!isValidObjectId(leadId)) {
+        throw createHttpError(400, "reservationLeadId must be a valid lead id");
+      }
+      safePayload[field] = leadId;
+      return;
+    }
+
     if (field === "saleDetails") {
       if (value === null) {
         safePayload[field] = null;
@@ -556,6 +660,10 @@ const sanitizeInventoryPayload = ({
     safePayload,
     "reservationReason",
   );
+  const hasReservationLeadPatch = Object.prototype.hasOwnProperty.call(
+    safePayload,
+    "reservationLeadId",
+  );
   const hasSaleDetailsPatch = Object.prototype.hasOwnProperty.call(
     safePayload,
     "saleDetails",
@@ -567,13 +675,17 @@ const sanitizeInventoryPayload = ({
   const effectiveReservationReason = hasReservationReasonPatch
     ? sanitizeReservationReason(safePayload.reservationReason)
     : sanitizeReservationReason(currentReservationReason);
+  const effectiveReservationLeadId = hasReservationLeadPatch
+    ? toObjectIdString(safePayload.reservationLeadId)
+    : toObjectIdString(currentReservationLeadId);
   const effectiveSaleDetails = hasSaleDetailsPatch
     ? safePayload.saleDetails
     : (currentSaleDetails || null);
   const shouldValidateBlockedReason =
     mode === "create"
     || (mode === "update" && hasStatusPatch && safePayload.status === "Blocked")
-    || (mode === "update" && hasReservationReasonPatch);
+    || (mode === "update" && hasReservationReasonPatch)
+    || (mode === "update" && hasReservationLeadPatch);
   const shouldRequireSoldDetails =
     mode === "create"
     || (mode === "update" && hasStatusPatch && safePayload.status === "Sold")
@@ -583,14 +695,26 @@ const sanitizeInventoryPayload = ({
     if (!effectiveReservationReason) {
       throw createHttpError(400, "reservationReason is required when status is Reserved");
     }
+    if (!effectiveReservationLeadId) {
+      throw createHttpError(400, "reservationLeadId is required when status is Reserved");
+    }
+    if (!isValidObjectId(effectiveReservationLeadId)) {
+      throw createHttpError(400, "reservationLeadId must be a valid lead id");
+    }
 
     if (hasReservationReasonPatch) {
       safePayload.reservationReason = effectiveReservationReason;
     }
+    if (hasReservationLeadPatch) {
+      safePayload.reservationLeadId = effectiveReservationLeadId;
+    }
   } else if (mode === "create" || hasStatusPatch) {
     safePayload.reservationReason = "";
+    safePayload.reservationLeadId = null;
   } else if (hasReservationReasonPatch && effectiveReservationReason) {
     throw createHttpError(400, "reservationReason can only be set when status is Reserved");
+  } else if (hasReservationLeadPatch && effectiveReservationLeadId) {
+    throw createHttpError(400, "reservationLeadId can only be set when status is Reserved");
   }
 
   if (effectiveStatus === "Sold") {
@@ -672,6 +796,7 @@ const applyInventoryPopulates = (query) =>
     .populate("createdBy", "name role companyId")
     .populate("approvedBy", "name role companyId")
     .populate("updatedBy", "name role companyId")
+    .populate("reservationLeadId", "name phone status projectInterested")
     .populate("saleDetails.leadId", "name phone status projectInterested")
     .lean();
 
@@ -681,6 +806,7 @@ const applyRequestPopulates = (query) =>
     .populate("reviewedBy", "name role companyId")
     .populate("teamId", "name role companyId")
     .populate("inventoryId")
+    .populate("relatedLead", "name phone status projectInterested")
     .lean();
 
 const getInventoryList = async ({
@@ -767,6 +893,7 @@ const createInventoryDirect = async ({ user, payload }) => {
     mode: "create",
   });
   await ensureSaleDetailsLeadExists(proposed.saleDetails);
+  await ensureReservationLeadExists(proposed.reservationLeadId);
 
   const teamId = await resolveDirectCreateTeamId({
     user,
@@ -821,9 +948,11 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
     mode: "update",
     currentStatus: inventory.status,
     currentReservationReason: inventory.reservationReason,
+    currentReservationLeadId: inventory.reservationLeadId,
     currentSaleDetails: inventory.saleDetails || null,
   });
   await ensureSaleDetailsLeadExists(patch.saleDetails);
+  await ensureReservationLeadExists(patch.reservationLeadId);
 
   const diff = pickInventoryDiff(inventory, patch);
 
@@ -842,6 +971,29 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
     oldValue: diff.oldValue,
     newValue: diff.newValue,
   });
+
+  const nextStatus = Object.prototype.hasOwnProperty.call(patch, "status")
+    ? String(patch.status || "").trim()
+    : String(inventory.status || "").trim();
+  if (nextStatus === "Blocked") {
+    const reservationLeadId = toObjectIdString(
+      patch.reservationLeadId || inventory.reservationLeadId,
+    );
+    const diaryNote = sanitizeString(
+      patch.reservationReason || inventory.reservationReason,
+    );
+    if (!reservationLeadId) {
+      throw createHttpError(400, "Lead selection is required when status is Blocked");
+    }
+    await ensureReservationLeadExists(reservationLeadId);
+    await appendLeadDiaryForInventory({
+      leadId: reservationLeadId,
+      note: diaryNote,
+      actorId: user._id,
+      inventory,
+      eventTitle: "Inventory blocked directly",
+    });
+  }
 
   return applyInventoryPopulates(Inventory.findById(inventory._id));
 };
@@ -906,6 +1058,7 @@ const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
         mode: "create",
       });
       await ensureSaleDetailsLeadExists(proposed.saleDetails);
+      await ensureReservationLeadExists(proposed.reservationLeadId);
 
       const teamId = row?.teamId || null;
       const teamIdKey = teamId ? String(teamId) : "";
@@ -965,6 +1118,7 @@ const createInventoryCreateRequest = async ({ user, payload, io }) => {
     mode: "create",
   });
   await ensureSaleDetailsLeadExists(proposed.saleDetails);
+  await ensureReservationLeadExists(proposed.reservationLeadId);
 
   const teamId = getTeamIdForUser(user);
   if (teamId) {
@@ -993,11 +1147,13 @@ const createInventoryCreateRequest = async ({ user, payload, io }) => {
   return applyRequestPopulates(InventoryRequest.findById(request._id));
 };
 
-const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) => {
-  if (![USER_ROLES.FIELD_EXECUTIVE, USER_ROLES.EXECUTIVE].includes(user.role)) {
+const createInventoryUpdateRequest = async ({
+  user, inventoryId, payload, requestNote, relatedLeadId, io,
+}) => {
+  if (![USER_ROLES.FIELD_EXECUTIVE, USER_ROLES.EXECUTIVE, ...MANAGEMENT_ROLES].includes(user.role)) {
     throw createHttpError(
       403,
-      "Only EXECUTIVE or FIELD_EXECUTIVE can submit update requests",
+      "Only leadership or executive roles can submit update requests",
     );
   }
 
@@ -1011,7 +1167,7 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     companyId,
   })
     .select(
-      "_id projectName towerName unitNumber price type category status reservationReason saleDetails location siteLocation images documents",
+      "_id projectName towerName unitNumber price type category status reservationReason reservationLeadId saleDetails location siteLocation images documents",
     )
     .lean();
 
@@ -1025,9 +1181,40 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     mode: "update",
     currentStatus: inventory.status,
     currentReservationReason: inventory.reservationReason,
+    currentReservationLeadId: inventory.reservationLeadId,
     currentSaleDetails: inventory.saleDetails || null,
   });
   await ensureSaleDetailsLeadExists(proposed.saleDetails);
+
+  const nextStatus = Object.prototype.hasOwnProperty.call(proposed, "status")
+    ? String(proposed.status || "").trim()
+    : String(inventory.status || "").trim();
+  const isBlockedRequest = nextStatus === "Blocked";
+  const selectedLeadId = toObjectIdString(
+    proposed.reservationLeadId
+      || relatedLeadId
+      || normalizedPayload.reservationLeadId
+      || normalizedPayload.relatedLeadId
+      || normalizedPayload.leadId,
+  );
+  const cleanRequestNote = sanitizeString(requestNote || payload?.requestNote)
+    .slice(0, MAX_INVENTORY_REQUEST_NOTE_LENGTH);
+
+  if (isBlockedRequest && !selectedLeadId) {
+    throw createHttpError(400, "Lead selection is required when status is Blocked");
+  }
+  if (isBlockedRequest && !cleanRequestNote) {
+    throw createHttpError(400, "Lead diary note is required when status is Blocked");
+  }
+
+  const selectedLead = selectedLeadId
+    ? await ensureReservationLeadExists(selectedLeadId)
+    : null;
+
+  if (isBlockedRequest) {
+    proposed.reservationLeadId = selectedLead?._id || selectedLeadId;
+    proposed.reservationReason = cleanRequestNote;
+  }
 
   const changedKeys = Object.keys(proposed).filter(
     (key) => !areValuesEqual(proposed[key], inventory[key]),
@@ -1057,8 +1244,10 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     inventoryId: inventory._id,
     type: "update",
     proposedData: newValue,
+    requestNote: cleanRequestNote,
     status: REQUEST_STATUS_PENDING,
     teamId: teamId || null,
+    relatedLead: selectedLead?._id || null,
   });
 
   await logInventoryActivity({
@@ -1078,6 +1267,16 @@ const createInventoryUpdateRequest = async ({ user, inventoryId, payload, io }) 
     companyId,
     teamId: teamId || null,
   });
+
+  if (selectedLead?._id && cleanRequestNote) {
+    await appendLeadDiaryForInventory({
+      leadId: selectedLead._id,
+      note: cleanRequestNote,
+      actorId: user._id,
+      inventory,
+      eventTitle: getInventoryRequestEventTitle({ status: nextStatus, stage: "sent" }),
+    });
+  }
 
   return applyRequestPopulates(InventoryRequest.findById(request._id));
 };
@@ -1151,6 +1350,9 @@ const approveRequest = async ({ user, requestId, io }) => {
   }
 
   let inventory = null;
+  let approvedLeadId = null;
+  let approvedLeadNote = "";
+  let approvedEventStatus = "";
 
   if (request.type === "create") {
     const proposed = sanitizeInventoryPayload({
@@ -1158,6 +1360,7 @@ const approveRequest = async ({ user, requestId, io }) => {
       mode: "create",
     });
     await ensureSaleDetailsLeadExists(proposed.saleDetails);
+    await ensureReservationLeadExists(proposed.reservationLeadId);
 
     inventory = await Inventory.create({
       ...proposed,
@@ -1199,9 +1402,40 @@ const approveRequest = async ({ user, requestId, io }) => {
       mode: "update",
       currentStatus: inventory.status,
       currentReservationReason: inventory.reservationReason,
+      currentReservationLeadId: inventory.reservationLeadId,
       currentSaleDetails: inventory.saleDetails || null,
     });
     await ensureSaleDetailsLeadExists(proposed.saleDetails);
+    const nextStatus = Object.prototype.hasOwnProperty.call(proposed, "status")
+      ? String(proposed.status || "").trim()
+      : String(inventory.status || "").trim();
+    approvedEventStatus = nextStatus;
+    if (nextStatus === "Blocked") {
+      approvedLeadId = toObjectIdString(
+        proposed.reservationLeadId
+          || request.relatedLead
+          || inventory.reservationLeadId,
+      );
+      approvedLeadNote = sanitizeString(
+        request.requestNote
+          || proposed.reservationReason
+          || inventory.reservationReason,
+      );
+      if (!approvedLeadId) {
+        throw createHttpError(400, "Lead selection is required when approving blocked status");
+      }
+      await ensureReservationLeadExists(approvedLeadId);
+      proposed.reservationLeadId = approvedLeadId;
+      if (approvedLeadNote) {
+        proposed.reservationReason = approvedLeadNote;
+      }
+    } else {
+      approvedLeadId = toObjectIdString(request.relatedLead);
+      approvedLeadNote = sanitizeString(request.requestNote || "");
+      if (approvedLeadId) {
+        await ensureReservationLeadExists(approvedLeadId);
+      }
+    }
 
     const diff = pickInventoryDiff(inventory, proposed);
     Object.assign(inventory, proposed);
@@ -1229,6 +1463,16 @@ const approveRequest = async ({ user, requestId, io }) => {
   request.reviewedAt = new Date();
   request.rejectionReason = "";
   await request.save();
+
+  if (approvedLeadId && inventory && approvedLeadNote) {
+    await appendLeadDiaryForInventory({
+      leadId: approvedLeadId,
+      note: approvedLeadNote,
+      actorId: user._id,
+      inventory,
+      eventTitle: getInventoryRequestEventTitle({ status: approvedEventStatus, stage: "approved" }),
+    });
+  }
 
   notifyRequestReviewed({
     io,
@@ -1274,6 +1518,16 @@ const rejectRequest = async ({ user, requestId, rejectionReason, io }) => {
   request.reviewedAt = new Date();
   request.rejectionReason = reason;
   await request.save();
+
+  if (request.relatedLead) {
+    await appendLeadDiaryForInventory({
+      leadId: request.relatedLead,
+      note: `${sanitizeString(request.requestNote)}\nReject reason: ${reason}`.trim(),
+      actorId: user._id,
+      inventory: request.inventoryId || {},
+      eventTitle: "Inventory block request rejected",
+    });
+  }
 
   notifyRequestReviewed({
     io,

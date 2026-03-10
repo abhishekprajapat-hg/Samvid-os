@@ -7,6 +7,7 @@ import {
   CheckCheck,
   ExternalLink,
   FileText,
+  MoreVertical,
   Paperclip,
   Phone,
   PhoneCall,
@@ -15,11 +16,14 @@ import {
   Search,
   Share2,
   Send,
+  Trash2,
   Video,
   X,
 } from "lucide-react";
 import {
+  clearConversationMessages,
   createDirectRoom,
+  deleteConversationMessage,
   getConversationCalls,
   getConversationMessages,
   getMessengerContacts,
@@ -292,6 +296,39 @@ const upsertConversation = (prev, incoming) => {
   );
 };
 
+const buildConversationPreviewFromRows = (conversation, rows) => {
+  if (!conversation?._id) return conversation;
+
+  const list = Array.isArray(rows) ? rows : [];
+  const latestMessage = list.length ? list[list.length - 1] : null;
+
+  if (!latestMessage) {
+    return {
+      ...conversation,
+      lastMessage: "",
+      lastMessageSender: null,
+      lastMessageAt: conversation.lastMessageAt || conversation.updatedAt || new Date().toISOString(),
+    };
+  }
+
+  const timestamp =
+    latestMessage.createdAt
+    || conversation.lastMessageAt
+    || conversation.updatedAt
+    || new Date().toISOString();
+  const senderId = String(
+    latestMessage?.sender?._id || latestMessage?.sender || "",
+  ).trim();
+
+  return {
+    ...conversation,
+    lastMessage: String(latestMessage?.text || "").trim(),
+    lastMessageSender: senderId || null,
+    lastMessageAt: timestamp,
+    updatedAt: timestamp,
+  };
+};
+
 const findConversationByContact = (conversations, contactId) =>
   conversations.find((conversation) =>
     (conversation.participants || []).some((participant) => String(participant._id) === String(contactId)),
@@ -509,6 +546,7 @@ const TeamChat = ({ theme = "light" }) => {
   const queuedSignalsByCallRef = useRef(new Map());
   const activeCallRef = useRef(null);
   const incomingCallRef = useRef(null);
+  const conversationMenuRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -536,6 +574,9 @@ const TeamChat = ({ theme = "light" }) => {
   const [activeCall, setActiveCall] = useState(null);
   const [callError, setCallError] = useState("");
   const [mobileListMode, setMobileListMode] = useState("chats");
+  const [activeMessageActionId, setActiveMessageActionId] = useState("");
+  const [messageActionLoadingId, setMessageActionLoadingId] = useState("");
+  const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
       return false;
@@ -577,6 +618,45 @@ const TeamChat = ({ theme = "light" }) => {
   useEffect(() => {
     setMessageSearch("");
   }, [selectedConversationId]);
+
+  useEffect(() => {
+    setActiveMessageActionId("");
+    setMessageActionLoadingId("");
+    setConversationMenuOpen(false);
+  }, [selectedConversationId]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || !activeMessageActionId) return undefined;
+
+    const handleOutsideClick = (event) => {
+      const target = event?.target;
+      if (!(target instanceof Element)) return;
+      const selector = `[data-message-action-wrap="${activeMessageActionId}"]`;
+      if (target.closest(selector)) return;
+      setActiveMessageActionId("");
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [activeMessageActionId]);
+
+  useEffect(() => {
+    if (typeof document === "undefined" || !conversationMenuOpen) return undefined;
+
+    const handleOutsideClick = (event) => {
+      const target = event?.target;
+      if (!(target instanceof Element)) return;
+      if (conversationMenuRef.current?.contains(target)) return;
+      setConversationMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+    };
+  }, [conversationMenuOpen]);
 
   useEffect(() => {
     activeCallRef.current = activeCall;
@@ -1195,6 +1275,115 @@ const TeamChat = ({ theme = "light" }) => {
     );
   }, [callHistory]);
 
+  const syncConversationPreviewFromRows = useCallback((roomId, rows) => {
+    const normalizedRoomId = toId(roomId);
+    if (!normalizedRoomId) return;
+
+    setConversations((prev) => {
+      const existing = prev.find((conversation) => toId(conversation?._id) === normalizedRoomId);
+      if (!existing) return prev;
+      const patched = buildConversationPreviewFromRows(existing, rows);
+      return upsertConversation(prev, patched);
+    });
+  }, []);
+
+  const removeMessageFromConversationState = useCallback((messageId, roomId) => {
+    const normalizedMessageId = toId(messageId);
+    const normalizedRoomId = toId(roomId);
+    if (!normalizedMessageId || !normalizedRoomId) return;
+    if (toId(selectedConversationRef.current) !== normalizedRoomId) return;
+
+    setMessages((prev) => {
+      const next = prev.filter((row) => toId(row?._id) !== normalizedMessageId);
+      if (next.length === prev.length) return prev;
+      syncConversationPreviewFromRows(normalizedRoomId, next);
+      return next;
+    });
+  }, [syncConversationPreviewFromRows]);
+
+  const clearConversationState = useCallback((roomId) => {
+    const normalizedRoomId = toId(roomId);
+    if (!normalizedRoomId) return;
+
+    if (toId(selectedConversationRef.current) === normalizedRoomId) {
+      setMessages([]);
+      setMessageSearch("");
+    }
+
+    syncConversationPreviewFromRows(normalizedRoomId, []);
+  }, [syncConversationPreviewFromRows]);
+
+  const handleDeleteMessageAction = useCallback(async ({ messageId, scope }) => {
+    const normalizedMessageId = toId(messageId);
+    const normalizedScope = toId(scope).toLowerCase() === "everyone" ? "everyone" : "self";
+    if (!normalizedMessageId) return;
+    if (normalizedScope === "everyone" && currentUser.role !== "ADMIN") {
+      setError("Only admin can delete messages for everyone");
+      return;
+    }
+    if (normalizedScope === "everyone") {
+      const shouldDeleteForEveryone = window.confirm("Delete this message for everyone?");
+      if (!shouldDeleteForEveryone) return;
+    }
+
+    setActiveMessageActionId("");
+    setMessageActionLoadingId(normalizedMessageId);
+    try {
+      const payload = await deleteConversationMessage({
+        messageId: normalizedMessageId,
+        scope: normalizedScope,
+      });
+      const roomId = toId(payload?.roomId || payload?.room?._id || selectedConversationRef.current);
+
+      if (payload?.room?._id) {
+        setConversations((prev) => upsertConversation(prev, payload.room));
+      }
+
+      removeMessageFromConversationState(normalizedMessageId, roomId);
+      setError("");
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to delete message"));
+    } finally {
+      setMessageActionLoadingId("");
+    }
+  }, [currentUser.role, removeMessageFromConversationState]);
+
+  const handleClearConversation = useCallback(async () => {
+    const roomId = toId(selectedConversationRef.current || selectedConversationId);
+    if (!roomId) return;
+
+    const targetLabel = String(activeContact?.name || "this chat").trim();
+    const shouldClear = window.confirm(
+      `Clear chat with ${targetLabel}? This clears only for your account.`,
+    );
+    setConversationMenuOpen(false);
+    if (!shouldClear) return;
+
+    try {
+      const payload = await clearConversationMessages(roomId);
+      if (payload?.room?._id) {
+        setConversations((prev) => upsertConversation(prev, payload.room));
+      } else {
+        clearConversationState(roomId);
+      }
+
+      if (toId(selectedConversationRef.current) === roomId) {
+        setMessages([]);
+        setMessageSearch("");
+      }
+
+      markConversationRead(roomId, { persist: false }).catch(() => null);
+      setError("");
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to clear chat"));
+    }
+  }, [
+    activeContact?.name,
+    clearConversationState,
+    markConversationRead,
+    selectedConversationId,
+  ]);
+
   const loadCallHistoryForConversation = useCallback(async (conversationId) => {
     const id = toId(conversationId);
     if (!id) {
@@ -1699,6 +1888,37 @@ const TeamChat = ({ theme = "light" }) => {
       );
     };
 
+    const onMessageDeleted = (payload = {}) => {
+      const roomId = toId(payload?.roomId || payload?.room?._id || selectedConversationRef.current);
+      const messageId = toId(payload?.messageId);
+      if (!roomId || !messageId) return;
+
+      if (payload?.room?._id) {
+        setConversations((prev) => upsertConversation(prev, payload.room));
+      }
+
+      removeMessageFromConversationState(messageId, roomId);
+      setActiveMessageActionId((prev) => (toId(prev) === messageId ? "" : prev));
+    };
+
+    const onRoomCleared = (payload = {}) => {
+      const roomId = toId(payload?.roomId || payload?.room?._id);
+      const userId = toId(payload?.userId);
+      if (!roomId) return;
+      if (userId && userId !== currentUser.id) return;
+
+      if (payload?.room?._id) {
+        setConversations((prev) => upsertConversation(prev, payload.room));
+      } else {
+        clearConversationState(roomId);
+      }
+
+      if (toId(selectedConversationRef.current) === roomId) {
+        setMessages([]);
+        setMessageSearch("");
+      }
+    };
+
     const onTyping = (payload = {}) => {
       const roomId = toId(payload?.roomId || payload?.conversationId);
       const userId = toId(payload?.userId);
@@ -1847,7 +2067,9 @@ const TeamChat = ({ theme = "light" }) => {
     socket.on("chat:message:new", onNewMessage);
     socket.on("chat:message:delivered", onMessageDelivered);
     socket.on("chat:message:seen", onMessageSeen);
+    socket.on("chat:message:deleted", onMessageDeleted);
     socket.on("chat:room:read", onRoomRead);
+    socket.on("chat:room:cleared", onRoomCleared);
     socket.on("chat:typing", onTyping);
     socket.on("chat:call:incoming", onCallIncoming);
     socket.on("chat:call:accepted", onCallAccepted);
@@ -1863,7 +2085,9 @@ const TeamChat = ({ theme = "light" }) => {
       socket.off("chat:message:new", onNewMessage);
       socket.off("chat:message:delivered", onMessageDelivered);
       socket.off("chat:message:seen", onMessageSeen);
+      socket.off("chat:message:deleted", onMessageDeleted);
       socket.off("chat:room:read", onRoomRead);
+      socket.off("chat:room:cleared", onRoomCleared);
       socket.off("chat:typing", onTyping);
       socket.off("chat:call:incoming", onCallIncoming);
       socket.off("chat:call:accepted", onCallAccepted);
@@ -1883,6 +2107,7 @@ const TeamChat = ({ theme = "light" }) => {
   }, [
     applyCallSignal,
     clearActiveCallLocally,
+    clearConversationState,
     clearLocalTypingStopTimer,
     clearQueuedCallSignals,
     currentUser.id,
@@ -1891,6 +2116,7 @@ const TeamChat = ({ theme = "light" }) => {
     loadMessenger,
     loadCallHistoryForConversation,
     queueCallSignal,
+    removeMessageFromConversationState,
     isMobileViewport,
   ]);
 
@@ -2387,6 +2613,41 @@ const TeamChat = ({ theme = "light" }) => {
                   ? `${visibleTimeline.length}/${messages.length} messages`
                   : `${messages.length} messages`}
               </span>
+              {activeContact && selectedConversationId && (
+                <div className="relative" ref={conversationMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setConversationMenuOpen((prev) => !prev)}
+                    disabled={Boolean(activeCall)}
+                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
+                      isDark
+                        ? "border-slate-700 text-slate-200 hover:border-cyan-400/50 hover:text-cyan-200"
+                        : "border-white/45 text-white hover:bg-white/10 md:border-slate-300 md:text-slate-600 md:hover:border-emerald-400 md:hover:text-emerald-700"
+                    } disabled:cursor-not-allowed disabled:opacity-60`}
+                    title="Chat actions"
+                  >
+                    <MoreVertical size={14} />
+                  </button>
+                  {conversationMenuOpen && (
+                    <div className={`absolute right-0 top-10 z-30 min-w-[190px] overflow-hidden rounded-lg border shadow-lg ${
+                      isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-white"
+                    }`}>
+                      <button
+                        type="button"
+                        onClick={handleClearConversation}
+                        className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold ${
+                          isDark
+                            ? "text-rose-200 hover:bg-slate-800"
+                            : "text-rose-700 hover:bg-rose-50"
+                        }`}
+                      >
+                        <Trash2 size={13} />
+                        Clear chat
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -2633,6 +2894,11 @@ const TeamChat = ({ theme = "light" }) => {
                   Boolean(String(message.text || "").trim())
                   && !isAutoPropertyText(message)
                   && !isAutoMediaText(message);
+                const messageId = toId(message?._id);
+                const canDeleteForEveryone = mine && currentUser.role === "ADMIN";
+                const isMessageActionOpen = activeMessageActionId === messageId;
+                const isMessageActionLoading = messageActionLoadingId === messageId;
+                const canOpenMessageActions = Boolean(messageId);
                 return (
                   <React.Fragment key={message._id}>
                     {showDayBreak && (
@@ -2656,7 +2922,10 @@ const TeamChat = ({ theme = "light" }) => {
                           <p className={`truncate text-xs font-semibold ${mine ? (isDark ? "text-emerald-200" : "text-emerald-700") : (isDark ? "text-slate-300" : "text-slate-600")}`}>
                             {mine ? "You" : message.sender?.name || "Unknown"}
                           </p>
-                          <div className="flex shrink-0 items-center gap-1.5">
+                          <div
+                            data-message-action-wrap={messageId}
+                            className="relative flex shrink-0 items-center gap-1.5"
+                          >
                             <p className={`text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                               {toLocalTime(message.createdAt)}
                             </p>
@@ -2673,6 +2942,62 @@ const TeamChat = ({ theme = "light" }) => {
                               >
                                 {outgoingStatus === "sent" ? <Check size={11} /> : <CheckCheck size={11} />}
                               </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!canOpenMessageActions || isMessageActionLoading) return;
+                                if (!canDeleteForEveryone) {
+                                  handleDeleteMessageAction({ messageId, scope: "self" });
+                                  return;
+                                }
+                                setActiveMessageActionId((prev) => (prev === messageId ? "" : messageId));
+                              }}
+                              disabled={!canOpenMessageActions || isMessageActionLoading}
+                              className={`inline-flex h-6 items-center gap-1 rounded-full border px-2 text-[10px] font-semibold ${
+                                isDark
+                                  ? "border-slate-700 text-slate-300 hover:border-cyan-400/40 hover:text-cyan-200"
+                                  : "border-slate-300 text-slate-600 hover:border-emerald-400 hover:text-emerald-700"
+                              } disabled:cursor-not-allowed disabled:opacity-60`}
+                              title={canDeleteForEveryone ? "Delete options" : "Delete for me"}
+                            >
+                              <Trash2 size={11} />
+                              {canDeleteForEveryone ? "Delete" : "Delete for me"}
+                              {canDeleteForEveryone && <MoreVertical size={11} />}
+                            </button>
+                            {isMessageActionOpen && (
+                              <div className={`absolute right-0 top-6 z-20 min-w-[168px] overflow-hidden rounded-lg border shadow-lg ${
+                                isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-white"
+                              }`}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteMessageAction({ messageId, scope: "self" })}
+                                  disabled={isMessageActionLoading}
+                                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold ${
+                                    isDark
+                                      ? "text-slate-200 hover:bg-slate-800"
+                                      : "text-slate-700 hover:bg-slate-50"
+                                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                                >
+                                  <Trash2 size={13} />
+                                  Delete for me
+                                </button>
+                                {canDeleteForEveryone && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteMessageAction({ messageId, scope: "everyone" })}
+                                    disabled={isMessageActionLoading}
+                                    className={`flex w-full items-center gap-2 border-t px-3 py-2 text-left text-xs font-semibold ${
+                                      isDark
+                                        ? "border-slate-700 text-rose-200 hover:bg-slate-800"
+                                        : "border-slate-200 text-rose-700 hover:bg-rose-50"
+                                    } disabled:cursor-not-allowed disabled:opacity-60`}
+                                  >
+                                    <Trash2 size={13} />
+                                    Delete for everyone
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>

@@ -22,6 +22,7 @@ import { Audio } from "expo-av";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useAuth } from "../../context/AuthContext";
+import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
 import { createChatSocket } from "../../services/chatSocket";
 import {
   getConversationMessages,
@@ -170,6 +171,7 @@ export const ChatConversationScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { token, user } = useAuth();
+  const { setActiveChatConversation, markChatConversationRead } = useRealtimeAlerts();
 
   const params = route.params || {};
   const contactId = String(params.contactId || "");
@@ -211,10 +213,23 @@ export const ChatConversationScreen = () => {
   } | null>(null);
   const [callTick, setCallTick] = useState(0);
   const [playingMessageId, setPlayingMessageId] = useState("");
+  const [pendingPreviewKey, setPendingPreviewKey] = useState("");
 
   const socketRef = useRef<ReturnType<typeof createChatSocket> | null>(null);
   const filePickerLockRef = useRef(false);
   const soundRef = useRef<Audio.Sound | null>(null);
+
+  useEffect(() => {
+    if (!conversationId) {
+      setActiveChatConversation("");
+      return;
+    }
+    setActiveChatConversation(conversationId);
+    markChatConversationRead(conversationId);
+    return () => {
+      setActiveChatConversation("");
+    };
+  }, [conversationId, markChatConversationRead, setActiveChatConversation]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -310,6 +325,8 @@ export const ChatConversationScreen = () => {
       soundRef.current = null;
     }
   }, []);
+
+  const myUserId = useMemo(() => String(user?._id || user?.id || ""), [user]);
 
   useEffect(() => {
     if (!token) return;
@@ -557,6 +574,7 @@ export const ChatConversationScreen = () => {
       const mimeType = Platform.OS === "ios" ? "audio/m4a" : "audio/mp4";
       const name = `voice-note-${Date.now()}.m4a`;
       setPendingAttachments((prev) => [...prev, { uri, name, mimeType }]);
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false, playsInSilentModeIOS: true });
     } catch (e) {
       setError(toErrorMessage(e, "Failed to record voice note"));
     } finally {
@@ -565,7 +583,17 @@ export const ChatConversationScreen = () => {
     }
   };
 
-  const removePendingAttachment = (indexToRemove: number) => {
+  const removePendingAttachment = async (indexToRemove: number) => {
+    const targetKey = `pending-${indexToRemove}`;
+    if (pendingPreviewKey === targetKey && soundRef.current) {
+      try {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+      } catch {}
+      soundRef.current = null;
+      setPlayingMessageId("");
+      setPendingPreviewKey("");
+    }
     setPendingAttachments((prev) => prev.filter((_, index) => index !== indexToRemove));
   };
 
@@ -685,6 +713,7 @@ export const ChatConversationScreen = () => {
         if (!status.isLoaded) return;
         if ((status as any).didJustFinish) {
           setPlayingMessageId("");
+          setPendingPreviewKey("");
           sound.unloadAsync().catch(() => {});
           if (soundRef.current === sound) {
             soundRef.current = null;
@@ -695,6 +724,16 @@ export const ChatConversationScreen = () => {
       setPlayingMessageId("");
       setError(toErrorMessage(e, "Unable to play voice note"));
     }
+  };
+
+  const onComposerKeyPress = (event: any) => {
+    if (Platform.OS !== "web") return;
+    const key = String(event?.nativeEvent?.key || "");
+    const shift = Boolean(event?.nativeEvent?.shiftKey);
+    if (key !== "Enter" || shift) return;
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    sendQueuedMessage();
   };
 
   const startCall = async (callType: "VOICE" | "VIDEO") => {
@@ -1074,7 +1113,19 @@ export const ChatConversationScreen = () => {
                         {isImage ? (
                           <Image source={{ uri: file.uri }} style={styles.pendingThumb} resizeMode="cover" />
                         ) : isAudio ? (
-                          <View style={styles.pendingIconWrap}><Ionicons name="mic" size={16} color="#334155" /></View>
+                          <Pressable
+                            style={styles.pendingAudioPreview}
+                            onPress={() => {
+                              const key = `pending-${index}`;
+                              setPendingPreviewKey(key);
+                              playAudioAttachment(key, file.uri);
+                            }}
+                          >
+                            <Ionicons name={playingMessageId === `pending-${index}` ? "pause" : "play"} size={15} color="#334155" />
+                            <Text style={styles.pendingAudioPreviewText}>
+                              {playingMessageId === `pending-${index}` ? "Stop" : "Preview"}
+                            </Text>
+                          </Pressable>
                         ) : (
                           <View style={styles.pendingIconWrap}><Ionicons name="document-text-outline" size={16} color="#334155" /></View>
                         )}
@@ -1104,12 +1155,15 @@ export const ChatConversationScreen = () => {
                 placeholder={isRecording ? "Recording voice note..." : `Message ${contactName}...`}
                 value={draft}
                 onChangeText={setDraft}
+                multiline
+                blurOnSubmit={false}
+                onKeyPress={onComposerKeyPress}
                 editable={!sending && !pickingFile && !isRecording}
               />
               <Pressable
-                style={[styles.sendBtn, ((!draft.trim() && pendingAttachments.length === 0) || sending || pickingFile || isRecording) && styles.sendDisabled]}
+                style={styles.sendBtn}
                 onPress={sendQueuedMessage}
-                disabled={(!draft.trim() && pendingAttachments.length === 0) || sending || pickingFile || isRecording}
+                disabled={(!draft.trim() && pendingAttachments.length === 0) || pickingFile || isRecording}
               >
                 {sending ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="paper-plane" size={15} color="#fff" />}
               </Pressable>
@@ -1216,8 +1270,11 @@ export const ChatConversationScreen = () => {
                 style={styles.forwardList}
                 ListEmptyComponent={<Text style={styles.empty}>No call logs yet</Text>}
                 renderItem={({ item }) => {
-                  const mine = String(item.caller?._id || "") === String(user?._id || user?.id || "");
-                  const peerName = mine ? item.callee?.name : item.caller?.name;
+                  const callerId = String(item.caller?._id || (item.metadata as any)?.callerId || "");
+                  const callerName = String(item.caller?.name || (item.metadata as any)?.callerName || "").trim();
+                  const isLocalFallback = Boolean((item.metadata as any)?.localFallback);
+                  const mine = (callerId && callerId === myUserId) || (!callerId && isLocalFallback);
+                  const peerName = mine ? "You" : (callerName || contactName || "Unknown");
                   return (
                     <View style={styles.callLogRow}>
                       <Ionicons
@@ -1226,7 +1283,7 @@ export const ChatConversationScreen = () => {
                         color="#334155"
                       />
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.forwardName}>{peerName || "Unknown"}</Text>
+                        <Text style={styles.forwardName}>{peerName}</Text>
                         <Text style={styles.forwardRole}>
                           {item.status} | {formatDateTime(item.startedAt)}{item.durationSec ? ` | ${formatCallDuration(item.durationSec)}` : ""}
                         </Text>
@@ -1320,13 +1377,24 @@ const styles = StyleSheet.create({
   pendingItem: { width: 120, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", padding: 6 },
   pendingThumb: { width: "100%", height: 60, borderRadius: 8, backgroundColor: "#e2e8f0" },
   pendingIconWrap: { height: 60, borderRadius: 8, backgroundColor: "#f1f5f9", alignItems: "center", justifyContent: "center" },
+  pendingAudioPreview: {
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: "#f1f5f9",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    borderWidth: 1,
+    borderColor: "#dbe3ee",
+  },
+  pendingAudioPreviewText: { fontSize: 10, color: "#334155", fontWeight: "700" },
   pendingName: { marginTop: 6, fontSize: 11, color: "#334155" },
   pendingRemove: { position: "absolute", top: 4, right: 4 },
   composer: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 20, borderTopWidth: 1, borderTopColor: "#e2e8f0", backgroundColor: "#ffffff" },
   attachBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
   micBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
   micBtnActive: { backgroundColor: "#ef4444", borderColor: "#ef4444" },
-  input: { flex: 1, height: 40, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, paddingHorizontal: 12, fontSize: 13, color: "#0f172a", backgroundColor: "#fff" },
+  input: { flex: 1, minHeight: 40, maxHeight: 120, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, color: "#0f172a", backgroundColor: "#fff", textAlignVertical: "top" },
   sendBtn: { width: 38, height: 38, borderRadius: 999, backgroundColor: "#67c3d6", alignItems: "center", justifyContent: "center" },
   sendDisabled: { opacity: 0.55 },
   viewerBackdrop: { flex: 1, backgroundColor: "rgba(2,6,23,0.95)" },

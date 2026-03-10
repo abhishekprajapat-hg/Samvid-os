@@ -5,6 +5,7 @@ import { Pressable, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
+import { useRealtimeAlerts } from "../context/RealtimeAlertsContext";
 import type { UserRole } from "../types";
 
 import { ManagerDashboardScreen } from "../modules/manager/ManagerDashboardScreen";
@@ -24,15 +25,20 @@ import { MasterScheduleScreen } from "../modules/calendar/MasterScheduleScreen";
 import { FieldOpsScreen } from "../modules/field/FieldOpsScreen";
 import { TeamManagerScreen } from "../modules/admin/TeamManagerScreen";
 import { SystemSettingsScreen } from "../modules/admin/SystemSettingsScreen";
-import { UserDetailsEditorScreen } from "../modules/admin/UserDetailsEditorScreen";
-import { AdminCommandConsoleScreen } from "../modules/admin/AdminCommandConsoleScreen";
 import { FinancialCoreScreen } from "../modules/finance/FinancialCoreScreen";
 import { NotificationsScreen } from "../modules/notifications/NotificationsScreen";
 import { ProfileScreen } from "../modules/profile/ProfileScreen";
 import { MoreMenuScreen } from "../modules/more/MoreMenuScreen";
+import { RealtimePopupOverlay } from "../components/common/RealtimePopupOverlay";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
+
+const toTabBadge = (count: number) => {
+  const normalized = Math.max(0, Number(count || 0));
+  if (!normalized) return undefined;
+  return normalized > 99 ? 99 : normalized;
+};
 
 const getTabIconName = (routeName: string, focused: boolean) => {
   const iconMap: Record<string, { focused: React.ComponentProps<typeof Ionicons>["name"]; unfocused: React.ComponentProps<typeof Ionicons>["name"] }> = {
@@ -57,9 +63,12 @@ const getTabIconName = (routeName: string, focused: boolean) => {
 };
 
 const RoleMainTabs = ({ role }: { role: UserRole }) => {
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
+  const { chatUnreadTotal, notificationUnreadTotal } = useRealtimeAlerts();
   const insets = useSafeAreaInsets();
   const bottomSpacing = Math.max(insets.bottom, 10);
+  const chatBadge = toTabBadge(chatUnreadTotal);
+  const notificationBadge = toTabBadge(notificationUnreadTotal);
 
   const sharedOptions = {
     headerRight: () => (
@@ -78,7 +87,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
     tabBarInactiveTintColor: "#64748b",
   };
 
-  if (role === "ADMIN" || role === "MANAGER" || role === "ASSISTANT_MANAGER" || role === "TEAM_LEADER") {
+  if (role === "ADMIN") {
     return (
       <Tab.Navigator
         screenOptions={({ route }) => ({
@@ -97,17 +106,18 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         <Tab.Screen name="Inventory" component={AssetVaultScreen} />
         <Tab.Screen name="Reports" component={IntelligenceReportsScreen} />
         <Tab.Screen name="Targets" component={PerformanceScreen} />
-        <Tab.Screen name="Calendar" component={MasterScheduleScreen} />
-        <Tab.Screen name="Field Ops" component={FieldOpsScreen} />
         <Tab.Screen name="Finance" component={FinancialCoreScreen} />
-        <Tab.Screen name="Chat" component={TeamChatScreen} />
-        <Tab.Screen name="More" component={MoreMenuScreen} />
+        <Tab.Screen
+          name="Notifications"
+          component={NotificationsScreen}
+          options={{ tabBarBadge: notificationBadge }}
+        />
+        <Tab.Screen name="More" component={MoreMenuScreen} options={{ tabBarBadge: chatBadge }} />
       </Tab.Navigator>
     );
   }
 
-  if (role === "CHANNEL_PARTNER") {
-    const canViewInventory = Boolean((user as any)?.canViewInventory);
+  if (role === "MANAGER" || role === "ASSISTANT_MANAGER" || role === "TEAM_LEADER") {
     return (
       <Tab.Navigator
         screenOptions={({ route }) => ({
@@ -121,8 +131,13 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
           ),
         })}
       >
+        <Tab.Screen name="Dashboard" component={ManagerDashboardScreen} />
         <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
-        {canViewInventory ? <Tab.Screen name="Inventory" component={AssetVaultScreen} /> : null}
+        <Tab.Screen name="Inventory" component={AssetVaultScreen} />
+        <Tab.Screen name="Reports" component={IntelligenceReportsScreen} />
+        <Tab.Screen name="Targets" component={PerformanceScreen} />
+        <Tab.Screen name="Finance" component={FinancialCoreScreen} />
+        <Tab.Screen name="Chat" component={TeamChatScreen} options={{ tabBarBadge: chatBadge }} />
         <Tab.Screen name="More" component={MoreMenuScreen} />
       </Tab.Navigator>
     );
@@ -147,7 +162,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         <Tab.Screen name="Inventory" component={AssetVaultScreen} />
         <Tab.Screen name="Targets" component={PerformanceScreen} />
         <Tab.Screen name="Calendar" component={MasterScheduleScreen} />
-        <Tab.Screen name="Chat" component={TeamChatScreen} />
+        <Tab.Screen name="Chat" component={TeamChatScreen} options={{ tabBarBadge: chatBadge }} />
         <Tab.Screen name="More" component={MoreMenuScreen} />
       </Tab.Navigator>
     );
@@ -172,79 +187,77 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
       <Tab.Screen name="Targets" component={PerformanceScreen} />
       <Tab.Screen name="Field Ops" component={FieldOpsScreen} />
       <Tab.Screen name="Calendar" component={MasterScheduleScreen} />
-      <Tab.Screen name="Chat" component={TeamChatScreen} />
+      <Tab.Screen name="Chat" component={TeamChatScreen} options={{ tabBarBadge: chatBadge }} />
       <Tab.Screen name="More" component={MoreMenuScreen} />
     </Tab.Navigator>
   );
 };
 
 export const RoleTabs = ({ role }: { role: UserRole }) => (
-  <Stack.Navigator>
-    <Stack.Screen
-      name="MainTabs"
-      options={{ headerShown: false }}
-    >
-      {() => <RoleMainTabs role={role} />}
-    </Stack.Screen>
-    <Stack.Screen
-      name="LeadDetails"
-      component={LeadDetailsScreen}
-      options={{ title: "Lead Details" }}
-    />
-    <Stack.Screen
-      name="InventoryDetails"
-      component={InventoryDetailsScreen}
-      options={{ title: "Inventory Details" }}
-    />
-    <Stack.Screen
-      name="ChatConversation"
-      component={ChatConversationScreen}
-      options={{ headerShown: false }}
-    />
-    <Stack.Screen
-      name="Samvid Bot"
-      component={SamvidBotScreen}
-      options={{ title: "Samvid Bot" }}
-    />
-    <Stack.Screen
-      name="CallScreen"
-      component={CallScreen}
-      options={{ headerShown: false }}
-    />
-    <Stack.Screen
-      name="Notifications"
-      component={NotificationsScreen}
-      options={{ title: "Notifications" }}
-    />
-    <Stack.Screen
-      name="Users"
-      component={TeamManagerScreen}
-      options={{ title: "Users" }}
-    />
-    <Stack.Screen
-      name="UserDetailsEditor"
-      component={UserDetailsEditorScreen}
-      options={{ title: "User Editor" }}
-    />
-    <Stack.Screen
-      name="AdminConsole"
-      component={AdminCommandConsoleScreen}
-      options={{ title: "Admin Console" }}
-    />
-    <Stack.Screen
-      name="Profile"
-      component={ProfileScreen}
-      options={{ title: "Profile" }}
-    />
-    <Stack.Screen
-      name="Settings"
-      component={SystemSettingsScreen}
-      options={{ title: "Settings" }}
-    />
-    <Stack.Screen
-      name="Field Ops"
-      component={FieldOpsScreen}
-      options={{ title: "Field Ops" }}
-    />
-  </Stack.Navigator>
+  <>
+    <Stack.Navigator>
+      <Stack.Screen
+        name="MainTabs"
+        options={{ headerShown: false }}
+      >
+        {() => <RoleMainTabs role={role} />}
+      </Stack.Screen>
+      <Stack.Screen
+        name="LeadDetails"
+        component={LeadDetailsScreen}
+        options={{ title: "Lead Details" }}
+      />
+      <Stack.Screen
+        name="InventoryDetails"
+        component={InventoryDetailsScreen}
+        options={{ title: "Inventory Details" }}
+      />
+      <Stack.Screen
+        name="ChatConversation"
+        component={ChatConversationScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Chat"
+        component={TeamChatScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Samvid Bot"
+        component={SamvidBotScreen}
+        options={{ title: "Samvid Bot" }}
+      />
+      <Stack.Screen
+        name="CallScreen"
+        component={CallScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={NotificationsScreen}
+        options={{ title: "Notifications" }}
+      />
+      <Stack.Screen
+        name="Users"
+        component={TeamManagerScreen}
+        options={{ title: "Users" }}
+      />
+      <Stack.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ title: "Profile" }}
+      />
+      <Stack.Screen
+        name="Settings"
+        component={SystemSettingsScreen}
+        options={{ title: "Settings" }}
+      />
+      <Stack.Screen
+        name="Field Ops"
+        component={FieldOpsScreen}
+        options={{ title: "Field Ops" }}
+      />
+    </Stack.Navigator>
+    <RealtimePopupOverlay />
+  </>
 );

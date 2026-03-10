@@ -2,8 +2,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
+import { SharedPerformancePanel } from "../../components/dashboard/SharedPerformancePanel";
 import api from "../../services/api";
+import { getAllLeads, getCompanyPerformanceOverview } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import type { Lead } from "../../types";
+import type { CompanyPerformanceOverview } from "../../services/leadService";
 
 type FieldTask = {
   id: string;
@@ -39,6 +43,8 @@ export const FieldDashboardScreen = () => {
   const [error, setError] = useState("");
   const [inventoryCount, setInventoryCount] = useState(0);
   const [inventoryRows, setInventoryRows] = useState<any[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [companyPerformance, setCompanyPerformance] = useState<CompanyPerformanceOverview | null>(null);
   const [tasks, setTasks] = useState<FieldTask[]>(DEFAULT_TASKS);
   const [activeBlock, setActiveBlock] = useState<"PENDING" | "COMPLETED" | "INVENTORY" | "NAVIGATION" | null>(null);
 
@@ -47,10 +53,16 @@ export const FieldDashboardScreen = () => {
       try {
         setLoading(true);
         setError("");
-        const res = await api.get("/inventory");
-        const rows = res.data?.assets || [];
+        const [inventoryRes, leadRows, overview] = await Promise.all([
+          api.get("/inventory"),
+          getAllLeads().catch(() => []),
+          getCompanyPerformanceOverview().catch(() => null),
+        ]);
+        const rows = inventoryRes.data?.assets || [];
         setInventoryCount(Array.isArray(rows) ? rows.length : 0);
         setInventoryRows(Array.isArray(rows) ? rows : []);
+        setLeads(Array.isArray(leadRows) ? leadRows : []);
+        setCompanyPerformance(overview && typeof overview === "object" ? overview : null);
       } catch (e) {
         setError(toErrorMessage(e, "Failed to load field data"));
       } finally {
@@ -135,6 +147,8 @@ export const FieldDashboardScreen = () => {
             onPress={() => navigation.navigate("Calendar")}
           />
         </View>
+
+        <SharedPerformancePanel leads={leads} overview={companyPerformance} />
       </ScrollView>
 
       <Modal visible={Boolean(activeBlock)} transparent animationType="slide" onRequestClose={() => setActiveBlock(null)}>

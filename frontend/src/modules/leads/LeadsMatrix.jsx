@@ -15,8 +15,6 @@ import {
 } from "../../services/leadService";
 import {
   getInventoryAssets,
-  requestInventoryUpdateChange,
-  updateInventoryAsset,
 } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
@@ -63,12 +61,6 @@ const DEAL_PAYMENT_ADMIN_DECISIONS = [
   { value: "APPROVED", label: "Approve Payment" },
   { value: "REJECTED", label: "Reject Payment" },
 ];
-const INVENTORY_STATUS_OPTIONS = [
-  { label: "Available", value: "Available" },
-  { label: "Reserved", value: "Blocked" },
-  { label: "Sold", value: "Sold" },
-];
-const INVENTORY_STATUS_REQUEST_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
 const MAX_PAYMENT_NOTE_LENGTH = 1000;
 const MAX_CLOSURE_DOCUMENTS = 20;
 
@@ -331,7 +323,6 @@ const LeadsMatrix = () => {
   const [linkingProperty, setLinkingProperty] = useState(false);
   const [propertyActionInventoryId, setPropertyActionInventoryId] = useState("");
   const [propertyActionType, setPropertyActionType] = useState("");
-  const [propertyStatusActionInventoryId, setPropertyStatusActionInventoryId] = useState("");
 
   const [statusDraft, setStatusDraft] = useState("NEW");
   const [followUpDraft, setFollowUpDraft] = useState("");
@@ -368,10 +359,6 @@ const LeadsMatrix = () => {
   const canConfigureSiteLocation =
     userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
   const canReviewDealPayment = userRole === "ADMIN";
-  const canDirectInventoryStatusUpdate = userRole === "ADMIN";
-  const canRequestInventoryStatusUpdate = INVENTORY_STATUS_REQUEST_ROLES.includes(userRole);
-  const canUpdateRelatedPropertyStatus =
-    canManageLeadProperties && (canDirectInventoryStatusUpdate || canRequestInventoryStatusUpdate);
 
   const fetchLeads = useCallback(async (asRefresh = false) => {
     try {
@@ -416,7 +403,7 @@ const LeadsMatrix = () => {
     if (!canManageLeadProperties) return;
 
     try {
-      const rows = await getInventoryAssets();
+      const rows = await getInventoryAssets({ page: 1, limit: 200 });
       setInventoryOptions(Array.isArray(rows) ? rows : []);
     } catch (fetchError) {
       const message = toErrorMessage(fetchError, "Failed to load inventory");
@@ -830,44 +817,6 @@ const LeadsMatrix = () => {
     setPaymentApprovalNoteDraft(String(updatedLead?.dealPayment?.approvalNote || ""));
     setClosureDocumentsDraft(sanitizeClosureDocumentList(updatedLead?.closureDocuments));
   };
-
-  const mergeInventorySnapshotIntoLead = useCallback((leadRow, updatedInventory) => {
-    if (!leadRow || !updatedInventory?._id) return leadRow;
-
-    const targetId = String(updatedInventory._id);
-    const withFallbackTitle = {
-      ...updatedInventory,
-      title:
-        updatedInventory?.title
-        || getInventoryLeadLabel(updatedInventory)
-        || String(updatedInventory?._id || "").slice(-6),
-      status: toInventoryStatusLabel(updatedInventory?.status),
-    };
-
-    const replaceInventoryRef = (inventoryLike) => {
-      const currentId = toObjectIdString(inventoryLike);
-      if (!currentId || currentId !== targetId) return inventoryLike;
-      if (inventoryLike && typeof inventoryLike === "object") {
-        return {
-          ...inventoryLike,
-          ...withFallbackTitle,
-          status: toInventoryStatusLabel(withFallbackTitle?.status),
-        };
-      }
-      return withFallbackTitle;
-    };
-
-    const next = {
-      ...leadRow,
-      inventoryId: replaceInventoryRef(leadRow.inventoryId),
-    };
-
-    if (Array.isArray(leadRow.relatedInventoryIds)) {
-      next.relatedInventoryIds = leadRow.relatedInventoryIds.map(replaceInventoryRef);
-    }
-
-    return next;
-  }, []);
 
   const handleInventorySelection = (inventoryId) => {
     setFormData((prev) => {
@@ -1283,145 +1232,6 @@ const LeadsMatrix = () => {
     }
   };
 
-  const handleRelatedPropertyStatusChange = async (inventoryId, nextStatus) => {
-    const resolvedInventoryId = String(inventoryId || "").trim();
-    const targetStatus = String(nextStatus || "").trim();
-    if (!selectedLead || !resolvedInventoryId || !targetStatus) return;
-    if (!canUpdateRelatedPropertyStatus) {
-      setError("You do not have access to change property status from lead");
-      return;
-    }
-
-    const linkedInventory = getLeadRelatedInventories(selectedLead).find(
-      (row) => String(toObjectIdString(row)) === resolvedInventoryId,
-    );
-    if (!linkedInventory || typeof linkedInventory !== "object") {
-      setError("Linked property details are unavailable for this lead");
-      return;
-    }
-
-    const currentStatus = toInventoryApiStatus(linkedInventory?.status);
-    if (currentStatus === targetStatus) return;
-
-    const isClosedDealFlow =
-      ["CLOSED", "REQUESTED"].includes(statusDraft)
-      || ["CLOSED", "REQUESTED"].includes(String(selectedLead?.status || ""));
-
-    if (targetStatus === "Sold" && !isClosedDealFlow) {
-      setError("Set lead status to CLOSED or REQUESTED before marking property as Sold");
-      return;
-    }
-
-    const payload = {
-      status: targetStatus,
-      reservationReason: "",
-    };
-
-    if (targetStatus === "Blocked") {
-      const reasonInput = window.prompt("Reservation reason:", String(linkedInventory?.reservationReason || "").trim());
-      if (reasonInput === null) return;
-      const reservationReason = String(reasonInput || "").trim();
-      if (!reservationReason) {
-        setError("Reservation reason is required when status is Reserved");
-        return;
-      }
-      payload.reservationReason = reservationReason;
-    }
-
-    if (targetStatus === "Sold") {
-      const paymentMode = String(paymentModeDraft || selectedLead?.dealPayment?.mode || "")
-        .trim()
-        .toUpperCase();
-      const paymentType = String(paymentTypeDraft || selectedLead?.dealPayment?.paymentType || "")
-        .trim()
-        .toUpperCase();
-      const remainingAmount = toAmountNumber(
-        paymentRemainingDraft !== ""
-          ? paymentRemainingDraft
-          : selectedLead?.dealPayment?.remainingAmount,
-      );
-      const paymentReference = String(
-        paymentReferenceDraft || selectedLead?.dealPayment?.paymentReference || "",
-      ).trim();
-      const paymentNote = String(paymentNoteDraft || selectedLead?.dealPayment?.note || "").trim();
-      const totalAmount = Number(linkedInventory?.price);
-
-      if (!selectedLead?._id) {
-        setError("Lead details unavailable for sold status payload");
-        return;
-      }
-      if (!paymentMode) {
-        setError("Payment mode is required before marking property as Sold");
-        return;
-      }
-      if (!paymentType) {
-        setError("Payment type is required before marking property as Sold");
-        return;
-      }
-      if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
-        setError("Property price must be set to mark status as Sold");
-        return;
-      }
-      if (paymentType === "PARTIAL" && (!Number.isFinite(remainingAmount) || remainingAmount <= 0)) {
-        setError("Remaining amount must be greater than 0 for partial payment");
-        return;
-      }
-      if (paymentMode !== "CASH" && !paymentReference) {
-        setError("Payment reference is required for non-cash mode");
-        return;
-      }
-
-      payload.saleDetails = {
-        leadId: selectedLead._id,
-        paymentMode,
-        paymentType,
-        totalAmount,
-        remainingAmount: paymentType === "PARTIAL" ? remainingAmount : 0,
-        paymentReference: paymentMode === "CASH" ? "" : paymentReference,
-        note: paymentNote,
-      };
-    }
-
-    try {
-      setPropertyStatusActionInventoryId(resolvedInventoryId);
-      setError("");
-
-      if (canDirectInventoryStatusUpdate) {
-        const updatedInventory = await updateInventoryAsset(resolvedInventoryId, payload);
-        if (updatedInventory) {
-          setInventoryOptions((previous) =>
-            previous.map((row) =>
-              String(row?._id || "") === String(updatedInventory?._id || "")
-                ? {
-                  ...row,
-                  ...updatedInventory,
-                  status: toInventoryStatusLabel(updatedInventory?.status),
-                }
-                : row),
-          );
-          setSelectedLead((previous) => mergeInventorySnapshotIntoLead(previous, updatedInventory));
-          setLeads((previous) =>
-            previous.map((leadRow) =>
-              String(leadRow?._id || "") === String(selectedLead?._id || "")
-                ? mergeInventorySnapshotIntoLead(leadRow, updatedInventory)
-                : leadRow),
-          );
-        }
-        setSuccess("Property status updated from lead details");
-        return;
-      }
-
-      await requestInventoryUpdateChange(resolvedInventoryId, payload);
-      setSuccess("Property status change request submitted for admin approval");
-    } catch (statusError) {
-      const message = toErrorMessage(statusError, "Failed to update property status");
-      console.error(`Update related property status failed: ${message}`);
-      setError(message);
-    } finally {
-      setPropertyStatusActionInventoryId("");
-    }
-  };
-
   const handleAddDiary = async () => {
     if (!selectedLead) return;
 
@@ -1483,12 +1293,7 @@ const LeadsMatrix = () => {
   const selectedLeadSiteLng = toCoordinateNumber(selectedLead?.siteLocation?.lng);
   const selectedLeadRelatedInventories = getLeadRelatedInventories(selectedLead);
   const selectedLeadActiveInventoryId = toObjectIdString(selectedLead?.inventoryId);
-  const selectedLeadRelatedInventoryIds = new Set(
-    selectedLeadRelatedInventories.map((row) => toObjectIdString(row)),
-  );
-  const availableRelatedInventoryOptions = inventoryOptions.filter(
-    (inventory) => !selectedLeadRelatedInventoryIds.has(String(inventory?._id || "")),
-  );
+  const availableRelatedInventoryOptions = inventoryOptions;
 
   return (
     <div
@@ -1608,16 +1413,11 @@ const LeadsMatrix = () => {
             propertyActionType={propertyActionType}
             propertyActionInventoryId={propertyActionInventoryId}
             canManageLeadProperties={canManageLeadProperties}
-            canUpdateRelatedPropertyStatus={canUpdateRelatedPropertyStatus}
-            propertyStatusActionInventoryId={propertyStatusActionInventoryId}
-            propertyStatusRequiresApproval={!canDirectInventoryStatusUpdate}
-            inventoryStatusOptions={INVENTORY_STATUS_OPTIONS}
             toInventoryApiStatus={toInventoryApiStatus}
             toInventoryStatusLabel={toInventoryStatusLabel}
             onSelectRelatedProperty={handleSelectRelatedProperty}
             onOpenRelatedProperty={handleOpenRelatedProperty}
             onRemoveRelatedProperty={handleRemoveRelatedProperty}
-            onUpdateRelatedPropertyStatus={handleRelatedPropertyStatusChange}
             availableRelatedInventoryOptions={availableRelatedInventoryOptions}
             relatedInventoryDraft={relatedInventoryDraft}
             setRelatedInventoryDraft={setRelatedInventoryDraft}

@@ -20,7 +20,13 @@ Set in `.env` for Expo:
 - `EXPO_PUBLIC_API_BASE_URL=https://nemnidhi.cloud/api`
 - `EXPO_PUBLIC_SOCKET_URL=https://nemnidhi.cloud`
 - `EXPO_PUBLIC_SOCKET_PATH=/socket.io`
+- Default mode is cloud-first (including dev builds).
 - Optional local API mode (Expo dev only): `EXPO_PUBLIC_USE_LOCAL_API=true`
+- Optional TURN relay for production calling reliability:
+  - `EXPO_PUBLIC_TURN_URL=turn:your-turn-host:3478`
+  - `EXPO_PUBLIC_TURN_URLS=turn:your-turn-host:3478,turns:your-turn-host:5349`
+  - `EXPO_PUBLIC_TURN_USERNAME=...`
+  - `EXPO_PUBLIC_TURN_CREDENTIAL=...`
 
 ## Run
 ```bash
@@ -33,6 +39,7 @@ npm run start
 - Build and install Android development client (one-time): `npm run android`
 - Start Metro for dev client: `npm run start`
 - Open installed app (not Expo Go), then connect to Metro.
+- For cloud testing, keep `EXPO_PUBLIC_USE_LOCAL_API` unset/false so app stays on cloud URLs.
 
 ## Expo Go scan + Web
 - Expo Go (no native WebRTC calling): `npm run start:go`
