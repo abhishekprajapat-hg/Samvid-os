@@ -20,6 +20,7 @@ const INVENTORY_ALLOWED_FIELDS = [
   "category",
   "status",
   "reservationReason",
+  "reservationLeadId",
   "saleDetails",
   "location",
   "siteLocation",

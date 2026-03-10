@@ -16,6 +16,7 @@ import { Screen } from "../../components/common/Screen";
 import { getMessengerContacts, getMessengerConversations } from "../../services/chatService";
 import { createChatSocket } from "../../services/chatSocket";
 import { useAuth } from "../../context/AuthContext";
+import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { updateCallLog } from "../../services/chatService";
@@ -32,6 +33,7 @@ const initials = (name: string) =>
 export const TeamChatScreen = () => {
   const navigation = useNavigation<any>();
   const { token, user } = useAuth();
+  const { markAllChatRead, markChatConversationRead, syncChatUnreadFromConversations } = useRealtimeAlerts();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -69,13 +71,18 @@ export const TeamChatScreen = () => {
 
       setContacts(nextContacts);
       setConversations(sortedConversations);
+      syncChatUnreadFromConversations(sortedConversations);
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load messenger"));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [syncChatUnreadFromConversations]);
+
+  useEffect(() => {
+    markAllChatRead();
+  }, [markAllChatRead]);
 
   useEffect(() => {
     load();
@@ -169,6 +176,9 @@ export const TeamChatScreen = () => {
     contactRole?: string;
     contactAvatar?: string;
   }) => {
+    if (conversationId) {
+      markChatConversationRead(conversationId);
+    }
     navigation.navigate("ChatConversation", {
       conversationId,
       contactId,
@@ -216,6 +226,14 @@ export const TeamChatScreen = () => {
     return contacts.filter((contact) => contact.name.toLowerCase().includes(q));
   }, [contacts, search]);
 
+  const goBack = () => {
+    if (navigation?.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+    navigation.navigate("MainTabs");
+  };
+
   return (
     <Screen title="Team Chat" subtitle="Realtime Messenger" loading={loading} error={error}>
       <ScrollView
@@ -225,12 +243,17 @@ export const TeamChatScreen = () => {
         contentContainerStyle={styles.pageContent}
       >
         <View style={styles.quickTop}>
-          <Pressable style={styles.quickBtn} onPress={() => setProfileVisible(true)}>
-            {renderAvatar({ name: user?.name || "Me", avatarUrl: user?.profileImageUrl || "" }, 24)}
+          <Pressable style={styles.quickBtn} onPress={goBack}>
+            <Ionicons name="arrow-back" size={16} color="#334155" />
           </Pressable>
-          <Pressable style={styles.quickBtn} onPress={() => load(true)}>
-            <Ionicons name="refresh" size={15} color="#64748b" />
-          </Pressable>
+          <View style={styles.quickTopRight}>
+            <Pressable style={styles.quickBtn} onPress={() => load(true)}>
+              <Ionicons name="refresh" size={15} color="#64748b" />
+            </Pressable>
+            <Pressable style={styles.quickBtn} onPress={() => setProfileVisible(true)}>
+              {renderAvatar({ name: user?.name || "Me", avatarUrl: user?.profileImageUrl || "" }, 24)}
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.searchCard}>
@@ -374,6 +397,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+  },
+  quickTopRight: {
+    flexDirection: "row",
+    gap: 8,
     alignItems: "center",
   },
   quickBtn: {

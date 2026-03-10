@@ -30,16 +30,21 @@ const RTCViewNative = webrtcModule?.RTCView;
 const mediaDevicesApi = webrtcModule?.mediaDevices;
 
 const TURN_URL = String(process.env.EXPO_PUBLIC_TURN_URL || "").trim();
+const TURN_URLS = String(process.env.EXPO_PUBLIC_TURN_URLS || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 const TURN_USERNAME = String(process.env.EXPO_PUBLIC_TURN_USERNAME || "").trim();
 const TURN_CREDENTIAL = String(process.env.EXPO_PUBLIC_TURN_CREDENTIAL || "").trim();
+const TURN_SERVER_URLS = Array.from(new Set([TURN_URL, ...TURN_URLS].filter(Boolean)));
 
 const ICE_SERVERS = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    ...(TURN_URL
+    ...(TURN_SERVER_URLS.length > 0
       ? [{
-          urls: TURN_URL,
+          urls: TURN_SERVER_URLS,
           username: TURN_USERNAME,
           credential: TURN_CREDENTIAL,
         }]
@@ -52,6 +57,26 @@ const toDuration = (seconds: number) => {
   const mm = String(Math.floor(safe / 60)).padStart(2, "0");
   const ss = String(safe % 60).padStart(2, "0");
   return `${mm}:${ss}`;
+};
+
+const normalizeIceCandidate = (candidate: any) => {
+  if (!candidate) return null;
+  if (typeof candidate?.toJSON === "function") {
+    const json = candidate.toJSON();
+    return {
+      candidate: String(json?.candidate || ""),
+      sdpMid: typeof json?.sdpMid === "string" ? json.sdpMid : null,
+      sdpMLineIndex: Number.isInteger(json?.sdpMLineIndex) ? json.sdpMLineIndex : null,
+      usernameFragment: typeof json?.usernameFragment === "string" ? json.usernameFragment : undefined,
+    };
+  }
+
+  return {
+    candidate: String(candidate?.candidate || ""),
+    sdpMid: typeof candidate?.sdpMid === "string" ? candidate.sdpMid : null,
+    sdpMLineIndex: Number.isInteger(candidate?.sdpMLineIndex) ? candidate.sdpMLineIndex : null,
+    usernameFragment: typeof candidate?.usernameFragment === "string" ? candidate.usernameFragment : undefined,
+  };
 };
 
 const ensureAndroidPermissions = async (callType: "VOICE" | "VIDEO") => {
@@ -100,6 +125,8 @@ export const CallScreen = () => {
   const socketRef = useRef<ReturnType<typeof createChatSocket> | null>(null);
   const connectedAtRef = useRef<number>(0);
   const hasEndedRef = useRef(false);
+  const localOfferRef = useRef<any>(null);
+  const localIceCandidatesRef = useRef<any[]>([]);
 
   const callLabel = useMemo(() => {
     if (connected) return `Connected ${toDuration(elapsed)}`;
@@ -117,10 +144,9 @@ export const CallScreen = () => {
 
   const emitSignal = (signalType: string, signal: any) => {
     if (!socketRef.current || !peerId) return;
-    const outgoingSignalPayload =
-      signalType === "ice-candidate"
-        ? { type: "candidate", candidate: signal?.candidate || signal }
-        : signal;
+    const outgoingSignalPayload = signalType === "ice-candidate"
+      ? { type: "ice-candidate", candidate: normalizeIceCandidate(signal) }
+      : signal;
 
     socketRef.current.emit("chat:call:signal", {
       callId,
@@ -133,7 +159,7 @@ export const CallScreen = () => {
       conversationId: conversationId || null,
       recipientId: peerId,
       signalType,
-      signal,
+      signal: signalType === "ice-candidate" ? normalizeIceCandidate(signal) : signal,
     });
   };
 
@@ -150,7 +176,14 @@ export const CallScreen = () => {
 
     const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: callType === "VIDEO" });
     await pc.setLocalDescription(offer);
+    localOfferRef.current = offer;
     emitSignal("offer", offer);
+  };
+
+  const resendOfferBundle = () => {
+    if (incoming || connected || !localOfferRef.current) return;
+    emitSignal("offer", localOfferRef.current);
+    localIceCandidatesRef.current.forEach((candidate) => emitSignal("ice-candidate", candidate));
   };
 
   const teardownMedia = async () => {
@@ -172,6 +205,8 @@ export const CallScreen = () => {
     } catch {}
 
     pcRef.current = null;
+    localOfferRef.current = null;
+    localIceCandidatesRef.current = [];
     setLocalStream(null);
     setRemoteStream(null);
 
@@ -216,7 +251,11 @@ export const CallScreen = () => {
 
   useEffect(() => {
     if (!hasWebRtc) {
-      setError("Calling is disabled in Expo Go. Install/open dev build and run: npm run android, then npm run start.");
+      if (Platform.OS === "web") {
+        setError("Calling preview is not supported on web. Calls work in Android APK/dev build with react-native-webrtc + TURN config.");
+      } else {
+        setError("Calling is unavailable in Expo Go. Use Android APK/dev build (EAS or `npm run android`) to enable audio/video calls.");
+      }
       setLoading(false);
       return;
     }
@@ -253,7 +292,10 @@ export const CallScreen = () => {
 
         (pc as any).onicecandidate = (event: any) => {
           if (!event?.candidate) return;
-          emitSignal("ice-candidate", event.candidate);
+          const normalizedCandidate = normalizeIceCandidate(event.candidate);
+          if (!normalizedCandidate?.candidate) return;
+          localIceCandidatesRef.current.push(normalizedCandidate);
+          emitSignal("ice-candidate", normalizedCandidate);
         };
 
         (pc as any).ontrack = (event: any) => {
@@ -323,7 +365,9 @@ export const CallScreen = () => {
             const signal = payload?.signal;
             if (!pcRef.current || !signal) return;
 
-            if (signal?.type === "offer" || signal?.sdp?.includes?.("a=group:BUNDLE")) {
+            const signalType = String(signal?.type || "").toLowerCase();
+
+            if (signalType === "offer" || signal?.sdp?.includes?.("a=group:BUNDLE")) {
               await pcRef.current.setRemoteDescription(new RTCSessionDescriptionCtor(signal));
               const answer = await pcRef.current.createAnswer();
               await pcRef.current.setLocalDescription(answer);
@@ -332,14 +376,20 @@ export const CallScreen = () => {
               return;
             }
 
-            if (signal?.type === "answer") {
+            if (signalType === "answer") {
               await pcRef.current.setRemoteDescription(new RTCSessionDescriptionCtor(signal));
               markConnected();
               return;
             }
 
-            const candidate = signal?.candidate ? signal : null;
-            if (candidate) {
+            const candidate =
+              signalType === "ice-candidate"
+                ? normalizeIceCandidate(signal?.candidate)
+                : signalType === "candidate"
+                  ? normalizeIceCandidate(signal)
+                  : normalizeIceCandidate(signal?.candidate ? signal : null);
+
+            if (candidate?.candidate) {
               await pcRef.current.addIceCandidate(new RTCIceCandidateCtor(candidate));
             }
           } catch {
@@ -351,9 +401,19 @@ export const CallScreen = () => {
           const incomingCallId = String(payload?.callId || "");
           if (incomingCallId && incomingCallId !== callId) return;
           const status = String(payload?.status || "").toUpperCase();
+          if (status === "ACCEPTED") {
+            resendOfferBundle();
+            return;
+          }
           if (["REJECTED", "MISSED", "ENDED", "FAILED", "CANCELLED"].includes(status)) {
             endCall(status === "REJECTED" ? "REJECTED" : "ENDED");
           }
+        });
+
+        socket.on("chat:call:accepted", (payload: any) => {
+          const incomingCallId = String(payload?.callId || "");
+          if (incomingCallId && incomingCallId !== callId) return;
+          resendOfferBundle();
         });
 
         socket.on("chat:call:ended", (payload: any) => {

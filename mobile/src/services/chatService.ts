@@ -76,6 +76,7 @@ const normalizeConversation = (row: any): ChatConversation => ({
   lastMessage: String(row?.lastMessage || ""),
   lastMessageAt: String(row?.lastMessageAt || row?.updatedAt || ""),
   updatedAt: String(row?.updatedAt || ""),
+  unreadCount: Math.max(0, Number(row?.unreadCount || 0)),
 });
 
 const normalizeCallLog = (row: any): ChatCallLog => {
@@ -93,24 +94,27 @@ const normalizeCallLog = (row: any): ChatCallLog => {
 
   const mode = String(row?.mode || row?.callType || "audio").toUpperCase();
   const normalizedStatus = statusMap[String(row?.status || "").toUpperCase()] || "INITIATED";
+  const callerRow = row?.caller || row?.from || null;
+  const calleeRow = row?.callee || row?.to || null;
+  const metadata = row?.metadata || {};
 
   return {
     _id: String(row?._id || row?.callId || `call-${Date.now()}`),
     conversationId: String(row?.conversationId || row?.roomId || ""),
-    caller: row?.caller
+    caller: callerRow
       ? {
-          _id: String(row.caller._id || ""),
-          name: String(row.caller.name || ""),
-          role: String(row.caller.role || ""),
-          profileImageUrl: String(row.caller.profileImageUrl || ""),
+          _id: String(callerRow._id || metadata?.callerId || ""),
+          name: String(callerRow.name || metadata?.callerName || ""),
+          role: String(callerRow.role || ""),
+          profileImageUrl: String(callerRow.profileImageUrl || ""),
         }
       : undefined,
-    callee: row?.callee
+    callee: calleeRow
       ? {
-          _id: String(row.callee._id || ""),
-          name: String(row.callee.name || ""),
-          role: String(row.callee.role || ""),
-          profileImageUrl: String(row.callee.profileImageUrl || ""),
+          _id: String(calleeRow._id || metadata?.calleeId || ""),
+          name: String(calleeRow.name || metadata?.calleeName || ""),
+          role: String(calleeRow.role || ""),
+          profileImageUrl: String(calleeRow.profileImageUrl || ""),
         }
       : undefined,
     callType: mode === "VIDEO" ? "VIDEO" : "VOICE",
@@ -119,7 +123,7 @@ const normalizeCallLog = (row: any): ChatCallLog => {
     answeredAt: String(row?.answeredAt || ""),
     endedAt: String(row?.endedAt || ""),
     durationSec: Number(row?.durationSec || row?.durationSeconds || 0),
-    metadata: row?.metadata || {},
+    metadata,
     e2ee: row?.e2ee || { enabled: true, protocol: "X25519-AES-256-GCM" },
   };
 };

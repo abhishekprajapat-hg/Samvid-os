@@ -1,4 +1,11 @@
-export type UserRole = "ADMIN" | "MANAGER" | "EXECUTIVE" | "FIELD_EXECUTIVE";
+export type UserRole =
+  | "ADMIN"
+  | "MANAGER"
+  | "ASSISTANT_MANAGER"
+  | "TEAM_LEADER"
+  | "EXECUTIVE"
+  | "FIELD_EXECUTIVE"
+  | "CHANNEL_PARTNER";
 
 export interface User {
   _id?: string;
@@ -9,10 +16,13 @@ export interface User {
   role: UserRole;
   isActive?: boolean;
   profileImageUrl?: string;
+  canViewInventory?: boolean;
 }
 
 export interface AuthPayload {
-  token: string;
+  token?: string;
+  accessToken?: string;
+  refreshToken?: string;
   user: User;
 }
 
@@ -27,6 +37,8 @@ export interface Lead {
   status: string;
   nextFollowUp?: string;
   assignedTo?: User;
+  inventoryId?: InventoryAsset | string | null;
+  relatedInventoryIds?: Array<InventoryAsset | string>;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -40,6 +52,23 @@ export interface InventoryAsset {
   category?: string;
   status?: string;
   reservationReason?: string;
+  reservationLeadId?: string;
+  reservationLead?: {
+    _id?: string;
+    name?: string;
+    phone?: string;
+    status?: string;
+  } | null;
+  saleDetails?: {
+    leadId?: string | { _id?: string; name?: string; phone?: string };
+    paymentMode?: string;
+    paymentType?: string;
+    totalAmount?: number;
+    remainingAmount?: number;
+    paymentReference?: string;
+    note?: string;
+    soldAt?: string;
+  } | null;
   amenities?: string[];
   images?: string[];
   documents?: string[];
@@ -92,6 +121,7 @@ export interface ChatConversation {
   lastMessage?: string;
   lastMessageAt?: string;
   updatedAt?: string;
+  unreadCount?: number;
 }
 
 export interface ChatCallLog {

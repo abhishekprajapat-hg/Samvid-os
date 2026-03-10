@@ -40,6 +40,41 @@ router.get(
   leadController.getLeadPaymentRequests
 );
 
+router.get(
+  "/status-requests/pending",
+  authMiddleware.protect,
+  authMiddleware.checkRole(["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]),
+  leadController.getPendingLeadStatusRequests
+);
+
+router.get(
+  "/status-requests",
+  authMiddleware.protect,
+  leadController.getLeadStatusRequests
+);
+
+router.get(
+  "/performance/overview",
+  authMiddleware.protect,
+  leadController.getCompanyPerformanceOverview
+);
+
+router.patch(
+  "/status-requests/:requestId/approve",
+  writeLimiter,
+  authMiddleware.protect,
+  authMiddleware.checkRole(["ADMIN"]),
+  leadController.approveLeadStatusRequest
+);
+
+router.patch(
+  "/status-requests/:requestId/reject",
+  writeLimiter,
+  authMiddleware.protect,
+  authMiddleware.checkRole(["ADMIN"]),
+  leadController.rejectLeadStatusRequest
+);
+
 // ======================================
 // ASSIGN LEAD (Admin + Leadership roles)
 // ======================================
@@ -72,6 +107,13 @@ router.delete(
   leadController.removeRelatedPropertyFromLead
 );
 
+router.patch(
+  "/:leadId",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.updateLeadBasics
+);
+
 // ======================================
 // UPDATE STATUS
 // ======================================
@@ -80,6 +122,13 @@ router.patch(
   writeLimiter,
   authMiddleware.protect,
   leadController.updateLeadStatus
+);
+
+router.post(
+  "/:leadId/status-request",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.requestLeadStatusChange
 );
 
 // ======================================

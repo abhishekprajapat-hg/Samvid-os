@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { AppState } from "react-native";
 import { getCurrentUser, loginUser } from "../services/authService";
 import { setUnauthorizedHandler } from "../services/api";
 import { sessionStorage } from "../storage/sessionStorage";
 import type { User, UserRole } from "../types";
+import { getSessionTimeoutMs, readSystemSettings } from "../utils/systemSettings";
 
 type AuthContextValue = {
   loading: boolean;
@@ -34,29 +36,82 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
+    let alive = true;
+    let wentBackgroundAt = 0;
+    let timeoutMs = getSessionTimeoutMs(30);
+
+    const boot = async () => {
+      try {
+        const settings = await readSystemSettings();
+        timeoutMs = getSessionTimeoutMs(settings.security.sessionTimeoutMinutes);
+      } catch {
+        timeoutMs = getSessionTimeoutMs(30);
+      }
+    };
+
+    boot();
+
+    const sub = AppState.addEventListener("change", async (nextState) => {
+      if (!alive) return;
+      if (nextState === "background" || nextState === "inactive") {
+        wentBackgroundAt = Date.now();
+        return;
+      }
+
+      if (nextState === "active" && wentBackgroundAt > 0) {
+        const now = Date.now();
+        const elapsed = now - wentBackgroundAt;
+        wentBackgroundAt = 0;
+
+        const currentToken = await sessionStorage.getToken();
+        if (!currentToken) return;
+        if (elapsed < timeoutMs) return;
+
+        await sessionStorage.clearSession();
+        setToken(null);
+        setUser(null);
+      }
+    });
+
+    return () => {
+      alive = false;
+      sub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
     const restore = async () => {
+      const expired = await sessionStorage.isSessionExpired();
+      if (expired) {
+        await sessionStorage.clearSession();
+        setToken(null);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
       const [storedToken, storedUser] = await Promise.all([
         sessionStorage.getToken(),
         sessionStorage.getUser(),
       ]);
 
       if (storedToken && storedUser) {
+        setToken(storedToken);
+        setUser(storedUser);
         try {
           const me = await getCurrentUser();
           if (me?.user) {
-            setToken(storedToken);
             setUser(me.user as User);
             const storedRefreshToken = await sessionStorage.getRefreshToken();
             await sessionStorage.setSession(storedToken, me.user as User, storedRefreshToken);
-          } else {
+          }
+        } catch (error: any) {
+          const status = Number(error?.response?.status || 0);
+          if (status === 401 || status === 403) {
             await sessionStorage.clearSession();
             setToken(null);
             setUser(null);
           }
-        } catch {
-          await sessionStorage.clearSession();
-          setToken(null);
-          setUser(null);
         }
       } else {
         setToken(null);
@@ -68,6 +123,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     restore();
   }, []);
+
+  useEffect(() => {
+    if (!token || !user) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    sessionStorage.getRemainingSessionMs().then((remaining) => {
+      if (remaining === null) return;
+      if (remaining <= 0) {
+        sessionStorage.clearSession().then(() => {
+          setToken(null);
+          setUser(null);
+        });
+        return;
+      }
+      timer = setTimeout(() => {
+        sessionStorage.clearSession().then(() => {
+          setToken(null);
+          setUser(null);
+        });
+      }, remaining);
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [token, user]);
 
   const login = async ({ email, password, portal = "GENERAL" }: { email: string; password: string; portal?: "GENERAL" | "ADMIN" }) => {
     const payload = await loginUser({ email, password, portal });

@@ -61,6 +61,25 @@ export const markMessageSeen = async (messageId) => {
   return res.data?.message || null;
 };
 
+export const deleteConversationMessage = async ({ messageId, scope = "self" } = {}) => {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+
+  const normalizedScope = String(scope || "").trim().toLowerCase() === "everyone"
+    ? "everyone"
+    : "self";
+  const res = await api.patch(`/chat/messages/${id}/delete`, { scope: normalizedScope });
+  return res.data || null;
+};
+
+export const clearConversationMessages = async (conversationId) => {
+  const id = String(conversationId || "").trim();
+  if (!id) return null;
+
+  const res = await api.patch(`/chat/rooms/${id}/clear`);
+  return res.data || null;
+};
+
 export const sendDirectMessage = async ({
   text,
   conversationId,

@@ -1,14 +1,69 @@
 import api from "./api";
 import type { Lead } from "../types";
 
+const LEAD_STATUS_REVIEW_ENABLED = String(process.env.EXPO_PUBLIC_ENABLE_LEAD_STATUS_REVIEW || "true").trim().toLowerCase() !== "false";
+
+export type CompanyPerformanceOverview = {
+  summary: {
+    totalLeads: number;
+    closed: number;
+    closeVelocity: number;
+  };
+  weekly: Array<{
+    label: string;
+    created: number;
+    closed: number;
+    open: number;
+  }>;
+  leaderboard: Array<{
+    id: string;
+    name: string;
+    role: string;
+    assigned: number;
+    closed: number;
+    visits: number;
+    scorePercent: number;
+  }>;
+  range?: "ALL" | "THIS_MONTH" | "CUSTOM" | string;
+  periodLabel?: string;
+  generatedAt?: string;
+};
+
 export const getAllLeads = async (): Promise<Lead[]> => {
   const res = await api.get("/leads");
   return res.data?.leads || [];
 };
 
+export const getCompanyPerformanceOverview = async (
+  params: {
+    range?: "ALL" | "THIS_MONTH" | "CUSTOM";
+    month?: string;
+    from?: string;
+    to?: string;
+  } = {},
+): Promise<CompanyPerformanceOverview | null> => {
+  const res = await api.get("/leads/performance/overview", { params });
+  return res.data?.overview || null;
+};
+
 export const createLead = async (payload: Partial<Lead>): Promise<Lead> => {
   const res = await api.post("/leads", payload);
   return res.data?.lead;
+};
+
+export const updateLeadBasics = async (
+  leadId: string,
+  payload: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    city?: string;
+    projectInterested?: string;
+    source?: string;
+  },
+): Promise<Lead | null> => {
+  const res = await api.patch(`/leads/${leadId}`, payload);
+  return res.data?.lead || null;
 };
 
 export const updateLeadStatus = async (leadId: string, payload: Partial<Lead>): Promise<Lead> => {
@@ -19,6 +74,21 @@ export const updateLeadStatus = async (leadId: string, payload: Partial<Lead>): 
 export const assignLead = async (leadId: string, executiveId: string): Promise<Lead> => {
   const res = await api.patch(`/leads/${leadId}/assign`, { executiveId });
   return res.data?.lead;
+};
+
+export const addLeadRelatedProperty = async (leadId: string, inventoryId: string): Promise<Lead | null> => {
+  const res = await api.patch(`/leads/${leadId}/properties`, { inventoryId });
+  return res.data?.lead || null;
+};
+
+export const selectLeadRelatedProperty = async (leadId: string, inventoryId: string): Promise<Lead | null> => {
+  const res = await api.patch(`/leads/${leadId}/properties/${inventoryId}/select`);
+  return res.data?.lead || null;
+};
+
+export const removeLeadRelatedProperty = async (leadId: string, inventoryId: string): Promise<Lead | null> => {
+  const res = await api.delete(`/leads/${leadId}/properties/${inventoryId}`);
+  return res.data?.lead || null;
 };
 
 export const getLeadActivity = async (leadId: string): Promise<Array<{ _id: string; action: string; createdAt: string; performedBy?: { name?: string } }>> => {
@@ -111,6 +181,13 @@ export type LeadStatusRequest = {
     size?: number;
     storagePath?: string;
   } | null;
+  closureDocuments?: Array<{
+    url?: string;
+    kind?: "image" | "pdf" | "file" | string;
+    mimeType?: string;
+    name?: string;
+    size?: number;
+  }>;
   requestNote: string;
   status: "pending" | "approved" | "rejected";
   requestedBy?: { _id?: string; name?: string; role?: string };
@@ -135,6 +212,13 @@ export const requestLeadStatusChange = async (
       size?: number;
       storagePath?: string;
     };
+    closureDocuments?: Array<{
+      url: string;
+      kind?: "image" | "pdf" | "file" | string;
+      mimeType?: string;
+      name?: string;
+      size?: number;
+    }>;
     saleMeta?: {
       leadId?: string;
       leadName?: string;
@@ -154,7 +238,16 @@ export const requestLeadStatusChange = async (
   return res.data?.request || null;
 };
 
+export const getLeadStatusRequests = async (
+  params: { leadId?: string; status?: "pending" | "approved" | "rejected" } = {},
+): Promise<LeadStatusRequest[]> => {
+  if (!LEAD_STATUS_REVIEW_ENABLED) return [];
+  const res = await api.get("/leads/status-requests", { params });
+  return res.data?.requests || [];
+};
+
 export const getPendingLeadStatusRequests = async (params: { leadId?: string } = {}): Promise<LeadStatusRequest[]> => {
+  if (!LEAD_STATUS_REVIEW_ENABLED) return [];
   const res = await api.get("/leads/status-requests/pending", { params });
   return res.data?.requests || [];
 };

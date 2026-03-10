@@ -20,6 +20,8 @@ router.post("/rooms/lead", chatController.createLeadRoom);
 router.get("/rooms/:roomId/messages", chatController.getRoomMessages);
 router.post("/rooms/:roomId/messages", chatMessageLimiter, chatController.sendRoomMessage);
 router.patch("/rooms/:roomId/read", chatController.markRoomRead);
+router.patch("/rooms/:roomId/clear", chatController.clearRoomMessages);
+router.patch("/messages/:messageId/delete", chatController.deleteMessage);
 router.patch("/messages/:messageId/delivered", chatController.markDelivered);
 router.patch("/messages/:messageId/seen", chatController.markSeen);
 router.get("/escalations", chatController.getEscalations);

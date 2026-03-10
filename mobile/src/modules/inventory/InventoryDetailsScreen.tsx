@@ -1,13 +1,44 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, FlatList, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { Ionicons } from "@expo/vector-icons";
 import { useRoute } from "@react-navigation/native";
-import { getInventoryAssetActivity, getInventoryAssetById, updateInventoryAsset } from "../../services/inventoryService";
+import * as DocumentPicker from "expo-document-picker";
+import { addLeadDiaryEntry, getAllLeads } from "../../services/leadService";
+import { uploadChatFile } from "../../services/chatService";
+import { getInventoryAssetActivity, getInventoryAssetById, requestInventoryStatusChange, updateInventoryAsset } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { useAuth } from "../../context/AuthContext";
 import type { InventoryActivity, InventoryAsset } from "../../types";
 
 const STATUS_OPTIONS = ["Available", "Blocked", "Sold"];
+const STATUS_MODAL_OPTIONS = new Set(["Available", "Blocked", "Sold"]);
+const SOLD_PAYMENT_MODES = ["CASH", "CHECK", "NET_BANKING_NEFTRTGSIMPS", "UPI"];
+const SOLD_PAYMENT_MODE_LABEL: Record<string, string> = {
+  CASH: "Cash",
+  CHECK: "Cheque",
+  NET_BANKING_NEFTRTGSIMPS: "Bank Transfer",
+  UPI: "UPI",
+};
+const SOLD_TRANSFER_TYPES = ["NEFT", "RTGS", "IMPS"];
+type SoldDateField = "remainingDueDate" | "paymentDate" | "chequeDate";
+
+const formatDateOnly = (value: Date) =>
+  `${String(value.getDate()).padStart(2, "0")}-${String(value.getMonth() + 1).padStart(2, "0")}-${value.getFullYear()}`;
+
+const parseDateOnly = (value: string): Date | null => {
+  const safe = String(value || "").trim();
+  const match = safe.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const year = Number(match[3]);
+  const date = new Date(year, month, day);
+  if (Number.isNaN(date.getTime())) return null;
+  if (date.getDate() !== day || date.getMonth() !== month || date.getFullYear() !== year) return null;
+  return date;
+};
 const buildDefaultImageSet = (seed: string) => {
   const safeSeed = encodeURIComponent(seed || "asset");
   return Array.from({ length: 4 }, (_, index) => `https://picsum.photos/seed/${safeSeed}-${index + 1}/900/600`);
@@ -22,6 +53,17 @@ const resolveFileUrl = (url?: string) => {
   const cleanBase = String(base).replace(/\/$/, "");
   if (cleanBase) return `${cleanBase}${safe.startsWith("/") ? "" : "/"}${safe}`;
   return safe;
+};
+
+const pickUriString = (value: unknown) => String(value || "").trim();
+
+const toObjectIdString = (value: unknown) => {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object" && value !== null && "_id" in value) {
+    return String((value as { _id?: string })._id || "").trim();
+  }
+  return "";
 };
 
 const formatActionLabel = (activity: InventoryActivity) => {
@@ -51,43 +93,123 @@ const formatActionLabel = (activity: InventoryActivity) => {
 
 export const InventoryDetailsScreen = () => {
   const route = useRoute<any>();
-  const assetId = String(route.params?.assetId || "");
+  const routeAsset = route.params?.asset || null;
+  const derivedRouteAssetId = String(
+    route.params?.assetId
+    || route.params?.inventoryId
+    || route.params?.id
+    || routeAsset?._id
+    || "",
+  );
+  const assetId = derivedRouteAssetId;
   const { role } = useAuth();
   const canManage = role === "ADMIN";
-  const { width: windowWidth } = useWindowDimensions();
+  const canRequestStatusChange = ["FIELD_EXECUTIVE", "EXECUTIVE", "TEAM_LEADER", "ASSISTANT_MANAGER", "MANAGER"].includes(String(role || ""));
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
-  const [asset, setAsset] = useState<InventoryAsset | null>(null);
+  const [asset, setAsset] = useState<InventoryAsset | null>(routeAsset || null);
   const [activities, setActivities] = useState<InventoryActivity[]>([]);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [reasonModalOpen, setReasonModalOpen] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
-  const [reservationReasonDraft, setReservationReasonDraft] = useState("");
-  const viewerListRef = useRef<FlatList<string>>(null);
+  const [leadDiaryDraft, setLeadDiaryDraft] = useState("");
+  const [showAllActivities, setShowAllActivities] = useState(false);
+  const [leadOptions, setLeadOptions] = useState<Array<{ _id: string; name: string; phone?: string }>>([]);
+  const [blockedLeadIdDraft, setBlockedLeadIdDraft] = useState("");
+  const [blockedLeadDropdownOpen, setBlockedLeadDropdownOpen] = useState(false);
+  const [soldDateField, setSoldDateField] = useState<SoldDateField | null>(null);
+  const [webDatePickerField, setWebDatePickerField] = useState<SoldDateField | null>(null);
+  const [webDatePickerValue, setWebDatePickerValue] = useState("");
+  const [soldForm, setSoldForm] = useState({
+    leadId: "",
+    paymentMode: "CASH",
+    totalAmount: "",
+    partialAmount: "",
+    remainingAmount: "",
+    remainingDueDate: "",
+    paymentDate: "",
+    chequeNumber: "",
+    chequeBankName: "",
+    chequeDate: "",
+    bankTransferType: "NEFT",
+    bankTransferUtrNumber: "",
+    upiTransactionId: "",
+    paymentReference: "",
+    note: "",
+  });
+  const [statusAttachment, setStatusAttachment] = useState<{
+    uri: string;
+    name: string;
+    mimeType?: string;
+    size?: number;
+    file?: any;
+  } | null>(null);
+  const [pickingStatusAttachment, setPickingStatusAttachment] = useState(false);
+  const webDateInputRef = useRef<any>(null);
 
   const galleryImages = useMemo(
     () => (asset?.images?.length ? asset.images : asset ? buildDefaultImageSet(asset.title || asset._id) : []),
     [asset],
   );
-  const viewerWidth = Math.max(windowWidth - 32, 1);
+  const selectedBlockedLeadLabel = useMemo(() => {
+    const selected = leadOptions.find((row) => row._id === blockedLeadIdDraft);
+    if (!selected) return "Select lead";
+    return selected.phone ? `${selected.name} (${selected.phone})` : selected.name;
+  }, [blockedLeadIdDraft, leadOptions]);
+  const visibleActivities = useMemo(
+    () => (showAllActivities ? activities : activities.slice(0, 5)),
+    [activities, showAllActivities],
+  );
 
   const loadDetails = async () => {
+    let hasHardError = false;
     try {
       setLoading(true);
       setError("");
-      const [{ asset }, timeline] = await Promise.all([
-        getInventoryAssetById(assetId),
-        getInventoryAssetActivity(assetId, { limit: 60 }),
+
+      try {
+        const details = await getInventoryAssetById(assetId);
+        const resolvedAsset = (details?.asset as any) || (details?.inventory as any) || null;
+        setAsset(resolvedAsset || routeAsset || null);
+      } catch (e) {
+        hasHardError = true;
+        const detailError = toErrorMessage(e, "Failed to load inventory details");
+        if (!routeAsset || !/access denied|forbidden/i.test(detailError)) {
+          setError(detailError);
+        }
+      }
+
+      const [timeline, leads] = await Promise.all([
+        getInventoryAssetActivity(assetId, { limit: 60 })
+          .then((rows) => ({ rows, error: "" }))
+          .catch((e) => ({
+            rows: [],
+            error: toErrorMessage(e, "Failed to load inventory activity"),
+          })),
+        getAllLeads().catch(() => []),
       ]);
 
-      setAsset(asset);
-      setActivities(Array.isArray(timeline) ? timeline : []);
+      if (timeline.error && !/access denied|forbidden/i.test(timeline.error)) {
+        setError((prev) => prev || timeline.error);
+      }
+      setActivities(Array.isArray(timeline.rows) ? timeline.rows : []);
+      setLeadOptions(
+        (Array.isArray(leads) ? leads : [])
+          .map((row: any) => ({
+            _id: String(row?._id || ""),
+            name: String(row?.name || "").trim(),
+            phone: String(row?.phone || "").trim(),
+          }))
+          .filter((row: any) => row._id && row.name),
+      );
     } catch (e) {
-      setError(toErrorMessage(e, "Failed to load inventory details"));
+      if (!hasHardError) {
+        setError(toErrorMessage(e, "Failed to load inventory details"));
+      }
     } finally {
       setLoading(false);
     }
@@ -106,26 +228,58 @@ export const InventoryDetailsScreen = () => {
   }, [assetId]);
 
   useEffect(() => {
-    if (!viewerOpen) return;
+    if (!webDatePickerField || Platform.OS !== "web") return;
     const timer = setTimeout(() => {
-      viewerListRef.current?.scrollToIndex({ index: viewerIndex, animated: false });
-    }, 30);
+      const node = webDateInputRef.current as any;
+      try {
+        if (node?.showPicker) node.showPicker();
+        else node?.focus?.();
+      } catch {
+        node?.focus?.();
+      }
+    }, 10);
     return () => clearTimeout(timer);
-  }, [viewerOpen, viewerIndex]);
+  }, [webDatePickerField]);
 
-  const applyStatusUpdate = async (status: string, reservationReason = "") => {
-    if (!asset || !canManage) return;
+  const applyStatusUpdate = async (
+    status: string,
+    options: { leadDiaryNote?: string; leadId?: string; saleDetails?: Record<string, unknown> | null } = {},
+  ) => {
+    if (!asset || (!canManage && !canRequestStatusChange)) return;
+    const leadDiaryNote = String(options.leadDiaryNote || "");
+    const leadId = String(options.leadId || "");
+    const saleDetails = options.saleDetails && typeof options.saleDetails === "object" ? options.saleDetails : null;
 
     try {
       setSaving(true);
-      const updated = await updateInventoryAsset(asset._id, {
-        status,
-        reservationReason: status === "Blocked" ? reservationReason : "",
-      });
-      setAsset(updated);
-      const latestTimeline = await getInventoryAssetActivity(asset._id, { limit: 60 });
-      setActivities(Array.isArray(latestTimeline) ? latestTimeline : []);
-      setSuccess("Status updated");
+      if (canManage) {
+        const updated = await updateInventoryAsset(asset._id, {
+          status,
+          reservationReason: status === "Blocked" ? leadDiaryNote : "",
+          reservationLeadId: status === "Blocked" ? leadId : "",
+          saleDetails: status === "Sold" ? saleDetails : null,
+        });
+        if (leadId && leadDiaryNote && status !== "Blocked") {
+          await addLeadDiaryEntry(leadId, {
+            note: `Inventory ${status.toLowerCase()} update: ${updated?.title || asset.title || "Inventory Unit"}\n${leadDiaryNote}`,
+          }).catch(() => null);
+        }
+        setAsset(updated);
+        const latestTimeline = await getInventoryAssetActivity(asset._id, { limit: 60 }).catch(() => []);
+        setActivities(Array.isArray(latestTimeline) ? latestTimeline : []);
+        setSuccess("Status updated");
+      } else {
+        await requestInventoryStatusChange(asset._id, status, {
+          leadId: status === "Blocked" || status === "Available"
+            ? leadId
+            : status === "Sold"
+              ? String((saleDetails as any)?.leadId || "")
+              : "",
+          requestNote: leadDiaryNote,
+          saleDetails: status === "Sold" ? saleDetails : null,
+        });
+        setSuccess("Status change request sent for admin approval");
+      }
     } catch (e) {
       setError(toErrorMessage(e, "Failed to update status"));
     } finally {
@@ -136,34 +290,271 @@ export const InventoryDetailsScreen = () => {
   const closeReasonModal = () => {
     setReasonModalOpen(false);
     setPendingStatus(null);
-    setReservationReasonDraft("");
+    setLeadDiaryDraft("");
+    setBlockedLeadIdDraft("");
+    setBlockedLeadDropdownOpen(false);
+    setSoldForm({
+      leadId: "",
+      paymentMode: "CASH",
+      totalAmount: "",
+      partialAmount: "",
+      remainingAmount: "",
+      remainingDueDate: "",
+      paymentDate: "",
+      chequeNumber: "",
+      chequeBankName: "",
+      chequeDate: "",
+      bankTransferType: "NEFT",
+      bankTransferUtrNumber: "",
+      upiTransactionId: "",
+      paymentReference: "",
+      note: "",
+    });
+    setStatusAttachment(null);
+    setSoldDateField(null);
+    setWebDatePickerField(null);
+    setWebDatePickerValue("");
   };
 
-  const updateStatus = async (status: string) => {
-    if (!asset || !canManage) return;
+  const openSoldDatePicker = (field: SoldDateField) => {
+    if (Platform.OS === "web") {
+      const initialDate = parseDateOnly((soldForm as any)[field]) || new Date();
+      const webValue = `${initialDate.getFullYear()}-${String(initialDate.getMonth() + 1).padStart(2, "0")}-${String(initialDate.getDate()).padStart(2, "0")}`;
+      setWebDatePickerValue(webValue);
+      setWebDatePickerField(field);
+      return;
+    }
+    setSoldDateField(field);
+  };
 
-    if (status === "Blocked") {
+  const onNativeSoldDateChange = (event: DateTimePickerEvent, picked?: Date) => {
+    if (event.type === "dismissed") {
+      setSoldDateField(null);
+      return;
+    }
+    const field = soldDateField;
+    if (field && picked) {
+      setSoldForm((prev) => ({ ...prev, [field]: formatDateOnly(picked) }));
+    }
+    setSoldDateField(null);
+  };
+
+  const pickStatusAttachment = async () => {
+    if (saving || pickingStatusAttachment) return;
+    try {
+      setPickingStatusAttachment(true);
+      const picked = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: false,
+        type: ["image/*", "application/pdf"],
+      });
+      if (picked.canceled || !picked.assets?.length) return;
+
+      const asset: any = picked.assets[0];
+      const file = asset?.file || null;
+      const uri = pickUriString(asset?.uri);
+      if (!uri && !file) {
+        setError("Unable to read selected file");
+        return;
+      }
+      const fallbackName = typeof file?.name === "string" ? file.name : "attachment";
+      setStatusAttachment({
+        uri,
+        name: String(asset?.name || fallbackName || "attachment"),
+        mimeType: String(asset?.mimeType || file?.type || "application/octet-stream"),
+        size: Number(asset?.size || file?.size || 0) || 0,
+        file: file || undefined,
+      });
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to select attachment"));
+    } finally {
+      setPickingStatusAttachment(false);
+    }
+  };
+
+  const updateStatus = async (status: string, reasonHint = "") => {
+    if (!asset || (!canManage && !canRequestStatusChange)) return;
+
+    if (String(asset.status || "") === status) return;
+    if (STATUS_MODAL_OPTIONS.has(status)) {
       setPendingStatus(status);
-      setReservationReasonDraft(String(asset.reservationReason || "").trim());
+      const trimmedReasonHint = String(reasonHint || "").trim();
+      setLeadDiaryDraft(trimmedReasonHint || (status === "Blocked" ? String(asset.reservationReason || "").trim() : ""));
+      setBlockedLeadIdDraft(toObjectIdString(asset.reservationLeadId || asset.reservationLead));
+      setBlockedLeadDropdownOpen(false);
+      setStatusAttachment(null);
+      const existingSale: any = asset.saleDetails || {};
+      setSoldForm({
+        leadId: toObjectIdString(existingSale?.leadId),
+        paymentMode: String(existingSale?.paymentMode || "CASH").toUpperCase(),
+        totalAmount: existingSale?.totalAmount ? String(existingSale.totalAmount) : String(asset.price || ""),
+        partialAmount: "0",
+        remainingAmount: existingSale?.remainingAmount !== undefined && existingSale?.remainingAmount !== null
+          ? String(existingSale.remainingAmount)
+          : "",
+        remainingDueDate: "",
+        paymentDate: "",
+        chequeNumber: existingSale?.paymentMode === "CHECK" ? String(existingSale?.paymentReference || "") : "",
+        chequeBankName: "",
+        chequeDate: "",
+        bankTransferType: "NEFT",
+        bankTransferUtrNumber: existingSale?.paymentMode === "NET_BANKING_NEFTRTGSIMPS" ? String(existingSale?.paymentReference || "") : "",
+        upiTransactionId: existingSale?.paymentMode === "UPI" ? String(existingSale?.paymentReference || "") : "",
+        paymentReference: String(existingSale?.paymentReference || ""),
+        note: trimmedReasonHint || String(existingSale?.note || ""),
+      });
       setReasonModalOpen(true);
       return;
     }
 
-    await applyStatusUpdate(status, "");
+    await applyStatusUpdate(status, { leadDiaryNote: String(reasonHint || "").trim() });
   };
 
   const submitPendingStatus = async () => {
     const status = pendingStatus;
     if (!status) return;
 
-    const trimmedReason = reservationReasonDraft.trim();
-    if (!trimmedReason) {
-      setError("Reservation reason is required when status is Reserved");
+    if (status === "Sold") {
+      const leadId = soldForm.leadId.trim();
+      const paymentMode = String(soldForm.paymentMode || "").toUpperCase();
+      const totalAmount = Number(soldForm.totalAmount);
+      const partialAmount = Number(soldForm.partialAmount);
+      if (!leadId) {
+        setError("Please select lead for sold inventory");
+        return;
+      }
+      if (!SOLD_PAYMENT_MODES.includes(paymentMode)) {
+        setError("Please select valid payment mode");
+        return;
+      }
+      if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+        setError("Total amount must be greater than 0");
+        return;
+      }
+      if (!Number.isFinite(partialAmount) || partialAmount < 0 || partialAmount > totalAmount) {
+        setError("Partial amount should be between 0 and total amount");
+        return;
+      }
+      const remainingAmountInput = soldForm.remainingAmount.trim();
+      const fallbackRemaining = Number((totalAmount - partialAmount).toFixed(2));
+      const remainingAmount = remainingAmountInput ? Number(remainingAmountInput) : fallbackRemaining;
+      if (!Number.isFinite(remainingAmount) || remainingAmount < 0) {
+        setError("Remaining amount should be a valid non-negative number");
+        return;
+      }
+      const paymentType = remainingAmount > 0 ? "PARTIAL" : "FULL";
+      const remainingDueDate = soldForm.remainingDueDate.trim();
+      if (remainingAmount > 0 && !remainingDueDate) {
+        setError("Remaining amount due date is required");
+        return;
+      }
+
+      const paymentDate = soldForm.paymentDate.trim();
+      const chequeDate = soldForm.chequeDate.trim();
+      const chequeNumber = soldForm.chequeNumber.trim();
+      const chequeBankName = soldForm.chequeBankName.trim();
+      const upiTransactionId = soldForm.upiTransactionId.trim();
+      const bankTransferType = soldForm.bankTransferType.trim();
+      const bankTransferUtrNumber = soldForm.bankTransferUtrNumber.trim();
+
+      let paymentReference = "";
+      if (paymentMode === "CASH") {
+        if (!paymentDate) {
+          setError("Payment date is required for cash");
+          return;
+        }
+      } else if (paymentMode === "UPI") {
+        if (!upiTransactionId || !paymentDate) {
+          setError("Please fill transaction id and payment date for UPI");
+          return;
+        }
+        paymentReference = upiTransactionId;
+      } else if (paymentMode === "CHECK") {
+        if (!chequeBankName || !chequeNumber || !chequeDate) {
+          setError("Please fill all required cheque details");
+          return;
+        }
+        paymentReference = chequeNumber;
+      } else if (paymentMode === "NET_BANKING_NEFTRTGSIMPS") {
+        if (!bankTransferType || !bankTransferUtrNumber || !paymentDate) {
+          setError("Please fill transfer type, UTR number and payment date");
+          return;
+        }
+        paymentReference = bankTransferUtrNumber;
+      }
+
+      let attachmentUrl = "";
+      if (statusAttachment) {
+        try {
+          setSaving(true);
+          const uploaded = await uploadChatFile({
+            uri: statusAttachment.uri,
+            name: statusAttachment.name,
+            mimeType: statusAttachment.mimeType || "application/octet-stream",
+            file: statusAttachment.file,
+          });
+          if (!uploaded?.fileUrl) {
+            throw new Error("Attachment upload failed");
+          }
+          attachmentUrl = String(uploaded.fileUrl || "").trim();
+        } catch (e) {
+          setError(toErrorMessage(e, "Failed to upload attachment"));
+          setSaving(false);
+          return;
+        }
+      }
+
+      const extraNote = [
+        soldForm.note.trim(),
+        remainingAmount > 0 ? `Remaining due: ${remainingDueDate}` : "",
+        paymentDate ? `Payment date: ${paymentDate}` : "",
+        paymentMode === "CHECK" && chequeBankName ? `Cheque bank: ${chequeBankName}` : "",
+        paymentMode === "CHECK" && chequeDate ? `Cheque date: ${chequeDate}` : "",
+        paymentMode === "NET_BANKING_NEFTRTGSIMPS" && bankTransferType ? `Bank transfer type: ${bankTransferType}` : "",
+        attachmentUrl ? `Attachment: ${attachmentUrl}` : "",
+      ].filter(Boolean).join("\n");
+
+      const saleDetails = {
+        leadId,
+        paymentMode,
+        paymentType,
+        totalAmount,
+        remainingAmount,
+        paymentReference: paymentMode === "CASH" ? "" : paymentReference,
+        note: extraNote,
+        soldAt: new Date().toISOString(),
+      };
+      closeReasonModal();
+      await applyStatusUpdate(status, {
+        leadDiaryNote: extraNote,
+        leadId,
+        saleDetails,
+      });
+      return;
+    }
+
+    const trimmedLeadId = blockedLeadIdDraft.trim();
+    const trimmedNote = leadDiaryDraft.trim();
+    if (status === "Blocked" || status === "Available") {
+      if (!trimmedLeadId) {
+        setError(`Please select lead for this ${status.toLowerCase()} inventory`);
+        return;
+      }
+      if (!trimmedNote) {
+        setError(`Lead diary note is required when status is ${status}`);
+        return;
+      }
+    } else if (!trimmedNote && !canManage) {
+      setError("Please add a note for this status request");
       return;
     }
 
     closeReasonModal();
-    await applyStatusUpdate(status, trimmedReason);
+    await applyStatusUpdate(status, {
+      leadDiaryNote: trimmedNote,
+      leadId: status === "Blocked" || status === "Available" ? trimmedLeadId : "",
+      saleDetails: null,
+    });
   };
 
   const openFile = async (url?: string) => {
@@ -205,6 +596,11 @@ export const InventoryDetailsScreen = () => {
         <Text style={styles.meta}>Status: {asset.status || "-"}</Text>
         {(asset.status === "Blocked" || asset.status === "Reserved") && asset.reservationReason ? (
           <Text style={styles.reasonMeta}>Reserved reason: {asset.reservationReason}</Text>
+        ) : null}
+        {(asset.status === "Blocked" || asset.status === "Reserved") && asset.reservationLead?.name ? (
+          <Text style={styles.meta}>
+            Blocked For Lead: {asset.reservationLead.name}{asset.reservationLead.phone ? ` (${asset.reservationLead.phone})` : ""}
+          </Text>
         ) : null}
         <Text style={styles.meta}>Price: Rs {Number(asset.price || 0).toLocaleString("en-IN")}</Text>
         <Text style={styles.meta}>Description: {asset.description || "-"}</Text>
@@ -253,7 +649,7 @@ export const InventoryDetailsScreen = () => {
         ) : null}
       </View>
 
-      {canManage ? (
+      {canManage || canRequestStatusChange ? (
         <View style={styles.card}>
           <Text style={styles.section}>Update Status</Text>
           <View style={styles.rowWrap}>
@@ -273,7 +669,7 @@ export const InventoryDetailsScreen = () => {
 
       <Text style={styles.section}>Activity Timeline</Text>
       <FlatList
-        data={activities}
+        data={visibleActivities}
         keyExtractor={(item) => item._id}
         ListEmptyComponent={<Text style={styles.meta}>No activity yet</Text>}
         renderItem={({ item }) => (
@@ -288,27 +684,294 @@ export const InventoryDetailsScreen = () => {
           </View>
         )}
       />
+      {activities.length > 5 ? (
+        <Pressable style={styles.timelineToggleBtn} onPress={() => setShowAllActivities((prev) => !prev)}>
+          <Text style={styles.timelineToggleText}>{showAllActivities ? "Show Less" : "Show More"}</Text>
+        </Pressable>
+      ) : null}
 
       <Modal visible={reasonModalOpen} animationType="fade" transparent onRequestClose={closeReasonModal}>
         <View style={styles.viewerOverlay}>
           <View style={styles.reasonModalCard}>
-            <Text style={styles.section}>Reservation Reason</Text>
-            <Text style={styles.meta}>Please mention why this property is being reserved.</Text>
-            <TextInput
-              style={[styles.reasonInput]}
-              placeholder="Reason for reservation"
-              value={reservationReasonDraft}
-              onChangeText={setReservationReasonDraft}
-              multiline
-            />
-            <View style={styles.rowWrap}>
-              <Pressable style={styles.chip} onPress={closeReasonModal}>
-                <Text style={styles.chipText}>Cancel</Text>
+            <ScrollView contentContainerStyle={styles.reasonModalContent} showsVerticalScrollIndicator={false}>
+            <Text style={styles.section}>
+              {pendingStatus === "Sold" ? "Sold Approval" : pendingStatus === "Available" ? "Available Approval" : "Lead Diary"}
+            </Text>
+            <Text style={styles.meta}>
+              {pendingStatus === "Sold"
+                ? "Select lead and enter sale details."
+                : pendingStatus === "Available"
+                  ? "Add note for marking this inventory available."
+                  : "Select lead and add diary note for blocked inventory."}
+            </Text>
+            {pendingStatus === "Sold" ? (
+              <>
+                <Pressable style={styles.selectInput} onPress={() => setBlockedLeadDropdownOpen((prev) => !prev)}>
+                  <Text style={styles.selectInputText}>
+                    {(() => {
+                      const selected = leadOptions.find((row) => row._id === soldForm.leadId);
+                      if (!selected) return "Select lead";
+                      return selected.phone ? `${selected.name} (${selected.phone})` : selected.name;
+                    })()}
+                  </Text>
+                </Pressable>
+                {blockedLeadDropdownOpen ? (
+                  <View style={styles.selectMenu}>
+                    <ScrollView style={styles.selectMenuScroll} nestedScrollEnabled>
+                      {leadOptions.length === 0 ? (
+                        <Text style={styles.meta}>No leads available</Text>
+                      ) : (
+                        leadOptions.map((lead) => (
+                          <Pressable
+                            key={lead._id}
+                            style={styles.selectMenuItem}
+                            onPress={() => {
+                              setSoldForm((prev) => ({ ...prev, leadId: lead._id }));
+                              setBlockedLeadDropdownOpen(false);
+                            }}
+                          >
+                            <Text style={styles.selectMenuItemText}>
+                              {lead.phone ? `${lead.name} (${lead.phone})` : lead.name}
+                            </Text>
+                          </Pressable>
+                        ))
+                      )}
+                    </ScrollView>
+                  </View>
+                ) : null}
+                <Text style={styles.sectionInline}>Payment Mode</Text>
+                <View style={styles.rowWrap}>
+                  {SOLD_PAYMENT_MODES.map((mode) => (
+                    <Pressable
+                      key={mode}
+                      style={[styles.chip, soldForm.paymentMode === mode && styles.chipActive]}
+                      onPress={() => setSoldForm((prev) => ({ ...prev, paymentMode: mode }))}
+                    >
+                      <Text style={[styles.chipText, soldForm.paymentMode === mode && styles.chipTextActive]}>{SOLD_PAYMENT_MODE_LABEL[mode] || mode}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+                <TextInput
+                  style={styles.selectInput}
+                  placeholder="Total Amount"
+                  keyboardType="number-pad"
+                  value={soldForm.totalAmount}
+                  onChangeText={(value) => setSoldForm((prev) => ({ ...prev, totalAmount: value }))}
+                />
+                <TextInput
+                  style={styles.selectInput}
+                  placeholder="Partial Amount"
+                  keyboardType="number-pad"
+                  value={soldForm.partialAmount}
+                  onChangeText={(value) => setSoldForm((prev) => ({ ...prev, partialAmount: value }))}
+                />
+                <TextInput
+                  style={styles.selectInput}
+                  placeholder="Remaining Amount"
+                  keyboardType="number-pad"
+                  value={soldForm.remainingAmount}
+                  onChangeText={(value) => setSoldForm((prev) => ({ ...prev, remainingAmount: value }))}
+                />
+                <TextInput
+                  style={styles.selectInput}
+                  placeholder="Remaining amount due date (DD-MM-YYYY)"
+                  value={soldForm.remainingDueDate}
+                  onChangeText={(value) => setSoldForm((prev) => ({ ...prev, remainingDueDate: value }))}
+                />
+                <View style={styles.dateFieldActionRow}>
+                  <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("remainingDueDate")}>
+                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Text style={styles.dateFieldBtnText}>Pick due date</Text>
+                  </Pressable>
+                </View>
+                {soldForm.paymentMode === "CASH" ? (
+                  <>
+                    <TextInput
+                      style={styles.selectInput}
+                      placeholder="Payment date (DD-MM-YYYY)"
+                      value={soldForm.paymentDate}
+                      onChangeText={(value) => setSoldForm((prev) => ({ ...prev, paymentDate: value }))}
+                    />
+                    <View style={styles.dateFieldActionRow}>
+                      <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
+                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : null}
+                {soldForm.paymentMode === "UPI" ? (
+                  <>
+                    <TextInput
+                      style={styles.selectInput}
+                      placeholder="Transaction id"
+                      value={soldForm.upiTransactionId}
+                      onChangeText={(value) => setSoldForm((prev) => ({ ...prev, upiTransactionId: value }))}
+                    />
+                    <TextInput
+                      style={styles.selectInput}
+                      placeholder="Payment date (DD-MM-YYYY)"
+                      value={soldForm.paymentDate}
+                      onChangeText={(value) => setSoldForm((prev) => ({ ...prev, paymentDate: value }))}
+                    />
+                    <View style={styles.dateFieldActionRow}>
+                      <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
+                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : null}
+                {soldForm.paymentMode === "CHECK" ? (
+                  <>
+                    <TextInput
+                      style={styles.selectInput}
+                      placeholder="Cheque date (DD-MM-YYYY)"
+                      value={soldForm.chequeDate}
+                      onChangeText={(value) => setSoldForm((prev) => ({ ...prev, chequeDate: value }))}
+                    />
+                    <View style={styles.dateFieldActionRow}>
+                      <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("chequeDate")}>
+                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
+                      </Pressable>
+                    </View>
+                    <TextInput
+                      style={styles.selectInput}
+                      placeholder="Cheque number"
+                      value={soldForm.chequeNumber}
+                      onChangeText={(value) => setSoldForm((prev) => ({ ...prev, chequeNumber: value }))}
+                    />
+                    <TextInput
+                      style={styles.selectInput}
+                      placeholder="Cheque bank name"
+                      value={soldForm.chequeBankName}
+                      onChangeText={(value) => setSoldForm((prev) => ({ ...prev, chequeBankName: value }))}
+                    />
+                  </>
+                ) : null}
+                {soldForm.paymentMode === "NET_BANKING_NEFTRTGSIMPS" ? (
+                  <>
+                    <Text style={styles.sectionInline}>Transfer Type</Text>
+                    <View style={styles.rowWrap}>
+                      {SOLD_TRANSFER_TYPES.map((type) => (
+                        <Pressable
+                          key={type}
+                          style={[styles.chip, soldForm.bankTransferType === type && styles.chipActive]}
+                          onPress={() => setSoldForm((prev) => ({ ...prev, bankTransferType: type }))}
+                        >
+                          <Text style={[styles.chipText, soldForm.bankTransferType === type && styles.chipTextActive]}>{type}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                    <TextInput
+                      style={styles.selectInput}
+                      placeholder="Bank transfer UTR number"
+                      value={soldForm.bankTransferUtrNumber}
+                      onChangeText={(value) => setSoldForm((prev) => ({ ...prev, bankTransferUtrNumber: value }))}
+                    />
+                    <TextInput
+                      style={styles.selectInput}
+                      placeholder="Payment date (DD-MM-YYYY)"
+                      value={soldForm.paymentDate}
+                      onChangeText={(value) => setSoldForm((prev) => ({ ...prev, paymentDate: value }))}
+                    />
+                    <View style={styles.dateFieldActionRow}>
+                      <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
+                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
+                      </Pressable>
+                    </View>
+                  </>
+                ) : null}
+                <TextInput
+                  style={[styles.reasonInput]}
+                  placeholder="Note for admin"
+                  value={soldForm.note}
+                  onChangeText={(value) => setSoldForm((prev) => ({ ...prev, note: value }))}
+                  multiline
+                />
+                <View style={styles.statusAttachmentRow}>
+                  <Pressable
+                    style={styles.statusAttachBtn}
+                    onPress={pickStatusAttachment}
+                    disabled={saving || pickingStatusAttachment}
+                  >
+                    <Text style={styles.statusAttachBtnText}>
+                      {pickingStatusAttachment ? "Attaching..." : "+ Attach file"}
+                    </Text>
+                  </Pressable>
+                  {statusAttachment ? (
+                    <Pressable
+                      style={styles.statusAttachRemoveBtn}
+                      onPress={() => setStatusAttachment(null)}
+                      disabled={saving}
+                    >
+                      <Ionicons name="close" size={16} color="#991b1b" />
+                    </Pressable>
+                  ) : null}
+                </View>
+                <Text style={styles.uploadStatusText}>{statusAttachment?.name || "No file attached"}</Text>
+              </>
+            ) : pendingStatus === "Blocked" || pendingStatus === "Available" ? (
+              <>
+                <Pressable style={styles.selectInput} onPress={() => setBlockedLeadDropdownOpen((prev) => !prev)}>
+                  <Text style={styles.selectInputText}>{selectedBlockedLeadLabel}</Text>
+                </Pressable>
+                {blockedLeadDropdownOpen ? (
+                  <View style={styles.selectMenu}>
+                    <ScrollView style={styles.selectMenuScroll} nestedScrollEnabled>
+                      {leadOptions.length === 0 ? (
+                        <Text style={styles.meta}>No leads available</Text>
+                      ) : (
+                        leadOptions.map((lead) => (
+                          <Pressable
+                            key={lead._id}
+                            style={styles.selectMenuItem}
+                            onPress={() => {
+                              setBlockedLeadIdDraft(lead._id);
+                              setBlockedLeadDropdownOpen(false);
+                            }}
+                          >
+                            <Text style={styles.selectMenuItemText}>
+                              {lead.phone ? `${lead.name} (${lead.phone})` : lead.name}
+                            </Text>
+                          </Pressable>
+                        ))
+                      )}
+                    </ScrollView>
+                  </View>
+                ) : null}
+                <TextInput
+                  style={[styles.reasonInput]}
+                  placeholder={pendingStatus === "Available" ? "Write lead diary note for available request" : "Write lead diary note"}
+                  value={leadDiaryDraft}
+                  onChangeText={setLeadDiaryDraft}
+                  multiline
+                />
+              </>
+            ) : (
+              <TextInput
+                style={[styles.reasonInput]}
+                placeholder="Write request note"
+                value={leadDiaryDraft}
+                onChangeText={setLeadDiaryDraft}
+                multiline
+              />
+            )}
+            <View style={styles.modalActionRow}>
+              <Pressable style={[styles.modalActionBtn, styles.modalActionGhost]} onPress={closeReasonModal}>
+                <Text style={styles.modalActionGhostText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.chipActive} onPress={submitPendingStatus}>
-                <Text style={styles.chipTextActive}>Submit</Text>
+              <Pressable style={[styles.modalActionBtn, styles.modalActionPrimary]} onPress={submitPendingStatus}>
+                <Text style={styles.modalActionPrimaryText}>
+                  {pendingStatus === "Sold"
+                    ? (canManage ? "Save Closed Details" : "Send for Approval")
+                    : (canManage ? "Submit" : "Send for Approval")}
+                </Text>
               </Pressable>
             </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -318,55 +981,52 @@ export const InventoryDetailsScreen = () => {
           <Pressable style={styles.viewerClose} onPress={() => setViewerOpen(false)}>
             <Text style={styles.viewerCloseText}>Close</Text>
           </Pressable>
-          <FlatList
-            ref={viewerListRef}
-            data={galleryImages}
-            keyExtractor={(item, index) => `${item}-${index}`}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            style={{ width: viewerWidth }}
-            getItemLayout={(_, index) => ({ length: viewerWidth, offset: viewerWidth * index, index })}
-            initialScrollIndex={viewerIndex}
-            onScrollToIndexFailed={() => {}}
-            onMomentumScrollEnd={(event) => {
-              const page = Math.round(event.nativeEvent.contentOffset.x / viewerWidth);
-              setViewerIndex(Math.max(0, Math.min(galleryImages.length - 1, page)));
-            }}
-            renderItem={({ item }) => (
-              <View style={[styles.viewerSlide, { width: viewerWidth }]}>
-                <Image source={{ uri: resolveFileUrl(item) }} style={styles.viewerImage} resizeMode="contain" />
-              </View>
-            )}
-          />
+          {galleryImages.length ? (
+            <Image source={{ uri: resolveFileUrl(galleryImages[viewerIndex]) }} style={styles.viewerImage} resizeMode="contain" />
+          ) : null}
 
           {galleryImages.length > 1 ? (
             <>
-              <Pressable
-                style={[styles.viewerArrow, styles.viewerArrowLeft, viewerIndex <= 0 && styles.viewerArrowDisabled]}
-                onPress={() => {
-                  const nextIndex = Math.max(0, viewerIndex - 1);
-                  setViewerIndex(nextIndex);
-                  viewerListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
-                }}
-                disabled={viewerIndex <= 0}
-              >
+              <Pressable style={[styles.viewerArrow, styles.viewerArrowLeft]} onPress={() => setViewerIndex((prev) => (prev <= 0 ? galleryImages.length - 1 : prev - 1))}>
                 <Text style={styles.viewerArrowText}>{"<"}</Text>
               </Pressable>
-              <Pressable
-                style={[styles.viewerArrow, styles.viewerArrowRight, viewerIndex >= galleryImages.length - 1 && styles.viewerArrowDisabled]}
-                onPress={() => {
-                  const nextIndex = Math.min(galleryImages.length - 1, viewerIndex + 1);
-                  setViewerIndex(nextIndex);
-                  viewerListRef.current?.scrollToIndex({ index: nextIndex, animated: true });
-                }}
-                disabled={viewerIndex >= galleryImages.length - 1}
-              >
+              <Pressable style={[styles.viewerArrow, styles.viewerArrowRight]} onPress={() => setViewerIndex((prev) => (prev + 1) % galleryImages.length)}>
                 <Text style={styles.viewerArrowText}>{">"}</Text>
               </Pressable>
               <Text style={styles.viewerCounter}>{viewerIndex + 1} / {galleryImages.length}</Text>
             </>
           ) : null}
+        </View>
+      </Modal>
+
+      {soldDateField ? (
+        <DateTimePicker
+          value={parseDateOnly((soldForm as any)[soldDateField]) || new Date()}
+          mode="date"
+          onChange={onNativeSoldDateChange}
+        />
+      ) : null}
+      <Modal visible={Boolean(webDatePickerField)} transparent animationType="fade" onRequestClose={() => setWebDatePickerField(null)}>
+        <View style={styles.webDateModalOverlay}>
+          <View style={styles.webDateModalCard}>
+            <Text style={styles.section}>Pick Date</Text>
+            <input
+              ref={webDateInputRef}
+              type="date"
+              value={webDatePickerValue}
+              onChange={(event: any) => {
+                const value = String(event?.target?.value || "");
+                setWebDatePickerValue(value);
+                const date = value ? new Date(`${value}T00:00:00`) : null;
+                if (date && !Number.isNaN(date.getTime()) && webDatePickerField) {
+                  setSoldForm((prev) => ({ ...prev, [webDatePickerField]: formatDateOnly(date) }));
+                }
+                setWebDatePickerField(null);
+              }}
+              onBlur={() => setWebDatePickerField(null)}
+              style={styles.webDateInput as any}
+            />
+          </View>
         </View>
       </Modal>
     </View>
@@ -464,9 +1124,13 @@ const styles = StyleSheet.create({
   },
   reasonModalCard: {
     width: "100%",
+    maxHeight: "88%",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 14,
+  },
+  reasonModalContent: {
+    paddingBottom: 8,
   },
   reasonInput: {
     marginTop: 8,
@@ -478,6 +1142,153 @@ const styles = StyleSheet.create({
     minHeight: 92,
     backgroundColor: "#fff",
     textAlignVertical: "top",
+  },
+  selectInput: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    justifyContent: "center",
+    backgroundColor: "#fff",
+    marginTop: 10,
+  },
+  selectInputText: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  dateFieldActionRow: {
+    marginTop: 4,
+    marginBottom: 10,
+    alignItems: "flex-start",
+  },
+  dateFieldBtn: {
+    height: 30,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  dateFieldBtnText: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  selectMenu: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    maxHeight: 180,
+    overflow: "hidden",
+  },
+  selectMenuScroll: {
+    maxHeight: 180,
+  },
+  selectMenuItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f5f9",
+  },
+  selectMenuItemText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  statusAttachmentRow: {
+    marginTop: 2,
+    marginBottom: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  statusAttachBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    height: 34,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statusAttachBtnText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  statusAttachRemoveBtn: {
+    width: 34,
+    height: 34,
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    borderRadius: 10,
+    backgroundColor: "#fff1f2",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  uploadStatusText: {
+    marginBottom: 10,
+    color: "#64748b",
+    fontSize: 12,
+  },
+  modalActionRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+    flexWrap: "nowrap",
+  },
+  modalActionBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  modalActionGhost: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    backgroundColor: "#fff",
+  },
+  modalActionPrimary: {
+    borderWidth: 1,
+    borderColor: "#0f172a",
+    backgroundColor: "#0f172a",
+  },
+  modalActionGhostText: {
+    color: "#334155",
+    fontWeight: "600",
+    fontSize: 12,
+  },
+  modalActionPrimaryText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 12,
+  },
+  timelineToggleBtn: {
+    marginTop: 6,
+    marginBottom: 8,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#bfdbfe",
+    borderRadius: 8,
+    backgroundColor: "#eff6ff",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  timelineToggleText: {
+    color: "#1d4ed8",
+    fontSize: 12,
+    fontWeight: "700",
   },
   viewerOverlay: {
     flex: 1,
@@ -507,10 +1318,6 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "82%",
   },
-  viewerSlide: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
   viewerArrow: {
     position: "absolute",
     top: "50%",
@@ -519,9 +1326,6 @@ const styles = StyleSheet.create({
     height: 72,
     justifyContent: "center",
     alignItems: "center",
-  },
-  viewerArrowDisabled: {
-    opacity: 0.2,
   },
   viewerArrowLeft: {
     left: 6,
@@ -533,9 +1337,13 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 34,
     fontWeight: "700",
-    textShadowColor: "rgba(15, 23, 42, 0.9)",
-    textShadowRadius: 8,
-    textShadowOffset: { width: 0, height: 0 },
+    ...(Platform.OS === "web"
+      ? { textShadow: "0px 0px 8px rgba(15, 23, 42, 0.9)" }
+      : {
+        textShadowColor: "rgba(15, 23, 42, 0.9)",
+        textShadowRadius: 8,
+        textShadowOffset: { width: 0, height: 0 },
+      }),
   },
   viewerCounter: {
     position: "absolute",
@@ -543,6 +1351,30 @@ const styles = StyleSheet.create({
     color: "#e2e8f0",
     fontSize: 12,
     fontWeight: "700",
+  },
+  webDateModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.45)",
+    justifyContent: "center",
+    padding: 16,
+  },
+  webDateModalCard: {
+    borderWidth: 1,
+    borderColor: "#dbe3ee",
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    padding: 14,
+  },
+  webDateInput: {
+    marginTop: 10,
+    width: "100%",
+    minHeight: 40,
+    border: "1px solid #cbd5e1",
+    borderRadius: 9,
+    padding: "8px 10px",
+    fontSize: 14,
+    color: "#0f172a",
+    backgroundColor: "#fff",
   },
   error: {
     marginBottom: 10,

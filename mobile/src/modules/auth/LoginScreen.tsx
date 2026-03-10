@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useState } from "react";
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Hexagon } from "lucide-react-native";
 import { useAuth } from "../../context/AuthContext";
 import { toErrorMessage } from "../../utils/errorMessage";
@@ -101,7 +101,7 @@ const PRIVACY_SECTIONS = [
 export const LoginScreen = () => {
   const { login } = useAuth();
 
-  const [portal, setPortal] = useState<Portal>("GENERAL");
+  const [portal, setPortal] = useState<Portal>("ADMIN");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -110,6 +110,12 @@ export const LoginScreen = () => {
   const [error, setError] = useState("");
   const [openDoc, setOpenDoc] = useState<LegalDoc>(null);
 
+  useEffect(() => {
+    if (email.trim().toLowerCase() === "admin@test.com") {
+      setPortal("ADMIN");
+    }
+  }, [email]);
+
   const docTitle = openDoc === "TERMS" ? "Terms And Conditions" : "Privacy Policy";
   const docSections = openDoc === "TERMS" ? TERMS_SECTIONS : PRIVACY_SECTIONS;
 
@@ -117,7 +123,9 @@ export const LoginScreen = () => {
     try {
       setLoading(true);
       setError("");
-      await login({ email: email.trim(), password, portal });
+      const normalizedEmail = email.trim().toLowerCase();
+      const effectivePortal: Portal = normalizedEmail === "admin@test.com" ? "ADMIN" : portal;
+      await login({ email: normalizedEmail, password, portal: effectivePortal });
     } catch (e) {
       setError(toErrorMessage(e, "Login failed"));
     } finally {
@@ -232,11 +240,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#dbe1ea",
     padding: 20,
-    shadowColor: "#0f172a",
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    ...(Platform.OS === "web"
+      ? { boxShadow: "0px 8px 20px rgba(15, 23, 42, 0.08)" }
+      : {
+        shadowColor: "#0f172a",
+        shadowOpacity: 0.08,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 3,
+      }),
   },
   logoWrap: {
     alignItems: "center",

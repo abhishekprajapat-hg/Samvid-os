@@ -4,32 +4,41 @@ import {
   Alert,
   Linking,
   Modal,
+  Platform,
   Pressable,
+  Share,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
 } from "react-native";
-import { useRoute } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import * as DocumentPicker from "expo-document-picker";
+import * as MailComposer from "expo-mail-composer";
+import * as Print from "expo-print";
+import * as Sharing from "expo-sharing";
 import {
   addLeadDiaryEntry,
+  addLeadRelatedProperty,
   assignLead,
-  approveLeadStatusRequest,
   getAllLeads,
   getLeadActivity,
   getLeadDiary,
-  getPendingLeadStatusRequests,
-  rejectLeadStatusRequest,
+  getLeadStatusRequests,
   requestLeadStatusChange,
+  removeLeadRelatedProperty,
+  updateLeadBasics,
   updateLeadDiaryEntry,
   updateLeadStatus,
   type LeadDiaryEntry,
   type LeadStatusRequest,
 } from "../../services/leadService";
 import { uploadChatFile } from "../../services/chatService";
+import { getInventoryAssets } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
@@ -38,8 +47,18 @@ import type { Lead } from "../../types";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { colors } from "../../theme/tokens";
 
-const STATUSES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "CLOSED", "LOST"];
+const STATUSES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED", "CLOSED", "LOST"];
 const CLOSED_STATUS = "CLOSED";
+const DEAL_PAYMENT_MODES = [
+  { value: "UPI", label: "UPI" },
+  { value: "CASH", label: "Cash" },
+  { value: "CHECK", label: "Check" },
+  { value: "NET_BANKING_NEFTRTGSIMPS", label: "Net Banking (NEFT/RTGS/IMPS)" },
+] as const;
+const DEAL_PAYMENT_TYPES = [
+  { value: "FULL", label: "Full" },
+  { value: "PARTIAL", label: "Partial" },
+] as const;
 const PAYMENT_MODE_OPTIONS = ["Cash", "Cheque", "Bank Transfer", "UPI"] as const;
 const TRANSFER_TYPE_OPTIONS = ["RTGS", "IMPS", "NEFT"] as const;
 const EMPTY_CLOSED_FORM = {
@@ -71,19 +90,19 @@ const toLocalTenDigitPhone = (value?: string) => {
 const toWhatsAppPhone = (value?: string) => {
   const localTen = toLocalTenDigitPhone(value);
   if (!localTen) return "";
-  return localTen;
+  return `91${localTen}`;
 };
 
 const formatFollowUpInput = (value?: string) => {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  return `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
 const parseFollowUpInput = (value: string) => {
   const trimmed = value.trim();
-  const match = /^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/.exec(trimmed);
+  const match = /^(\d{2})[-\/](\d{2})[-\/](\d{4})\s+(\d{2}):(\d{2})$/.exec(trimmed);
   if (!match) return null;
 
   const day = Number(match[1]);
@@ -108,29 +127,144 @@ const parseFollowUpInput = (value: string) => {
   return parsed;
 };
 
+const formatFollowUpDate = (date: Date) =>
+  `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+const formatDateOnly = (date: Date) =>
+  `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()}`;
+const parseDateOnly = (value?: string) => {
+  const match = /^(\d{2})[-/](\d{2})[-/](\d{4})$/.exec(String(value || "").trim());
+  if (!match) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const parsed = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) return null;
+  return parsed;
+};
+
+const formatProposalDate = (date = new Date()) => `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+
 const pickUriString = (value: unknown) => String(value || "").trim();
+const toObjectIdString = (value: unknown) => {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null && "_id" in value) {
+    return String((value as { _id?: string })._id || "");
+  }
+  return String(value || "");
+};
+
+const getInventoryLeadLabel = (inventory: any) =>
+  [inventory?.projectName, inventory?.towerName, inventory?.unitNumber]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" - ");
+
+const getLeadRelatedInventories = (lead: any) => {
+  if (!lead) return [];
+  const merged: any[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (value: any) => {
+    const id = toObjectIdString(value);
+    if (!id || seen.has(id)) return;
+    seen.add(id);
+    merged.push(value);
+  };
+
+  pushUnique(lead?.inventoryId);
+  if (Array.isArray(lead?.relatedInventoryIds)) {
+    lead.relatedInventoryIds.forEach((value: any) => pushUnique(value));
+  }
+
+  return merged;
+};
+
+const toCoordinateNumber = (value: unknown) => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+};
+
+const escapeHtml = (value: string) =>
+  String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 
 export const LeadDetailsScreen = () => {
+  const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const leadId = String(route.params?.leadId || "");
+  const { width } = useWindowDimensions();
+  const isCompact = width < 430;
+  const leadId = String(
+    route.params?.leadId
+    || route.params?.id
+    || route.params?.lead?._id
+    || "",
+  ).trim();
+  const fallbackRouteLeadId = String(route.params?.lead?._id || "").trim();
+  const initialRouteLead = ((route.params?.lead && typeof route.params.lead === "object")
+    ? route.params.lead
+    : null) as Lead | null;
   const { role, user } = useAuth();
-  const canManage = ["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"].includes(String(role || ""));
+  const normalizedRole = String(role || "").toUpperCase();
+  const canManage = ["ADMIN", "MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"].includes(normalizedRole);
+  const canLinkProperties = canManage || ["EXECUTIVE", "FIELD_EXECUTIVE"].includes(normalizedRole);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialRouteLead);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const [lead, setLead] = useState<Lead | null>(null);
+  const [lead, setLead] = useState<Lead | null>(initialRouteLead);
   const [activities, setActivities] = useState<Array<{ _id: string; action: string; createdAt: string; performedBy?: { name?: string } }>>([]);
   const [diaryEntries, setDiaryEntries] = useState<LeadDiaryEntry[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<LeadStatusRequest[]>([]);
+  const [statusRequestHistory, setStatusRequestHistory] = useState<LeadStatusRequest[]>([]);
   const [saleLeadOptions, setSaleLeadOptions] = useState<Array<{ _id: string; name: string; phone?: string }>>([]);
   const [executives, setExecutives] = useState<Array<{ _id?: string; name: string; role?: string; isActive?: boolean }>>([]);
+  const [inventoryOptions, setInventoryOptions] = useState<any[]>([]);
 
   const [statusDraft, setStatusDraft] = useState("NEW");
   const [followUpDraft, setFollowUpDraft] = useState("");
+  const [showFollowUpPicker, setShowFollowUpPicker] = useState(false);
+  const [followUpPickerMode, setFollowUpPickerMode] = useState<"date" | "time">("date");
+  const [followUpPickerSeed, setFollowUpPickerSeed] = useState<Date>(new Date());
+  const [followUpPickerDatePart, setFollowUpPickerDatePart] = useState<Date>(new Date());
+  const webFollowUpPickerRef = useRef<any>(null);
+  const [leadNameDraft, setLeadNameDraft] = useState("");
+  const [leadPhoneDraft, setLeadPhoneDraft] = useState("");
+  const [leadEmailDraft, setLeadEmailDraft] = useState("");
+  const [leadCityDraft, setLeadCityDraft] = useState("");
+  const [leadProjectDraft, setLeadProjectDraft] = useState("");
   const [assignDraft, setAssignDraft] = useState("");
+  const [siteLatDraft, setSiteLatDraft] = useState("");
+  const [siteLngDraft, setSiteLngDraft] = useState("");
+  const [relatedInventoryDraft, setRelatedInventoryDraft] = useState("");
+  const [linkDropdownOpen, setLinkDropdownOpen] = useState(false);
+  const [assignDropdownOpen, setAssignDropdownOpen] = useState(false);
+  const [linkingProperty, setLinkingProperty] = useState(false);
+  const [propertyActionInventoryId, setPropertyActionInventoryId] = useState("");
+  const [proposalSelectedPropertyIds, setProposalSelectedPropertyIds] = useState<string[]>([]);
+  const [proposalValidityDays, setProposalValidityDays] = useState("7");
+  const [proposalSpecialNote, setProposalSpecialNote] = useState("");
+  const [proposalBusy, setProposalBusy] = useState(false);
+  const [paymentModeDraft, setPaymentModeDraft] = useState("");
+  const [paymentTypeDraft, setPaymentTypeDraft] = useState("");
+  const [paymentRemainingDraft, setPaymentRemainingDraft] = useState("");
+  const [paymentReferenceDraft, setPaymentReferenceDraft] = useState("");
+  const [paymentNoteDraft, setPaymentNoteDraft] = useState("");
+  const [closureDocumentsDraft, setClosureDocumentsDraft] = useState<Array<{
+    url: string;
+    name?: string;
+    mimeType?: string;
+    size?: number;
+    kind?: string;
+  }>>([]);
+  const [uploadingClosureDocs, setUploadingClosureDocs] = useState(false);
   const [statusRequestOpen, setStatusRequestOpen] = useState(false);
   const [statusRequestReason, setStatusRequestReason] = useState("");
   const [statusRequestAttachment, setStatusRequestAttachment] = useState<{
@@ -140,12 +274,14 @@ export const LeadDetailsScreen = () => {
     size: number;
     file?: any;
   } | null>(null);
+  const [showClosedDatePicker, setShowClosedDatePicker] = useState(false);
+  const [closedDatePickerSeed, setClosedDatePickerSeed] = useState<Date>(new Date());
+  const [closedDatePickerField, setClosedDatePickerField] = useState<"remainingDueDate" | "paymentDate" | "chequeDate" | null>(null);
+  const webClosedDatePickerRef = useRef<any>(null);
+  const webClosedDateFieldRef = useRef<"remainingDueDate" | "paymentDate" | "chequeDate" | null>(null);
   const [pickingStatusAttachment, setPickingStatusAttachment] = useState(false);
   const [saleLeadDropdownOpen, setSaleLeadDropdownOpen] = useState(false);
   const [closedForm, setClosedForm] = useState(EMPTY_CLOSED_FORM);
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [reviewTarget, setReviewTarget] = useState<LeadStatusRequest | null>(null);
-  const [rejectReason, setRejectReason] = useState("");
   const [diaryNoteDraft, setDiaryNoteDraft] = useState("");
   const [isDiaryListening, setIsDiaryListening] = useState(false);
   const [isDiaryMicSupported, setIsDiaryMicSupported] = useState(false);
@@ -166,6 +302,46 @@ export const LeadDetailsScreen = () => {
     () => (showAllActivities ? activities : activities.slice(0, 2)),
     [activities, showAllActivities],
   );
+  const selectedLeadRelatedInventories = useMemo(() => getLeadRelatedInventories(lead as any), [lead]);
+  const selectedLeadActiveInventoryId = useMemo(
+    () => toObjectIdString((lead as any)?.inventoryId),
+    [lead],
+  );
+  const selectedLeadSiteLat = useMemo(
+    () => toCoordinateNumber((lead as any)?.siteLocation?.lat),
+    [lead],
+  );
+  const selectedLeadSiteLng = useMemo(
+    () => toCoordinateNumber((lead as any)?.siteLocation?.lng),
+    [lead],
+  );
+  const siteVisitRadiusMeters = useMemo(() => {
+    const raw = Number((lead as any)?.siteLocation?.radiusMeters);
+    if (Number.isFinite(raw) && raw > 0) return Math.round(raw);
+    return 200;
+  }, [lead]);
+  const availableRelatedInventoryOptions = useMemo(
+    () => {
+      const linkedIds = new Set(
+        selectedLeadRelatedInventories.map((row: any) => toObjectIdString(row)).filter(Boolean),
+      );
+      return (Array.isArray(inventoryOptions) ? inventoryOptions : []).filter((item: any) => {
+        const id = toObjectIdString(item);
+        if (!id || linkedIds.has(id)) return false;
+        const status = String(item?.status || "").trim().toLowerCase();
+        return status === "available";
+      });
+    },
+    [inventoryOptions, selectedLeadRelatedInventories],
+  );
+  const selectedProposalPropertySet = useMemo(
+    () => new Set(proposalSelectedPropertyIds),
+    [proposalSelectedPropertyIds],
+  );
+  const selectedProposalProperties = useMemo(
+    () => selectedLeadRelatedInventories.filter((row: any) => selectedProposalPropertySet.has(toObjectIdString(row))),
+    [selectedLeadRelatedInventories, selectedProposalPropertySet],
+  );
 
   useEffect(() => {
     setShowAllDiaryEntries(false);
@@ -173,6 +349,15 @@ export const LeadDetailsScreen = () => {
     setEditingDiaryEntryId("");
     setDiaryEditDraft("");
   }, [leadId]);
+
+  useEffect(() => {
+    if (!lead) return;
+    setLeadNameDraft(String((lead as any)?.name || ""));
+    setLeadPhoneDraft(String((lead as any)?.phone || ""));
+    setLeadEmailDraft(String((lead as any)?.email || ""));
+    setLeadCityDraft(String((lead as any)?.city || ""));
+    setLeadProjectDraft(String((lead as any)?.projectInterested || ""));
+  }, [lead?._id]);
 
   useEffect(() => {
     if (!success) return;
@@ -185,27 +370,45 @@ export const LeadDetailsScreen = () => {
       setLoading(true);
       setError("");
 
-      const [leads, timeline, diary, users, requests] = await Promise.all([
-        getAllLeads(),
-        getLeadActivity(leadId),
-        getLeadDiary(leadId),
+      const leadRowsResult = await getAllLeads();
+      const [usersResult, inventoryRowsResult] = await Promise.allSettled([
         canManage ? getUsers() : Promise.resolve({ users: [] }),
-        canManage ? getPendingLeadStatusRequests({ leadId }) : Promise.resolve([]),
+        getInventoryAssets({ page: 1, limit: 200 }),
       ]);
+      let resolvedInventoryRows: any[] =
+        inventoryRowsResult.status === "fulfilled" && Array.isArray(inventoryRowsResult.value)
+          ? inventoryRowsResult.value
+          : [];
+      if (resolvedInventoryRows.length === 0) {
+        const fallbackInventoryResult = await Promise.allSettled([
+          getInventoryAssets(),
+        ]);
+        const fallbackRows = fallbackInventoryResult[0];
+        if (fallbackRows.status === "fulfilled" && Array.isArray(fallbackRows.value)) {
+          resolvedInventoryRows = fallbackRows.value;
+        }
+      }
 
-      const currentLead = (leads || []).find((row) => String(row._id) === leadId) || null;
+      const leadRows = Array.isArray(leadRowsResult) ? leadRowsResult : [];
+      let currentLead = leadRows.find((row) => String((row as any)?._id || "") === leadId) || null;
+      if (!currentLead && fallbackRouteLeadId) {
+        currentLead = leadRows.find((row) => String((row as any)?._id || "") === fallbackRouteLeadId) || null;
+      }
+      if (!currentLead && leadRows.length > 0) {
+        currentLead = leadRows[0];
+      }
       if (!currentLead) {
         setError("Lead not found");
         setLead(null);
         setActivities([]);
         setDiaryEntries([]);
-        setPendingRequests([]);
+        setStatusRequestHistory([]);
         return;
       }
 
       setLead(currentLead);
       setSaleLeadOptions(
-        (Array.isArray(leads) ? leads : [])
+        leadRows
           .map((row) => ({
             _id: String((row as any)?._id || ""),
             name: String((row as any)?.name || "").trim(),
@@ -213,27 +416,76 @@ export const LeadDetailsScreen = () => {
           }))
           .filter((row) => row._id && row.name),
       );
-      setActivities(Array.isArray(timeline) ? timeline : []);
-      setDiaryEntries(Array.isArray(diary) ? diary : []);
-      setPendingRequests(Array.isArray(requests) ? requests : []);
-      setExecutives((users as any)?.users || []);
+      setExecutives(usersResult.status === "fulfilled" ? ((usersResult.value as any)?.users || []) : []);
+      setInventoryOptions(resolvedInventoryRows);
+
+      const resolvedLeadId = String((currentLead as any)?._id || "");
+      const [timelineResult, diaryResult, historyResult] = await Promise.allSettled([
+        getLeadActivity(resolvedLeadId),
+        getLeadDiary(resolvedLeadId),
+        getLeadStatusRequests({ leadId: resolvedLeadId }),
+      ]);
+      setActivities(
+        timelineResult.status === "fulfilled" && Array.isArray(timelineResult.value)
+          ? timelineResult.value
+          : [],
+      );
+      setDiaryEntries(
+        diaryResult.status === "fulfilled" && Array.isArray(diaryResult.value)
+          ? diaryResult.value
+          : [],
+      );
+      setStatusRequestHistory(
+        historyResult.status === "fulfilled" && Array.isArray(historyResult.value)
+          ? historyResult.value
+          : [],
+      );
 
       setStatusDraft(currentLead.status || "NEW");
       setFollowUpDraft(formatFollowUpInput(currentLead.nextFollowUp));
+      setLeadNameDraft(String((currentLead as any)?.name || ""));
+      setLeadPhoneDraft(String((currentLead as any)?.phone || ""));
+      setLeadEmailDraft(String((currentLead as any)?.email || ""));
+      setLeadCityDraft(String((currentLead as any)?.city || ""));
+      setLeadProjectDraft(String((currentLead as any)?.projectInterested || ""));
       setAssignDraft(currentLead.assignedTo?._id || "");
+      setSiteLatDraft(String((currentLead as any)?.siteLocation?.lat ?? ""));
+      setSiteLngDraft(String((currentLead as any)?.siteLocation?.lng ?? ""));
+      setPaymentModeDraft(String((currentLead as any)?.dealPayment?.mode || ""));
+      setPaymentTypeDraft(String((currentLead as any)?.dealPayment?.paymentType || ""));
+      setPaymentRemainingDraft(String((currentLead as any)?.dealPayment?.remainingAmount ?? ""));
+      setPaymentReferenceDraft(String((currentLead as any)?.dealPayment?.paymentReference || ""));
+      setPaymentNoteDraft(String((currentLead as any)?.dealPayment?.note || ""));
+      setClosureDocumentsDraft(Array.isArray((currentLead as any)?.closureDocuments) ? (currentLead as any).closureDocuments : []);
       setClosedForm((prev) => ({ ...prev, saleLeadId: prev.saleLeadId || String(currentLead._id || "") }));
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load lead details"));
     } finally {
       setLoading(false);
     }
-  }, [leadId, canManage]);
+  }, [leadId, canManage, fallbackRouteLeadId]);
 
   useEffect(() => {
-    if (leadId) {
-      loadData();
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    const firstInventoryId =
+      toObjectIdString((lead as any)?.inventoryId)
+      || toObjectIdString((selectedLeadRelatedInventories[0] as any)?._id);
+    if (!firstInventoryId) {
+      setProposalSelectedPropertyIds([]);
+      return;
     }
-  }, [leadId, loadData]);
+
+    setProposalSelectedPropertyIds((previous) => {
+      const validIds = previous.filter((id) =>
+        selectedLeadRelatedInventories.some((row: any) => toObjectIdString(row) === id),
+      );
+      if (validIds.length > 0) return validIds;
+      return [firstInventoryId];
+    });
+  }, [lead, selectedLeadRelatedInventories]);
 
   useEffect(() => {
     const win = globalThis as any;
@@ -368,30 +620,77 @@ export const LeadDetailsScreen = () => {
     if (!selected) return "Select lead";
     return selected.phone ? `${selected.name} (${selected.phone})` : selected.name;
   }, [closedForm.saleLeadId, saleLeadOptions]);
+  const assignableExecutives = useMemo(
+    () =>
+      executives.filter(
+        (u) => u.isActive !== false && ["EXECUTIVE", "FIELD_EXECUTIVE"].includes(String(u.role)),
+      ),
+    [executives],
+  );
+  const selectedAssigneeLabel = useMemo(() => {
+    const selected = assignableExecutives.find((u) => String(u._id || "") === String(assignDraft || ""));
+    return selected?.name || "Select executive";
+  }, [assignDraft, assignableExecutives]);
 
   const saveUpdate = async () => {
     if (!lead) return;
 
-    const payload: Partial<Lead> = { status: statusDraft };
+    const payload: any = { status: statusDraft };
 
     if (followUpDraft.trim()) {
       const parsed = parseFollowUpInput(followUpDraft);
       if (!parsed) {
-        setError("Invalid follow-up format. Use dd/mm/yyyy hh:mm");
+        setError("Invalid follow-up format. Use dd-mm-yyyy hh:mm");
         return;
       }
       payload.nextFollowUp = parsed.toISOString();
     }
 
-    if (requiresClosedApproval) {
-      setClosedForm({ ...EMPTY_CLOSED_FORM, saleLeadId: String(lead?._id || "") });
-      setStatusRequestReason("");
-      setStatusRequestOpen(true);
+    if (statusDraft === CLOSED_STATUS) {
+      openClosedStatusForm();
       return;
+    }
+
+    const statusForPayment = String(statusDraft || "").toUpperCase();
+    const canUpdatePayment = statusForPayment === "REQUESTED" || statusForPayment === "CLOSED";
+    if (canUpdatePayment && paymentModeDraft && paymentTypeDraft) {
+      payload.dealPayment = {
+        mode: paymentModeDraft,
+        paymentType: paymentTypeDraft,
+        remainingAmount: paymentTypeDraft === "PARTIAL"
+          ? Number(paymentRemainingDraft || 0)
+          : 0,
+        paymentReference: paymentReferenceDraft.trim(),
+        note: paymentNoteDraft.trim(),
+      };
+    }
+
+    if (closureDocumentsDraft.length > 0) {
+      payload.closureDocuments = closureDocumentsDraft;
+    }
+
+    if (canManage) {
+      const lat = Number(siteLatDraft);
+      const lng = Number(siteLngDraft);
+      if (siteLatDraft.trim() && siteLngDraft.trim() && Number.isFinite(lat) && Number.isFinite(lng)) {
+        payload.siteLocation = {
+          lat,
+          lng,
+          radiusMeters: siteVisitRadiusMeters,
+        };
+      }
     }
 
     try {
       setSaving(true);
+      const sanitizedPhone = toDigits(leadPhoneDraft).slice(0, 15);
+      await updateLeadBasics(lead._id, {
+        name: leadNameDraft.trim(),
+        phone: sanitizedPhone,
+        email: leadEmailDraft.trim(),
+        city: leadCityDraft.trim(),
+        projectInterested: leadProjectDraft.trim(),
+      });
       await updateLeadStatus(lead._id, payload);
       setSuccess("Lead updated");
       await loadData();
@@ -432,6 +731,10 @@ export const LeadDetailsScreen = () => {
     const appUrl = `whatsapp://send?phone=${whatsappPhone}`;
     const webUrl = `https://wa.me/${whatsappPhone}`;
     try {
+      if (Platform.OS === "web") {
+        await Linking.openURL(webUrl);
+        return;
+      }
       const appSupported = await Linking.canOpenURL(appUrl);
       if (appSupported) {
         await Linking.openURL(appUrl);
@@ -478,10 +781,552 @@ export const LeadDetailsScreen = () => {
     }
   };
 
+  const openMaps = async () => {
+    const locationLabel = String((lead as any)?.city || "").trim();
+    const fallbackQuery = [locationLabel, String((lead as any)?.projectInterested || "").trim()]
+      .filter(Boolean)
+      .join(", ");
+    const lat = toCoordinateNumber(siteLatDraft);
+    const lng = toCoordinateNumber(siteLngDraft);
+    const query = lat !== null && lng !== null ? `${lat},${lng}` : fallbackQuery;
+    if (!query) {
+      Alert.alert("Location missing", "Lead location is not available.");
+      return;
+    }
+    const url = `https://maps.google.com/?q=${encodeURIComponent(query)}`;
+    await Linking.openURL(url).catch(() => {
+      Alert.alert("Maps unavailable", "Unable to open maps right now.");
+    });
+  };
+
+  const fillWithLiveLocation = async () => {
+    const nav: any = globalThis?.navigator;
+    if (!nav?.geolocation?.getCurrentPosition) {
+      Alert.alert("Location unavailable", "Geolocation is not supported on this device/browser.");
+      return;
+    }
+
+    nav.geolocation.getCurrentPosition(
+      (position: any) => {
+        const latitude = Number(position?.coords?.latitude);
+        const longitude = Number(position?.coords?.longitude);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+          setError("Unable to read live location coordinates");
+          return;
+        }
+        setSiteLatDraft(String(latitude));
+        setSiteLngDraft(String(longitude));
+      },
+      () => {
+        setError("Unable to fetch live location");
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 },
+    );
+  };
+
+  const pickClosureDocuments = async () => {
+    if (uploadingClosureDocs) return;
+    try {
+      setUploadingClosureDocs(true);
+      const picked = await DocumentPicker.getDocumentAsync({
+        copyToCacheDirectory: true,
+        multiple: true,
+        type: ["image/*", "application/pdf"],
+      });
+      if (picked.canceled || !picked.assets?.length) return;
+
+      const uploadedRows: Array<{
+        url: string;
+        name?: string;
+        mimeType?: string;
+        size?: number;
+        kind?: string;
+      }> = [];
+
+      for (const asset of picked.assets as any[]) {
+        const uploaded = await uploadChatFile({
+          uri: pickUriString(asset?.uri),
+          name: String(asset?.name || "document"),
+          mimeType: String(asset?.mimeType || "application/octet-stream"),
+          file: asset?.file,
+        });
+        if (!uploaded?.fileUrl) continue;
+        uploadedRows.push({
+          url: uploaded.fileUrl,
+          name: uploaded.fileName || asset?.name || "document",
+          mimeType: uploaded.mimeType || asset?.mimeType || "application/octet-stream",
+          size: Number(uploaded.size || asset?.size || 0),
+          kind: String(uploaded.mimeType || asset?.mimeType || "").includes("pdf") ? "pdf" : "image",
+        });
+      }
+
+      if (uploadedRows.length === 0) {
+        setError("No document uploaded");
+        return;
+      }
+      setClosureDocumentsDraft((previous) => [...previous, ...uploadedRows].slice(0, 20));
+      setSuccess(`${uploadedRows.length} document uploaded`);
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to upload documents"));
+    } finally {
+      setUploadingClosureDocs(false);
+    }
+  };
+
+  const removeClosureDocument = (url: string) => {
+    setClosureDocumentsDraft((previous) => previous.filter((row) => String(row?.url || "") !== String(url || "")));
+  };
+
+  const toggleProposalProperty = (propertyId: string) => {
+    if (!propertyId) return;
+    setProposalSelectedPropertyIds((previous) => {
+      if (previous.includes(propertyId)) {
+        return previous.filter((row) => row !== propertyId);
+      }
+      return [...previous, propertyId];
+    });
+  };
+
+  const formatCurrency = (value: number) => {
+    if (!Number.isFinite(value) || value <= 0) return "On request";
+    return `Rs ${Math.round(value).toLocaleString("en-IN")}`;
+  };
+
+  const buildProposalText = useCallback(() => {
+    if (!lead) return "";
+    const selectedRows = selectedProposalProperties;
+    const today = formatProposalDate(new Date());
+    const validity = Number.parseInt(proposalValidityDays, 10);
+    const lines = [
+      "SAMVID REALTY - PROPERTY PROPOSAL",
+      `Date: ${today}`,
+      "",
+      `Dear ${String(lead.name || "Client")},`,
+      "Thank you for your interest. Please find your selected property proposal below:",
+      `Selected Properties: ${selectedRows.length}`,
+      "",
+    ];
+
+    selectedRows.forEach((inventory: any, index) => {
+      const label = getInventoryLeadLabel(inventory) || `Property ${index + 1}`;
+      lines.push(`Property ${index + 1}: ${label}`);
+      lines.push(`Project: ${String(inventory?.projectName || (lead as any)?.projectInterested || "-")}`);
+      lines.push(`Location: ${String(inventory?.location || (lead as any)?.city || "-")}`);
+      lines.push(`Property Type: ${String(inventory?.type || "-")}`);
+      lines.push(`Category: ${String(inventory?.category || "-")}`);
+      lines.push(`Price: ${formatCurrency(Number(inventory?.price || 0))}`);
+      lines.push("");
+    });
+
+    lines.push(`Validity: ${Number.isFinite(validity) && validity > 0 ? validity : 7} day(s)`);
+    if (proposalSpecialNote.trim()) {
+      lines.push(`Special Note: ${proposalSpecialNote.trim()}`);
+    }
+    lines.push("", "Regards,", "Samvid Realty");
+
+    return lines.join("\n");
+  }, [lead, proposalSpecialNote, proposalValidityDays, selectedProposalProperties]);
+
+  const buildProposalHtml = useCallback(() => {
+    const proposalText = buildProposalText();
+    return `
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <style>
+            body { font-family: Arial, sans-serif; color: #0f172a; padding: 24px; line-height: 1.5; }
+            pre { white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 12px; }
+            h1 { margin: 0 0 12px; font-size: 20px; }
+          </style>
+        </head>
+        <body>
+          <pre>${escapeHtml(proposalText)}</pre>
+        </body>
+      </html>
+    `;
+  }, [buildProposalText]);
+
+  const copyProposalText = async () => {
+    const message = buildProposalText();
+    if (!selectedProposalProperties.length) {
+      Alert.alert("Select property", "Please select at least one property for proposal.");
+      return;
+    }
+    if (!message.trim()) return;
+    const nav = globalThis as any;
+    if (nav?.navigator?.clipboard?.writeText) {
+      await nav.navigator.clipboard.writeText(message).then(() => {
+        setSuccess("Proposal copied");
+      }).catch(() => {
+        setError("Unable to copy proposal text");
+      });
+      return;
+    }
+    if (Platform.OS === "web") {
+      try {
+        const doc = (globalThis as any)?.document;
+        if (!doc?.createElement || !doc?.body) {
+          throw new Error("Document unavailable");
+        }
+        const textArea = doc.createElement("textarea");
+        textArea.value = message;
+        textArea.style.position = "absolute";
+        textArea.style.left = "-9999px";
+        doc.body.appendChild(textArea);
+        textArea.select();
+        doc.execCommand?.("copy");
+        doc.body.removeChild(textArea);
+        setSuccess("Proposal copied");
+        return;
+      } catch {
+        // fall through
+      }
+    }
+    Alert.alert("Copy unavailable", "Clipboard copy is not supported on this device/browser.");
+  };
+
+  const generateProposalPdf = async () => {
+    if (!selectedProposalProperties.length) {
+      Alert.alert("Select property", "Please select at least one property for proposal.");
+      return "";
+    }
+    if (Platform.OS === "web") {
+      // Web uses jsPDF blob generation to avoid browser print preview/page capture.
+      return "";
+    }
+    const html = buildProposalHtml();
+    setProposalBusy(true);
+    try {
+      const printed = await Print.printToFileAsync({ html, base64: false });
+      return printed.uri;
+    } finally {
+      setProposalBusy(false);
+    }
+  };
+
+  const buildProposalPdfName = () =>
+    `proposal-${String((lead as any)?.name || "lead")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "lead"}-${Date.now()}.pdf`;
+
+  const buildWebProposalPdfBlob = async () => {
+    const { jsPDF } = await import("jspdf");
+    const doc = new jsPDF({ unit: "pt", format: "a4", compress: true });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 36;
+    const contentWidth = pageWidth - (margin * 2);
+    let cursorY = margin;
+
+    const ensureSpace = (requiredHeight = 20) => {
+      if (cursorY + requiredHeight > pageHeight - margin) {
+        doc.addPage();
+        cursorY = margin;
+      }
+    };
+
+    const addLine = (line) => {
+      const text = String(line || "");
+      const lines = doc.splitTextToSize(text, contentWidth);
+      const lineHeight = 15;
+      ensureSpace((lines.length * lineHeight) + 5);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.setTextColor(15, 23, 42);
+      doc.text(lines, margin, cursorY);
+      cursorY += (lines.length * lineHeight) + 5;
+    };
+
+    String(buildProposalText() || "")
+      .split("\n")
+      .forEach((line) => addLine(line));
+
+    return doc.output("blob");
+  };
+
+  const buildWebShareFile = async (fileName: string) => {
+    const blob = await buildWebProposalPdfBlob();
+    const hasFileCtor = typeof File !== "undefined";
+    const file = hasFileCtor ? new File([blob], fileName, { type: "application/pdf" }) : null;
+    return { file, blob };
+  };
+
+  const downloadWebProposalBlob = (blob: Blob, fileName: string) => {
+    const doc = (globalThis as any)?.document;
+    if (!doc?.createElement || !doc?.body) {
+      throw new Error("Document unavailable");
+    }
+    const downloadUrl = URL.createObjectURL(blob);
+    const anchor = doc.createElement("a");
+    anchor.href = downloadUrl;
+    anchor.download = fileName;
+    doc.body.appendChild(anchor);
+    anchor.click();
+    doc.body.removeChild(anchor);
+    URL.revokeObjectURL(downloadUrl);
+  };
+
+  const openSystemPdfShare = async (options: {
+    title: string;
+    message: string;
+    fileName?: string;
+    preferNativeShareOnWeb?: boolean;
+  }) => {
+    const fileName = options.fileName || buildProposalPdfName();
+    const nav = globalThis as any;
+
+    if (Platform.OS === "web") {
+      try {
+        const { file, blob } = await buildWebShareFile(fileName);
+        if (options.preferNativeShareOnWeb && file && nav?.navigator?.share) {
+          await nav.navigator.share({
+            title: options.title,
+            text: options.message,
+            files: [file],
+          });
+          return true;
+        }
+        downloadWebProposalBlob(blob, fileName);
+        return true;
+      } catch {
+        // fall through
+      }
+      return false;
+    }
+
+    const pdfUri = await generateProposalPdf();
+    if (!pdfUri) return false;
+
+    if (Platform.OS !== "web" && options.preferNativeShareOnWeb && nav?.navigator?.share) {
+      try {
+        const { file } = await buildWebShareFile(fileName);
+        await nav.navigator.share({
+          title: options.title,
+          text: options.message,
+          files: [file],
+        });
+        return true;
+      } catch {
+        // fall through to generic share
+      }
+    }
+
+    if (Platform.OS !== "web" && await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(pdfUri, {
+        mimeType: "application/pdf",
+        dialogTitle: options.title,
+        UTI: "com.adobe.pdf",
+      });
+      return true;
+    }
+
+    await Share.share({
+      title: options.title,
+      message: options.message,
+      url: pdfUri,
+    });
+    return true;
+  };
+
+  const downloadProposalPdf = async () => {
+    try {
+      const fileName = buildProposalPdfName();
+
+      if (Platform.OS === "web") {
+        setProposalBusy(true);
+        const { blob } = await buildWebShareFile(fileName);
+        downloadWebProposalBlob(blob, fileName);
+        setSuccess("PDF downloaded");
+        setProposalBusy(false);
+        return;
+      }
+
+      const pdfUri = await generateProposalPdf();
+      if (!pdfUri) return;
+
+      if (Platform.OS !== "web" && await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(pdfUri, {
+          mimeType: "application/pdf",
+          dialogTitle: "Save/Download Proposal PDF",
+          UTI: "com.adobe.pdf",
+        });
+        setSuccess("PDF ready to save/share");
+        return;
+      }
+
+      await Share.share({
+        title: "Property Proposal PDF",
+        message: "Property proposal PDF generated",
+        url: pdfUri,
+      });
+    } catch {
+      Alert.alert("PDF failed", "Unable to generate or download proposal PDF.");
+    } finally {
+      if (Platform.OS === "web") {
+        setProposalBusy(false);
+      }
+    }
+  };
+
+  const shareProposalPdf = async () => {
+    try {
+      await openSystemPdfShare({
+        title: "Share Proposal PDF",
+        message: "Property proposal PDF",
+        preferNativeShareOnWeb: true,
+      });
+    } catch {
+      Alert.alert("Share failed", "Unable to open sharing options.");
+    }
+  };
+
+  const shareProposalWhatsApp = async () => {
+    if (!selectedProposalProperties.length) {
+      Alert.alert("Select property", "Please select at least one property for proposal.");
+      return;
+    }
+    const phone = toWhatsAppPhone((lead as any)?.phone) || "";
+    if (!phone) {
+      Alert.alert("Invalid number", "Lead phone number is invalid. Last 10 digits are required.");
+      return;
+    }
+
+    const text = encodeURIComponent(buildProposalText());
+    const appUrlWithPhone = `whatsapp://send?phone=${phone}&text=${text}`;
+    const appUrlGeneric = `whatsapp://send?text=${text}`;
+    const webUrl = `https://wa.me/${phone}?text=${text}`;
+    if (Platform.OS === "web") {
+      await Linking.openURL(webUrl).catch(() => {
+        Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp Web.");
+      });
+      return;
+    }
+    const canAppWithPhone = await Linking.canOpenURL(appUrlWithPhone).catch(() => false);
+    if (canAppWithPhone) {
+      await Linking.openURL(appUrlWithPhone).catch(() => {
+        Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp.");
+      });
+      return;
+    }
+    const canAppGeneric = await Linking.canOpenURL(appUrlGeneric).catch(() => false);
+    if (canAppGeneric) {
+      await Linking.openURL(appUrlGeneric).catch(() => {
+        Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp.");
+      });
+      return;
+    }
+    await Linking.openURL(webUrl).catch(() => {
+      Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp.");
+    });
+  };
+
+  const shareProposalEmail = async () => {
+    if (!selectedProposalProperties.length) {
+      Alert.alert("Select property", "Please select at least one property for proposal.");
+      return;
+    }
+    const email = String((lead as any)?.email || "").trim();
+
+    const subject = `Property Proposal - ${String((lead as any)?.name || "Client")}`;
+    const body = buildProposalText();
+
+    if (Platform.OS !== "web" && (await MailComposer.isAvailableAsync())) {
+      await MailComposer.composeAsync({
+        recipients: email ? [email] : [],
+        subject,
+        body,
+      });
+      return;
+    }
+
+    const mailto = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    await Linking.openURL(mailto).catch(() => {
+      Alert.alert("Mail unavailable", "Unable to open mail client.");
+    });
+  };
+
+  const onLinkPropertyToLead = async () => {
+    if (!lead || !relatedInventoryDraft) return;
+    try {
+      setLinkingProperty(true);
+      setPropertyActionInventoryId(relatedInventoryDraft);
+      const updatedLead = await addLeadRelatedProperty(lead._id, relatedInventoryDraft);
+      if (updatedLead?._id) {
+        setLead(updatedLead);
+        setRelatedInventoryDraft("");
+        setSuccess("Property linked");
+      }
+      await loadData();
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to link property"));
+    } finally {
+      setPropertyActionInventoryId("");
+      setLinkingProperty(false);
+    }
+  };
+
+  const onViewRelatedProperty = (inventoryId: string) => {
+    if (!inventoryId) return;
+    navigation.navigate("InventoryDetails", { assetId: inventoryId });
+  };
+
+  const onRemoveRelatedProperty = async (inventoryId: string) => {
+    if (!lead || !inventoryId) return;
+    if (Platform.OS === "web") {
+      const confirmed = typeof window !== "undefined"
+        ? window.confirm("Are you sure you want to delete this property?")
+        : false;
+      if (!confirmed) return;
+
+      try {
+        setPropertyActionInventoryId(inventoryId);
+        const updatedLead = await removeLeadRelatedProperty(lead._id, inventoryId);
+        if (updatedLead?._id) {
+          setLead(updatedLead);
+          setSuccess("Property removed");
+        }
+        await loadData();
+      } catch (e) {
+        setError(toErrorMessage(e, "Failed to remove property"));
+      } finally {
+        setPropertyActionInventoryId("");
+      }
+      return;
+    }
+
+    Alert.alert(
+      "Delete property",
+      "Are you sure you want to delete this property?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Yes",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setPropertyActionInventoryId(inventoryId);
+              const updatedLead = await removeLeadRelatedProperty(lead._id, inventoryId);
+              if (updatedLead?._id) {
+                setLead(updatedLead);
+                setSuccess("Property removed");
+              }
+              await loadData();
+            } catch (e) {
+              setError(toErrorMessage(e, "Failed to remove property"));
+            } finally {
+              setPropertyActionInventoryId("");
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const submitStatusRequest = async () => {
     if (!lead) return;
-    if (!requiresClosedApproval) {
-      setError("Approval is required only for CLOSED status");
+    if (statusDraft !== CLOSED_STATUS) {
+      setError("Closed details form is only for CLOSED status");
       setStatusRequestOpen(false);
       return;
     }
@@ -585,16 +1430,34 @@ export const LeadDetailsScreen = () => {
         size?: number;
         storagePath?: string;
       };
+      closureDocuments?: Array<{
+        url: string;
+        kind?: string;
+        mimeType?: string;
+        name?: string;
+        size?: number;
+      }>;
     } = {
       status: statusDraft,
       requestNote: statusRequestReason.trim() || `Lead closed via ${paymentMode}`,
       saleMeta,
     };
+    if (Array.isArray(closureDocumentsDraft) && closureDocumentsDraft.length > 0) {
+      payload.closureDocuments = closureDocumentsDraft
+        .map((doc) => ({
+          url: String(doc?.url || "").trim(),
+          kind: String(doc?.kind || "file").trim().toLowerCase(),
+          mimeType: String(doc?.mimeType || "").trim(),
+          name: String(doc?.name || "").trim(),
+          size: Number(doc?.size || 0),
+        }))
+        .filter((doc) => Boolean(doc.url));
+    }
 
     if (followUpDraft.trim()) {
       const parsed = parseFollowUpInput(followUpDraft);
       if (!parsed) {
-        setError("Invalid follow-up format. Use dd/mm/yyyy hh:mm");
+        setError("Invalid follow-up format. Use dd-mm-yyyy hh:mm");
         return;
       }
       payload.nextFollowUp = parsed.toISOString();
@@ -620,12 +1483,48 @@ export const LeadDetailsScreen = () => {
           storagePath: uploaded.storagePath || "",
         };
       }
-      await requestLeadStatusChange(lead._id, payload);
+      if (requiresClosedApproval) {
+        await requestLeadStatusChange(lead._id, payload);
+        setSuccess("Status change request sent for admin approval");
+      } else {
+        const paymentModeMap: Record<string, string> = {
+          Cash: "CASH",
+          Cheque: "CHECK",
+          "Bank Transfer": "NET_BANKING_NEFTRTGSIMPS",
+          UPI: "UPI",
+        };
+        const mode = paymentModeMap[paymentMode] || "CASH";
+        const paymentType = remainingAmount > 0 ? "PARTIAL" : "FULL";
+        const paymentReference =
+          paymentMode === "UPI"
+            ? closedForm.upiTransactionId.trim()
+            : paymentMode === "Cheque"
+              ? closedForm.chequeNumber.trim()
+              : paymentMode === "Bank Transfer"
+                ? closedForm.bankTransferUtrNumber.trim()
+                : "";
+        const noteParts = [
+          `Close details via ${paymentMode}`,
+          remainingDueDate ? `Remaining due: ${remainingDueDate}` : "",
+          paymentDate ? `Payment date: ${paymentDate}` : "",
+        ].filter(Boolean);
+
+        await updateLeadStatus(lead._id, {
+          status: CLOSED_STATUS,
+          dealPayment: {
+            mode,
+            paymentType,
+            remainingAmount,
+            paymentReference,
+            note: noteParts.join(" | "),
+          },
+        } as any);
+        setSuccess("Lead closed with required details");
+      }
       setStatusRequestOpen(false);
       setStatusRequestReason("");
       setStatusRequestAttachment(null);
       setClosedForm({ ...EMPTY_CLOSED_FORM, saleLeadId: String(lead?._id || "") });
-      setSuccess("Status change request sent for admin approval");
       await loadData();
     } catch (e) {
       setError(toErrorMessage(e, "Failed to send request"));
@@ -640,6 +1539,70 @@ export const LeadDetailsScreen = () => {
     setStatusRequestAttachment(null);
     setSaleLeadDropdownOpen(false);
     setClosedForm({ ...EMPTY_CLOSED_FORM, saleLeadId: String(lead?._id || "") });
+  };
+
+  const openClosedStatusForm = () => {
+    setStatusRequestReason("");
+    setStatusRequestAttachment(null);
+    setSaleLeadDropdownOpen(false);
+    setClosedForm({ ...EMPTY_CLOSED_FORM, saleLeadId: String(lead?._id || "") });
+    setStatusRequestOpen(true);
+  };
+
+  const openClosedDatePicker = (field: "remainingDueDate" | "paymentDate" | "chequeDate") => {
+    const seed = parseDateOnly(closedForm[field]) || new Date();
+
+    if (Platform.OS === "android") {
+      DateTimePickerAndroid.open({
+        value: seed,
+        mode: "date",
+        is24Hour: true,
+        onChange: (event, pickedDate) => {
+          if (event.type !== "set" || !pickedDate) return;
+          setClosedForm((prev) => ({ ...prev, [field]: formatDateOnly(pickedDate) }));
+        },
+      });
+      return;
+    }
+
+    if (Platform.OS === "web") {
+      const input = webClosedDatePickerRef.current;
+      webClosedDateFieldRef.current = field;
+      if (input) {
+        input.value = `${seed.getFullYear()}-${pad(seed.getMonth() + 1)}-${pad(seed.getDate())}`;
+        if (typeof input.showPicker === "function") {
+          input.showPicker();
+        } else {
+          input.focus?.();
+          input.click?.();
+        }
+      }
+      return;
+    }
+
+    setClosedDatePickerField(field);
+    setClosedDatePickerSeed(seed);
+    setShowClosedDatePicker(true);
+  };
+
+  const onClosedDatePickerChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (event.type === "dismissed") {
+      setShowClosedDatePicker(false);
+      return;
+    }
+    if (!selectedDate || !closedDatePickerField) return;
+    setClosedForm((prev) => ({ ...prev, [closedDatePickerField]: formatDateOnly(selectedDate) }));
+    setShowClosedDatePicker(false);
+  };
+
+  const onWebClosedDateChange = (rawValue: string) => {
+    const field = webClosedDateFieldRef.current;
+    if (!field) return;
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(rawValue || "").trim());
+    if (!match) return;
+    const parsed = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    if (Number.isNaN(parsed.getTime())) return;
+    setClosedForm((prev) => ({ ...prev, [field]: formatDateOnly(parsed) }));
   };
 
   const pickStatusRequestAttachment = async () => {
@@ -675,65 +1638,102 @@ export const LeadDetailsScreen = () => {
     }
   };
 
-  const closeReviewModal = () => {
-    setReviewOpen(false);
-    setReviewTarget(null);
-    setRejectReason("");
+  const openFollowUpPicker = () => {
+    const parsedFromDraft = followUpDraft.trim() ? parseFollowUpInput(followUpDraft) : null;
+    const parsedFromLead = (lead as any)?.nextFollowUp ? new Date((lead as any).nextFollowUp) : null;
+    const seedDate = parsedFromDraft
+      || (parsedFromLead && !Number.isNaN(parsedFromLead.getTime()) ? parsedFromLead : null)
+      || new Date();
+
+    if (Platform.OS === "android") {
+      DateTimePickerAndroid.open({
+        value: seedDate,
+        mode: "date",
+        is24Hour: true,
+        onChange: (dateEvent, pickedDate) => {
+          if (dateEvent.type !== "set" || !pickedDate) return;
+          DateTimePickerAndroid.open({
+            value: pickedDate,
+            mode: "time",
+            is24Hour: true,
+            onChange: (timeEvent, pickedTime) => {
+              if (timeEvent.type !== "set" || !pickedTime) return;
+              const finalDate = new Date(pickedDate);
+              finalDate.setHours(pickedTime.getHours(), pickedTime.getMinutes(), 0, 0);
+              setFollowUpDraft(formatFollowUpDate(finalDate));
+            },
+          });
+        },
+      });
+      return;
+    }
+
+    if (Platform.OS === "web") {
+      const input = webFollowUpPickerRef.current;
+      if (input) {
+        const localDateTimeValue = `${seedDate.getFullYear()}-${pad(seedDate.getMonth() + 1)}-${pad(seedDate.getDate())}T${pad(seedDate.getHours())}:${pad(seedDate.getMinutes())}`;
+        input.value = localDateTimeValue;
+        if (typeof input.showPicker === "function") {
+          input.showPicker();
+        } else {
+          input.focus?.();
+          input.click?.();
+        }
+      }
+      return;
+    }
+
+    setFollowUpPickerDatePart(seedDate);
+    setFollowUpPickerSeed(seedDate);
+    setFollowUpPickerMode("date");
+    setShowFollowUpPicker(true);
+  };
+
+  const onWebFollowUpChange = (rawValue: string) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(String(rawValue || "").trim());
+    if (!match) return;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const hour = Number(match[4]);
+    const minute = Number(match[5]);
+    const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+    if (Number.isNaN(parsed.getTime())) return;
+    setFollowUpDraft(formatFollowUpDate(parsed));
+  };
+
+  const onFollowUpPickerChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (event.type === "dismissed") {
+      setShowFollowUpPicker(false);
+      setFollowUpPickerMode("date");
+      return;
+    }
+
+    if (!selectedDate) return;
+
+    if (followUpPickerMode === "date") {
+      const pickedDate = new Date(selectedDate);
+      setFollowUpPickerDatePart(pickedDate);
+      setFollowUpPickerSeed(pickedDate);
+      setShowFollowUpPicker(false);
+      setTimeout(() => {
+        setFollowUpPickerMode("time");
+        setShowFollowUpPicker(true);
+      }, 10);
+      return;
+    }
+
+    const finalDate = new Date(followUpPickerDatePart);
+    finalDate.setHours(selectedDate.getHours(), selectedDate.getMinutes(), 0, 0);
+    setFollowUpDraft(formatFollowUpDate(finalDate));
+    setShowFollowUpPicker(false);
+    setFollowUpPickerMode("date");
   };
 
   const handleStatusSelect = (nextStatus: string) => {
     setStatusDraft(nextStatus);
-    if (!canManage && nextStatus === CLOSED_STATUS && String(lead?.status || "") !== CLOSED_STATUS) {
-      setStatusRequestReason("");
-      setStatusRequestAttachment(null);
-      setSaleLeadDropdownOpen(false);
-      setClosedForm({ ...EMPTY_CLOSED_FORM, saleLeadId: String(lead?._id || "") });
-      setStatusRequestOpen(true);
-    }
-  };
-
-  const openReviewModal = (request: LeadStatusRequest) => {
-    setReviewTarget(request);
-    setRejectReason("");
-    setReviewOpen(true);
-  };
-
-  const approveRequest = async () => {
-    if (!reviewTarget?._id) return;
-    try {
-      setSaving(true);
-      await approveLeadStatusRequest(reviewTarget._id);
-      setReviewOpen(false);
-      setReviewTarget(null);
-      setSuccess("Request approved");
-      await loadData();
-    } catch (e) {
-      setError(toErrorMessage(e, "Failed to approve request"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const rejectRequest = async () => {
-    if (!reviewTarget?._id) return;
-    const reason = rejectReason.trim();
-    if (!reason) {
-      setError("Rejection reason is required");
-      return;
-    }
-
-    try {
-      setSaving(true);
-      await rejectLeadStatusRequest(reviewTarget._id, reason);
-      setReviewOpen(false);
-      setReviewTarget(null);
-      setRejectReason("");
-      setSuccess("Request rejected with reason");
-      await loadData();
-    } catch (e) {
-      setError(toErrorMessage(e, "Failed to reject request"));
-    } finally {
-      setSaving(false);
+    if (nextStatus === CLOSED_STATUS) {
+      openClosedStatusForm();
     }
   };
 
@@ -847,34 +1847,358 @@ export const LeadDetailsScreen = () => {
     );
   }
 
+  const commandDateLabel = new Date().toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const roleLabel = String(role || "USER").replace(/_/g, " ");
+
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {success ? <Text style={styles.success}>{success}</Text> : null}
 
+      <View style={styles.commandCenterBar}>
+        <Text style={styles.commandCenterTitle}>Leads Command Center</Text>
+        <View style={styles.commandMetaRow}>
+          <Text style={styles.commandMetaChip}>PIPELINE</Text>
+          <Text style={styles.commandMetaChip}>ROLE: {roleLabel}</Text>
+          <Text style={styles.commandMetaChip}>{commandDateLabel}</Text>
+        </View>
+      </View>
+
       <AppCard style={styles.card as object}>
+        <View style={styles.profileHeaderRow}>
+          <Text style={styles.profileLabel}>Lead Profile</Text>
+          <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Text style={styles.backBtnText}>Back</Text>
+          </Pressable>
+        </View>
         <Text style={styles.name}>{lead.name}</Text>
-        <Text style={styles.meta}>{lead.phone} | {lead.email || "-"}</Text>
-        <Text style={styles.meta}>City: {lead.city || "-"}</Text>
-        <Text style={styles.meta}>Project: {lead.projectInterested || "-"}</Text>
-        <Text style={styles.meta}>Assigned Executive: {assigneeName}</Text>
-        <Text style={styles.meta}>Team Leader: {teamLeaderName}</Text>
-        <Text style={styles.meta}>Manager: {managerName}</Text>
+        <Text style={styles.meta}>{lead.projectInterested || "Project not tagged yet"}</Text>
+        <View style={styles.profileMetaRow}>
+          <Text style={styles.statusTag}>{statusDraft || lead.status || "NEW"}</Text>
+          <Text style={styles.idTag}>ID: {String(lead._id || "").slice(-6).toUpperCase()}</Text>
+        </View>
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Assigned</Text>
+            <Text style={styles.summaryValue}>{assigneeName}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Follow-up</Text>
+            <Text style={styles.summaryValue}>{followUpDraft || formatFollowUpInput((lead as any)?.nextFollowUp) || "-"}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Approval</Text>
+            <Text style={styles.summaryValue}>{String((lead as any)?.dealPayment?.approvalStatus || "PENDING")}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Text style={styles.summaryLabel}>Primary Property</Text>
+            <Text style={styles.summaryValue}>
+              {getInventoryLeadLabel((lead as any)?.inventoryId) || lead.projectInterested || "-"}
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.quickActionRow}>
-          <Pressable style={styles.quickActionBtn} onPress={() => openDialer(lead.phone)}>
+          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openDialer(lead.phone)}>
             <Ionicons name="call-outline" size={16} color="#0f172a" />
             <Text style={styles.quickActionText}>Call</Text>
           </Pressable>
-          <Pressable style={styles.quickActionBtn} onPress={() => openWhatsApp(lead.phone)}>
+          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openWhatsApp(lead.phone)}>
             <Ionicons name="logo-whatsapp" size={16} color="#16a34a" />
             <Text style={styles.quickActionText}>WhatsApp</Text>
           </Pressable>
-          <Pressable style={styles.quickActionBtn} onPress={() => openMail(lead.email)}>
+          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openMail(lead.email)}>
             <Ionicons name="mail-outline" size={16} color="#2563eb" />
             <Text style={styles.quickActionText}>Mail</Text>
           </Pressable>
+          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={openMaps}>
+            <Ionicons name="location-outline" size={16} color="#0ea5e9" />
+            <Text style={styles.quickActionText}>Maps</Text>
+          </Pressable>
         </View>
+        <Text style={styles.section}>Name</Text>
+        <AppInput style={styles.input as object} value={leadNameDraft} onChangeText={setLeadNameDraft} placeholder="Lead name" />
+        {isCompact ? (
+          <>
+            <Text style={styles.section}>Phone</Text>
+            <AppInput style={styles.input as object} value={leadPhoneDraft} onChangeText={setLeadPhoneDraft} placeholder="Phone" keyboardType="phone-pad" />
+            <Text style={styles.section}>Email</Text>
+            <AppInput style={styles.input as object} value={leadEmailDraft} onChangeText={setLeadEmailDraft} placeholder="Email" />
+            <Text style={styles.section}>City</Text>
+            <AppInput style={styles.input as object} value={leadCityDraft} onChangeText={setLeadCityDraft} placeholder="City" />
+            <Text style={styles.section}>Project</Text>
+            <AppInput style={styles.input as object} value={leadProjectDraft} onChangeText={setLeadProjectDraft} placeholder="Project" />
+          </>
+        ) : (
+          <>
+            <View style={styles.twoColRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.section}>Phone</Text>
+                <AppInput style={styles.input as object} value={leadPhoneDraft} onChangeText={setLeadPhoneDraft} placeholder="Phone" keyboardType="phone-pad" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.section}>Email</Text>
+                <AppInput style={styles.input as object} value={leadEmailDraft} onChangeText={setLeadEmailDraft} placeholder="Email" />
+              </View>
+            </View>
+            <View style={styles.twoColRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.section}>City</Text>
+                <AppInput style={styles.input as object} value={leadCityDraft} onChangeText={setLeadCityDraft} placeholder="City" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.section}>Project</Text>
+                <AppInput style={styles.input as object} value={leadProjectDraft} onChangeText={setLeadProjectDraft} placeholder="Project" />
+              </View>
+            </View>
+          </>
+        )}
+        <Text style={styles.meta}>Team Leader: {teamLeaderName}</Text>
+        <Text style={styles.meta}>Manager: {managerName}</Text>
+        <AppButton
+          title={saving ? "Saving..." : "Save Lead Update"}
+          onPress={saveUpdate}
+          disabled={saving}
+          style={styles.profileSaveBtn as object}
+        />
+      </AppCard>
+
+      <AppCard style={styles.card as object}>
+        <View style={styles.sectionRow}>
+          <Text style={styles.section}>Properties</Text>
+          <Text style={styles.meta}>{selectedLeadRelatedInventories.length} linked</Text>
+        </View>
+        {selectedLeadRelatedInventories.length === 0 ? (
+          <Text style={styles.meta}>No linked properties yet</Text>
+        ) : (
+          selectedLeadRelatedInventories.map((inventory: any, inventoryIndex: number) => {
+            const inventoryId = toObjectIdString(inventory);
+            const isPrimary = inventoryId && inventoryId === selectedLeadActiveInventoryId;
+            return (
+              <View key={inventoryId || `row-${inventoryIndex}`} style={[styles.propertyRow, isPrimary && styles.propertyRowActive]}>
+                <Text style={styles.propertyTitle}>
+                  {getInventoryLeadLabel(inventory) || "Property"}
+                </Text>
+                <Text style={styles.meta}>{String(inventory?.location || "").trim() || "-"}</Text>
+                <View style={styles.propertyActionRow}>
+                  <Pressable
+                    style={styles.propertyActionBtn}
+                    onPress={() => onViewRelatedProperty(inventoryId)}
+                    disabled={!inventoryId || propertyActionInventoryId === inventoryId}
+                  >
+                    <Ionicons name="eye-outline" size={13} color="#334155" />
+                    <Text style={styles.propertyActionText}>View</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.propertyActionBtn}
+                    onPress={() => onRemoveRelatedProperty(inventoryId)}
+                    disabled={!inventoryId || propertyActionInventoryId === inventoryId}
+                  >
+                    <Ionicons name="trash-outline" size={13} color="#b91c1c" />
+                    <Text style={[styles.propertyActionText, { color: "#b91c1c" }]}>Remove</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          })
+        )}
+
+        {canLinkProperties ? (
+          <>
+            <Text style={styles.section}>Select property to link</Text>
+            <View style={styles.linkRow}>
+            <Pressable style={[styles.selectInput, styles.linkSelect]} onPress={() => setLinkDropdownOpen((previous) => !previous)}>
+              <Text style={styles.selectInputText}>
+                {availableRelatedInventoryOptions.find((item: any) => String(item?._id) === relatedInventoryDraft)
+                  ? (
+                    getInventoryLeadLabel(availableRelatedInventoryOptions.find((item: any) => String(item?._id) === relatedInventoryDraft))
+                    || "Select property to link"
+                  )
+                  : "Select property to link"}
+              </Text>
+              <Ionicons name={linkDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#475569" />
+            </Pressable>
+            <Pressable style={styles.linkAddBtn} onPress={onLinkPropertyToLead} disabled={linkingProperty || !relatedInventoryDraft}>
+              <Text style={styles.linkAddBtnText}>{linkingProperty ? "Adding..." : "+ Add"}</Text>
+            </Pressable>
+            </View>
+            {linkDropdownOpen ? (
+              <View style={styles.selectMenu}>
+                <ScrollView style={styles.selectMenuScroll} nestedScrollEnabled>
+                  {availableRelatedInventoryOptions.length > 0 ? (
+                    availableRelatedInventoryOptions.map((inventory: any) => (
+                      <Pressable
+                        key={String(inventory?._id)}
+                        style={styles.selectMenuItem}
+                        onPress={() => {
+                          setRelatedInventoryDraft(String(inventory?._id || ""));
+                          setLinkDropdownOpen(false);
+                        }}
+                      >
+                        <Text style={styles.selectMenuItemText}>
+                          {getInventoryLeadLabel(inventory) || String(inventory?.title || "").trim() || "Property"}
+                        </Text>
+                      </Pressable>
+                    ))
+                  ) : (
+                    <Text style={styles.emptySelectText}>No properties found</Text>
+                  )}
+                </ScrollView>
+              </View>
+            ) : null}
+          </>
+        ) : null}
+      </AppCard>
+
+      <AppCard style={styles.card as object}>
+        <View style={styles.sectionRow}>
+          <Text style={styles.section}>Proposal Generator</Text>
+          <Text style={styles.meta}>Single or multiple properties</Text>
+        </View>
+        <View style={styles.inlineActionRow}>
+          <Text style={styles.meta}>Select Properties ({proposalSelectedPropertyIds.length}/{selectedLeadRelatedInventories.length})</Text>
+          <View style={styles.proposalTopActions}>
+            <Pressable
+              style={styles.smallTextBtn}
+              onPress={() =>
+                setProposalSelectedPropertyIds(
+                  selectedLeadRelatedInventories.map((row: any) => toObjectIdString(row)).filter(Boolean),
+                )
+              }
+            >
+              <Text style={styles.smallTextBtnText}>All</Text>
+            </Pressable>
+            <Pressable style={styles.smallTextBtn} onPress={() => setProposalSelectedPropertyIds([])}>
+              <Text style={styles.smallTextBtnText}>Reset</Text>
+            </Pressable>
+          </View>
+        </View>
+        {selectedLeadRelatedInventories.map((inventory: any) => {
+          const inventoryId = toObjectIdString(inventory);
+          const selected = selectedProposalPropertySet.has(inventoryId);
+          return (
+            <Pressable
+              key={`proposal-${inventoryId}`}
+              onPress={() => toggleProposalProperty(inventoryId)}
+              style={[styles.propertyCheckboxRow, selected && styles.propertyCheckboxRowActive]}
+            >
+              <Ionicons name={selected ? "checkbox-outline" : "square-outline"} size={16} color={selected ? "#0f766e" : "#64748b"} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.propertyTitle}>{getInventoryLeadLabel(inventory) || "Property"}</Text>
+                <Text style={styles.meta}>{String(inventory?.status || "Available")} | {(Array.isArray(inventory?.images) ? inventory.images.length : 0)} image(s)</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+        <View style={styles.metricsRow}>
+          <View style={styles.metricBox}>
+            <Text style={styles.metricLabel}>Selected Properties</Text>
+            <Text style={styles.metricValue}>{proposalSelectedPropertyIds.length}</Text>
+          </View>
+          <View style={styles.metricBox}>
+            <Text style={styles.metricLabel}>Images Included</Text>
+            <Text style={styles.metricValue}>
+              {selectedProposalProperties.reduce((sum: number, row: any) => sum + (Array.isArray(row?.images) ? row.images.length : 0), 0)}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.twoColRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.metricLabel}>Validity Days</Text>
+            <AppInput
+              style={[styles.input as object, styles.twoColInput as object]}
+              value={proposalValidityDays}
+              onChangeText={setProposalValidityDays}
+              placeholder="7"
+              keyboardType="phone-pad"
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.metricLabel}>Client Note</Text>
+            <AppInput
+              style={[styles.input as object, styles.twoColInput as object]}
+              value={proposalSpecialNote}
+              onChangeText={setProposalSpecialNote}
+              placeholder="Optional note"
+            />
+          </View>
+        </View>
+        <Text style={styles.section}>Property Images ({selectedProposalProperties.reduce((sum: number, row: any) => sum + (Array.isArray(row?.images) ? row.images.length : 0), 0)})</Text>
+        {selectedProposalProperties.length === 0 ? (
+          <Text style={styles.meta}>No images attached for selected properties.</Text>
+        ) : (
+          selectedProposalProperties.map((row: any) => (
+            <Text key={`img-${toObjectIdString(row)}`} style={styles.meta}>
+              {getInventoryLeadLabel(row) || "Property"}: {(Array.isArray(row?.images) ? row.images.length : 0)} image(s)
+            </Text>
+          ))
+        )}
+        <TextInput
+          style={[styles.diaryInput, { minHeight: 120, maxHeight: 220 }]}
+          value={buildProposalText()}
+          editable={false}
+          multiline
+        />
+        <View style={styles.proposalActionGrid}>
+          <Pressable style={styles.proposalBtn} onPress={copyProposalText}>
+            <Ionicons name="copy-outline" size={13} color="#334155" />
+            <Text style={styles.proposalBtnText}>Copy</Text>
+          </Pressable>
+          <Pressable style={[styles.proposalBtn, styles.proposalBtnPrimary]} onPress={downloadProposalPdf} disabled={proposalBusy}>
+            <Ionicons name="download-outline" size={13} color="#0f766e" />
+            <Text style={[styles.proposalBtnText, styles.proposalBtnPrimaryText]}>
+              {proposalBusy ? "Generating..." : "PDF"}
+            </Text>
+          </Pressable>
+          <Pressable style={styles.proposalBtn} onPress={shareProposalWhatsApp}>
+            <Ionicons name="logo-whatsapp" size={13} color="#16a34a" />
+            <Text style={styles.proposalBtnText}>WhatsApp</Text>
+          </Pressable>
+          <Pressable style={styles.proposalBtn} onPress={shareProposalEmail}>
+            <Ionicons name="mail-outline" size={13} color="#334155" />
+            <Text style={styles.proposalBtnText}>Email</Text>
+          </Pressable>
+          <Pressable style={styles.proposalBtn} onPress={shareProposalPdf} disabled={proposalBusy}>
+            <Ionicons name="paper-plane-outline" size={13} color="#334155" />
+            <Text style={styles.proposalBtnText}>Share PDF</Text>
+          </Pressable>
+        </View>
+      </AppCard>
+
+      <AppCard style={styles.card as object}>
+        <View style={styles.sectionRow}>
+          <Text style={styles.section}>Document Submission</Text>
+          <Text style={styles.meta}>{closureDocumentsDraft.length}/20</Text>
+        </View>
+        <Text style={styles.meta}>Upload closing proof documents (photos or PDF).</Text>
+        <Pressable style={styles.docUploadBtn} onPress={pickClosureDocuments} disabled={uploadingClosureDocs || closureDocumentsDraft.length >= 20}>
+          <Text style={styles.docUploadBtnText}>{uploadingClosureDocs ? "Uploading..." : "+ Add Photos / PDFs"}</Text>
+        </Pressable>
+        <Text style={styles.meta}>Max file size: 25MB each</Text>
+        {closureDocumentsDraft.length === 0 ? (
+          <Text style={styles.meta}>No documents uploaded yet</Text>
+        ) : (
+          closureDocumentsDraft.map((doc, index) => (
+            <View key={`${doc.url}-${index}`} style={styles.docRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.propertyTitle}>{doc.name || `Document ${index + 1}`}</Text>
+                <Text style={styles.meta}>{doc.kind || "file"} | {Math.max(0, Number(doc.size || 0))} bytes</Text>
+              </View>
+              <Pressable style={styles.docIconBtn} onPress={() => Linking.openURL(String(doc.url || "")).catch(() => setError("Unable to open document"))}>
+                <Ionicons name="eye-outline" size={14} color="#334155" />
+              </Pressable>
+              <Pressable style={styles.docIconBtn} onPress={() => removeClosureDocument(String(doc.url || ""))}>
+                <Ionicons name="trash-outline" size={14} color="#b91c1c" />
+              </Pressable>
+            </View>
+          ))
+        )}
       </AppCard>
 
       <AppCard style={styles.card as object}>
@@ -892,16 +2216,173 @@ export const LeadDetailsScreen = () => {
         </View>
 
         <Text style={styles.section}>Follow-up</Text>
-        <AppInput
-          style={styles.input as object}
-          value={followUpDraft}
-          onChangeText={setFollowUpDraft}
-          placeholder="dd/mm/yyyy hh:mm"
-        />
+        <View style={styles.followUpInputRow}>
+          <AppInput
+            style={[styles.input as object, styles.followUpInput as object]}
+            value={followUpDraft}
+            onChangeText={setFollowUpDraft}
+            placeholder="dd-mm-yyyy hh:mm"
+          />
+          <Pressable style={styles.followUpCalendarBtn} onPress={openFollowUpPicker}>
+            <Ionicons name="calendar-outline" size={16} color="#334155" />
+          </Pressable>
+        </View>
+        {showFollowUpPicker && Platform.OS === "ios" ? (
+          <DateTimePicker
+            value={followUpPickerSeed}
+            mode={followUpPickerMode}
+            is24Hour
+            display="spinner"
+            onChange={onFollowUpPickerChange}
+          />
+        ) : null}
+        {Platform.OS === "web" ? (
+          <input
+            ref={webFollowUpPickerRef}
+            type="datetime-local"
+            aria-label="Follow-up datetime"
+            onChange={(event) => onWebFollowUpChange(event.target.value)}
+            style={{
+              position: "absolute",
+              width: 0,
+              height: 0,
+              opacity: 0,
+              pointerEvents: "none",
+            }}
+          />
+        ) : null}
 
-        <AppButton title={saveButtonTitle} onPress={saveUpdate} disabled={saving} />
+        <Text style={styles.section}>Lead Diary</Text>
+        <TextInput
+          style={[styles.diaryInput, { height: 84 }]}
+          placeholder="Add conversation notes, visit details, objections, or next steps..."
+          value={diaryNoteDraft}
+          onChangeText={setDiaryNoteDraft}
+          multiline
+          maxLength={2000}
+          contextMenuHidden={false}
+          selectTextOnFocus={false}
+        />
+        <View style={styles.diaryBottomRow}>
+          <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
+          <View style={styles.diaryActionRow}>
+            <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={saving || !isDiaryMicSupported}>
+              <Ionicons name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#94a3b8" : "#334155"} />
+              <Text style={[styles.voiceBtnText, (saving || !isDiaryMicSupported) && styles.voiceBtnTextDisabled]}>
+                {isDiaryListening ? "Stop" : "Voice"}
+              </Text>
+            </Pressable>
+            <Pressable style={[styles.addNoteBtn, (!diaryNoteDraft.trim() || saving) && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving || !diaryNoteDraft.trim()}>
+              <Ionicons name="document-text-outline" size={14} color="#fff" />
+              <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
+            </Pressable>
+          </View>
+        </View>
+        {diaryEntries.length === 0 ? (
+          <Text style={styles.meta}>No diary notes yet</Text>
+        ) : (
+          <View style={styles.diaryListWrap}>
+            {visibleDiaryEntries.map((entry) => (
+              <View key={`top-${entry._id}`} style={styles.diaryEntryCard}>
+                <Text style={styles.diaryLine}>{String(entry.note || entry.conversation || entry.visitDetails || entry.nextStep || entry.conversionDetails || "-")}</Text>
+                <Text style={styles.meta}>{formatDateTime(entry.createdAt)} {entry.createdBy?.name ? `| ${entry.createdBy.name}` : ""}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {(statusDraft === "REQUESTED" || statusDraft === "CLOSED") ? (
+          <>
+            <Text style={styles.section}>Deal Payment & Approval</Text>
+            <View style={styles.modalChipWrap}>
+              {DEAL_PAYMENT_MODES.map((mode) => (
+                <AppChip
+                  key={mode.value}
+                  label={mode.label}
+                  active={paymentModeDraft === mode.value}
+                  onPress={() => {
+                    setPaymentModeDraft(mode.value);
+                    if (mode.value === "CASH") setPaymentReferenceDraft("");
+                  }}
+                  style={styles.modalChip as object}
+                />
+              ))}
+            </View>
+            <View style={styles.modalChipWrap}>
+              {DEAL_PAYMENT_TYPES.map((type) => (
+                <AppChip
+                  key={type.value}
+                  label={type.label}
+                  active={paymentTypeDraft === type.value}
+                  onPress={() => setPaymentTypeDraft(type.value)}
+                  style={styles.modalChip as object}
+                />
+              ))}
+            </View>
+            {paymentModeDraft && paymentModeDraft !== "CASH" ? (
+              <AppInput
+                style={styles.input as object}
+                value={paymentReferenceDraft}
+                onChangeText={setPaymentReferenceDraft}
+                placeholder="UTR / Txn / Cheque no."
+              />
+            ) : null}
+            {paymentTypeDraft === "PARTIAL" ? (
+              <AppInput
+                style={styles.input as object}
+                value={paymentRemainingDraft}
+                onChangeText={setPaymentRemainingDraft}
+                placeholder="Remaining amount"
+                keyboardType="phone-pad"
+              />
+            ) : null}
+            <TextInput
+              style={[styles.diaryInput, { height: 66 }]}
+              placeholder="Executive payment note..."
+              value={paymentNoteDraft}
+              onChangeText={setPaymentNoteDraft}
+              multiline
+              maxLength={1000}
+            />
+          </>
+        ) : null}
+
+        <Text style={styles.section}>Site Location</Text>
+        {canManage ? (
+          <>
+          <View style={styles.twoColRow}>
+            <AppInput
+              style={[styles.input as object, styles.twoColInput as object]}
+              value={siteLatDraft}
+              onChangeText={setSiteLatDraft}
+              placeholder="Latitude"
+              keyboardType="phone-pad"
+            />
+            <AppInput
+              style={[styles.input as object, styles.twoColInput as object]}
+              value={siteLngDraft}
+              onChangeText={setSiteLngDraft}
+              placeholder="Longitude"
+              keyboardType="phone-pad"
+            />
+          </View>
+          <Pressable style={styles.liveLocationBtn} onPress={fillWithLiveLocation}>
+            <Text style={styles.liveLocationBtnText}>Use Live Location</Text>
+          </Pressable>
+          </>
+        ) : (
+          <Text style={styles.meta}>
+            {selectedLeadSiteLat !== null && selectedLeadSiteLng !== null
+              ? `${selectedLeadSiteLat}, ${selectedLeadSiteLng}`
+              : "Not configured by admin/manager"}
+          </Text>
+        )}
+        <Text style={styles.meta}>Site visit status is verified within {siteVisitRadiusMeters} meters.</Text>
+
+        <AppButton title={saving ? "Saving..." : saveButtonTitle.replace("Save Details", "Save Lead Update")} onPress={saveUpdate} disabled={saving} />
       </AppCard>
 
+      {false ? (
       <AppCard style={styles.card as object}>
         <Text style={styles.section}>Lead Diary</Text>
         <TextInput
@@ -988,54 +2469,89 @@ export const LeadDetailsScreen = () => {
           )}
         </View>
       </AppCard>
-
-      {canManage ? (
-        <AppCard style={styles.card as object}>
-          <Text style={styles.section}>Pending Status Requests ({pendingRequests.length})</Text>
-          {pendingRequests.length === 0 ? (
-            <Text style={styles.meta}>No pending requests</Text>
-          ) : (
-            pendingRequests.map((request) => (
-              <View key={request._id} style={styles.requestCard}>
-                <Text style={styles.meta}>Requested: {request.proposedStatus}</Text>
-                <Text style={styles.meta}>Reason: {request.requestNote}</Text>
-                <Text style={styles.meta}>By: {request.requestedBy?.name || "-"}</Text>
-                {request.proposedSaleMeta ? (
-                  <>
-                    <Text style={styles.meta}>Payment Mode: {String(request.proposedSaleMeta.paymentMode || "-")}</Text>
-                    <Text style={styles.meta}>Total: {String(request.proposedSaleMeta.totalAmount || "-")}</Text>
-                    <Text style={styles.meta}>Partial: {String(request.proposedSaleMeta.partialAmount || "-")}</Text>
-                    <Text style={styles.meta}>Remaining: {String(request.proposedSaleMeta.remainingAmount || "-")}</Text>
-                    <Text style={styles.meta}>Remaining Due Date: {String(request.proposedSaleMeta.remainingDueDate || "-")}</Text>
-                    <Text style={styles.meta}>Payment Date: {String(request.proposedSaleMeta.paymentDate || "-")}</Text>
-                  </>
-                ) : null}
-                {request.proposedNextFollowUp ? <Text style={styles.meta}>Follow-up: {formatFollowUpInput(request.proposedNextFollowUp)}</Text> : null}
-                <Pressable style={styles.reviewBtn} onPress={() => openReviewModal(request)}>
-                  <Text style={styles.reviewBtnText}>Review</Text>
-                </Pressable>
-              </View>
-            ))
-          )}
-        </AppCard>
       ) : null}
+
+      <AppCard style={styles.card as object}>
+        <Text style={styles.section}>Status Request History ({statusRequestHistory.length})</Text>
+        {statusRequestHistory.length === 0 ? (
+          <Text style={styles.meta}>No status request history</Text>
+        ) : (
+          statusRequestHistory.map((request) => {
+            const status = String(request.status || "pending").toLowerCase();
+            const statusStyle =
+              status === "approved"
+                ? styles.reqApproved
+                : status === "rejected"
+                  ? styles.reqRejected
+                  : styles.reqPending;
+            return (
+              <View key={`history-${request._id}`} style={styles.requestCard}>
+                <View style={styles.requestHeadRow}>
+                  <Text style={styles.meta}>Requested: {request.proposedStatus || "-"}</Text>
+                  <Text style={statusStyle}>{status.toUpperCase()}</Text>
+                </View>
+                <Text style={styles.meta}>Reason: {request.requestNote || "-"}</Text>
+                <Text style={styles.meta}>By: {request.requestedBy?.name || "-"}</Text>
+                <Text style={styles.meta}>At: {formatDateTime(request.createdAt)}</Text>
+                {request.reviewedBy?.name ? (
+                  <Text style={styles.meta}>Reviewed by: {request.reviewedBy.name}</Text>
+                ) : null}
+                {request.reviewedAt ? (
+                  <Text style={styles.meta}>Reviewed at: {formatDateTime(request.reviewedAt)}</Text>
+                ) : null}
+                {request.rejectionReason ? (
+                  <Text style={[styles.meta, { color: "#b91c1c" }]}>Reject reason: {request.rejectionReason}</Text>
+                ) : null}
+                {request.attachment?.fileUrl ? (
+                  <Pressable
+                    onPress={() =>
+                      Linking.openURL(String(request.attachment?.fileUrl || "")).catch(() => {
+                        setError("Unable to open attachment");
+                      })
+                    }
+                  >
+                    <Text style={styles.attachmentLinkText}>
+                      Attachment: {String(request.attachment?.fileName || "Open file")}
+                    </Text>
+                  </Pressable>
+                ) : null}
+                {Array.isArray(request.closureDocuments) && request.closureDocuments.length > 0 ? (
+                  <Text style={styles.meta}>Documents: {request.closureDocuments.length}</Text>
+                ) : null}
+              </View>
+            );
+          })
+        )}
+      </AppCard>
 
       {canManage ? (
         <AppCard style={styles.card as object}>
           <Text style={styles.section}>Assign Executive</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.assignRow}>
-            {executives
-              .filter((u) => u.isActive !== false && ["EXECUTIVE", "FIELD_EXECUTIVE"].includes(String(u.role)))
-              .map((user) => (
-                <AppChip
-                  key={String(user._id)}
-                  label={user.name}
-                  active={assignDraft === user._id}
-                  onPress={() => setAssignDraft(String(user._id || ""))}
-                  style={styles.chip as object}
-                />
-              ))}
-          </ScrollView>
+          <Pressable style={styles.selectInput} onPress={() => setAssignDropdownOpen((prev) => !prev)}>
+            <Text style={styles.selectInputText}>{selectedAssigneeLabel}</Text>
+          </Pressable>
+          {assignDropdownOpen ? (
+            <View style={styles.selectMenu}>
+              <ScrollView style={styles.selectMenuScroll} nestedScrollEnabled>
+                {assignableExecutives.length > 0 ? (
+                  assignableExecutives.map((assignee) => (
+                    <Pressable
+                      key={`assign-${String(assignee._id || "")}`}
+                      style={styles.selectMenuItem}
+                      onPress={() => {
+                        setAssignDraft(String(assignee._id || ""));
+                        setAssignDropdownOpen(false);
+                      }}
+                    >
+                      <Text style={styles.selectMenuItemText}>{assignee.name}</Text>
+                    </Pressable>
+                  ))
+                ) : (
+                  <Text style={styles.emptySelectText}>No active executives available</Text>
+                )}
+              </ScrollView>
+            </View>
+          ) : null}
 
           <AppButton title={saving ? "Assigning..." : "Assign Lead"} onPress={saveAssignment} disabled={saving || !assignDraft} />
         </AppCard>
@@ -1138,14 +2654,28 @@ export const LeadDetailsScreen = () => {
               onChangeText={(value: string) => setClosedForm((prev) => ({ ...prev, remainingDueDate: value }))}
               placeholder="Remaining amount due date (DD-MM-YYYY)"
             />
+            <View style={styles.dateFieldActionRow}>
+              <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("remainingDueDate")}>
+                <Ionicons name="calendar-outline" size={14} color="#334155" />
+                <Text style={styles.dateFieldBtnText}>Pick due date</Text>
+              </Pressable>
+            </View>
 
             {closedForm.paymentMode === "Cash" ? (
-              <AppInput
-                style={styles.input as object}
-                value={closedForm.paymentDate}
-                onChangeText={(value: string) => setClosedForm((prev) => ({ ...prev, paymentDate: value }))}
-                placeholder="Payment date (DD-MM-YYYY)"
-              />
+              <>
+                <AppInput
+                  style={styles.input as object}
+                  value={closedForm.paymentDate}
+                  onChangeText={(value: string) => setClosedForm((prev) => ({ ...prev, paymentDate: value }))}
+                  placeholder="Payment date (DD-MM-YYYY)"
+                />
+                <View style={styles.dateFieldActionRow}>
+                  <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
+                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
+                  </Pressable>
+                </View>
+              </>
             ) : null}
 
             {closedForm.paymentMode === "UPI" ? (
@@ -1162,6 +2692,12 @@ export const LeadDetailsScreen = () => {
                   onChangeText={(value: string) => setClosedForm((prev) => ({ ...prev, paymentDate: value }))}
                   placeholder="Payment date (DD-MM-YYYY)"
                 />
+                <View style={styles.dateFieldActionRow}>
+                  <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
+                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
+                  </Pressable>
+                </View>
               </>
             ) : null}
 
@@ -1173,6 +2709,12 @@ export const LeadDetailsScreen = () => {
                   onChangeText={(value: string) => setClosedForm((prev) => ({ ...prev, chequeDate: value }))}
                   placeholder="Cheque date (DD-MM-YYYY)"
                 />
+                <View style={styles.dateFieldActionRow}>
+                  <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("chequeDate")}>
+                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
+                  </Pressable>
+                </View>
                 <AppInput
                   style={styles.input as object}
                   value={closedForm.chequeNumber}
@@ -1214,6 +2756,12 @@ export const LeadDetailsScreen = () => {
                   onChangeText={(value: string) => setClosedForm((prev) => ({ ...prev, paymentDate: value }))}
                   placeholder="Payment date (DD-MM-YYYY)"
                 />
+                <View style={styles.dateFieldActionRow}>
+                  <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
+                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
+                  </Pressable>
+                </View>
               </>
             ) : null}
 
@@ -1250,89 +2798,37 @@ export const LeadDetailsScreen = () => {
                 <Text style={styles.modalCancelText}>Cancel</Text>
               </Pressable>
               <Pressable style={[styles.modalBtn, styles.modalPrimaryBtn]} onPress={submitStatusRequest}>
-                <Text style={styles.modalPrimaryText}>Send for Approval</Text>
+                <Text style={styles.modalPrimaryText}>{requiresClosedApproval ? "Send for Approval" : "Save Closed Details"}</Text>
               </Pressable>
             </View>
+            {showClosedDatePicker && Platform.OS === "ios" ? (
+              <DateTimePicker
+                value={closedDatePickerSeed}
+                mode="date"
+                display="spinner"
+                onChange={onClosedDatePickerChange}
+              />
+            ) : null}
+            {Platform.OS === "web" ? (
+              <input
+                ref={webClosedDatePickerRef}
+                type="date"
+                aria-label="Closed form date picker"
+                onChange={(event) => onWebClosedDateChange(event.target.value)}
+                style={{
+                  position: "absolute",
+                  width: 0,
+                  height: 0,
+                  opacity: 0,
+                  pointerEvents: "none",
+                }}
+              />
+            ) : null}
             </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
 
-      <Modal visible={reviewOpen} animationType="fade" transparent onRequestClose={closeReviewModal}>
-        <Pressable style={styles.modalWrap} onPress={closeReviewModal}>
-          <Pressable style={[styles.modalCard, styles.modalCardWide]} onPress={(event) => event.stopPropagation()}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={styles.modalTitle}>Review Status Request</Text>
-            <View style={styles.reviewBox}>
-              <Text style={styles.reviewTitle}>Request Summary</Text>
-              <Text style={styles.meta}>Requested status: {reviewTarget?.proposedStatus || "-"}</Text>
-              <Text style={styles.meta}>Reason by executive: {reviewTarget?.requestNote || "-"}</Text>
-              {reviewTarget?.attachment?.fileUrl ? (
-                <Pressable
-                  onPress={() =>
-                    Linking.openURL(String(reviewTarget?.attachment?.fileUrl || "")).catch(() => {
-                      setError("Unable to open attachment");
-                    })
-                  }
-                >
-                  <Text style={styles.attachmentLinkText}>
-                    Attachment: {String(reviewTarget?.attachment?.fileName || "Open file")}
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
-            {reviewTarget?.proposedSaleMeta ? (
-              <View style={styles.reviewBox}>
-                <Text style={styles.reviewTitle}>Payment Details</Text>
-                <Text style={styles.meta}>Sold To: {String(reviewTarget.proposedSaleMeta.leadName || reviewTarget.proposedSaleMeta.leadId || "-")}</Text>
-                <Text style={styles.meta}>Payment Mode: {String(reviewTarget.proposedSaleMeta.paymentMode || "-")}</Text>
-                <Text style={styles.meta}>Total Amount: {String(reviewTarget.proposedSaleMeta.totalAmount || "-")}</Text>
-                <Text style={styles.meta}>Partial Amount: {String(reviewTarget.proposedSaleMeta.partialAmount || "-")}</Text>
-                <Text style={styles.meta}>Remaining Amount: {String(reviewTarget.proposedSaleMeta.remainingAmount || "-")}</Text>
-                <Text style={styles.meta}>Remaining Due Date: {String(reviewTarget.proposedSaleMeta.remainingDueDate || "-")}</Text>
-                <Text style={styles.meta}>Payment Date: {String(reviewTarget.proposedSaleMeta.paymentDate || "-")}</Text>
-                {reviewTarget.proposedSaleMeta.cheque ? (
-                  <View style={styles.reviewSubBox}>
-                    <Text style={styles.reviewSubTitle}>Cheque Details</Text>
-                    <Text style={styles.meta}>Cheque Date: {String(reviewTarget.proposedSaleMeta.cheque.chequeDate || "-")}</Text>
-                    <Text style={styles.meta}>Cheque No: {String(reviewTarget.proposedSaleMeta.cheque.chequeNumber || "-")}</Text>
-                    <Text style={styles.meta}>Bank Name: {String(reviewTarget.proposedSaleMeta.cheque.bankName || "-")}</Text>
-                  </View>
-                ) : null}
-                {reviewTarget.proposedSaleMeta.upi ? (
-                  <View style={styles.reviewSubBox}>
-                    <Text style={styles.reviewSubTitle}>UPI Details</Text>
-                    <Text style={styles.meta}>UPI Txn ID: {String(reviewTarget.proposedSaleMeta.upi.transactionId || "-")}</Text>
-                  </View>
-                ) : null}
-                {reviewTarget.proposedSaleMeta.bankTransfer ? (
-                  <View style={styles.reviewSubBox}>
-                    <Text style={styles.reviewSubTitle}>Bank Transfer Details</Text>
-                    <Text style={styles.meta}>Transfer Type: {String(reviewTarget.proposedSaleMeta.bankTransfer.transferType || "-")}</Text>
-                    <Text style={styles.meta}>UTR Number: {String(reviewTarget.proposedSaleMeta.bankTransfer.utrNumber || "-")}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-            <TextInput
-              style={[styles.diaryInput, { height: 82 }]}
-              placeholder="Rejection reason (required for reject)"
-              value={rejectReason}
-              onChangeText={setRejectReason}
-              multiline
-            />
-            <View style={styles.modalRow}>
-              <Pressable style={[styles.modalBtn, styles.modalDangerBtn]} onPress={rejectRequest}>
-                <Text style={styles.modalDangerText}>Reject</Text>
-              </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalPrimaryBtn]} onPress={approveRequest}>
-                <Text style={styles.modalPrimaryText}>Approve</Text>
-              </Pressable>
-            </View>
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </ScrollView>
   );
 };
@@ -1341,6 +2837,44 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#f8fafc" },
   content: { padding: 12, paddingBottom: 24 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc" },
+  commandCenterBar: {
+    marginBottom: 10,
+    borderRadius: 12,
+    backgroundColor: "#10233d",
+    borderWidth: 1,
+    borderColor: "#1d3557",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  commandCenterTitle: {
+    color: "#f8fafc",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  commandMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  commandMetaChip: {
+    borderWidth: 1,
+    borderColor: "#2d547f",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    color: "#bae6fd",
+    fontSize: 10,
+    textTransform: "uppercase",
+    fontWeight: "700",
+    backgroundColor: "#1c3e61",
+    overflow: "hidden",
+  },
   card: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -1349,7 +2883,98 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
+  profileLabel: {
+    color: "#0891b2",
+    textTransform: "uppercase",
+    letterSpacing: 1.1,
+    fontSize: 10,
+    marginBottom: 4,
+    fontWeight: "700",
+  },
+  profileHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 2,
+  },
+  backBtn: {
+    minWidth: 54,
+    height: 28,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  backBtnText: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
   name: { fontSize: 18, fontWeight: "700", color: colors.text },
+  profileMetaRow: {
+    marginTop: 6,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  statusTag: {
+    borderWidth: 1,
+    borderColor: "#67e8f9",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    color: "#0e7490",
+    fontSize: 10,
+    fontWeight: "700",
+    backgroundColor: "#ecfeff",
+    overflow: "hidden",
+  },
+  idTag: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    color: "#475569",
+    fontSize: 10,
+    fontWeight: "600",
+    backgroundColor: "#f8fafc",
+    overflow: "hidden",
+  },
+  summaryGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  },
+  summaryItem: {
+    flexGrow: 1,
+    minWidth: 140,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  summaryLabel: {
+    color: "#64748b",
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 2,
+    fontWeight: "700",
+  },
+  summaryValue: {
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "600",
+  },
   section: { marginBottom: 8, color: "#334155", fontWeight: "700" },
   sectionRow: {
     flexDirection: "row",
@@ -1378,6 +3003,47 @@ const styles = StyleSheet.create({
   assignRow: { flexDirection: "row", gap: 8, alignItems: "center", paddingBottom: 2 },
   chip: {},
   input: { marginBottom: 10 },
+  followUpInputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  followUpInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  followUpCalendarBtn: {
+    width: 42,
+    height: 42,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dateFieldActionRow: {
+    marginTop: -2,
+    marginBottom: 8,
+    alignItems: "flex-start",
+  },
+  dateFieldBtn: {
+    height: 30,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  dateFieldBtnText: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "600",
+  },
   selectInput: {
     borderWidth: 1,
     borderColor: "#cbd5e1",
@@ -1421,6 +3087,7 @@ const styles = StyleSheet.create({
   quickActionRow: {
     marginTop: 10,
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   quickActionBtn: {
@@ -1435,10 +3102,274 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 6,
   },
+  quickActionBtnHalf: {
+    minWidth: "48%",
+  },
   quickActionText: {
     fontSize: 12,
     fontWeight: "600",
     color: "#334155",
+  },
+  propertyRow: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#ffffff",
+    padding: 10,
+    marginBottom: 8,
+  },
+  propertyRowActive: {
+    borderColor: "#86efac",
+    backgroundColor: "#f0fdf4",
+  },
+  propertyTitle: {
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  propertyActionRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  propertyStatusWrap: {
+    marginTop: 6,
+    marginBottom: 2,
+  },
+  propertyStatusDropdown: {
+    height: 32,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  propertyStatusText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  propertyStatusMenu: {
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    overflow: "hidden",
+  },
+  propertyStatusMenuItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eef2ff",
+  },
+  propertyStatusMenuText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  linkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  linkSelect: {
+    flex: 1,
+  },
+  linkAddBtn: {
+    width: 74,
+    height: 40,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  linkAddBtnText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  docUploadBtn: {
+    marginTop: 8,
+    marginBottom: 6,
+    height: 34,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  docUploadBtnText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  docRow: {
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    padding: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  docIconBtn: {
+    width: 30,
+    height: 30,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveLocationBtn: {
+    marginTop: -2,
+    marginBottom: 8,
+    height: 32,
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  liveLocationBtnText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  profileSaveBtn: {
+    marginTop: 10,
+  },
+  propertyActionBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    paddingHorizontal: 10,
+    height: 30,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 5,
+  },
+  propertyActionText: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  proposalTopActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  smallTextBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    height: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#fff",
+  },
+  smallTextBtnText: {
+    color: "#475569",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  propertyCheckboxRow: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    padding: 10,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  propertyCheckboxRowActive: {
+    borderColor: "#86efac",
+    backgroundColor: "#f0fdf4",
+  },
+  metricsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 8,
+  },
+  metricBox: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#f8fafc",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  metricLabel: {
+    color: "#64748b",
+    fontSize: 10,
+    marginBottom: 2,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  metricValue: {
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  twoColRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  twoColInput: {
+    flex: 1,
+  },
+  proposalActionGrid: {
+    marginTop: 2,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  proposalBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    minWidth: 102,
+    height: 34,
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  proposalBtnPrimary: {
+    borderColor: "#5eead4",
+    backgroundColor: "#ecfeff",
+  },
+  proposalBtnText: {
+    color: "#334155",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  proposalBtnPrimaryText: {
+    color: "#0f766e",
   },
   activityCard: {
     borderWidth: 1,
@@ -1596,6 +3527,48 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
     padding: 10,
     marginBottom: 8,
+  },
+  requestHeadRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  reqPending: {
+    color: "#0f766e",
+    backgroundColor: "#ecfeff",
+    borderWidth: 1,
+    borderColor: "#99f6e4",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 10,
+    fontWeight: "700",
+    overflow: "hidden",
+  },
+  reqApproved: {
+    color: "#166534",
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#86efac",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 10,
+    fontWeight: "700",
+    overflow: "hidden",
+  },
+  reqRejected: {
+    color: "#b91c1c",
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 10,
+    fontWeight: "700",
+    overflow: "hidden",
   },
   reviewBtn: {
     marginTop: 8,

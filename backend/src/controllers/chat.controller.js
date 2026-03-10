@@ -10,6 +10,8 @@ const {
   markRoomAsRead,
   markMessageDelivered,
   markMessageSeen,
+  deleteMessageForUser,
+  clearRoomMessagesForUser,
   listEscalationRooms,
   listEscalationLogs,
   toPositiveInt,
@@ -216,6 +218,59 @@ exports.markSeen = async (req, res) => {
     return res.json(payload);
   } catch (error) {
     return handleControllerError(res, error, "Failed to update seen status");
+  }
+};
+
+exports.deleteMessage = async (req, res) => {
+  try {
+    const payload = await deleteMessageForUser({
+      user: req.user,
+      messageId: req.params.messageId,
+      scope: req.body?.scope || "self",
+    });
+
+    const io = req.app.get("io");
+    const eventPayload = {
+      roomId: payload.roomId,
+      messageId: payload.messageId,
+      scope: payload.scope,
+      deletedBy: payload.deletedBy,
+      deletedAt: payload.deletedAt,
+      room: payload.room || null,
+    };
+
+    if (payload.scope === "everyone") {
+      io?.to(`room:${payload.roomId}`).emit("chat:message:deleted", eventPayload);
+      (payload.participantIds || []).forEach((participantId) => {
+        io?.to(`user:${participantId}`).emit("chat:message:deleted", eventPayload);
+      });
+    } else {
+      io?.to(`user:${req.user._id}`).emit("chat:message:deleted", eventPayload);
+    }
+
+    return res.json(payload);
+  } catch (error) {
+    return handleControllerError(res, error, "Failed to delete message");
+  }
+};
+
+exports.clearRoomMessages = async (req, res) => {
+  try {
+    const payload = await clearRoomMessagesForUser({
+      user: req.user,
+      roomId: req.params.roomId,
+    });
+
+    req.app.get("io")?.to(`user:${req.user._id}`).emit("chat:room:cleared", {
+      roomId: payload.roomId,
+      userId: payload.userId,
+      clearedAt: payload.clearedAt,
+      room: payload.room || null,
+    });
+
+    return res.json(payload);
+  } catch (error) {
+    return handleControllerError(res, error, "Failed to clear room chat");
   }
 };
 

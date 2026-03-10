@@ -114,6 +114,12 @@ const inventorySchema = new mongoose.Schema(
       default: "",
       maxlength: 300,
     },
+    reservationLeadId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Lead",
+      default: null,
+      index: true,
+    },
     saleDetails: {
       type: saleDetailsSchema,
       default: null,
@@ -178,8 +184,9 @@ inventorySchema.index({ companyId: 1, teamId: 1, updatedAt: -1 });
 
 inventorySchema.pre("validate", function enforceStatusDetails() {
   const cleanReason = String(this.reservationReason || "").trim();
+  const reservationLeadId = this.reservationLeadId || null;
   const enforceReasonCheck =
-    this.isNew || this.isModified("status") || this.isModified("reservationReason");
+    this.isNew || this.isModified("status") || this.isModified("reservationReason") || this.isModified("reservationLeadId");
   const saleDetails = this.saleDetails || null;
 
   if (enforceReasonCheck && this.status === "Blocked" && !cleanReason) {
@@ -188,11 +195,21 @@ inventorySchema.pre("validate", function enforceStatusDetails() {
       "reservationReason is required when status is Reserved",
     );
   }
+  if (enforceReasonCheck && this.status === "Blocked" && !reservationLeadId) {
+    this.invalidate(
+      "reservationLeadId",
+      "Lead is required when status is Reserved",
+    );
+  }
 
   if (this.status !== "Blocked" && cleanReason) {
     this.reservationReason = "";
   } else if (this.status === "Blocked") {
     this.reservationReason = cleanReason;
+  }
+
+  if (this.status !== "Blocked" && reservationLeadId) {
+    this.reservationLeadId = null;
   }
 
   if (this.status !== "Sold") {

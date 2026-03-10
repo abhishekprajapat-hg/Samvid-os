@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from "react";
-import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppInput } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
 import {
   approveLeadStatusRequest,
+  getLeadStatusRequests,
   getPendingLeadStatusRequests,
   rejectLeadStatusRequest,
   type LeadStatusRequest,
@@ -61,11 +62,49 @@ export const NotificationsScreen = () => {
   const [actionLoadingId, setActionLoadingId] = useState("");
 
   const [leadRequests, setLeadRequests] = useState<LeadStatusRequest[]>([]);
+  const [leadRequestHistory, setLeadRequestHistory] = useState<LeadStatusRequest[]>([]);
   const [inventoryRequests, setInventoryRequests] = useState<InventoryRequest[]>([]);
 
   const [previewItem, setPreviewItem] = useState<NotificationItem | null>(null);
   const [rejectItem, setRejectItem] = useState<NotificationItem | null>(null);
   const [rejectionReason, setRejectionReason] = useState("");
+
+  const downloadFile = async (url: string, fileName = "document") => {
+    const safeUrl = String(url || "").trim();
+    if (!safeUrl) {
+      setError("Document URL is missing");
+      return;
+    }
+    if (Platform.OS !== "web") {
+      await Linking.openURL(safeUrl).catch(() => {
+        Alert.alert("Open failed", "Unable to open/download document.");
+      });
+      return;
+    }
+    try {
+      const response = await fetch(safeUrl);
+      if (!response.ok) {
+        throw new Error("Download failed");
+      }
+      const blob = await response.blob();
+      const doc = (globalThis as any)?.document;
+      if (!doc?.createElement || !doc?.body) {
+        throw new Error("Document unavailable");
+      }
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = doc.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName || "document";
+      doc.body.appendChild(anchor);
+      anchor.click();
+      doc.body.removeChild(anchor);
+      URL.revokeObjectURL(objectUrl);
+    } catch {
+      await Linking.openURL(safeUrl).catch(() => {
+        setError("Unable to download document");
+      });
+    }
+  };
 
   const load = async (silent = false) => {
     try {
@@ -73,12 +112,17 @@ export const NotificationsScreen = () => {
       else setLoading(true);
       setError("");
 
-      const [leadRows, inventoryRows] = await Promise.all([
+      const [leadRows, leadHistoryRows, inventoryRows] = await Promise.all([
         getPendingLeadStatusRequests(),
+        getLeadStatusRequests(),
         getPendingInventoryRequests(),
       ]);
 
       setLeadRequests(Array.isArray(leadRows) ? leadRows : []);
+      const history = Array.isArray(leadHistoryRows)
+        ? leadHistoryRows.filter((row) => String(row?.status || "") !== "pending").slice(0, 50)
+        : [];
+      setLeadRequestHistory(history);
       setInventoryRequests(Array.isArray(inventoryRows) ? (inventoryRows as InventoryRequest[]) : []);
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load notifications"));
@@ -176,6 +220,10 @@ export const NotificationsScreen = () => {
             <Text style={styles.summaryValue}>{leadRequests.length}</Text>
           </View>
           <View style={styles.summaryBox}>
+            <Text style={styles.summaryLabel}>Lead Reviews</Text>
+            <Text style={styles.summaryValue}>{leadRequestHistory.length}</Text>
+          </View>
+          <View style={styles.summaryBox}>
             <Text style={styles.summaryLabel}>Inventory Requests</Text>
             <Text style={styles.summaryValue}>{inventoryRequests.length}</Text>
           </View>
@@ -210,8 +258,8 @@ export const NotificationsScreen = () => {
               <Text style={styles.meta}>Requested by: {item.request.requestedBy?.name || "User"} ({item.request.requestedBy?.role || "-"})</Text>
               <Text style={styles.meta}>Created: {formatDate(item.createdAt)}</Text>
 
-              {item.kind === "LEAD" ? (
-                <>
+                {item.kind === "LEAD" ? (
+                  <>
                   <Text style={styles.meta}>Lead: {item.request.lead?.name || "-"} | Current: {item.request.lead?.status || "-"}</Text>
                   <Text style={styles.meta}>Proposed Status: {item.request.proposedStatus || "-"}</Text>
                   <Text style={styles.meta}>Note: {item.request.requestNote || "-"}</Text>
@@ -242,6 +290,61 @@ export const NotificationsScreen = () => {
             </AppCard>
           ))
         )}
+        {isAdmin ? (
+          <AppCard style={styles.historyCard as object}>
+            <Text style={styles.summaryTitle}>Lead Review History</Text>
+            {leadRequestHistory.length === 0 ? (
+              <Text style={styles.meta}>No approved/rejected lead reviews yet.</Text>
+            ) : (
+              leadRequestHistory.map((row) => (
+                <View key={`history-${row._id}`} style={styles.historyRow}>
+                  <View style={styles.rowBetween}>
+                    <Text style={styles.requestType}>{row.lead?.name || "Lead"}</Text>
+                    <Text style={String(row.status || "") === "approved" ? styles.historyApproved : styles.historyRejected}>
+                      {String(row.status || "-").toUpperCase()}
+                    </Text>
+                  </View>
+                  <Text style={styles.meta}>Requested: {String(row.proposedStatus || "-")}</Text>
+                  <Text style={styles.meta}>By: {row.requestedBy?.name || "-"} | Reviewed by: {row.reviewedBy?.name || "-"}</Text>
+                  <Text style={styles.meta}>At: {formatDate(row.reviewedAt || row.createdAt)}</Text>
+                  <Text style={styles.meta}>Reason: {row.requestNote || "-"}</Text>
+                  {row.rejectionReason ? <Text style={styles.meta}>Reject reason: {row.rejectionReason}</Text> : null}
+                  {Array.isArray(row.closureDocuments) && row.closureDocuments.length > 0 ? (
+                    <View style={{ marginTop: 4 }}>
+                      <Text style={styles.meta}>Documents: {row.closureDocuments.length}</Text>
+                      {row.closureDocuments.map((doc, index) => (
+                        <View key={`history-doc-${row._id}-${index}`} style={styles.fileRow}>
+                          <Text style={[styles.meta, { flex: 1 }]}>{String(doc?.name || `Document ${index + 1}`)}</Text>
+                          <Pressable
+                            style={styles.fileBtn}
+                            onPress={() => {
+                              const url = String(doc?.url || "");
+                              if (!url) return;
+                              void Linking.openURL(url);
+                            }}
+                          >
+                            <Text style={styles.fileBtnText}>Open</Text>
+                          </Pressable>
+                          <Pressable
+                            style={styles.fileBtn}
+                            onPress={() =>
+                              void downloadFile(
+                                String(doc?.url || ""),
+                                String(doc?.name || `document-${index + 1}`),
+                              )
+                            }
+                          >
+                            <Text style={styles.fileBtnText}>Download</Text>
+                          </Pressable>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ))
+            )}
+          </AppCard>
+        ) : null}
       </ScrollView>
 
       <Modal visible={Boolean(previewItem)} transparent animationType="slide" onRequestClose={() => setPreviewItem(null)}>
@@ -263,6 +366,67 @@ export const NotificationsScreen = () => {
                     <Text style={styles.previewText}>Total Amount: {previewItem.request.proposedSaleMeta?.totalAmount ?? "-"}</Text>
                     <Text style={styles.previewText}>Partial Amount: {previewItem.request.proposedSaleMeta?.partialAmount ?? "-"}</Text>
                     <Text style={styles.previewText}>Remaining Amount: {previewItem.request.proposedSaleMeta?.remainingAmount ?? "-"}</Text>
+                    {previewItem.request.attachment?.fileUrl ? (
+                      <View style={styles.fileRow}>
+                        <Text style={[styles.previewText, { flex: 1 }]}>
+                          Attachment: {String(previewItem.request.attachment?.fileName || "file")}
+                        </Text>
+                        <Pressable
+                          style={styles.fileBtn}
+                          onPress={() => {
+                            const url = String(previewItem.request.attachment?.fileUrl || "");
+                            if (!url) return;
+                            void Linking.openURL(url);
+                          }}
+                        >
+                          <Text style={styles.fileBtnText}>Open</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.fileBtn}
+                          onPress={() =>
+                            void downloadFile(
+                              String(previewItem.request.attachment?.fileUrl || ""),
+                              String(previewItem.request.attachment?.fileName || "attachment"),
+                            )
+                          }
+                        >
+                          <Text style={styles.fileBtnText}>Download</Text>
+                        </Pressable>
+                      </View>
+                    ) : null}
+                    {Array.isArray(previewItem.request.closureDocuments) && previewItem.request.closureDocuments.length > 0 ? (
+                      <>
+                        <Text style={styles.previewText}>Closure Documents ({previewItem.request.closureDocuments.length})</Text>
+                        {previewItem.request.closureDocuments.map((doc, index) => (
+                          <View key={`preview-closure-doc-${index}-${String(doc?.url || "")}`} style={styles.fileRow}>
+                            <Text style={[styles.previewText, { flex: 1 }]}>
+                              {String(doc?.name || `Document ${index + 1}`)}
+                            </Text>
+                            <Pressable
+                              style={styles.fileBtn}
+                              onPress={() => {
+                                const url = String(doc?.url || "");
+                                if (!url) return;
+                                void Linking.openURL(url);
+                              }}
+                            >
+                              <Text style={styles.fileBtnText}>Open</Text>
+                            </Pressable>
+                            <Pressable
+                              style={styles.fileBtn}
+                              onPress={() =>
+                                void downloadFile(
+                                  String(doc?.url || ""),
+                                  String(doc?.name || `document-${index + 1}`),
+                                )
+                              }
+                            >
+                              <Text style={styles.fileBtnText}>Download</Text>
+                            </Pressable>
+                          </View>
+                        ))}
+                      </>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -372,6 +536,42 @@ const styles = StyleSheet.create({
   readOnlyCard: {
     marginBottom: 10,
   },
+  historyCard: {
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  historyRow: {
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    padding: 10,
+    marginTop: 8,
+  },
+  historyApproved: {
+    color: "#166534",
+    backgroundColor: "#f0fdf4",
+    borderWidth: 1,
+    borderColor: "#86efac",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 10,
+    fontWeight: "700",
+    overflow: "hidden",
+  },
+  historyRejected: {
+    color: "#b91c1c",
+    backgroundColor: "#fef2f2",
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    fontSize: 10,
+    fontWeight: "700",
+    overflow: "hidden",
+  },
   emptyCard: {
     marginBottom: 10,
   },
@@ -464,6 +664,27 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 8,
   },
+  fileRow: {
+    marginBottom: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  fileBtn: {
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 8,
+    backgroundColor: "#fff",
+    height: 28,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  fileBtnText: {
+    color: "#334155",
+    fontSize: 11,
+    fontWeight: "700",
+  },
   modalActionRow: {
     flexDirection: "row",
     gap: 8,
@@ -476,4 +697,3 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
 });
-

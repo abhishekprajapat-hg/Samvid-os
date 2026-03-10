@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Linking,
@@ -27,12 +26,11 @@ import {
   getLeadActivity,
   updateLeadStatus,
 } from "../../services/leadService";
-import { getInventoryAssets } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { useAuth } from "../../context/AuthContext";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
-import type { InventoryAsset, Lead } from "../../types";
+import type { Lead } from "../../types";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { colors } from "../../theme/tokens";
 
@@ -83,30 +81,6 @@ const toWhatsAppPhone = (value?: string) => {
 };
 
 const formatCurrency = (value: number) => `Rs ${Math.round(value).toLocaleString("en-IN")}`;
-const escapeHtml = (value: string) =>
-  String(value || "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-
-const buildInventoryLabel = (asset: InventoryAsset) =>
-  String(
-    asset.title
-    || [asset.location, asset.category, asset.type].filter(Boolean).join(" - ")
-    || "Inventory",
-  ).trim();
-
-const resolveMediaUrl = (url?: string) => {
-  const safe = String(url || "").trim();
-  if (!safe) return "";
-  if (/^https?:\/\//i.test(safe)) return safe;
-  const base = process.env.EXPO_PUBLIC_API_ORIGIN || process.env.EXPO_PUBLIC_SOCKET_URL || process.env.EXPO_PUBLIC_API_BASE_URL || "";
-  const cleanBase = String(base).replace(/\/$/, "");
-  if (!cleanBase) return safe;
-  return `${cleanBase}${safe.startsWith("/") ? "" : "/"}${safe}`;
-};
 
 const getPendingPaymentRows = (lead: Lead) => {
   const merged: any[] = [];
@@ -139,7 +113,15 @@ export const LeadsMatrixScreen = () => {
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
   const { role } = useAuth();
-  const canManage = role === "ADMIN" || role === "MANAGER";
+  const canAddLead = [
+    "ADMIN",
+    "MANAGER",
+    "ASSISTANT_MANAGER",
+    "TEAM_LEADER",
+    "EXECUTIVE",
+    "FIELD_EXECUTIVE",
+    "CHANNEL_PARTNER",
+  ].includes(String(role || "").toUpperCase());
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -166,14 +148,6 @@ export const LeadsMatrixScreen = () => {
   const [assignDraft, setAssignDraft] = useState("");
   const [activities, setActivities] = useState<Array<{ _id: string; action: string; createdAt: string; performedBy?: { name?: string } }>>([]);
 
-  const [proposalOpen, setProposalOpen] = useState(false);
-  const [proposalLoading, setProposalLoading] = useState(false);
-  const [proposalGenerating, setProposalGenerating] = useState(false);
-  const [proposalLeadId, setProposalLeadId] = useState("");
-  const [proposalLeadDropdownOpen, setProposalLeadDropdownOpen] = useState(false);
-  const [proposalAssets, setProposalAssets] = useState<InventoryAsset[]>([]);
-  const [proposalSelectedAssetIds, setProposalSelectedAssetIds] = useState<string[]>([]);
-  const [lastGeneratedPdfUri, setLastGeneratedPdfUri] = useState("");
 
   const load = useCallback(async (silent = false) => {
     try {
@@ -270,15 +244,6 @@ export const LeadsMatrixScreen = () => {
   const executiveUsers = useMemo(
     () => users.filter((u) => u.isActive !== false && EXECUTIVE_ROLES.has(String(u.role || ""))),
     [users],
-  );
-  const selectedProposalLead = useMemo(
-    () => leads.find((row) => String(row._id) === proposalLeadId) || null,
-    [leads, proposalLeadId],
-  );
-  const selectedProposalAssets = useMemo(
-    () =>
-      proposalAssets.filter((asset) => proposalSelectedAssetIds.includes(String(asset._id || ""))),
-    [proposalAssets, proposalSelectedAssetIds],
   );
 
   const openLead = async (lead: Lead) => {
@@ -413,6 +378,10 @@ export const LeadsMatrixScreen = () => {
     const webUrl = `https://wa.me/${whatsappPhone}`;
 
     try {
+      if (Platform.OS === "web") {
+        await Linking.openURL(webUrl);
+        return;
+      }
       const appSupported = await Linking.canOpenURL(appUrl);
       if (appSupported) {
         await Linking.openURL(appUrl);
@@ -748,14 +717,10 @@ export const LeadsMatrixScreen = () => {
             <View style={styles.topActions}>
               <View style={styles.topActionsLeft}>
                 <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} />
-                {canManage ? (
+                {canAddLead ? (
                   <AppButton title="+ Add Lead" onPress={() => setAddOpen(true)} />
                 ) : null}
               </View>
-              <Pressable style={styles.proposalBtn} onPress={openProposalGenerator}>
-                <Ionicons name="document-text-outline" size={16} color="#0f172a" />
-                <Text style={styles.proposalBtnText}>Proposal</Text>
-              </Pressable>
             </View>
 
             <AppInput
@@ -800,7 +765,7 @@ export const LeadsMatrixScreen = () => {
         renderItem={({ item }) => {
           const statusStyle = statusPillStyles[(item.status || "NEW") as keyof typeof statusPillStyles] || statusPillStyles.NEW;
           return (
-            <Pressable onPress={() => openLead(item)} style={styles.card}>
+            <Pressable onPress={() => navigation.navigate("LeadDetails", { leadId: item._id, lead: item })} style={styles.card}>
               <View style={styles.cardHead}>
                 <Text style={styles.name}>{item.name}</Text>
                 <View style={[styles.statusPill, { backgroundColor: statusStyle.bg, borderColor: statusStyle.border }]}>
@@ -828,12 +793,7 @@ export const LeadsMatrixScreen = () => {
                 </Pressable>
               </View>
 
-              <AppButton
-                title="Open Full Details"
-                variant="ghost"
-                style={styles.detailsBtn as object}
-                onPress={() => navigation.navigate("LeadDetails", { leadId: item._id })}
-              />
+              <AppButton title="Open Full Details" variant="ghost" style={styles.detailsBtn as object} onPress={() => navigation.navigate("LeadDetails", { leadId: item._id, lead: item })} />
             </Pressable>
           );
         }}
@@ -867,201 +827,6 @@ export const LeadsMatrixScreen = () => {
         </View>
       </Modal>
 
-      <Modal visible={Boolean(selected)} animationType="slide" onRequestClose={() => setSelected(null)}>
-        <View style={styles.detailRoot}>
-          <ScrollView contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
-            <Text style={styles.modalTitle}>{selected?.name}</Text>
-            <Text style={styles.meta}>{selected?.phone} | {selected?.email || "-"}</Text>
-            <Text style={styles.meta}>Project: {selected?.projectInterested || "-"}</Text>
-
-            <Text style={styles.section}>Status</Text>
-            <View style={styles.statusRow}>
-              {LEAD_STATUSES.filter((s) => s !== "ALL").map((status) => (
-                <AppChip
-                  key={status}
-                  label={status}
-                  active={statusDraft === status}
-                  onPress={() => setStatusDraft(status)}
-                />
-              ))}
-            </View>
-
-            <Text style={styles.section}>Next Follow-up (YYYY-MM-DD HH:mm)</Text>
-            <AppInput
-              style={styles.input as object}
-              placeholder="2026-02-19 18:30"
-              value={followUpDraft}
-              onChangeText={setFollowUpDraft}
-            />
-
-            <AppButton title={saving ? "Saving..." : "Save Lead Update"} onPress={saveLeadUpdate} disabled={saving} />
-
-            {canManage ? (
-              <>
-                <Text style={styles.section}>Assign Executive</Text>
-                <View style={styles.statusRow}>
-                  {executiveUsers.map((user) => (
-                    <AppChip
-                      key={String(user._id)}
-                      label={user.name}
-                      active={assignDraft === user._id}
-                      onPress={() => setAssignDraft(String(user._id || ""))}
-                      style={styles.statusChip as object}
-                    />
-                  ))}
-                </View>
-                <AppButton title={saving ? "Assigning..." : "Assign Lead"} onPress={saveAssignment} disabled={saving || !assignDraft} />
-              </>
-            ) : null}
-
-            <Text style={styles.section}>Activity Timeline</Text>
-            {activityLoading ? (
-              <ActivityIndicator color="#0f172a" />
-            ) : activities.length === 0 ? (
-              <Text style={styles.empty}>No activity yet</Text>
-            ) : (
-              activities.map((item) => (
-                <View key={item._id} style={styles.activityCard}>
-                  <Text style={styles.meta}>{item.action}</Text>
-                  <Text style={styles.meta}>
-                    {formatDateTime(item.createdAt)} {item.performedBy?.name ? `| ${item.performedBy.name}` : ""}
-                  </Text>
-                </View>
-              ))
-            )}
-
-            <AppButton
-              title="Close"
-              variant="ghost"
-              onPress={() => {
-                if (saving) {
-                  Alert.alert("Please wait", "A save operation is in progress.");
-                  return;
-                }
-                setSelected(null);
-              }}
-            />
-          </ScrollView>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={proposalOpen}
-        animationType="slide"
-        transparent
-        onRequestClose={() => {
-          setProposalOpen(false);
-          setProposalLeadDropdownOpen(false);
-        }}
-      >
-        <View style={styles.modalWrap}>
-          <AppCard style={[styles.modalCard, styles.proposalModalCard] as object}>
-            <View style={styles.proposalContentArea}>
-              <Text style={styles.modalTitle}>Proposal Generator</Text>
-              <Text style={styles.meta}>1. Select lead  2. Select inventory  3. Download/share PDF</Text>
-
-              <Text style={styles.section}>Select Lead</Text>
-              <Pressable style={styles.selectInput} onPress={() => setProposalLeadDropdownOpen((prev) => !prev)}>
-                <Text style={styles.selectInputText}>{selectedProposalLead?.name || "Select lead"}</Text>
-                <Ionicons name={proposalLeadDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#475569" />
-              </Pressable>
-              {proposalLeadDropdownOpen ? (
-                <ScrollView style={styles.selectDropdown}>
-                  {leads.map((row) => {
-                    const id = String(row._id || "");
-                    const active = proposalLeadId === id;
-                    return (
-                      <Pressable
-                        key={`proposal-lead-${id}`}
-                        style={[styles.selectOption, active && styles.selectOptionActive]}
-                        onPress={() => {
-                          setProposalLeadId(id);
-                          setProposalLeadDropdownOpen(false);
-                        }}
-                      >
-                        <Text style={[styles.selectOptionText, active && styles.selectOptionTextActive]}>{row.name}</Text>
-                        <Text style={styles.selectOptionMeta}>{row.phone || "-"}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              ) : null}
-
-              <Text style={styles.section}>Select Inventory (Multiple)</Text>
-              {proposalLoading ? (
-                <ActivityIndicator color="#0f172a" />
-              ) : proposalAssets.length === 0 ? (
-                <Text style={styles.empty}>No inventory found</Text>
-              ) : (
-                <ScrollView style={styles.proposalList} contentContainerStyle={{ paddingBottom: 8 }}>
-                  {proposalAssets.map((asset) => {
-                    const id = String(asset._id || "");
-                    const active = proposalSelectedAssetIds.includes(id);
-                    return (
-                      <Pressable key={`proposal-asset-${id}`} onPress={() => toggleProposalAsset(id)} style={[styles.proposalAssetRow, active && styles.proposalAssetRowActive]}>
-                        <View style={styles.proposalAssetLeft}>
-                          <Ionicons
-                            name={active ? "checkbox-outline" : "square-outline"}
-                            size={18}
-                            color={active ? "#0f172a" : "#64748b"}
-                          />
-                          <View style={{ flex: 1 }}>
-                            <Text style={styles.proposalAssetTitle}>{buildInventoryLabel(asset)}</Text>
-                            <Text style={styles.meta}>Location: {asset.location || "-"}</Text>
-                            <Text style={styles.meta}>Category: {asset.category || "-"}</Text>
-                            <Text style={styles.meta}>Type: {asset.type || "-"}</Text>
-                            <Text style={styles.meta}>Status: {asset.status || "-"}</Text>
-                            <Text style={styles.meta}>Price: {formatCurrency(Number(asset.price || 0))}</Text>
-                            <Text style={styles.meta}>Photos: {Array.isArray(asset.images) ? asset.images.length : 0}</Text>
-                          </View>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              )}
-            </View>
-
-            <View style={styles.proposalFooter}>
-              <Pressable
-                style={[styles.actionBtn, (proposalGenerating || proposalSelectedAssetIds.length === 0) && styles.actionBtnDisabled]}
-                onPress={generateProposalPdf}
-                disabled={proposalGenerating || proposalSelectedAssetIds.length === 0}
-              >
-                <Ionicons name="download-outline" size={16} color="#0f172a" />
-                <Text style={styles.actionBtnText}>Download</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.actionBtn, (proposalGenerating || proposalSelectedAssetIds.length === 0) && styles.actionBtnDisabled]}
-                onPress={shareProposalOnWhatsApp}
-                disabled={proposalGenerating || proposalSelectedAssetIds.length === 0}
-              >
-                <Ionicons name="logo-whatsapp" size={16} color="#16a34a" />
-                <Text style={styles.actionBtnText}>WhatsApp</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.actionBtn, (proposalGenerating || proposalSelectedAssetIds.length === 0) && styles.actionBtnDisabled]}
-                onPress={shareProposalByEmail}
-                disabled={proposalGenerating || proposalSelectedAssetIds.length === 0}
-              >
-                <Ionicons name="mail-outline" size={16} color="#2563eb" />
-                <Text style={styles.actionBtnText}>Mail</Text>
-              </Pressable>
-              <Pressable
-                style={styles.actionBtn}
-                onPress={() => {
-                  setProposalOpen(false);
-                  setProposalLeadDropdownOpen(false);
-                }}
-                disabled={proposalGenerating}
-              >
-                <Ionicons name="close-outline" size={16} color="#475569" />
-                <Text style={styles.actionBtnText}>Close</Text>
-              </Pressable>
-            </View>
-          </AppCard>
-        </View>
-      </Modal>
     </Screen>
   );
 };
@@ -1102,23 +867,6 @@ const styles = StyleSheet.create({
   topActionsLeft: {
     flexDirection: "row",
     gap: 8,
-  },
-  proposalBtn: {
-    height: 36,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  proposalBtnText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#0f172a",
   },
   search: {
     height: 44,
@@ -1215,16 +963,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,23,42,0.45)",
   },
   modalCard: { borderRadius: 14, padding: 14 },
-  proposalModalCard: {
-    maxHeight: "90%",
-    width: "100%",
-    padding: 0,
-    overflow: "hidden",
-  },
-  proposalContentArea: {
-    flex: 1,
-    padding: 14,
-  },
   modalTitle: {
     fontSize: 18,
     fontWeight: "700",
@@ -1312,110 +1050,5 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     color: "#64748b",
-  },
-  proposalList: {
-    flex: 1,
-    minHeight: 200,
-    maxHeight: 320,
-    marginBottom: 6,
-  },
-  proposalAssetRow: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    padding: 8,
-    marginBottom: 8,
-    backgroundColor: "#fff",
-  },
-  proposalAssetRowActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#f8fafc",
-  },
-  proposalAssetLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  proposalAssetTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#0f172a",
-  },
-  selectInput: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: "#fff",
-  },
-  selectInputText: {
-    color: "#0f172a",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  selectDropdown: {
-    marginTop: 6,
-    marginBottom: 8,
-    maxHeight: 180,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-  },
-  selectOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
-  },
-  selectOptionActive: {
-    backgroundColor: "#f8fafc",
-  },
-  selectOptionText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#0f172a",
-  },
-  selectOptionTextActive: {
-    color: "#0f172a",
-  },
-  selectOptionMeta: {
-    marginTop: 2,
-    fontSize: 12,
-    color: "#64748b",
-  },
-  proposalFooter: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    paddingBottom: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#e2e8f0",
-    backgroundColor: "#fff",
-  },
-  actionBtn: {
-    flex: 1,
-    height: 40,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-    flexDirection: "row",
-    gap: 6,
-  },
-  actionBtnDisabled: {
-    opacity: 0.45,
-  },
-  actionBtnText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#334155",
   },
 });

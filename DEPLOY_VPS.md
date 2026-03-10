@@ -114,4 +114,8 @@ sudo systemctl reload nginx
 - Keep separate Nginx server blocks per app/subdomain.
 - Keep `.env` out of Git and rotate secrets if ever exposed.
 - If you prefer path-based hosting (`example.com/samvid`), Nginx and Vite base-path changes are required.
+- For reliable mobile WebRTC calling across NAT/mobile data, deploy a TURN server (coturn) and set:
+  - `EXPO_PUBLIC_TURN_URL` / `EXPO_PUBLIC_TURN_URLS`
+  - `EXPO_PUBLIC_TURN_USERNAME`
+  - `EXPO_PUBLIC_TURN_CREDENTIAL`
 

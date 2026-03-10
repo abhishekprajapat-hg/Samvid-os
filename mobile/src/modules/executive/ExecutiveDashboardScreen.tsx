@@ -2,9 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
-import { getAllLeads } from "../../services/leadService";
+import { SharedPerformancePanel } from "../../components/dashboard/SharedPerformancePanel";
+import { getAllLeads, getCompanyPerformanceOverview } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
+import type { CompanyPerformanceOverview } from "../../services/leadService";
 
 const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
 
@@ -47,14 +49,19 @@ export const ExecutiveDashboardScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [companyPerformance, setCompanyPerformance] = useState<CompanyPerformanceOverview | null>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
         setLoading(true);
         setError("");
-        const rows = await getAllLeads();
+        const [rows, overview] = await Promise.all([
+          getAllLeads(),
+          getCompanyPerformanceOverview().catch(() => null),
+        ]);
         setLeads(Array.isArray(rows) ? rows : []);
+        setCompanyPerformance(overview);
       } catch (e) {
         setError(toErrorMessage(e, "Failed to load executive dashboard"));
       } finally {
@@ -160,6 +167,8 @@ export const ExecutiveDashboardScreen = () => {
             ))
           )}
         </View>
+
+        <SharedPerformancePanel leads={leads} overview={companyPerformance} />
       </ScrollView>
     </Screen>
   );

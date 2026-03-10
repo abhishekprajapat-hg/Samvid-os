@@ -30,6 +30,37 @@ export const getMyProfile = async (): Promise<{
   };
 };
 
+export const getUserProfileById = async (userId: string): Promise<{
+  profile: {
+    _id?: string;
+    id?: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+    role?: string;
+    companyId?: string | null;
+    profileImageUrl?: string;
+    parentId?: { _id?: string; name?: string; email?: string; role?: string } | string | null;
+    manager?: { _id?: string; name?: string; email?: string; phone?: string; role?: string } | null;
+    canViewInventory?: boolean;
+    isActive?: boolean;
+    partnerCode?: string;
+    liveLocation?: { updatedAt?: string } | null;
+    createdAt?: string | null;
+    updatedAt?: string | null;
+    lastAssignedAt?: string | null;
+  } | null;
+  summary: Record<string, number>;
+  performance: Record<string, number>;
+}> => {
+  const res = await api.get(`/users/${userId}/profile`);
+  return {
+    profile: res.data?.profile || null,
+    summary: res.data?.summary || {},
+    performance: res.data?.performance || {},
+  };
+};
+
 export const updateMyProfile = async (payload: {
   name?: string;
   phone?: string;
@@ -83,6 +114,25 @@ export const updateUserById = async (
     reportingToId?: string;
     parentId?: string;
     isActive?: boolean;
+  },
+) => {
+  const res = await api.patch(`/users/${userId}`, payload);
+  return res.data?.user || null;
+};
+
+export const updateUserByAdmin = async (
+  userId: string,
+  payload: {
+    name?: string;
+    email?: string;
+    phone?: string;
+    role?: string;
+    reportingToId?: string | null;
+    managerId?: string | null;
+    parentId?: string | null;
+    isActive?: boolean;
+    canViewInventory?: boolean;
+    password?: string;
   },
 ) => {
   const res = await api.patch(`/users/${userId}`, payload);

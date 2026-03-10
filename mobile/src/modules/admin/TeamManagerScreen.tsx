@@ -16,7 +16,9 @@ import {
   UIManager,
   View,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
+import { useNavigation } from "@react-navigation/native";
 import { useAuth } from "../../context/AuthContext";
 import { createUser, deleteUser, getUsers, rebalanceExecutives, updateUserById } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
@@ -48,8 +50,11 @@ type TeamLead = {
 
 const ROLE_OPTIONS = [
   { label: "Manager", value: "MANAGER" },
+  { label: "Assistant Manager", value: "ASSISTANT_MANAGER" },
+  { label: "Team Leader", value: "TEAM_LEADER" },
   { label: "Executive", value: "EXECUTIVE" },
   { label: "Field Executive", value: "FIELD_EXECUTIVE" },
+  { label: "Channel Partner", value: "CHANNEL_PARTNER" },
 ];
 const EDIT_ROLE_OPTIONS = [
   { label: "Manager", value: "MANAGER" },
@@ -62,6 +67,14 @@ const EDIT_ROLE_OPTIONS = [
 
 const EXECUTIVE_ROLES = new Set(["EXECUTIVE", "FIELD_EXECUTIVE"]);
 const MANAGEMENT_ROLES = new Set(["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"]);
+const REPORTING_PARENT_ROLES: Record<string, string[]> = {
+  MANAGER: ["ADMIN"],
+  ASSISTANT_MANAGER: ["MANAGER"],
+  TEAM_LEADER: ["ASSISTANT_MANAGER"],
+  EXECUTIVE: ["TEAM_LEADER"],
+  FIELD_EXECUTIVE: ["TEAM_LEADER"],
+  CHANNEL_PARTNER: ["ADMIN"],
+};
 const getRefId = (value: { _id?: string } | string | null | undefined) => {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -69,6 +82,7 @@ const getRefId = (value: { _id?: string } | string | null | undefined) => {
 };
 
 export const TeamManagerScreen = () => {
+  const navigation = useNavigation<any>();
   const { role, user } = useAuth();
   const isAdmin = role === "ADMIN";
   const canManageUsers = isAdmin || MANAGEMENT_ROLES.has(String(role || ""));
@@ -138,10 +152,11 @@ export const TeamManagerScreen = () => {
     }
   }, []);
 
-  const managers = useMemo(
-    () => users.filter((u) => u.role === "MANAGER" && u.isActive !== false),
-    [users],
-  );
+  const reportingCandidates = useMemo(() => {
+    const allowedParentRoles = REPORTING_PARENT_ROLES[roleDraft] || [];
+    if (!allowedParentRoles.length) return [];
+    return users.filter((u) => allowedParentRoles.includes(String(u.role || "")) && u.isActive !== false);
+  }, [roleDraft, users]);
   const editManagerOptions = useMemo(
     () =>
       users.filter((u) =>
@@ -333,8 +348,9 @@ export const TeamManagerScreen = () => {
         role: roleDraft,
       };
 
-      if (EXECUTIVE_ROLES.has(roleDraft) && managerId) {
+      if (managerId) {
         payload.managerId = managerId;
+        payload.reportingToId = managerId;
       }
 
       await createUser(payload);
@@ -467,12 +483,12 @@ export const TeamManagerScreen = () => {
                 ))}
               </View>
 
-            {EXECUTIVE_ROLES.has(roleDraft) ? (
+            {(REPORTING_PARENT_ROLES[roleDraft] || []).length > 0 ? (
               <>
-                <Text style={styles.label}>Manager (optional, auto if empty)</Text>
+                <Text style={styles.label}>Reporting To (optional, auto if empty)</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.roleRow}>
                   <AppChip label="Auto Assign" active={managerId === ""} onPress={() => setManagerId("")} />
-                  {managers.map((manager) => (
+                  {reportingCandidates.map((manager) => (
                     <AppChip
                       key={String(manager._id)}
                       label={manager.name}
@@ -523,6 +539,15 @@ export const TeamManagerScreen = () => {
                   />
                   {isAdmin ? (
                     <AppButton
+                      title="Open Full Editor"
+                      variant="ghost"
+                      style={styles.editBtn as object}
+                      onPress={() => navigation.navigate("UserDetailsEditor", { userId })}
+                      disabled={!userId}
+                    />
+                  ) : null}
+                  {isAdmin ? (
+                    <AppButton
                       title={isSelf ? "Current User" : deletingId === userId ? "Deleting..." : "Delete"}
                       variant="ghost"
                       style={[styles.deleteBtn as object, (isSelf || deletingId === userId) && styles.deleteBtnDisabled]}
@@ -551,16 +576,19 @@ export const TeamManagerScreen = () => {
                   : item.createdBy ? String(item.createdBy) : "-";
 
               return (
-                <AppCard style={styles.card as object}>
-                  <Text style={styles.name}>{item.name || "Unnamed Lead"}</Text>
-                  <Text style={styles.meta}>Phone: {item.phone || "-"}</Text>
-                  <Text style={styles.meta}>Email: {item.email || "-"}</Text>
-                  <Text style={styles.meta}>Project: {item.projectInterested || "-"}</Text>
-                  <Text style={styles.meta}>Status: {item.status || "-"}</Text>
-                  <Text style={styles.meta}>Assigned To: {assignedName || "Unassigned"}</Text>
-                  <Text style={styles.meta}>Created By: {createdByName}</Text>
-                  <Text style={styles.meta}>Next Follow-up: {item.nextFollowUp || "-"}</Text>
-                </AppCard>
+                <Pressable onPress={() => navigation.navigate("LeadDetails", { leadId: String(item._id || "") })}>
+                  <AppCard style={styles.card as object}>
+                    <Text style={styles.name}>{item.name || "Unnamed Lead"}</Text>
+                    <Text style={styles.meta}>Phone: {item.phone || "-"}</Text>
+                    <Text style={styles.meta}>Email: {item.email || "-"}</Text>
+                    <Text style={styles.meta}>Project: {item.projectInterested || "-"}</Text>
+                    <Text style={styles.meta}>Status: {item.status || "-"}</Text>
+                    <Text style={styles.meta}>Assigned To: {assignedName || "Unassigned"}</Text>
+                    <Text style={styles.meta}>Created By: {createdByName}</Text>
+                    <Text style={styles.meta}>Next Follow-up: {item.nextFollowUp || "-"}</Text>
+                    <Text style={styles.meta}>Tap to open full details + diary</Text>
+                  </AppCard>
+                </Pressable>
               );
             }}
             ListEmptyComponent={<Text style={styles.emptyText}>No leads found for this filter.</Text>}
