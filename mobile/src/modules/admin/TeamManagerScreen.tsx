@@ -18,7 +18,6 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
-import { useNavigation } from "@react-navigation/native";
 import { useAuth } from "../../context/AuthContext";
 import { createUser, deleteUser, getUsers, rebalanceExecutives, updateUserById } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
