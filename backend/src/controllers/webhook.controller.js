@@ -303,7 +303,9 @@ const isMetaLeadPermissionError = (error) => {
   const graphCode = Number(error?.response?.data?.error?.code || 0);
   const message = String(error?.response?.data?.error?.message || "").toLowerCase();
 
-  if (status !== 400 || graphCode !== 100) return false;
+  if (status === 403) return true;
+  if (graphCode === 10 || graphCode === 200) return true;
+  if (!(status === 400 && graphCode === 100)) return false;
 
   return (
     message.includes("permission")
@@ -334,6 +336,73 @@ const ensureLeadAssignmentIfMissing = async (leadDoc, event, requester = null) =
   });
 
   return assignment;
+};
+
+const captureFallbackMetaLead = async ({
+  companyId = "",
+  event = {},
+  requester = null,
+  reason = "",
+  graphError = null,
+} = {}) => {
+  const existing = await Lead.findOne({
+    metaLeadId: event.leadId,
+    companyId,
+  });
+  if (existing) {
+    const recovered = await ensureLeadAssignmentIfMissing(existing, event, requester);
+    return {
+      created: false,
+      duplicate: true,
+      assignmentRecovered: Boolean(recovered?.assigned),
+      lead: existing,
+    };
+  }
+
+  const fallbackPhone = buildFallbackMetaPhone(event.leadId);
+  const fallbackProject = reason ? `META_${String(reason).toUpperCase()}` : "META_INTAKE";
+
+  const lead = await Lead.create({
+    name: "Meta Lead",
+    phone: fallbackPhone,
+    email: "",
+    city: "",
+    projectInterested: fallbackProject,
+    companyId,
+    metaLeadId: event.leadId,
+    metaPageId: event.pageId,
+    metaFormId: event.formId,
+    source: "META",
+    status: "NEW",
+    assignedTo: null,
+    createdBy: null,
+  });
+
+  const assignment = await autoAssignLead({
+    lead,
+    requester,
+  });
+
+  logger.warn({
+    companyId,
+    leadId: lead._id,
+    metaLeadId: event.leadId,
+    fallbackPhone,
+    reason,
+    assigned: assignment.assigned,
+    mode: assignment.mode || null,
+    executiveId: assignment.executive?._id || null,
+    managerId: assignment.manager?._id || null,
+    error: graphError?.response?.data || graphError?.message || "",
+    message: "Meta lead captured via fallback intake",
+  });
+
+  return {
+    created: true,
+    duplicate: false,
+    assignmentRecovered: false,
+    lead,
+  };
 };
 
 exports.verifyWebhook = (req, res) => {
@@ -389,6 +458,7 @@ exports.handleWebhook = async (req, res) => {
     let failedCount = 0;
     let missingPhoneCount = 0;
     let permissionDeniedCount = 0;
+    let fallbackCreatedCount = 0;
     let recoveredAssignments = 0;
     const processedLeadKeys = new Set();
 
@@ -402,6 +472,27 @@ exports.handleWebhook = async (req, res) => {
         const processKey = `${tenantCompanyId}:${event.leadId}`;
         if (processedLeadKeys.has(processKey)) continue;
         processedLeadKeys.add(processKey);
+
+        const existingByMetaLeadId = await Lead.findOne({
+          metaLeadId: event.leadId,
+          companyId: tenantCompanyId,
+        });
+        if (existingByMetaLeadId) {
+          const recovered = await ensureLeadAssignmentIfMissing(
+            existingByMetaLeadId,
+            event,
+            assignmentRequester,
+          );
+          if (recovered?.assigned) recoveredAssignments += 1;
+          duplicateCount += 1;
+          logger.info({
+            companyId: tenantCompanyId,
+            leadId: existingByMetaLeadId._id,
+            metaLeadId: event.leadId,
+            message: "Duplicate meta lead skipped by metaLeadId",
+          });
+          continue;
+        }
 
         try {
           const response = await axios.get(
@@ -430,28 +521,6 @@ exports.handleWebhook = async (req, res) => {
               generatedPhone: fallbackPhone,
               message: "Meta lead missing phone; generated fallback phone for intake",
             });
-          }
-
-          const existingByMetaLeadId = await Lead.findOne({
-            metaLeadId: event.leadId,
-            companyId: tenantCompanyId,
-          });
-          if (existingByMetaLeadId) {
-            const recovered = await ensureLeadAssignmentIfMissing(
-              existingByMetaLeadId,
-              event,
-              assignmentRequester,
-            );
-            if (recovered?.assigned) recoveredAssignments += 1;
-            duplicateCount += 1;
-            logger.info({
-              companyId: tenantCompanyId,
-              leadId: existingByMetaLeadId._id,
-              metaLeadId: event.leadId,
-              phone,
-              message: "Duplicate meta lead skipped by metaLeadId",
-            });
-            continue;
           }
 
           if (META_DEDUPE_BY_PHONE && hasRealPhone) {
@@ -513,13 +582,31 @@ exports.handleWebhook = async (req, res) => {
 
           if (isMetaLeadPermissionError(leadError)) {
             permissionDeniedCount += 1;
-            failedCount += 1;
-            logger.error({
-              companyId: tenantCompanyId,
-              leadId: event.leadId,
-              error: leadError.response?.data || leadError.message,
-              message: "Meta lead processing failed due to permissions on access token",
-            });
+            try {
+              const fallback = await captureFallbackMetaLead({
+                companyId: tenantCompanyId,
+                event,
+                requester: assignmentRequester,
+                reason: "permission_denied",
+                graphError: leadError,
+              });
+              if (fallback.created) {
+                createdCount += 1;
+                fallbackCreatedCount += 1;
+              } else if (fallback.duplicate) {
+                duplicateCount += 1;
+                if (fallback.assignmentRecovered) recoveredAssignments += 1;
+              }
+            } catch (fallbackError) {
+              failedCount += 1;
+              logger.error({
+                companyId: tenantCompanyId,
+                leadId: event.leadId,
+                error: fallbackError.message,
+                rootError: leadError.response?.data || leadError.message,
+                message: "Meta fallback lead capture failed after permission error",
+              });
+            }
             continue;
           }
 
@@ -562,6 +649,7 @@ exports.handleWebhook = async (req, res) => {
       failed: failedCount,
       missingPhone: missingPhoneCount,
       permissionDenied: permissionDeniedCount,
+      fallbackCreated: fallbackCreatedCount,
       assignmentRecovered: recoveredAssignments,
       dedupeByPhoneEnabled: META_DEDUPE_BY_PHONE,
     };
