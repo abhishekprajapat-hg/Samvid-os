@@ -23,6 +23,7 @@ import {
   UserCircle2,
   TerminalSquare,
   Trophy,
+  Megaphone,
 } from "lucide-react";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import { useChatNotifications } from "../../context/useChatNotifications";
@@ -40,6 +41,7 @@ const MENU_CONFIG = {
     { name: "Leaderboard", icon: Trophy, path: "/leaderboard" },
     { name: "Chat", icon: MessageSquare, path: "/chat" },
     { name: "Alerts", icon: Bell, path: "/admin/notifications" },
+    { name: "Meta Ads", icon: Megaphone, path: "/admin/meta-ads" },
     { name: "Console", icon: TerminalSquare, path: "/admin/console" },
     { name: "Empire", icon: Building2, path: "/inventory" },
     { name: "Field Ops", icon: Map, path: "/map" },

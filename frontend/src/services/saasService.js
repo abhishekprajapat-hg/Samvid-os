@@ -20,6 +20,16 @@ export const updateCompany = async (companyId, payload = {}) => {
   return res.data;
 };
 
+export const getMyTenantMetaIntegration = async () => {
+  const res = await api.get("/saas/tenant/meta");
+  return res.data?.integration || null;
+};
+
+export const updateMyTenantMetaIntegration = async (payload = {}) => {
+  const res = await api.patch("/saas/tenant/meta", payload);
+  return res.data?.integration || null;
+};
+
 export const listPlans = async () => {
   const res = await api.get("/saas/plans");
   return Array.isArray(res.data?.plans) ? res.data.plans : [];
@@ -57,4 +67,3 @@ export const getGlobalAnalytics = async () => {
     generatedAt: res.data?.generatedAt || "",
   };
 };
-

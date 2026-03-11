@@ -1,5 +1,6 @@
 const axios = require("axios");
 const Lead = require("../models/Lead");
+const Company = require("../models/Company");
 const { autoAssignLead } = require("../services/leadAssignment.service");
 const logger = require("../config/logger");
 
@@ -51,24 +52,156 @@ const getFirstNonEmpty = (...values) => {
   return "";
 };
 
-const resolveMetaAccessToken = (tenant = null) =>
-  getFirstNonEmpty(
+const resolveMetaAccessToken = (tenant = null, { includeEnv = true } = {}) => {
+  const candidates = [
     tenant?.metadata?.metaAccessToken,
     tenant?.metadata?.meta?.accessToken,
-    process.env.META_ACCESS_TOKEN,
-  );
+  ];
+  if (includeEnv) {
+    candidates.push(process.env.META_ACCESS_TOKEN);
+  }
+  return getFirstNonEmpty(...candidates);
+};
 
-const resolveAllowedMetaPageIds = (tenant = null) => {
+const resolveAllowedMetaPageIds = (tenant = null, { includeEnv = true } = {}) => {
   const ids = new Set([
     ...toPageIdList(tenant?.metadata?.metaPageIds),
     ...toPageIdList(tenant?.metadata?.meta?.pageIds),
     ...toPageIdList(tenant?.metadata?.metaPageId),
     ...toPageIdList(tenant?.metadata?.meta?.pageId),
-    ...toPageIdList(process.env.META_PAGE_IDS),
-    ...toPageIdList(process.env.META_PAGE_ID),
+    ...(includeEnv ? toPageIdList(process.env.META_PAGE_IDS) : []),
+    ...(includeEnv ? toPageIdList(process.env.META_PAGE_ID) : []),
   ]);
 
   return ids;
+};
+
+const buildCompanyPageRouteMap = async () => {
+  const companies = await Company.find({ status: "ACTIVE" })
+    .select("_id name subdomain metadata")
+    .lean();
+
+  const pageIdToCompany = new Map();
+  const ambiguousPageIds = new Set();
+
+  companies.forEach((company) => {
+    const companyId = toNormalizedText(company?._id);
+    if (!companyId) return;
+
+    const pageIds = [...resolveAllowedMetaPageIds(company, { includeEnv: false })];
+    if (!pageIds.length) return;
+
+    const companyRoute = {
+      companyId,
+      companyName: toNormalizedText(company?.name),
+      tenantSlug: toNormalizedText(company?.subdomain),
+      accessToken: resolveMetaAccessToken(company, { includeEnv: false }),
+    };
+
+    pageIds.forEach((pageId) => {
+      if (!pageId) return;
+      if (ambiguousPageIds.has(pageId)) return;
+
+      const existing = pageIdToCompany.get(pageId);
+      if (existing && existing.companyId !== companyRoute.companyId) {
+        pageIdToCompany.delete(pageId);
+        ambiguousPageIds.add(pageId);
+        return;
+      }
+
+      pageIdToCompany.set(pageId, companyRoute);
+    });
+  });
+
+  return {
+    pageIdToCompany,
+    ambiguousPageIds,
+  };
+};
+
+const routeLeadEventsByCompany = async ({ leadEvents = [], tenant = null } = {}) => {
+  const groups = new Map();
+  let filteredOutCount = 0;
+  let unmatchedPageCount = 0;
+  let ambiguousPageCount = 0;
+  let noAccessTokenCount = 0;
+
+  const tenantCompanyId = toNormalizedText(tenant?._id);
+  if (tenantCompanyId) {
+    const allowedPageIds = resolveAllowedMetaPageIds(tenant, { includeEnv: false });
+    const scopedLeadEvents = allowedPageIds.size
+      ? leadEvents.filter((event) => allowedPageIds.has(event.pageId))
+      : leadEvents;
+    filteredOutCount = Math.max(0, leadEvents.length - scopedLeadEvents.length);
+
+    const accessToken = resolveMetaAccessToken(tenant, { includeEnv: false });
+    if (!accessToken) {
+      noAccessTokenCount += scopedLeadEvents.length;
+    } else if (scopedLeadEvents.length) {
+      groups.set(tenantCompanyId, {
+        companyId: tenantCompanyId,
+        companyName: toNormalizedText(tenant?.name),
+        tenantSlug: toNormalizedText(tenant?.subdomain),
+        accessToken,
+        events: scopedLeadEvents,
+      });
+    }
+
+    return {
+      groups,
+      filteredOutCount,
+      unmatchedPageCount,
+      ambiguousPageCount,
+      noAccessTokenCount,
+    };
+  }
+
+  const { pageIdToCompany, ambiguousPageIds } = await buildCompanyPageRouteMap();
+
+  leadEvents.forEach((event) => {
+    const pageId = toNormalizedText(event?.pageId);
+    if (!pageId) {
+      unmatchedPageCount += 1;
+      return;
+    }
+
+    if (ambiguousPageIds.has(pageId)) {
+      ambiguousPageCount += 1;
+      return;
+    }
+
+    const companyRoute = pageIdToCompany.get(pageId);
+    if (!companyRoute) {
+      unmatchedPageCount += 1;
+      return;
+    }
+
+    if (!companyRoute.accessToken) {
+      noAccessTokenCount += 1;
+      return;
+    }
+
+    const key = companyRoute.companyId;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        companyId: companyRoute.companyId,
+        companyName: companyRoute.companyName,
+        tenantSlug: companyRoute.tenantSlug,
+        accessToken: companyRoute.accessToken,
+        events: [],
+      });
+    }
+
+    groups.get(key).events.push(event);
+  });
+
+  return {
+    groups,
+    filteredOutCount,
+    unmatchedPageCount,
+    ambiguousPageCount,
+    noAccessTokenCount,
+  };
 };
 
 const normalizeFieldData = (rows = []) => {
@@ -187,45 +320,31 @@ exports.verifyWebhook = (req, res) => {
 
 exports.handleWebhook = async (req, res) => {
   try {
-    const tenantCompanyId = String(req.tenant?._id || "").trim();
-    if (!tenantCompanyId) {
-      return res.status(400).json({
-        message: "Tenant context is required for webhook processing",
-      });
-    }
-
-    const accessToken = resolveMetaAccessToken(req.tenant);
-    if (!accessToken) {
-      logger.error({
-        companyId: tenantCompanyId,
-        message: "META access token is missing for webhook processing",
-      });
-      return res.status(500).json({ message: "Server not configured for meta leads" });
-    }
-
     const leadEvents = extractLeadEvents(req.body);
     if (!leadEvents.length) {
       return res.status(200).json({ message: "No leadgen event found" });
     }
 
-    const allowedPageIds = resolveAllowedMetaPageIds(req.tenant);
-    const scopedLeadEvents = allowedPageIds.size
-      ? leadEvents.filter((event) => allowedPageIds.has(event.pageId))
-      : leadEvents;
-    const filteredOutCount = Math.max(0, leadEvents.length - scopedLeadEvents.length);
+    const routed = await routeLeadEventsByCompany({
+      leadEvents,
+      tenant: req.tenant || null,
+    });
 
-    if (!scopedLeadEvents.length) {
-      logger.info({
-        companyId: tenantCompanyId,
-        receivedEvents: leadEvents.length,
-        allowedPageIds: [...allowedPageIds],
-        message: "No leadgen events matched tenant page scope",
-      });
+    if (!routed.groups.size) {
       return res.status(200).json({
-        message: "No leadgen event matched tenant page scope",
-        processed: 0,
+        message: "No leadgen event mapped to configured company Meta pages",
         received: leadEvents.length,
-        filteredOut: filteredOutCount,
+        processed: 0,
+        routedCompanies: 0,
+        filteredOut: routed.filteredOutCount,
+        unmatchedPage: routed.unmatchedPageCount,
+        ambiguousPage: routed.ambiguousPageCount,
+        noAccessToken: routed.noAccessTokenCount,
+        created: 0,
+        duplicate: 0,
+        invalid: 0,
+        failed: 0,
+        assignmentRecovered: 0,
       });
     }
 
@@ -234,127 +353,141 @@ exports.handleWebhook = async (req, res) => {
     let invalidCount = 0;
     let failedCount = 0;
     let recoveredAssignments = 0;
-    const processedLeadIds = new Set();
+    const processedLeadKeys = new Set();
 
-    for (const event of scopedLeadEvents) {
-      if (processedLeadIds.has(event.leadId)) continue;
-      processedLeadIds.add(event.leadId);
+    for (const group of routed.groups.values()) {
+      const tenantCompanyId = group.companyId;
+      const accessToken = group.accessToken;
+      const scopedLeadEvents = Array.isArray(group.events) ? group.events : [];
+      const assignmentRequester = { companyId: tenantCompanyId };
 
-      try {
-        const response = await axios.get(
-          `https://graph.facebook.com/${META_GRAPH_VERSION}/${event.leadId}`,
-          {
-            params: {
-              access_token: accessToken,
+      for (const event of scopedLeadEvents) {
+        const processKey = `${tenantCompanyId}:${event.leadId}`;
+        if (processedLeadKeys.has(processKey)) continue;
+        processedLeadKeys.add(processKey);
+
+        try {
+          const response = await axios.get(
+            `https://graph.facebook.com/${META_GRAPH_VERSION}/${event.leadId}`,
+            {
+              params: {
+                access_token: accessToken,
+              },
+              timeout: META_GRAPH_TIMEOUT_MS,
             },
-            timeout: META_GRAPH_TIMEOUT_MS,
-          },
-        );
-
-        const leadData = response.data || {};
-        const normalized = normalizeFieldData(leadData.field_data || []);
-        const phone = String(normalized.phone || "").trim();
-
-        if (!phone) {
-          invalidCount += 1;
-          logger.info({
-            leadId: event.leadId,
-            message: "Meta lead skipped due to missing phone",
-          });
-          continue;
-        }
-
-        const assignmentRequester = { companyId: tenantCompanyId };
-
-        const existingByMetaLeadId = await Lead.findOne({
-          metaLeadId: event.leadId,
-          companyId: tenantCompanyId,
-        });
-        if (existingByMetaLeadId) {
-          const recovered = await ensureLeadAssignmentIfMissing(
-            existingByMetaLeadId,
-            event,
-            assignmentRequester,
           );
-          if (recovered?.assigned) recoveredAssignments += 1;
-          duplicateCount += 1;
-          logger.info({
-            leadId: existingByMetaLeadId._id,
+
+          const leadData = response.data || {};
+          const normalized = normalizeFieldData(leadData.field_data || []);
+          const phone = String(normalized.phone || "").trim();
+
+          if (!phone) {
+            invalidCount += 1;
+            logger.info({
+              companyId: tenantCompanyId,
+              pageId: event.pageId,
+              leadId: event.leadId,
+              message: "Meta lead skipped due to missing phone",
+            });
+            continue;
+          }
+
+          const existingByMetaLeadId = await Lead.findOne({
             metaLeadId: event.leadId,
+            companyId: tenantCompanyId,
+          });
+          if (existingByMetaLeadId) {
+            const recovered = await ensureLeadAssignmentIfMissing(
+              existingByMetaLeadId,
+              event,
+              assignmentRequester,
+            );
+            if (recovered?.assigned) recoveredAssignments += 1;
+            duplicateCount += 1;
+            logger.info({
+              companyId: tenantCompanyId,
+              leadId: existingByMetaLeadId._id,
+              metaLeadId: event.leadId,
+              phone,
+              message: "Duplicate meta lead skipped by metaLeadId",
+            });
+            continue;
+          }
+
+          const existingByPhone = await Lead.findOne({ phone, companyId: tenantCompanyId });
+          if (existingByPhone) {
+            duplicateCount += 1;
+            logger.info({
+              companyId: tenantCompanyId,
+              leadId: existingByPhone._id,
+              phone,
+              metaLeadId: event.leadId,
+              message: "Duplicate meta lead skipped by phone",
+            });
+            continue;
+          }
+
+          const lead = await Lead.create({
+            name: normalized.name || "Unknown",
             phone,
-            message: "Duplicate meta lead skipped by metaLeadId",
-          });
-          continue;
-        }
-
-        const existingByPhone = await Lead.findOne({ phone, companyId: tenantCompanyId });
-        if (existingByPhone) {
-          duplicateCount += 1;
-          logger.info({
-            leadId: existingByPhone._id,
-            phone,
+            email: normalized.email,
+            city: normalized.city,
+            projectInterested: normalized.projectInterested,
+            companyId: tenantCompanyId,
             metaLeadId: event.leadId,
-            message: "Duplicate meta lead skipped by phone",
+            metaPageId: event.pageId,
+            metaFormId: event.formId,
+            source: "META",
+            status: "NEW",
+            assignedTo: null,
+            createdBy: null,
           });
-          continue;
-        }
 
-        const lead = await Lead.create({
-          name: normalized.name || "Unknown",
-          phone,
-          email: normalized.email,
-          city: normalized.city,
-          projectInterested: normalized.projectInterested,
-          companyId: tenantCompanyId,
-          metaLeadId: event.leadId,
-          metaPageId: event.pageId,
-          metaFormId: event.formId,
-          source: "META",
-          status: "NEW",
-          assignedTo: null,
-          createdBy: null,
-        });
+          const assignment = await autoAssignLead({
+            lead,
+            requester: assignmentRequester,
+          });
+          createdCount += 1;
 
-        const assignment = await autoAssignLead({
-          lead,
-          requester: assignmentRequester,
-        });
-        createdCount += 1;
-
-        logger.info({
-          leadId: lead._id,
-          assigned: assignment.assigned,
-          mode: assignment.mode || null,
-          executiveId: assignment.executive?._id || null,
-          managerId: assignment.manager?._id || null,
-          message: "Meta lead processed",
-        });
-      } catch (leadError) {
-        if (isDuplicateMetaLeadError(leadError)) {
-          duplicateCount += 1;
           logger.info({
-            metaLeadId: event.leadId,
-            message: "Duplicate meta lead skipped due to unique metaLeadId",
+            companyId: tenantCompanyId,
+            leadId: lead._id,
+            assigned: assignment.assigned,
+            mode: assignment.mode || null,
+            executiveId: assignment.executive?._id || null,
+            managerId: assignment.manager?._id || null,
+            message: "Meta lead processed",
           });
-          continue;
-        }
+        } catch (leadError) {
+          if (isDuplicateMetaLeadError(leadError)) {
+            duplicateCount += 1;
+            logger.info({
+              companyId: tenantCompanyId,
+              metaLeadId: event.leadId,
+              message: "Duplicate meta lead skipped due to unique metaLeadId",
+            });
+            continue;
+          }
 
-        if (isInvalidMetaLeadError(leadError)) {
-          invalidCount += 1;
-          logger.warn({
+          if (isInvalidMetaLeadError(leadError)) {
+            invalidCount += 1;
+            logger.warn({
+              companyId: tenantCompanyId,
+              leadId: event.leadId,
+              error: leadError.response?.data || leadError.message,
+              message: "Meta lead skipped due to invalid lead ID in Graph API",
+            });
+            continue;
+          }
+
+          failedCount += 1;
+          logger.error({
+            companyId: tenantCompanyId,
             leadId: event.leadId,
             error: leadError.response?.data || leadError.message,
-            message: "Meta lead skipped due to invalid lead ID in Graph API",
+            message: "Failed to process meta lead",
           });
-          continue;
         }
-
-        failedCount += 1;
-        logger.error({
-          leadId: event.leadId,
-          error: leadError.response?.data || leadError.message,
-          message: "Failed to process meta lead",
-        });
       }
     }
 
@@ -363,8 +496,12 @@ exports.handleWebhook = async (req, res) => {
         ? "Meta lead webhook partially failed; returning 500 for retry"
         : "Meta lead webhook processed",
       received: leadEvents.length,
-      processed: processedLeadIds.size,
-      filteredOut: filteredOutCount,
+      processed: processedLeadKeys.size,
+      routedCompanies: routed.groups.size,
+      filteredOut: routed.filteredOutCount,
+      unmatchedPage: routed.unmatchedPageCount,
+      ambiguousPage: routed.ambiguousPageCount,
+      noAccessToken: routed.noAccessTokenCount,
       created: createdCount,
       duplicate: duplicateCount,
       invalid: invalidCount,

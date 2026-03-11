@@ -21,6 +21,17 @@ router.patch(
   authMiddleware.checkRole([USER_ROLES.ADMIN]),
   saasController.updateMyTenantSettings,
 );
+router.get(
+  "/tenant/meta",
+  authMiddleware.checkRole([USER_ROLES.ADMIN]),
+  saasController.getMyTenantMetaIntegration,
+);
+router.patch(
+  "/tenant/meta",
+  writeLimiter,
+  authMiddleware.checkRole([USER_ROLES.ADMIN]),
+  saasController.updateMyTenantMetaIntegration,
+);
 
 // Super admin platform controls
 router.get(
@@ -83,4 +94,3 @@ router.get(
 );
 
 module.exports = router;
-

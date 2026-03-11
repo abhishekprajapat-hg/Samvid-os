@@ -27,6 +27,7 @@ const TeamManager = lazy(() => import("./modules/admin/TeamManager"));
 const UserDetailsEditor = lazy(() => import("./modules/admin/UserDetailsEditor"));
 const AdminNotifications = lazy(() => import("./modules/admin/AdminNotifications"));
 const AdminCommandConsole = lazy(() => import("./modules/admin/AdminCommandConsole"));
+const AdminMetaAdsPanel = lazy(() => import("./modules/admin/AdminMetaAdsPanel"));
 const SuperAdminPanel = lazy(() => import("./modules/admin/SuperAdminPanel"));
 const TeamChat = lazy(() => import("./modules/chat/TeamChat"));
 
@@ -203,6 +204,14 @@ const resolvePageHeader = (pathname, userRole) => {
       title: "Console Command Center",
       subtitle: "Run commands to inspect platform data and jump across modules",
       scopeLabel: "Console",
+    };
+  }
+
+  if (pathname.startsWith("/admin/meta-ads")) {
+    return {
+      title: "Meta Ads Command Center",
+      subtitle: "Configure page integration and monitor lead subscription sync",
+      scopeLabel: "Meta Ads",
     };
   }
 
@@ -743,6 +752,10 @@ export default function App() {
                         <Route
                           path="/admin/console"
                           element={userRole === "ADMIN" ? <AdminCommandConsole /> : <Navigate to="/" />}
+                        />
+                        <Route
+                          path="/admin/meta-ads"
+                          element={userRole === "ADMIN" ? <AdminMetaAdsPanel theme={theme} /> : <Navigate to="/" />}
                         />
                         <Route
                           path="/settings"
