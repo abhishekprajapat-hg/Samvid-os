@@ -46,6 +46,7 @@ export const FieldDashboardScreen = () => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [companyPerformance, setCompanyPerformance] = useState<CompanyPerformanceOverview | null>(null);
   const [tasks, setTasks] = useState<FieldTask[]>(DEFAULT_TASKS);
+  const [showAllTasks, setShowAllTasks] = useState(false);
   const [activeBlock, setActiveBlock] = useState<"PENDING" | "COMPLETED" | "INVENTORY" | "NAVIGATION" | null>(null);
 
   useEffect(() => {
@@ -78,6 +79,10 @@ export const FieldDashboardScreen = () => {
   );
   const pendingTasks = useMemo(() => tasks.filter((task) => task.status !== "Done"), [tasks]);
   const completedTasks = useMemo(() => tasks.filter((task) => task.status === "Done"), [tasks]);
+  const visibleTasks = useMemo(
+    () => (showAllTasks ? tasks : tasks.slice(0, 5)),
+    [tasks, showAllTasks],
+  );
 
   const completeTask = (taskId: string) => {
     setTasks((prev) =>
@@ -99,7 +104,7 @@ export const FieldDashboardScreen = () => {
 
         <View style={styles.tasksCard}>
           <Text style={styles.sectionTitle}>Today Tasks</Text>
-          {tasks.map((task) => (
+          {visibleTasks.map((task) => (
             <View
               key={task.id}
               style={[
@@ -123,6 +128,14 @@ export const FieldDashboardScreen = () => {
               )}
             </View>
           ))}
+          {tasks.length > 5 ? (
+            <View style={styles.inlineActionRow}>
+              <View />
+              <Pressable onPress={() => setShowAllTasks((prev) => !prev)}>
+                <Text style={styles.linkTextCompact}>{showAllTasks ? "Show less" : "Show more"}</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.quickWrap}>
@@ -410,6 +423,17 @@ const styles = StyleSheet.create({
     color: "#334155",
     fontSize: 12,
     fontWeight: "700",
+  },
+  inlineActionRow: {
+    marginTop: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  linkTextCompact: {
+    color: "#2563eb",
+    fontSize: 12,
+    fontWeight: "600",
   },
 });
 

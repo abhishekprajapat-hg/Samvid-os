@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useNavigation } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Screen } from "../../components/common/Screen";
 import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
@@ -12,6 +13,8 @@ import type { InventoryAsset, Lead } from "../../types";
 const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
 const LOCATION_REFRESH_INTERVAL_MS = 30000;
 const LOCATION_STALE_MINUTES = 30;
+const INDIA_CENTER: [number, number] = [22.9734, 78.6569];
+const INDIA_BOUNDS: [[number, number], [number, number]] = [[6.4, 67.5], [37.6, 97.4]];
 
 type FieldExecutive = {
   _id?: string;
@@ -117,7 +120,7 @@ const buildMapHtml = ({
   const payload = JSON.stringify({ executives, properties, selectedExecutiveId, selectedPropertyId }).replace(/</g, "\\u003c");
   return `<!doctype html><html><head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=yes" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <style>
     html, body, #map { margin:0; padding:0; height:100%; width:100%; background:#f8fafc; }
@@ -129,7 +132,16 @@ const buildMapHtml = ({
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script>
     const input = ${payload};
-    const map = L.map("map", { zoomControl:true, attributionControl:false }).setView([22.9734,78.6569],5);
+    const indiaBounds = L.latLngBounds([${INDIA_BOUNDS[0][0]}, ${INDIA_BOUNDS[0][1]}], [${INDIA_BOUNDS[1][0]}, ${INDIA_BOUNDS[1][1]}]);
+    const map = L.map("map", {
+      zoomControl:true,
+      attributionControl:false,
+      maxBounds: indiaBounds,
+      maxBoundsViscosity: 1,
+      minZoom: 4,
+      maxZoom: 18,
+      zoomSnap: 0.5
+    }).setView([${INDIA_CENTER[0]},${INDIA_CENTER[1]}],5);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19 }).addTo(map);
     const bounds = [];
     const postNative = (payload) => {
@@ -158,6 +170,7 @@ const buildMapHtml = ({
       postNative({ type:"open-direction", lat: row.lat, lng: row.lng, id: row.id });
     };
     if (bounds.length) map.fitBounds(bounds, { padding:[24,24] });
+    map.panInsideBounds(indiaBounds, { animate: false });
   </script></body></html>`;
 };
 
@@ -184,6 +197,7 @@ const WebMapCanvas = ({ html, onMessage }: { html: string; onMessage: (event: an
 
 export const FieldOpsScreen = () => {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -530,7 +544,7 @@ export const FieldOpsScreen = () => {
 
       <Modal visible={propertyDetailVisible && Boolean(selectedProperty)} transparent animationType="slide" onRequestClose={() => setPropertyDetailVisible(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
+          <View style={[styles.modalCard, { paddingBottom: 12 + Math.max(insets.bottom, 10) }]}>
             {!selectedProperty ? null : (
               <>
                 <Text style={styles.section}>Property Details</Text>
@@ -538,7 +552,7 @@ export const FieldOpsScreen = () => {
                 <Text style={styles.meta}>{selectedProperty.location}</Text>
                 <Text style={styles.meta}>Status: {selectedProperty.status || "-"}</Text>
                 <Text style={styles.meta}>Coordinates: {selectedProperty.lat.toFixed(6)}, {selectedProperty.lng.toFixed(6)}</Text>
-                <View style={styles.actionRow}>
+                <View style={styles.modalActionRow}>
                   <Pressable style={styles.smallBtn} onPress={() => openMap(selectedProperty.lat, selectedProperty.lng)}>
                     <Text style={styles.smallBtnText}>Open Map</Text>
                   </Pressable>
@@ -551,7 +565,7 @@ export const FieldOpsScreen = () => {
                 </View>
               </>
             )}
-            <Pressable style={[styles.smallBtn, { marginTop: 10, alignSelf: "flex-end" }]} onPress={() => setPropertyDetailVisible(false)}>
+            <Pressable style={[styles.smallBtn, styles.modalCloseBtn]} onPress={() => setPropertyDetailVisible(false)}>
               <Text style={styles.smallBtnText}>Close</Text>
             </Pressable>
           </View>
@@ -560,7 +574,7 @@ export const FieldOpsScreen = () => {
 
       <Modal visible={activeLeadsVisible} transparent animationType="slide" onRequestClose={() => setActiveLeadsVisible(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCardLarge}>
+          <View style={[styles.modalCardLarge, { paddingBottom: 12 + Math.max(insets.bottom, 10) }]}>
             <View style={styles.modalHeaderRow}>
               <Text style={styles.section}>Active Leads</Text>
               <Text style={styles.sectionMeta}>{allActiveLeads.length} leads</Text>
@@ -587,7 +601,7 @@ export const FieldOpsScreen = () => {
                 </Pressable>
               ))}
             </ScrollView>
-            <Pressable style={[styles.smallBtn, { marginTop: 10, alignSelf: "flex-end" }]} onPress={() => setActiveLeadsVisible(false)}>
+            <Pressable style={[styles.smallBtn, styles.modalCloseBtn]} onPress={() => setActiveLeadsVisible(false)}>
               <Text style={styles.smallBtnText}>Close</Text>
             </Pressable>
           </View>
@@ -596,7 +610,7 @@ export const FieldOpsScreen = () => {
 
       <Modal visible={allPropertiesVisible} transparent animationType="slide" onRequestClose={() => setAllPropertiesVisible(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCardLarge}>
+          <View style={[styles.modalCardLarge, { paddingBottom: 12 + Math.max(insets.bottom, 10) }]}>
             <View style={styles.modalHeaderRow}>
               <Text style={styles.section}>All Properties</Text>
               <Text style={styles.sectionMeta}>{mapProperties.length} properties</Text>
@@ -620,7 +634,7 @@ export const FieldOpsScreen = () => {
                 </Pressable>
               ))}
             </ScrollView>
-            <Pressable style={[styles.smallBtn, { marginTop: 10, alignSelf: "flex-end" }]} onPress={() => setAllPropertiesVisible(false)}>
+            <Pressable style={[styles.smallBtn, styles.modalCloseBtn]} onPress={() => setAllPropertiesVisible(false)}>
               <Text style={styles.smallBtnText}>Close</Text>
             </Pressable>
           </View>
@@ -629,7 +643,7 @@ export const FieldOpsScreen = () => {
 
       <Modal visible={siteVisitsVisible} transparent animationType="slide" onRequestClose={() => setSiteVisitsVisible(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCardLarge}>
+          <View style={[styles.modalCardLarge, { paddingBottom: 12 + Math.max(insets.bottom, 10) }]}>
             <View style={styles.modalHeaderRow}>
               <Text style={styles.section}>Visited Sites</Text>
               <Text style={styles.sectionMeta}>{allSiteVisitLeads.length} visits</Text>
@@ -656,7 +670,7 @@ export const FieldOpsScreen = () => {
                 </Pressable>
               ))}
             </ScrollView>
-            <Pressable style={[styles.smallBtn, { marginTop: 10, alignSelf: "flex-end" }]} onPress={() => setSiteVisitsVisible(false)}>
+            <Pressable style={[styles.smallBtn, styles.modalCloseBtn]} onPress={() => setSiteVisitsVisible(false)}>
               <Text style={styles.smallBtnText}>Close</Text>
             </Pressable>
           </View>
@@ -695,11 +709,13 @@ const styles = StyleSheet.create({
   badgeClosed: { backgroundColor: "#dcfce7", color: "#166534" },
   badgeLost: { backgroundColor: "#ffe4e6", color: "#be123c" },
   actionRow: { marginTop: 8, flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  modalActionRow: { marginTop: 8, flexDirection: "row", gap: 8, flexWrap: "wrap" },
   smallBtn: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#fff" },
   smallBtnText: { color: "#334155", fontSize: 11, fontWeight: "700" },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "flex-end", padding: 12 },
   modalCard: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 14, backgroundColor: "#fff", padding: 12 },
   modalCardLarge: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 14, backgroundColor: "#fff", padding: 12, maxHeight: "84%" },
+  modalCloseBtn: { marginTop: 10, alignSelf: "flex-end" },
   modalHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   modalList: { maxHeight: 440 },
 });

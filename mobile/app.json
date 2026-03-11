@@ -31,14 +31,16 @@
         "MODIFY_AUDIO_SETTINGS",
         "INTERNET"
       ],
-      "edgeToEdgeEnabled": true,
+      "edgeToEdgeEnabled": false,
+      "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false,
       "package": "com.ashish_09.samvidos"
     },
     "plugins": [
       "@react-native-community/datetimepicker",
       "expo-font",
-      "expo-mail-composer"
+      "expo-mail-composer",
+      "expo-speech-recognition"
     ],
     "extra": {
       "eas": {

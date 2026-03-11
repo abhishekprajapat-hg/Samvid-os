@@ -50,6 +50,7 @@ export const ExecutiveDashboardScreen = () => {
   const [error, setError] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [companyPerformance, setCompanyPerformance] = useState<CompanyPerformanceOverview | null>(null);
+  const [showAllFollowUps, setShowAllFollowUps] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -97,9 +98,12 @@ export const ExecutiveDashboardScreen = () => {
     () =>
       leads
         .filter((lead) => lead.nextFollowUp && ACTIVE_STATUSES.has(String(lead.status || "")))
-        .sort((a, b) => new Date(a.nextFollowUp || "").getTime() - new Date(b.nextFollowUp || "").getTime())
-        .slice(0, 5),
+        .sort((a, b) => new Date(a.nextFollowUp || "").getTime() - new Date(b.nextFollowUp || "").getTime()),
     [leads],
+  );
+  const visibleFollowUps = useMemo(
+    () => (showAllFollowUps ? urgentFollowUps : urgentFollowUps.slice(0, 5)),
+    [urgentFollowUps, showAllFollowUps],
   );
 
   const openLeads = (params: Record<string, unknown>) => {
@@ -144,10 +148,10 @@ export const ExecutiveDashboardScreen = () => {
 
         <View style={styles.listCard}>
           <Text style={styles.listTitle}>Upcoming Follow-ups</Text>
-          {urgentFollowUps.length === 0 ? (
+          {visibleFollowUps.length === 0 ? (
             <Text style={styles.empty}>No scheduled follow-up right now</Text>
           ) : (
-            urgentFollowUps.map((lead) => (
+            visibleFollowUps.map((lead) => (
               <Pressable
                 key={lead._id}
                 style={styles.itemRow}
@@ -166,6 +170,14 @@ export const ExecutiveDashboardScreen = () => {
               </Pressable>
             ))
           )}
+          {urgentFollowUps.length > 5 ? (
+            <View style={styles.inlineActionRow}>
+              <View />
+              <Pressable onPress={() => setShowAllFollowUps((prev) => !prev)}>
+                <Text style={styles.linkTextCompact}>{showAllFollowUps ? "Show less" : "Show more"}</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
 
         <SharedPerformancePanel leads={leads} overview={companyPerformance} />
@@ -296,6 +308,17 @@ const styles = StyleSheet.create({
   },
   itemDate: {
     color: "#334155",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  inlineActionRow: {
+    marginTop: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  linkTextCompact: {
+    color: "#2563eb",
     fontSize: 12,
     fontWeight: "600",
   },

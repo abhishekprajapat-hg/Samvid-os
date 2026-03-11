@@ -92,6 +92,18 @@ export const requestInventoryStatusChange = async (
   return res.data?.request || null;
 };
 
+export const requestInventoryUpdate = async (
+  assetId: string,
+  proposedData: Record<string, unknown>,
+  requestNote = "",
+) => {
+  const res = await api.post(`/inventory-request/update/${assetId}`, {
+    proposedData,
+    requestNote: String(requestNote || "").trim(),
+  });
+  return res.data?.request || null;
+};
+
 export const getPendingInventoryRequests = async () => {
   const res = await api.get("/inventory-request/pending");
   return res.data?.requests || [];

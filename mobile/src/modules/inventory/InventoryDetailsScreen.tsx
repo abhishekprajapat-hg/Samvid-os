@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Image, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-import { useRoute } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import { addLeadDiaryEntry, getAllLeads } from "../../services/leadService";
 import { uploadChatFile } from "../../services/chatService";
-import { getInventoryAssetActivity, getInventoryAssetById, requestInventoryStatusChange, updateInventoryAsset } from "../../services/inventoryService";
+import { deleteInventoryAsset, getInventoryAssetActivity, getInventoryAssetById, requestInventoryStatusChange, updateInventoryAsset } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { useAuth } from "../../context/AuthContext";
@@ -92,6 +92,7 @@ const formatActionLabel = (activity: InventoryActivity) => {
 };
 
 export const InventoryDetailsScreen = () => {
+  const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const routeAsset = route.params?.asset || null;
   const derivedRouteAssetId = String(
@@ -103,8 +104,11 @@ export const InventoryDetailsScreen = () => {
   );
   const assetId = derivedRouteAssetId;
   const { role } = useAuth();
-  const canManage = role === "ADMIN";
-  const canRequestStatusChange = ["FIELD_EXECUTIVE", "EXECUTIVE", "TEAM_LEADER", "ASSISTANT_MANAGER", "MANAGER"].includes(String(role || ""));
+  const normalizedRole = String(role || "").toUpperCase();
+  const isAdmin = normalizedRole === "ADMIN";
+  const canManage = ["ADMIN", "MANAGER", "CHANNEL_PARTNER"].includes(normalizedRole);
+  const canRequestStatusChange = ["FIELD_EXECUTIVE", "EXECUTIVE", "TEAM_LEADER", "ASSISTANT_MANAGER"].includes(normalizedRole);
+  const canEditAsset = canManage || canRequestStatusChange;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -150,6 +154,9 @@ export const InventoryDetailsScreen = () => {
   } | null>(null);
   const [pickingStatusAttachment, setPickingStatusAttachment] = useState(false);
   const webDateInputRef = useRef<any>(null);
+  const viewerListRef = useRef<FlatList<string> | null>(null);
+  const { width: viewportWidth } = useWindowDimensions();
+  const viewerWidth = Math.max(220, viewportWidth - 32);
 
   const galleryImages = useMemo(
     () => (asset?.images?.length ? asset.images : asset ? buildDefaultImageSet(asset.title || asset._id) : []),
@@ -240,6 +247,26 @@ export const InventoryDetailsScreen = () => {
     }, 10);
     return () => clearTimeout(timer);
   }, [webDatePickerField]);
+
+  useEffect(() => {
+    if (!viewerOpen || !galleryImages.length) return;
+    const safeIndex = Math.min(viewerIndex, Math.max(galleryImages.length - 1, 0));
+    const timer = setTimeout(() => {
+      viewerListRef.current?.scrollToIndex({ index: safeIndex, animated: false });
+    }, 40);
+    return () => clearTimeout(timer);
+  }, [viewerOpen, galleryImages.length, viewerWidth]);
+
+  useEffect(() => {
+    if (!galleryImages.length && viewerOpen) {
+      setViewerOpen(false);
+      setViewerIndex(0);
+      return;
+    }
+    if (viewerIndex > Math.max(galleryImages.length - 1, 0)) {
+      setViewerIndex(Math.max(galleryImages.length - 1, 0));
+    }
+  }, [galleryImages.length, viewerIndex, viewerOpen]);
 
   const applyStatusUpdate = async (
     status: string,
@@ -567,6 +594,63 @@ export const InventoryDetailsScreen = () => {
     }
   };
 
+  const handleShareAsset = async () => {
+    if (!asset) return;
+    try {
+      await Share.share({
+        message: `Inventory: ${asset.title}\nLocation: ${asset.location || "-"}\nType: ${asset.type || "-"}\nPrice: Rs ${Number(asset.price || 0).toLocaleString("en-IN")}`,
+      });
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to share asset"));
+    }
+  };
+
+  const handleEditAsset = () => {
+    if (!asset || !canEditAsset) return;
+    navigation.navigate("MainTabs", {
+      screen: "Inventory",
+      params: {
+        editAssetId: asset._id,
+        editAsset: asset,
+        editAt: Date.now(),
+      },
+    });
+  };
+
+  const handleDeleteAsset = async () => {
+    if (!asset || !isAdmin) return;
+    const proceed = async () => {
+      try {
+        await deleteInventoryAsset(asset._id);
+        setSuccess("Asset deleted");
+        navigation.goBack();
+      } catch (e) {
+        setError(toErrorMessage(e, "Failed to delete asset"));
+      }
+    };
+
+    if (Platform.OS === "web") {
+      const confirmed = typeof window !== "undefined"
+        ? window.confirm("Delete this asset from inventory?")
+        : true;
+      if (confirmed) {
+        await proceed();
+      }
+      return;
+    }
+
+    Alert.alert("Confirm Delete", "Delete this asset from inventory?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "OK",
+        style: "destructive",
+        onPress: () => {
+          void proceed();
+        },
+      },
+    ]);
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -589,7 +673,24 @@ export const InventoryDetailsScreen = () => {
       {success ? <Text style={styles.success}>{success}</Text> : null}
 
       <View style={styles.card}>
-        <Text style={styles.name}>{asset.title}</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.name}>{asset.title}</Text>
+          <View style={styles.detailActions}>
+            {canEditAsset ? (
+              <Pressable style={styles.detailIconBtn} onPress={handleEditAsset}>
+                <Ionicons name="create-outline" size={15} color="#64748b" />
+              </Pressable>
+            ) : null}
+            <Pressable style={styles.detailIconBtn} onPress={() => void handleShareAsset()}>
+              <Ionicons name="share-social-outline" size={15} color="#0891b2" />
+            </Pressable>
+            {isAdmin ? (
+              <Pressable style={[styles.detailIconBtn, styles.detailIconDanger]} onPress={() => void handleDeleteAsset()}>
+                <Ionicons name="trash-outline" size={15} color="#ef4444" />
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
         <Text style={styles.meta}>Location: {asset.location || "-"}</Text>
         <Text style={styles.meta}>Category: {asset.category || "-"}</Text>
         <Text style={styles.meta}>Type: {asset.type || "-"}</Text>
@@ -630,7 +731,7 @@ export const InventoryDetailsScreen = () => {
                     setViewerOpen(true);
                   }}
                 >
-                  <Image source={{ uri: resolveFileUrl(photo) }} style={styles.photoThumb} />
+                  <Image source={{ uri: resolveFileUrl(photo) }} style={styles.photoThumb as any} />
                 </Pressable>
               ))}
             </ScrollView>
@@ -671,6 +772,7 @@ export const InventoryDetailsScreen = () => {
       <FlatList
         data={visibleActivities}
         keyExtractor={(item) => item._id}
+        contentContainerStyle={styles.timelineListContent}
         ListEmptyComponent={<Text style={styles.meta}>No activity yet</Text>}
         renderItem={({ item }) => (
           <View style={styles.activityCard}>
@@ -982,19 +1084,41 @@ export const InventoryDetailsScreen = () => {
             <Text style={styles.viewerCloseText}>Close</Text>
           </Pressable>
           {galleryImages.length ? (
-            <Image source={{ uri: resolveFileUrl(galleryImages[viewerIndex]) }} style={styles.viewerImage} resizeMode="contain" />
+            <View style={[styles.viewerFrame, { width: viewerWidth }]}>
+              <FlatList
+                ref={viewerListRef}
+                style={styles.viewerList}
+                data={galleryImages}
+                keyExtractor={(item, index) => `${item}-${index}`}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                getItemLayout={(_, index) => ({
+                  length: viewerWidth,
+                  offset: viewerWidth * index,
+                  index,
+                })}
+                onMomentumScrollEnd={(event) => {
+                  const offsetX = Number(event.nativeEvent.contentOffset.x || 0);
+                  const nextIndex = Math.round(offsetX / viewerWidth);
+                  setViewerIndex(Math.max(0, Math.min(nextIndex, galleryImages.length - 1)));
+                }}
+                onScrollToIndexFailed={(info) => {
+                  const fallback = Math.max(0, Math.min(info.index, galleryImages.length - 1));
+                  setTimeout(() => {
+                    viewerListRef.current?.scrollToIndex({ index: fallback, animated: false });
+                  }, 40);
+                }}
+                renderItem={({ item }) => (
+                  <View style={[styles.viewerSlide, { width: viewerWidth }]}>
+                    <Image source={{ uri: resolveFileUrl(item) }} style={styles.viewerImage as any} resizeMode="contain" />
+                  </View>
+                )}
+              />
+            </View>
           ) : null}
-
           {galleryImages.length > 1 ? (
-            <>
-              <Pressable style={[styles.viewerArrow, styles.viewerArrowLeft]} onPress={() => setViewerIndex((prev) => (prev <= 0 ? galleryImages.length - 1 : prev - 1))}>
-                <Text style={styles.viewerArrowText}>{"<"}</Text>
-              </Pressable>
-              <Pressable style={[styles.viewerArrow, styles.viewerArrowRight]} onPress={() => setViewerIndex((prev) => (prev + 1) % galleryImages.length)}>
-                <Text style={styles.viewerArrowText}>{">"}</Text>
-              </Pressable>
-              <Text style={styles.viewerCounter}>{viewerIndex + 1} / {galleryImages.length}</Text>
-            </>
+            <Text style={styles.viewerCounter}>{viewerIndex + 1} / {galleryImages.length}</Text>
           ) : null}
         </View>
       </Modal>
@@ -1044,7 +1168,31 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
-  name: { fontSize: 18, fontWeight: "700", color: "#0f172a" },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  name: { flex: 1, fontSize: 18, fontWeight: "700", color: "#0f172a" },
+  detailActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  detailIconBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "#ffffff",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  detailIconDanger: {
+    borderColor: "#fecaca",
+  },
   section: { marginBottom: 8, color: "#334155", fontWeight: "700" },
   meta: { marginTop: 4, fontSize: 12, color: "#64748b" },
   reasonMeta: { marginTop: 5, fontSize: 12, color: "#b45309", fontWeight: "600" },
@@ -1277,18 +1425,17 @@ const styles = StyleSheet.create({
   timelineToggleBtn: {
     marginTop: 6,
     marginBottom: 8,
-    alignSelf: "flex-start",
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    borderRadius: 8,
-    backgroundColor: "#eff6ff",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    alignSelf: "flex-end",
+    paddingHorizontal: 2,
+    paddingVertical: 2,
   },
   timelineToggleText: {
     color: "#1d4ed8",
     fontSize: 12,
     fontWeight: "700",
+  },
+  timelineListContent: {
+    paddingBottom: 92,
   },
   viewerOverlay: {
     flex: 1,
@@ -1318,32 +1465,18 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "82%",
   },
-  viewerArrow: {
-    position: "absolute",
-    top: "50%",
-    marginTop: -36,
-    width: 34,
-    height: 72,
-    justifyContent: "center",
+  viewerFrame: {
+    height: "82%",
+    minHeight: 280,
+    maxHeight: 620,
+  },
+  viewerList: {
+    flex: 1,
+  },
+  viewerSlide: {
     alignItems: "center",
-  },
-  viewerArrowLeft: {
-    left: 6,
-  },
-  viewerArrowRight: {
-    right: 6,
-  },
-  viewerArrowText: {
-    color: "#ffffff",
-    fontSize: 34,
-    fontWeight: "700",
-    ...(Platform.OS === "web"
-      ? { textShadow: "0px 0px 8px rgba(15, 23, 42, 0.9)" }
-      : {
-        textShadowColor: "rgba(15, 23, 42, 0.9)",
-        textShadowRadius: 8,
-        textShadowOffset: { width: 0, height: 0 },
-      }),
+    justifyContent: "center",
+    height: "100%",
   },
   viewerCounter: {
     position: "absolute",
@@ -1369,9 +1502,11 @@ const styles = StyleSheet.create({
     marginTop: 10,
     width: "100%",
     minHeight: 40,
-    border: "1px solid #cbd5e1",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
     borderRadius: 9,
-    padding: "8px 10px",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     fontSize: 14,
     color: "#0f172a",
     backgroundColor: "#fff",

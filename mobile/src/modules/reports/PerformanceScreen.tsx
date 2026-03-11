@@ -3,7 +3,7 @@ import { Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Tex
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import Svg, { Circle, Line, Polyline, Rect, Text as SvgText } from "react-native-svg";
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from "react-native-svg";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
@@ -97,34 +97,107 @@ const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number;
   const w = 330;
   const h = 200;
   const p = 18;
-  const maxY = Math.max(1, ...rows.map((row) => Math.max(row.created, row.closed, row.open)));
-  const line = (selector: (row: (typeof rows)[number]) => number) =>
-    rows
-      .map((row, idx) => {
-        const x = p + (idx / Math.max(rows.length - 1, 1)) * (w - p * 2);
-        const y = h - p - (selector(row) / maxY) * (h - p * 2);
-        return `${x},${y}`;
-      })
-      .join(" ");
+  const preparedRows = useMemo(() => {
+    if (!Array.isArray(rows) || rows.length === 0) return [{ label: "-", created: 0, closed: 0, open: 0 }];
+    const firstActiveIdx = rows.findIndex((row) => Math.max(row.created, row.closed, row.open) > 0);
+    if (firstActiveIdx <= 0) return rows;
+    const start = Math.max(0, firstActiveIdx - 1);
+    const trimmed = rows.slice(start);
+    if (trimmed.length >= 4) return trimmed;
+    const needed = 4 - trimmed.length;
+    const prefix = rows.slice(Math.max(0, start - needed), start);
+    return [...prefix, ...trimmed];
+  }, [rows]);
+  const rawMax = Math.max(1, ...preparedRows.map((row) => Math.max(row.created, row.closed, row.open)));
+  const maxY = rawMax <= 5 ? rawMax + 1 : Math.ceil(rawMax * 1.15);
+  const yRange = Math.max(1, maxY);
+  const step = (w - p * 2) / Math.max(preparedRows.length - 1, 1);
+  const toPoints = (selector: (row: (typeof rows)[number]) => number) =>
+    preparedRows.map((row, idx) => ({
+      x: p + idx * step,
+      y: h - p - (selector(row) / yRange) * (h - p * 2),
+    }));
+  const toSmoothPath = (points: Array<{ x: number; y: number }>) => {
+    if (points.length <= 1) {
+      const first = points[0] || { x: p, y: h - p };
+      return `M ${first.x} ${first.y}`;
+    }
+    let path = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const p0 = points[i - 1] || points[i];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[i + 2] || p2;
+      const cp1x = p1.x + (p2.x - p0.x) / 6;
+      const cp1y = p1.y + (p2.y - p0.y) / 6;
+      const cp2x = p2.x - (p3.x - p1.x) / 6;
+      const cp2y = p2.y - (p3.y - p1.y) / 6;
+      path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
+    }
+    return path;
+  };
+  const createdPoints = toPoints((r) => r.created);
+  const closedPoints = toPoints((r) => r.closed);
+  const openPoints = toPoints((r) => r.open);
+  const createdPath = toSmoothPath(createdPoints);
+  const closedPath = toSmoothPath(closedPoints);
+  const openPath = toSmoothPath(openPoints);
+  const latestActiveIdx = preparedRows.reduce((acc, row, idx) => (Math.max(row.created, row.closed, row.open) > 0 ? idx : acc), -1);
+  const latestBandX = latestActiveIdx >= 0 ? p + latestActiveIdx * step - step / 2 : -1;
+  const latestBandW = Math.max(16, step);
+  const barWidth = Math.min(18, Math.max(8, step * 0.34));
 
   return (
     <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
+      <Defs>
+        <LinearGradient id="createdBarGrad" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#38bdf8" stopOpacity="0.55" />
+          <Stop offset="1" stopColor="#38bdf8" stopOpacity="0.12" />
+        </LinearGradient>
+        <LinearGradient id="closedAreaGrad" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor="#10b981" stopOpacity="0.35" />
+          <Stop offset="1" stopColor="#10b981" stopOpacity="0.05" />
+        </LinearGradient>
+      </Defs>
       <Rect x={0} y={0} width={w} height={h} fill="#fff" rx={10} />
-      {[0, 1, 2, 3].map((idx) => {
-        const y = p + (idx / 3) * (h - p * 2);
+      {[0, 1, 2, 3, 4].map((idx) => {
+        const y = p + (idx / 4) * (h - p * 2);
         return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />;
       })}
-      {rows.map((row, idx) => {
-        const x = p + (idx / Math.max(rows.length - 1, 1)) * (w - p * 2);
+      {latestActiveIdx >= 0 ? (
+        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill="#22d3ee" opacity={0.09} rx={8} />
+      ) : null}
+      {preparedRows.map((row, idx) => {
+        const x = p + idx * step;
         const barBaseY = h - p;
-        const barHeight = (row.created / maxY) * (h - p * 2);
-        return <Rect key={`${row.label}-bar`} x={x - 4} y={barBaseY - barHeight} width={8} height={barHeight} fill="#bae6fd" opacity={0.45} rx={4} />;
+        const barHeight = (row.created / yRange) * (h - p * 2);
+        return <Rect key={`${row.label}-bar`} x={x - barWidth / 2} y={barBaseY - barHeight} width={barWidth} height={barHeight} fill="url(#createdBarGrad)" rx={5} />;
       })}
-      <Polyline fill="none" stroke="#0284c7" strokeWidth={2.4} points={line((r) => r.created)} />
-      <Polyline fill="none" stroke="#16a34a" strokeWidth={2.4} points={line((r) => r.closed)} />
-      <Polyline fill="none" stroke="#1d4ed8" strokeWidth={2.4} points={line((r) => r.open)} />
-      {rows.map((row, idx) => {
-        const x = p + (idx / Math.max(rows.length - 1, 1)) * (w - p * 2);
+      {closedPoints.length > 1 ? (
+        <Path
+          d={`${closedPath} L ${closedPoints[closedPoints.length - 1].x} ${h - p} L ${closedPoints[0].x} ${h - p} Z`}
+          fill="url(#closedAreaGrad)"
+        />
+      ) : null}
+      <Path d={createdPath} fill="none" stroke="#0284c7" strokeWidth={2.6} />
+      <Path d={closedPath} fill="none" stroke="#10b981" strokeWidth={3} />
+      <Path d={openPath} fill="none" stroke="#1d4ed8" strokeWidth={2.2} strokeDasharray="4 3" />
+      {createdPoints.map((point, idx) => (
+        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill="#0284c7" />
+      ))}
+      {closedPoints.map((point, idx) => (
+        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill="#10b981" />
+      ))}
+      {openPoints.map((point, idx) => (
+        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill="#1d4ed8" />
+      ))}
+      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill="#0284c7">Created</SvgText>
+      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill="#10b981">Closed</SvgText>
+      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill="#1d4ed8">Open</SvgText>
+      {preparedRows.map((row, idx) => {
+        const x = p + idx * step;
+        const showLabel = preparedRows.length <= 6 || idx === 0 || idx === preparedRows.length - 1 || idx % 2 === 0;
+        if (!showLabel) return null;
         return (
           <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill="#64748b">
             {row.label}

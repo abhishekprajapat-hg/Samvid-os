@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "../context/AuthContext";
 import { RealtimeAlertsProvider } from "../context/RealtimeAlertsContext";
 import { AuthStack } from "./AuthStack";
 import { RoleTabs } from "./RoleTabs";
+import { navigationRef } from "./navigationRef";
 
 const AppShell = () => {
   const { loading, isLoggedIn, role } = useAuth();
@@ -27,7 +28,7 @@ const AppShell = () => {
 export const RootNavigator = () => (
   <AuthProvider>
     <RealtimeAlertsProvider>
-      <NavigationContainer>
+      <NavigationContainer ref={navigationRef}>
         <AppShell />
       </NavigationContainer>
     </RealtimeAlertsProvider>

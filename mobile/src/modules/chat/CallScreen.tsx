@@ -8,12 +8,14 @@ import {
   Text,
   View,
 } from "react-native";
+import { Audio } from "expo-av";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { createChatSocket } from "../../services/chatSocket";
 import { updateCallLog } from "../../services/chatService";
 import { useAuth } from "../../context/AuthContext";
+import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
 import { toErrorMessage } from "../../utils/errorMessage";
 
 let webrtcModule: any = null;
@@ -95,6 +97,7 @@ export const CallScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { token } = useAuth();
+  const { dismissCallPopups } = useRealtimeAlerts();
 
   const params = route.params || {};
   const callId = String(params.callId || "");
@@ -112,6 +115,8 @@ export const CallScreen = () => {
   const [cameraMuted, setCameraMuted] = useState(callType === "VOICE");
   const [localStream, setLocalStream] = useState<any>(null);
   const [remoteStream, setRemoteStream] = useState<any>(null);
+  const [speakerOn, setSpeakerOn] = useState(callType === "VIDEO");
+  const [cameraFacing, setCameraFacing] = useState<"user" | "environment">("user");
 
   const hasWebRtc = Boolean(
     RTCIceCandidateCtor &&
@@ -141,6 +146,26 @@ export const CallScreen = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, [connected]);
+
+  useEffect(() => {
+    dismissCallPopups();
+  }, [dismissCallPopups]);
+
+  useEffect(() => {
+    const configureAudioRoute = async () => {
+      try {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: !speakerOn,
+        });
+      } catch {
+        // ignore device-level audio mode failures
+      }
+    };
+    void configureAudioRoute();
+  }, [speakerOn]);
 
   const emitSignal = (signalType: string, signal: any) => {
     if (!socketRef.current || !peerId) return;
@@ -486,6 +511,20 @@ export const CallScreen = () => {
     setCameraMuted(next);
   };
 
+  const switchCamera = () => {
+    if (!localStream || callType !== "VIDEO") return;
+    const track = localStream.getVideoTracks?.()[0];
+    const switchFn = (track as any)?._switchCamera;
+    if (typeof switchFn === "function") {
+      switchFn.call(track);
+      setCameraFacing((prev) => (prev === "user" ? "environment" : "user"));
+    }
+  };
+
+  const toggleSpeaker = () => {
+    setSpeakerOn((prev) => !prev);
+  };
+
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
@@ -503,6 +542,13 @@ export const CallScreen = () => {
             style={styles.remoteVideo}
             objectFit="cover"
           />
+        ) : callType === "VIDEO" && localStream && !cameraMuted ? (
+          <RTCViewNative
+            streamURL={localStream.toURL()}
+            style={styles.remoteVideo}
+            objectFit="cover"
+            mirror={cameraFacing === "user"}
+          />
         ) : (
           <View style={styles.placeholder}>
             {loading ? <ActivityIndicator color="#ffffff" /> : null}
@@ -511,12 +557,12 @@ export const CallScreen = () => {
           </View>
         )}
 
-        {callType === "VIDEO" && localStream ? (
+        {callType === "VIDEO" && localStream && remoteStream ? (
           <RTCViewNative
             streamURL={localStream.toURL()}
             style={styles.localVideo}
             objectFit="cover"
-            mirror
+            mirror={cameraFacing === "user"}
           />
         ) : null}
       </View>
@@ -528,11 +574,22 @@ export const CallScreen = () => {
         </Pressable>
 
         {callType === "VIDEO" ? (
-          <Pressable style={styles.actionBtn} onPress={toggleCamera}>
-            <Ionicons name={cameraMuted ? "videocam-off" : "videocam"} size={20} color="#0f172a" />
-            <Text style={styles.actionText}>{cameraMuted ? "Camera On" : "Camera Off"}</Text>
+          <>
+            <Pressable style={styles.actionBtn} onPress={toggleCamera}>
+              <Ionicons name={cameraMuted ? "videocam-off" : "videocam"} size={20} color="#0f172a" />
+              <Text style={styles.actionText}>{cameraMuted ? "Camera On" : "Camera Off"}</Text>
+            </Pressable>
+            <Pressable style={styles.actionBtn} onPress={switchCamera}>
+              <Ionicons name="camera-reverse-outline" size={20} color="#0f172a" />
+              <Text style={styles.actionText}>Switch</Text>
+            </Pressable>
+          </>
+        ) : (
+          <Pressable style={[styles.actionBtn, speakerOn && styles.actionBtnActive]} onPress={toggleSpeaker}>
+            <Ionicons name={speakerOn ? "volume-high" : "volume-medium"} size={20} color={speakerOn ? "#ffffff" : "#0f172a"} />
+            <Text style={[styles.actionText, speakerOn && styles.actionTextActive]}>{speakerOn ? "Speaker On" : "Speaker Off"}</Text>
           </Pressable>
-        ) : null}
+        )}
 
         <Pressable style={[styles.actionBtn, styles.endBtn]} onPress={() => endCall("ENDED")}>
           <Ionicons name="call" size={20} color="#ffffff" />
@@ -566,11 +623,14 @@ const styles = StyleSheet.create({
   localVideo: {
     position: "absolute",
     right: 10,
-    bottom: 10,
-    width: 110,
-    height: 160,
+    top: 10,
+    width: 104,
+    height: 148,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.45)",
     backgroundColor: "#111827",
+    zIndex: 5,
   },
   placeholder: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
   placeholderText: { color: "#94a3b8", fontSize: 12 },
@@ -595,6 +655,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   actionText: { color: "#0f172a", fontSize: 12, fontWeight: "700" },
+  actionBtnActive: {
+    backgroundColor: "#0f172a",
+    borderColor: "#0f172a",
+  },
+  actionTextActive: {
+    color: "#ffffff",
+  },
   endBtn: { backgroundColor: "#ef4444", borderColor: "#ef4444" },
   endText: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
 });

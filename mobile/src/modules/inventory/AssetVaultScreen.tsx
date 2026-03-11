@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
   Modal,
+  Share,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -25,6 +26,7 @@ import {
   createInventoryAsset,
   deleteInventoryAsset,
   getInventoryAssets,
+  requestInventoryUpdate,
   requestInventoryStatusChange,
   updateInventoryAsset,
 } from "../../services/inventoryService";
@@ -45,6 +47,7 @@ const SOLD_PAYMENT_MODE_LABEL: Record<string, string> = {
 };
 const SOLD_TRANSFER_TYPES = ["NEFT", "RTGS", "IMPS"];
 type SoldDateField = "remainingDueDate" | "paymentDate" | "chequeDate";
+const INPUT_PLACEHOLDER = "#94a3b8";
 
 const formatDateOnly = (value: Date) =>
   `${String(value.getDate()).padStart(2, "0")}-${String(value.getMonth() + 1).padStart(2, "0")}-${value.getFullYear()}`;
@@ -119,12 +122,22 @@ const toObjectIdString = (value: unknown) => {
 
 const pickUriString = (value: unknown) => String(value || "").trim();
 
+const normalizeAssetType = (value: unknown): "sale" | "rent" => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["rent", "rental", "rentals", "for rent", "lease"].includes(normalized)) return "rent";
+  return "sale";
+};
+
 export const AssetVaultScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const { role } = useAuth();
-  const canManage = role === "ADMIN";
-  const canRequestStatusChange = ["FIELD_EXECUTIVE", "EXECUTIVE", "TEAM_LEADER", "ASSISTANT_MANAGER", "MANAGER"].includes(String(role || ""));
+  const normalizedRole = String(role || "").toUpperCase();
+  const isAdmin = normalizedRole === "ADMIN";
+  const canManage = ["ADMIN", "MANAGER", "CHANNEL_PARTNER"].includes(normalizedRole);
+  const canRequestStatusChange = ["FIELD_EXECUTIVE", "EXECUTIVE", "TEAM_LEADER", "ASSISTANT_MANAGER"].includes(normalizedRole);
+  const canDirectInventoryEdit = canManage;
+  const canEditInventory = canManage || canRequestStatusChange;
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -132,10 +145,12 @@ export const AssetVaultScreen = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [search, setSearch] = useState("");
+  const [modeType, setModeType] = useState<"sale" | "rent">("sale");
   const [assets, setAssets] = useState<InventoryAsset[]>([]);
   const [leadOptions, setLeadOptions] = useState<Array<{ _id: string; name: string; phone?: string }>>([]);
 
   const [formOpen, setFormOpen] = useState(false);
+  const [editingAssetId, setEditingAssetId] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [reasonModalOpen, setReasonModalOpen] = useState(false);
   const [leadDiaryDraft, setLeadDiaryDraft] = useState("");
@@ -180,6 +195,7 @@ export const AssetVaultScreen = () => {
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>([]);
   const [pickedImages, setPickedImages] = useState<UploadInput[]>([]);
   const [pickedFiles, setPickedFiles] = useState<UploadInput[]>([]);
+  const handledRouteEditTokenRef = useRef("");
 
   const load = useCallback(async (silent = false) => {
     try {
@@ -229,15 +245,40 @@ export const AssetVaultScreen = () => {
     }
   }, [route.params]);
 
+  useEffect(() => {
+    const editAssetId = String(route.params?.editAssetId || "").trim();
+    const editToken = `${editAssetId}-${String(route.params?.editAt || "")}`;
+    if (!editAssetId || editToken === handledRouteEditTokenRef.current) return;
+    const routeEditAsset = (route.params?.editAsset || null) as InventoryAsset | null;
+    const targetAsset = routeEditAsset && routeEditAsset._id === editAssetId
+      ? routeEditAsset
+      : assets.find((row) => row._id === editAssetId);
+    if (!targetAsset) return;
+
+    handledRouteEditTokenRef.current = editToken;
+    openEditModal(targetAsset);
+    navigation.setParams?.({
+      editAssetId: undefined,
+      editAsset: undefined,
+      editAt: undefined,
+    });
+  }, [assets, navigation, route.params]);
+
   const filtered = useMemo(() => {
     const key = search.trim().toLowerCase();
-    if (!key) return assets;
-    return assets.filter((asset) =>
-      [asset.title, asset.location, asset.category, asset.status, ...(asset.amenities || [])].some((v) =>
+    return assets.filter((asset) => {
+      const typeMatch = modeType === "sale"
+        ? normalizeAssetType(asset.type) === "sale"
+        : normalizeAssetType(asset.type) === "rent";
+
+      if (!typeMatch) return false;
+      if (!key) return true;
+
+      return [asset.title, asset.location, asset.category, asset.status, ...(asset.amenities || [])].some((v) =>
         String(v || "").toLowerCase().includes(key),
-      ),
-    );
-  }, [assets, search]);
+      );
+    });
+  }, [assets, modeType, search]);
   const selectedBlockedLeadLabel = useMemo(() => {
     const selected = leadOptions.find((row) => row._id === blockedLeadIdDraft);
     if (!selected) return "Select lead";
@@ -331,9 +372,15 @@ export const AssetVaultScreen = () => {
 
   const resetForm = () => {
     setForm(EMPTY_FORM);
+    setEditingAssetId("");
     setSelectedAmenities([]);
     setPickedImages([]);
     setPickedFiles([]);
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setFormOpen(true);
   };
 
   const resetPendingStatusChange = () => {
@@ -482,6 +529,132 @@ export const AssetVaultScreen = () => {
       setError(toErrorMessage(e, "Failed to create asset"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const openEditModal = (asset: InventoryAsset) => {
+    setEditingAssetId(asset._id);
+    setForm({
+      title: String(asset.title || ""),
+      location: String(asset.location || ""),
+      category: String(asset.category || "Apartment"),
+      type: String(asset.type || "Sale"),
+      status: String(asset.status || "Available"),
+      reservationReason: String(asset.reservationReason || ""),
+      price: String(Number(asset.price || 0) || ""),
+      description: String((asset as any)?.description || ""),
+      customAmenities: "",
+    });
+    setSelectedAmenities(Array.isArray(asset.amenities) ? asset.amenities : []);
+    setPickedImages([]);
+    setPickedFiles([]);
+    setFormOpen(true);
+  };
+
+  const updateAsset = async () => {
+    const assetId = String(editingAssetId || "").trim();
+    if (!assetId) return;
+
+    const existing = assets.find((row) => row._id === assetId);
+    if (!existing) {
+      setError("Asset not found");
+      return;
+    }
+
+    const title = form.title.trim();
+    const location = form.location.trim();
+    const price = Number(form.price);
+    const reservationReason = String(form.reservationReason || "").trim();
+
+    if (!title || !location || !Number.isFinite(price) || price <= 0) {
+      setError("Title, location and valid price are required");
+      return;
+    }
+
+    if (form.status === "Blocked" && !reservationReason) {
+      setError("Reservation reason is required when status is Reserved");
+      return;
+    }
+
+    try {
+      setSaving(true);
+
+      const [uploadedImages, uploadedFiles] = await Promise.all([
+        Promise.all(pickedImages.map((row) => uploadChatFile(row))),
+        Promise.all(pickedFiles.map((row) => uploadChatFile(row))),
+      ]);
+
+      const appendedImages = uploadedImages
+        .map((row) => resolveFileUrl(row?.fileUrl))
+        .filter(Boolean);
+
+      const appendedDocs = uploadedFiles
+        .map((row) => resolveFileUrl(row?.fileUrl))
+        .filter(Boolean);
+
+      const existingImages = Array.isArray(existing.images) ? existing.images : [];
+      const existingDocs = Array.isArray(existing.documents) ? existing.documents : [];
+
+      const customAmenities = form.customAmenities
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const amenities = [...new Set([...selectedAmenities, ...customAmenities])];
+
+      const images = [...new Set([...existingImages, ...appendedImages])];
+      const documents = [...new Set([...existingDocs, ...appendedDocs])];
+
+      const updatePayload = {
+        ...existing,
+        ...form,
+        title,
+        location,
+        price,
+        reservationReason: form.status === "Blocked" ? reservationReason : "",
+        description: form.description.trim(),
+        images: images.length ? images : buildDefaultImageSet(`${title}-${location}`),
+        documents,
+        amenities,
+      } as Record<string, unknown>;
+
+      if (canDirectInventoryEdit) {
+        const updated = await updateInventoryAsset(assetId, updatePayload as Partial<InventoryAsset>);
+        setAssets((prev) => prev.map((row) => (row._id === updated._id ? updated : row)));
+        setSuccess("Asset updated");
+      } else {
+        await requestInventoryUpdate(
+          assetId,
+          updatePayload,
+          `Inventory edit requested by ${String(role || "USER").replace(/_/g, " ")}`,
+        );
+        setSuccess("Edit request sent for admin approval");
+      }
+
+      setFormOpen(false);
+      resetForm();
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to update asset"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleShareAsset = async (asset: InventoryAsset) => {
+    try {
+      const message = [
+        asset.title || "Property",
+        `Location: ${asset.location || "-"}`,
+        `Type: ${asset.type || "-"}`,
+        `Status: ${asset.status || "-"}`,
+        `Price: Rs ${Number(asset.price || 0).toLocaleString("en-IN")}`,
+      ].join("\n");
+
+      await Share.share({
+        title: asset.title || "Inventory Property",
+        message,
+      });
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to share asset"));
     }
   };
 
@@ -721,19 +894,33 @@ export const AssetVaultScreen = () => {
   };
 
   const removeAsset = async (assetId: string) => {
-    Alert.alert("Delete asset", "Are you sure you want to delete this asset?", [
+    const proceed = async () => {
+      try {
+        await deleteInventoryAsset(assetId);
+        setAssets((prev) => prev.filter((asset) => asset._id !== assetId));
+        setSuccess("Asset deleted");
+      } catch (e) {
+        setError(toErrorMessage(e, "Failed to delete asset"));
+      }
+    };
+
+    if (Platform.OS === "web") {
+      const confirmed = typeof window !== "undefined"
+        ? window.confirm("Delete this asset from inventory?")
+        : true;
+      if (confirmed) {
+        await proceed();
+      }
+      return;
+    }
+
+    Alert.alert("Confirm Delete", "Delete this asset from inventory?", [
       { text: "Cancel", style: "cancel" },
       {
-        text: "Delete",
+        text: "OK",
         style: "destructive",
-        onPress: async () => {
-          try {
-            await deleteInventoryAsset(assetId);
-            setAssets((prev) => prev.filter((asset) => asset._id !== assetId));
-            setSuccess("Asset deleted");
-          } catch (e) {
-            setError(toErrorMessage(e, "Failed to delete asset"));
-          }
+        onPress: () => {
+          void proceed();
         },
       },
     ]);
@@ -746,15 +933,32 @@ export const AssetVaultScreen = () => {
       <TextInput
         style={styles.search}
         placeholder="Search title, location, status"
+        placeholderTextColor={INPUT_PLACEHOLDER}
         value={search}
         onChangeText={setSearch}
       />
 
-      {canManage ? (
-        <Pressable style={styles.primaryBtn} onPress={() => setFormOpen(true)}>
-          <Text style={styles.primaryText}>+ Add Asset</Text>
-        </Pressable>
-      ) : null}
+      <View style={styles.topRow}>
+        <View style={styles.modeToggle}>
+          <Pressable
+            style={[styles.modeBtn, modeType === "sale" && styles.modeBtnActive]}
+            onPress={() => setModeType("sale")}
+          >
+            <Text style={[styles.modeBtnText, modeType === "sale" && styles.modeBtnTextActive]}>For Sale</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.modeBtn, modeType === "rent" && styles.modeBtnActive]}
+            onPress={() => setModeType("rent")}
+          >
+            <Text style={[styles.modeBtnText, modeType === "rent" && styles.modeBtnTextActive]}>Rentals</Text>
+          </Pressable>
+        </View>
+        {canManage ? (
+          <Pressable style={styles.primaryBtn} onPress={openCreateModal}>
+            <Text style={styles.primaryText}>+ Add Asset</Text>
+          </Pressable>
+        ) : null}
+      </View>
 
       <FlatList
         data={filtered}
@@ -770,6 +974,43 @@ export const AssetVaultScreen = () => {
             <Pressable style={styles.card} onPress={() => navigation.navigate("InventoryDetails", { assetId: item._id, asset: item })}>
               {cover ? (
                 <View style={styles.cardImageWrap}>
+                  <View style={styles.imageOverlayTop}>
+                    {isAdmin ? (
+                      <Pressable
+                        style={[styles.imageIconBtn, styles.imageIconBtnDanger]}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          removeAsset(item._id);
+                        }}
+                      >
+                        <Ionicons name="trash-outline" size={14} color="#ef4444" />
+                      </Pressable>
+                    ) : (
+                      <View />
+                    )}
+                    <View style={styles.imageRightActions}>
+                      {canEditInventory ? (
+                        <Pressable
+                          style={styles.imageIconBtn}
+                          onPress={(event) => {
+                            event.stopPropagation();
+                            openEditModal(item);
+                          }}
+                        >
+                          <Ionicons name="create-outline" size={14} color="#64748b" />
+                        </Pressable>
+                      ) : null}
+                      <Pressable
+                        style={styles.imageIconBtn}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          void handleShareAsset(item);
+                        }}
+                      >
+                        <Ionicons name="share-social-outline" size={14} color="#0891b2" />
+                      </Pressable>
+                    </View>
+                  </View>
                   <Pressable
                     onPress={(event) => {
                       event.stopPropagation();
@@ -778,7 +1019,7 @@ export const AssetVaultScreen = () => {
                       setViewerOpen(true);
                     }}
                   >
-                    <Image source={{ uri: cover }} style={styles.cardImage} resizeMode="cover" />
+                    <Image source={{ uri: cover }} style={styles.cardImage as any} resizeMode="cover" />
                   </Pressable>
                   {displayImages.length > 1 ? (
                     <>
@@ -865,11 +1106,6 @@ export const AssetVaultScreen = () => {
                 <Text style={styles.openDetailsText}>Open Details</Text>
               </Pressable>
 
-              {canManage ? (
-                <Pressable style={styles.deleteBtn} onPress={() => removeAsset(item._id)}>
-                  <Text style={styles.deleteText}>Delete Asset</Text>
-                </Pressable>
-              ) : null}
             </Pressable>
           );
         }}
@@ -879,34 +1115,39 @@ export const AssetVaultScreen = () => {
         <View style={styles.modalWrap}>
           <View style={styles.modalCard}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent}>
-              <Text style={styles.modalTitle}>Add Asset</Text>
+              <Text style={styles.modalTitle}>{editingAssetId ? "Edit Asset" : "Add Asset"}</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Title"
+                placeholderTextColor={INPUT_PLACEHOLDER}
                 value={form.title}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, title: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Location"
+                placeholderTextColor={INPUT_PLACEHOLDER}
                 value={form.location}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, location: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Category"
+                placeholderTextColor={INPUT_PLACEHOLDER}
                 value={form.category}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, category: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Type (Sale/Rent)"
+                placeholderTextColor={INPUT_PLACEHOLDER}
                 value={form.type}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, type: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Price"
+                placeholderTextColor={INPUT_PLACEHOLDER}
                 value={form.price}
                 keyboardType="number-pad"
                 onChangeText={(value) => setForm((prev) => ({ ...prev, price: value }))}
@@ -914,6 +1155,7 @@ export const AssetVaultScreen = () => {
               <TextInput
                 style={[styles.input, { height: 80 }]}
                 placeholder="Description"
+                placeholderTextColor={INPUT_PLACEHOLDER}
                 multiline
                 value={form.description}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, description: value }))}
@@ -935,6 +1177,7 @@ export const AssetVaultScreen = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Custom amenities (comma separated)"
+                placeholderTextColor={INPUT_PLACEHOLDER}
                 value={form.customAmenities}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, customAmenities: value }))}
               />
@@ -942,7 +1185,7 @@ export const AssetVaultScreen = () => {
               <Text style={styles.sectionLabel}>Photos</Text>
               <View style={styles.uploadRow}>
                 <Pressable style={styles.ghostBtn} onPress={pickImages}>
-                  <Text>+ Upload Photos</Text>
+                  <Text style={styles.ghostBtnText}>+ Upload Photos</Text>
                 </Pressable>
                 <Text style={styles.uploadCount}>{pickedImages.length} selected</Text>
               </View>
@@ -962,7 +1205,7 @@ export const AssetVaultScreen = () => {
               <Text style={styles.sectionLabel}>Files</Text>
               <View style={styles.uploadRow}>
                 <Pressable style={styles.ghostBtn} onPress={pickFiles}>
-                  <Text>+ Upload Files</Text>
+                  <Text style={styles.ghostBtnText}>+ Upload Files</Text>
                 </Pressable>
                 <Text style={styles.uploadCount}>{pickedFiles.length} selected</Text>
               </View>
@@ -983,8 +1226,8 @@ export const AssetVaultScreen = () => {
                 <Pressable style={[styles.modalActionBtn, styles.modalActionGhost]} onPress={() => { setFormOpen(false); resetForm(); }} disabled={saving}>
                   <Text style={styles.modalActionGhostText}>Cancel</Text>
                 </Pressable>
-                <Pressable style={[styles.modalActionBtn, styles.modalActionPrimary]} onPress={createAsset} disabled={saving}>
-                  {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalActionPrimaryText}>Save</Text>}
+                <Pressable style={[styles.modalActionBtn, styles.modalActionPrimary]} onPress={editingAssetId ? updateAsset : createAsset} disabled={saving}>
+                  {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalActionPrimaryText}>{editingAssetId ? (canDirectInventoryEdit ? "Update" : "Send for Approval") : "Save"}</Text>}
                 </Pressable>
               </View>
             </ScrollView>
@@ -1290,7 +1533,7 @@ export const AssetVaultScreen = () => {
             <Text style={styles.viewerCloseText}>Close</Text>
           </Pressable>
           {viewerImages.length ? (
-            <Image source={{ uri: resolveFileUrl(viewerImages[viewerIndex]) }} style={styles.viewerImage} resizeMode="contain" />
+            <Image source={{ uri: resolveFileUrl(viewerImages[viewerIndex]) }} style={styles.viewerImage as any} resizeMode="contain" />
           ) : null}
           {viewerImages.length > 1 ? (
             <>
@@ -1364,6 +1607,39 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 44,
     marginBottom: 10,
+    color: "#0f172a",
+  },
+  topRow: {
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  modeToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#e2e8f0",
+    borderRadius: 999,
+    padding: 4,
+  },
+  modeBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  modeBtnActive: {
+    backgroundColor: "#ffffff",
+  },
+  modeBtnText: {
+    color: "#64748b",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  modeBtnTextActive: {
+    color: "#0f172a",
   },
   primaryBtn: {
     height: 40,
@@ -1396,6 +1672,35 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 10,
     overflow: "hidden",
+    position: "relative",
+  },
+  imageOverlayTop: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    right: 8,
+    zIndex: 2,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  imageRightActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  imageIconBtn: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    backgroundColor: "rgba(255,255,255,0.96)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  imageIconBtnDanger: {
+    borderColor: "#fecaca",
   },
   cardNavBtn: {
     position: "absolute",
@@ -1467,21 +1772,6 @@ const styles = StyleSheet.create({
   activeText: {
     color: "#fff",
   },
-  deleteBtn: {
-    marginTop: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 36,
-  },
-  deleteText: {
-    color: "#b91c1c",
-    fontWeight: "700",
-    fontSize: 12,
-  },
   empty: {
     textAlign: "center",
     color: "#64748b",
@@ -1526,6 +1816,7 @@ const styles = StyleSheet.create({
     height: 42,
     marginBottom: 10,
     backgroundColor: "#fff",
+    color: "#0f172a",
     textAlignVertical: "top",
   },
   reasonInput: {
@@ -1533,19 +1824,19 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   openDetailsBtn: {
-    marginTop: 10,
+    marginTop: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: "#bfdbfe",
     backgroundColor: "#eff6ff",
     alignItems: "center",
     justifyContent: "center",
-    height: 36,
+    height: 32,
   },
   openDetailsText: {
     color: "#1d4ed8",
     fontWeight: "700",
-    fontSize: 12,
+    fontSize: 11,
   },
   selectInput: {
     borderWidth: 1,
@@ -1690,7 +1981,7 @@ const styles = StyleSheet.create({
   photoCountBadge: {
     position: "absolute",
     right: 10,
-    top: 10,
+    bottom: 10,
     backgroundColor: "rgba(15, 23, 42, 0.82)",
     borderRadius: 999,
     paddingHorizontal: 10,
@@ -1735,6 +2026,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 8,
+  },
+  ghostBtn: {
+    minHeight: 34,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ghostBtnText: {
+    color: "#0f172a",
+    fontSize: 13,
+    fontWeight: "600",
   },
   uploadCount: {
     fontSize: 12,
@@ -1853,9 +2159,11 @@ const styles = StyleSheet.create({
     marginTop: 10,
     width: "100%",
     minHeight: 40,
-    border: "1px solid #cbd5e1",
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
     borderRadius: 9,
-    padding: "8px 10px",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     fontSize: 14,
     color: "#0f172a",
     backgroundColor: "#fff",

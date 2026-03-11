@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   FlatList,
   Modal,
   Platform,
@@ -16,7 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppChip } from "../../components/common/ui";
-import { getAllLeads } from "../../services/leadService";
+import { clearLeadFollowUp, getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
 
@@ -209,6 +210,7 @@ export const FinancialCoreScreen = () => {
   const [webCustomFromValue, setWebCustomFromValue] = useState("");
   const [webCustomToValue, setWebCustomToValue] = useState("");
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [clearingFollowUpId, setClearingFollowUpId] = useState("");
 
   const load = async (silent = false) => {
     try {
@@ -423,6 +425,35 @@ export const FinancialCoreScreen = () => {
     setCustomFromDate(parsedFrom);
     setCustomToDate(parsedTo);
     setWebCustomPickerVisible(false);
+  };
+
+  const clearFollowUpForLead = (lead: Lead) => {
+    if (!lead?._id) return;
+    Alert.alert(
+      "Delete follow-up",
+      `Delete follow-up for "${lead.name || "this lead"}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setClearingFollowUpId(String(lead._id));
+              const updated = await clearLeadFollowUp(String(lead._id), String(lead.status || "NEW"));
+              if (!updated || updated.nextFollowUp) {
+                throw new Error("Follow-up not cleared");
+              }
+              await load(true);
+            } catch (e) {
+              setError(toErrorMessage(e, "Failed to delete follow-up"));
+            } finally {
+              setClearingFollowUpId("");
+            }
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -642,9 +673,22 @@ export const FinancialCoreScreen = () => {
                     <Text style={styles.listTitle}>{item.name || "-"}</Text>
                     <Text style={styles.listMeta}>{item.projectInterested || "-"}</Text>
                   </View>
-                  <Text style={[styles.watchDate, item.isOverdue && styles.watchDateOverdue]}>
-                    {formatDateTime(item.nextFollowUp)}
-                  </Text>
+                  <View style={styles.watchRightCol}>
+                    <Text style={[styles.watchDate, item.isOverdue && styles.watchDateOverdue]}>
+                      {formatDateTime(item.nextFollowUp)}
+                    </Text>
+                    <Pressable
+                      style={styles.followupDeleteBtn}
+                      onPress={(event: any) => {
+                        event?.stopPropagation?.();
+                        clearFollowUpForLead(item);
+                      }}
+                      disabled={clearingFollowUpId === item._id}
+                    >
+                      <Ionicons name="trash-outline" size={13} color="#b91c1c" />
+                      <Text style={styles.followupDeleteText}>{clearingFollowUpId === item._id ? "..." : "Delete"}</Text>
+                    </Pressable>
+                  </View>
                 </Pressable>
               )}
             />
@@ -962,11 +1006,33 @@ const styles = StyleSheet.create({
     color: "#475569",
     fontSize: 11,
     fontWeight: "600",
-    width: 122,
+    width: 126,
     textAlign: "right",
+  },
+  watchRightCol: {
+    width: 126,
+    alignItems: "flex-end",
+    gap: 6,
   },
   watchDateOverdue: {
     color: "#b91c1c",
+  },
+  followupDeleteBtn: {
+    borderWidth: 1,
+    borderColor: "#fecaca",
+    backgroundColor: "#fff1f2",
+    borderRadius: 8,
+    minHeight: 24,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  followupDeleteText: {
+    color: "#b91c1c",
+    fontSize: 10,
+    fontWeight: "700",
   },
   actionRow: {
     flexDirection: "row",
