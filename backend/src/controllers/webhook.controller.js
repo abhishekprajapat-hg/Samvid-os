@@ -10,6 +10,14 @@ const toPositiveInt = (value, fallback) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 const META_GRAPH_TIMEOUT_MS = toPositiveInt(process.env.META_GRAPH_TIMEOUT_MS, 10_000);
+const META_GRAPH_LEAD_FIELDS = "id,created_time,field_data,form_id,ad_id,campaign_id";
+const META_DEDUPE_BY_PHONE = String(process.env.META_DEDUPE_BY_PHONE || "false")
+  .trim()
+  .toLowerCase() === "true";
+const META_PHONE_PLACEHOLDER_PREFIX = String(process.env.META_PHONE_PLACEHOLDER_PREFIX || "META")
+  .trim()
+  .replace(/[^A-Za-z0-9_-]/g, "")
+  || "META";
 const toNormalizedText = (value) => String(value || "").trim();
 const toPageIdList = (value) => {
   if (Array.isArray(value)) {
@@ -275,10 +283,35 @@ const isDuplicateMetaLeadError = (error) => {
   return String(error?.message || "").toLowerCase().includes("metaleadid");
 };
 
+const buildFallbackMetaPhone = (leadId = "") => {
+  const normalized = String(leadId || "")
+    .trim()
+    .replace(/[^A-Za-z0-9]/g, "")
+    .slice(-18);
+  const suffix = normalized || Date.now().toString(36).toUpperCase();
+  return `${META_PHONE_PLACEHOLDER_PREFIX}-${suffix}`;
+};
+
 const isInvalidMetaLeadError = (error) => {
   const status = Number(error?.response?.status || 0);
   const graphCode = Number(error?.response?.data?.error?.code || 0);
   return status === 400 && (graphCode === 100 || graphCode === 33);
+};
+
+const isMetaLeadPermissionError = (error) => {
+  const status = Number(error?.response?.status || 0);
+  const graphCode = Number(error?.response?.data?.error?.code || 0);
+  const message = String(error?.response?.data?.error?.message || "").toLowerCase();
+
+  if (status !== 400 || graphCode !== 100) return false;
+
+  return (
+    message.includes("permission")
+    || message.includes("leads_retrieval")
+    || message.includes("does not have the capability")
+    || message.includes("insufficient")
+    || message.includes("not authorized")
+  );
 };
 
 const ensureLeadAssignmentIfMissing = async (leadDoc, event, requester = null) => {
@@ -344,6 +377,8 @@ exports.handleWebhook = async (req, res) => {
         duplicate: 0,
         invalid: 0,
         failed: 0,
+        missingPhone: 0,
+        permissionDenied: 0,
         assignmentRecovered: 0,
       });
     }
@@ -352,6 +387,8 @@ exports.handleWebhook = async (req, res) => {
     let duplicateCount = 0;
     let invalidCount = 0;
     let failedCount = 0;
+    let missingPhoneCount = 0;
+    let permissionDeniedCount = 0;
     let recoveredAssignments = 0;
     const processedLeadKeys = new Set();
 
@@ -372,6 +409,7 @@ exports.handleWebhook = async (req, res) => {
             {
               params: {
                 access_token: accessToken,
+                fields: META_GRAPH_LEAD_FIELDS,
               },
               timeout: META_GRAPH_TIMEOUT_MS,
             },
@@ -380,16 +418,18 @@ exports.handleWebhook = async (req, res) => {
           const leadData = response.data || {};
           const normalized = normalizeFieldData(leadData.field_data || []);
           const phone = String(normalized.phone || "").trim();
+          const hasRealPhone = Boolean(phone);
+          const fallbackPhone = hasRealPhone ? phone : buildFallbackMetaPhone(event.leadId);
 
-          if (!phone) {
-            invalidCount += 1;
+          if (!hasRealPhone) {
+            missingPhoneCount += 1;
             logger.info({
               companyId: tenantCompanyId,
               pageId: event.pageId,
               leadId: event.leadId,
-              message: "Meta lead skipped due to missing phone",
+              generatedPhone: fallbackPhone,
+              message: "Meta lead missing phone; generated fallback phone for intake",
             });
-            continue;
           }
 
           const existingByMetaLeadId = await Lead.findOne({
@@ -414,22 +454,24 @@ exports.handleWebhook = async (req, res) => {
             continue;
           }
 
-          const existingByPhone = await Lead.findOne({ phone, companyId: tenantCompanyId });
-          if (existingByPhone) {
-            duplicateCount += 1;
-            logger.info({
-              companyId: tenantCompanyId,
-              leadId: existingByPhone._id,
-              phone,
-              metaLeadId: event.leadId,
-              message: "Duplicate meta lead skipped by phone",
-            });
-            continue;
+          if (META_DEDUPE_BY_PHONE && hasRealPhone) {
+            const existingByPhone = await Lead.findOne({ phone, companyId: tenantCompanyId });
+            if (existingByPhone) {
+              duplicateCount += 1;
+              logger.info({
+                companyId: tenantCompanyId,
+                leadId: existingByPhone._id,
+                phone,
+                metaLeadId: event.leadId,
+                message: "Duplicate meta lead skipped by phone",
+              });
+              continue;
+            }
           }
 
           const lead = await Lead.create({
             name: normalized.name || "Unknown",
-            phone,
+            phone: fallbackPhone,
             email: normalized.email,
             city: normalized.city,
             projectInterested: normalized.projectInterested,
@@ -465,6 +507,18 @@ exports.handleWebhook = async (req, res) => {
               companyId: tenantCompanyId,
               metaLeadId: event.leadId,
               message: "Duplicate meta lead skipped due to unique metaLeadId",
+            });
+            continue;
+          }
+
+          if (isMetaLeadPermissionError(leadError)) {
+            permissionDeniedCount += 1;
+            failedCount += 1;
+            logger.error({
+              companyId: tenantCompanyId,
+              leadId: event.leadId,
+              error: leadError.response?.data || leadError.message,
+              message: "Meta lead processing failed due to permissions on access token",
             });
             continue;
           }
@@ -506,7 +560,10 @@ exports.handleWebhook = async (req, res) => {
       duplicate: duplicateCount,
       invalid: invalidCount,
       failed: failedCount,
+      missingPhone: missingPhoneCount,
+      permissionDenied: permissionDeniedCount,
       assignmentRecovered: recoveredAssignments,
+      dedupeByPhoneEnabled: META_DEDUPE_BY_PHONE,
     };
 
     if (failedCount > 0) {
