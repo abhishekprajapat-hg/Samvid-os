@@ -86,11 +86,10 @@ const resolveAllowedMetaPageIds = (tenant = null, { includeEnv = true } = {}) =>
 
 const buildCompanyPageRouteMap = async () => {
   const companies = await Company.find({ status: "ACTIVE" })
-    .select("_id name subdomain metadata")
+    .select("_id name subdomain metadata updatedAt")
     .lean();
 
-  const pageIdToCompany = new Map();
-  const ambiguousPageIds = new Set();
+  const pageIdToCompanies = new Map();
 
   companies.forEach((company) => {
     const companyId = toNormalizedText(company?._id);
@@ -104,26 +103,19 @@ const buildCompanyPageRouteMap = async () => {
       companyName: toNormalizedText(company?.name),
       tenantSlug: toNormalizedText(company?.subdomain),
       accessToken: resolveMetaAccessToken(company, { includeEnv: false }),
+      updatedAt: company?.updatedAt ? new Date(company.updatedAt).getTime() : 0,
     };
 
     pageIds.forEach((pageId) => {
       if (!pageId) return;
-      if (ambiguousPageIds.has(pageId)) return;
-
-      const existing = pageIdToCompany.get(pageId);
-      if (existing && existing.companyId !== companyRoute.companyId) {
-        pageIdToCompany.delete(pageId);
-        ambiguousPageIds.add(pageId);
-        return;
-      }
-
-      pageIdToCompany.set(pageId, companyRoute);
+      const existingRows = pageIdToCompanies.get(pageId) || [];
+      existingRows.push(companyRoute);
+      pageIdToCompanies.set(pageId, existingRows);
     });
   });
 
   return {
-    pageIdToCompany,
-    ambiguousPageIds,
+    pageIdToCompanies,
   };
 };
 
@@ -132,6 +124,7 @@ const routeLeadEventsByCompany = async ({ leadEvents = [], tenant = null } = {})
   let filteredOutCount = 0;
   let unmatchedPageCount = 0;
   let ambiguousPageCount = 0;
+  let ambiguousResolvedCount = 0;
   let noAccessTokenCount = 0;
 
   const tenantCompanyId = toNormalizedText(tenant?._id);
@@ -160,11 +153,12 @@ const routeLeadEventsByCompany = async ({ leadEvents = [], tenant = null } = {})
       filteredOutCount,
       unmatchedPageCount,
       ambiguousPageCount,
+      ambiguousResolvedCount,
       noAccessTokenCount,
     };
   }
 
-  const { pageIdToCompany, ambiguousPageIds } = await buildCompanyPageRouteMap();
+  const { pageIdToCompanies } = await buildCompanyPageRouteMap();
 
   leadEvents.forEach((event) => {
     const pageId = toNormalizedText(event?.pageId);
@@ -173,20 +167,32 @@ const routeLeadEventsByCompany = async ({ leadEvents = [], tenant = null } = {})
       return;
     }
 
-    if (ambiguousPageIds.has(pageId)) {
-      ambiguousPageCount += 1;
-      return;
-    }
-
-    const companyRoute = pageIdToCompany.get(pageId);
-    if (!companyRoute) {
+    const candidates = pageIdToCompanies.get(pageId) || [];
+    if (!candidates.length) {
       unmatchedPageCount += 1;
       return;
     }
 
-    if (!companyRoute.accessToken) {
+    const candidatesWithToken = candidates.filter((row) => Boolean(row?.accessToken));
+    if (!candidatesWithToken.length) {
       noAccessTokenCount += 1;
       return;
+    }
+
+    let companyRoute = candidatesWithToken[0];
+    if (candidatesWithToken.length > 1) {
+      ambiguousPageCount += 1;
+      ambiguousResolvedCount += 1;
+      companyRoute = [...candidatesWithToken]
+        .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))[0];
+
+      logger.warn({
+        pageId,
+        selectedCompanyId: companyRoute.companyId,
+        selectedTenantSlug: companyRoute.tenantSlug,
+        candidateCompanyIds: candidatesWithToken.map((row) => row.companyId),
+        message: "Meta page configured in multiple companies; routed to most recently updated company",
+      });
     }
 
     const key = companyRoute.companyId;
@@ -208,6 +214,7 @@ const routeLeadEventsByCompany = async ({ leadEvents = [], tenant = null } = {})
     filteredOutCount,
     unmatchedPageCount,
     ambiguousPageCount,
+    ambiguousResolvedCount,
     noAccessTokenCount,
   };
 };
@@ -441,6 +448,7 @@ exports.handleWebhook = async (req, res) => {
         filteredOut: routed.filteredOutCount,
         unmatchedPage: routed.unmatchedPageCount,
         ambiguousPage: routed.ambiguousPageCount,
+        ambiguousResolved: routed.ambiguousResolvedCount,
         noAccessToken: routed.noAccessTokenCount,
         created: 0,
         duplicate: 0,
@@ -642,6 +650,7 @@ exports.handleWebhook = async (req, res) => {
       filteredOut: routed.filteredOutCount,
       unmatchedPage: routed.unmatchedPageCount,
       ambiguousPage: routed.ambiguousPageCount,
+      ambiguousResolved: routed.ambiguousResolvedCount,
       noAccessToken: routed.noAccessTokenCount,
       created: createdCount,
       duplicate: duplicateCount,
