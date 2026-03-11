@@ -28,8 +28,11 @@ import { motion as Motion, AnimatePresence } from "framer-motion";
 import { useChatNotifications } from "../../context/useChatNotifications";
 
 const MENU_CONFIG = {
+  super_admin: [
+    { name: "Platform", icon: ShieldCheck, path: "/super-admin" },
+  ],
   admin: [
-    { name: "Home", icon: Home, path: "/" },
+    { name: "Home", icon: Home, path: "/dashboard" },
     { name: "Pipeline", icon: Users, path: "/leads" },
     { name: "Schedule", icon: Calendar, path: "/calendar" },
     { name: "Finance", icon: PieChart, path: "/finance" },
@@ -46,7 +49,7 @@ const MENU_CONFIG = {
     { name: "System", icon: Settings, path: "/settings" },
   ],
   manager: [
-    { name: "Home", icon: Home, path: "/" },
+    { name: "Home", icon: Home, path: "/dashboard" },
     { name: "Schedule", icon: Calendar, path: "/calendar" },
     { name: "Finance", icon: PieChart, path: "/finance" },
     { name: "Pipeline", icon: Users, path: "/leads" },
@@ -61,7 +64,7 @@ const MENU_CONFIG = {
     { name: "System", icon: Settings, path: "/settings" },
   ],
   executive: [
-    { name: "My Desk", icon: Briefcase, path: "/" },
+    { name: "My Desk", icon: Briefcase, path: "/dashboard" },
     { name: "My Leads", icon: Users, path: "/my-leads" },
     { name: "Inventory", icon: Building2, path: "/inventory" },
     { name: "Finance", icon: PieChart, path: "/finance" },
@@ -72,7 +75,7 @@ const MENU_CONFIG = {
     { name: "Profile", icon: UserCircle2, path: "/profile" },
   ],
   field_agent: [
-    { name: "Route", icon: Map, path: "/" },
+    { name: "Route", icon: Map, path: "/dashboard" },
     { name: "My Leads", icon: Users, path: "/my-leads" },
     { name: "Inventory", icon: Building2, path: "/inventory" },
     { name: "Finance", icon: PieChart, path: "/finance" },
@@ -102,6 +105,7 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
   const canChannelPartnerViewInventory = Boolean(storedUser?.canViewInventory);
 
   const roleKeyMap = {
+    SUPER_ADMIN: "super_admin",
     ADMIN: "admin",
     MANAGER: "manager",
     ASSISTANT_MANAGER: "manager",

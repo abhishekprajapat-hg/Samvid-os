@@ -141,8 +141,14 @@ const getLeadScopeLabel = (role) => {
 };
 
 const buildLeadScopeQuery = async (userDoc) => {
+  if (!userDoc.companyId) {
+    return { _id: null };
+  }
+
+  const companyScope = { companyId: userDoc.companyId };
+
   if (userDoc.role === USER_ROLES.ADMIN) {
-    return {};
+    return companyScope;
   }
 
   if (isManagementRole(userDoc.role)) {
@@ -151,19 +157,20 @@ const buildLeadScopeQuery = async (userDoc) => {
       companyId: userDoc.companyId,
     });
     return {
+      ...companyScope,
       assignedTo: { $in: teamExecutiveIds },
     };
   }
 
   if (EXECUTIVE_ROLES.includes(userDoc.role)) {
-    return { assignedTo: userDoc._id };
+    return { ...companyScope, assignedTo: userDoc._id };
   }
 
   if (userDoc.role === USER_ROLES.CHANNEL_PARTNER) {
-    return { createdBy: userDoc._id };
+    return { ...companyScope, createdBy: userDoc._id };
   }
 
-  return { createdBy: userDoc._id };
+  return { ...companyScope, createdBy: userDoc._id };
 };
 
 const buildLeadStatusMap = (rows) => {
@@ -362,6 +369,7 @@ const buildLeadPerformanceRowsByOwnerIds = async ({
   ownerField,
   ownerIds = [],
   sinceDate = null,
+  companyId = null,
 }) => {
   const normalizedOwnerIds = normalizeOwnerIds(ownerIds);
   if (!ownerField || !normalizedOwnerIds.length) {
@@ -371,6 +379,9 @@ const buildLeadPerformanceRowsByOwnerIds = async ({
   const match = {
     [ownerField]: { $in: normalizedOwnerIds },
   };
+  if (companyId) {
+    match.companyId = companyId;
+  }
 
   if (sinceDate instanceof Date && !Number.isNaN(sinceDate.getTime())) {
     // Use updatedAt so closures in the selected window are reflected immediately.
@@ -466,7 +477,7 @@ const buildProfileSummary = async (userDoc) => {
         role: USER_ROLES.FIELD_EXECUTIVE,
         isActive: true,
       }),
-      Lead.countDocuments({}),
+      Lead.countDocuments({ companyId }),
       Inventory.countDocuments({ companyId }),
     ]);
 
@@ -505,8 +516,9 @@ const buildProfileSummary = async (userDoc) => {
 
     const [teamLeads, dueFollowUpsToday] = executiveIds.length
       ? await Promise.all([
-        Lead.countDocuments({ assignedTo: { $in: executiveIds } }),
+        Lead.countDocuments({ companyId, assignedTo: { $in: executiveIds } }),
         Lead.countDocuments({
+          companyId,
           assignedTo: { $in: executiveIds },
           nextFollowUp: { $gte: todayStart, $lte: todayEnd },
         }),
@@ -540,13 +552,15 @@ const buildProfileSummary = async (userDoc) => {
     todayEnd.setHours(23, 59, 59, 999);
 
     const [assignedLeads, openLeads, closedLeads, dueFollowUpsToday] = await Promise.all([
-      Lead.countDocuments({ assignedTo: userId }),
+      Lead.countDocuments({ companyId, assignedTo: userId }),
       Lead.countDocuments({
+        companyId,
         assignedTo: userId,
         status: { $in: ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED"] },
       }),
-      Lead.countDocuments({ assignedTo: userId, status: "CLOSED" }),
+      Lead.countDocuments({ companyId, assignedTo: userId, status: "CLOSED" }),
       Lead.countDocuments({
+        companyId,
         assignedTo: userId,
         nextFollowUp: { $gte: todayStart, $lte: todayEnd },
       }),
@@ -562,8 +576,8 @@ const buildProfileSummary = async (userDoc) => {
 
   if (role === USER_ROLES.CHANNEL_PARTNER) {
     const [createdLeads, closedLeads] = await Promise.all([
-      Lead.countDocuments({ createdBy: userId }),
-      Lead.countDocuments({ createdBy: userId, status: "CLOSED" }),
+      Lead.countDocuments({ companyId, createdBy: userId }),
+      Lead.countDocuments({ companyId, createdBy: userId, status: "CLOSED" }),
     ]);
 
     return {
@@ -751,6 +765,7 @@ exports.getRoleLeaderboard = async (req, res) => {
         ownerField: "assignedTo",
         ownerIds: peerIds,
         sinceDate,
+        companyId: req.user.companyId,
       });
 
       assignedMetricsByOwnerId.forEach((metrics, ownerId) => {
@@ -778,6 +793,7 @@ exports.getRoleLeaderboard = async (req, res) => {
         ownerField: "assignedTo",
         ownerIds: allExecutiveIds,
         sinceDate,
+        companyId: req.user.companyId,
       });
 
       managementTeams.forEach((teamRow) => {
@@ -802,6 +818,7 @@ exports.getRoleLeaderboard = async (req, res) => {
         ownerField: "createdBy",
         ownerIds: peerIds,
         sinceDate,
+        companyId: req.user.companyId,
       });
 
       creatorMetricsByOwnerId.forEach((metrics, ownerId) => {
@@ -1054,9 +1071,9 @@ exports.createUserByRole = async (req, res) => {
       });
     }
 
-    if (role === USER_ROLES.ADMIN) {
+    if ([USER_ROLES.ADMIN, USER_ROLES.SUPER_ADMIN].includes(role)) {
       return res.status(400).json({
-        message: "Admin role cannot be created from this endpoint",
+        message: "Admin or Super Admin role cannot be created from this endpoint",
       });
     }
 
@@ -1243,9 +1260,9 @@ exports.updateUserByAdmin = async (req, res) => {
         return res.status(400).json({ message: "Invalid role" });
       }
 
-      if (requestedRole === USER_ROLES.ADMIN) {
+      if ([USER_ROLES.ADMIN, USER_ROLES.SUPER_ADMIN].includes(requestedRole)) {
         return res.status(400).json({
-          message: "Role cannot be changed to ADMIN",
+          message: "Role cannot be changed to ADMIN or SUPER_ADMIN",
         });
       }
 
@@ -1271,6 +1288,7 @@ exports.updateUserByAdmin = async (req, res) => {
 
     if (EXECUTIVE_ROLES.includes(previousRole) && !EXECUTIVE_ROLES.includes(nextRole)) {
       const openAssignedLeads = await Lead.countDocuments({
+        companyId: req.user.companyId,
         assignedTo: user._id,
         status: { $nin: ["CLOSED", "LOST"] },
       });
@@ -1411,17 +1429,17 @@ exports.updateUserByAdmin = async (req, res) => {
     if (nextRole !== previousRole) {
       if (nextRole === USER_ROLES.EXECUTIVE) {
         await Lead.updateMany(
-          { assignedTo: user._id },
+          { assignedTo: user._id, companyId: req.user.companyId },
           { $set: { assignedExecutive: user._id, assignedFieldExecutive: null } },
         );
       } else if (nextRole === USER_ROLES.FIELD_EXECUTIVE) {
         await Lead.updateMany(
-          { assignedTo: user._id },
+          { assignedTo: user._id, companyId: req.user.companyId },
           { $set: { assignedExecutive: null, assignedFieldExecutive: user._id } },
         );
       } else {
         await Lead.updateMany(
-          { assignedTo: user._id },
+          { assignedTo: user._id, companyId: req.user.companyId },
           { $set: { assignedExecutive: null, assignedFieldExecutive: null } },
         );
       }
@@ -1480,9 +1498,9 @@ exports.updateUserDesignation = async (req, res) => {
       return res.status(400).json({ message: "Invalid role" });
     }
 
-    if (requestedRole === USER_ROLES.ADMIN) {
+    if ([USER_ROLES.ADMIN, USER_ROLES.SUPER_ADMIN].includes(requestedRole)) {
       return res.status(400).json({
-        message: "Designation cannot be changed to ADMIN",
+        message: "Designation cannot be changed to ADMIN or SUPER_ADMIN",
       });
     }
 
@@ -1523,6 +1541,7 @@ exports.updateUserDesignation = async (req, res) => {
       && !EXECUTIVE_ROLES.includes(requestedRole)
     ) {
       const openAssignedLeads = await Lead.countDocuments({
+        companyId: req.user.companyId,
         assignedTo: targetUser._id,
         status: { $nin: ["CLOSED", "LOST"] },
       });
@@ -1642,7 +1661,7 @@ exports.updateUserDesignation = async (req, res) => {
           };
 
       await Lead.updateMany(
-        { assignedTo: updatedUser._id },
+        { assignedTo: updatedUser._id, companyId: req.user.companyId },
         { $set: assignmentPatch },
       );
     }
@@ -1815,6 +1834,7 @@ exports.rebalanceExecutives = async (req, res) => {
     const executiveLeadDistribution = await Lead.aggregate([
       {
         $match: {
+          companyId: req.user.companyId,
           assignedTo: { $in: executives.map((e) => e._id) },
         },
       },
@@ -1905,7 +1925,7 @@ exports.deleteUser = async (req, res) => {
     }
 
     await Lead.updateMany(
-      { assignedTo: user._id },
+      { assignedTo: user._id, companyId: req.user.companyId },
       { $set: { assignedTo: null } },
     );
 
@@ -2010,8 +2030,8 @@ exports.updateUserByRole = async (req, res) => {
       if (nextRole && !Object.values(USER_ROLES).includes(nextRole)) {
         return res.status(400).json({ message: "Invalid role" });
       }
-      if (nextRole === USER_ROLES.ADMIN) {
-        return res.status(400).json({ message: "Cannot assign ADMIN role" });
+      if ([USER_ROLES.ADMIN, USER_ROLES.SUPER_ADMIN].includes(nextRole)) {
+        return res.status(400).json({ message: "Cannot assign ADMIN or SUPER_ADMIN role" });
       }
 
       if (nextRole && nextRole !== targetUser.role) {

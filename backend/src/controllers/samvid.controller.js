@@ -151,6 +151,7 @@ const getLeadScopeForUser = async (user) => {
   if (!companyUserIds.length) return null;
 
   const baseCompanyScope = {
+    companyId: user.companyId,
     $or: [
       { createdBy: { $in: companyUserIds } },
       { assignedTo: { $in: companyUserIds } },

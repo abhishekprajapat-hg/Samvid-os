@@ -11,7 +11,7 @@ const parseSeedCount = (rawValue, fallback) => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-function buildLead(index, assignedTo) {
+function buildLead(index, assignedTo, companyId) {
   const serial = String(index + 1).padStart(2, "0");
   const stamp = Date.now().toString().slice(-6);
   const cities = ["Noida", "Gurgaon", "Delhi", "Ghaziabad", "Faridabad"];
@@ -31,6 +31,7 @@ function buildLead(index, assignedTo) {
     projectInterested: projects[index % projects.length],
     source: "MANUAL",
     status: "NEW",
+    companyId: companyId || null,
     assignedTo: assignedTo || null,
     createdBy: null,
   };
@@ -48,14 +49,20 @@ async function seedLeads() {
     const executives = await User.find({
       role: { $in: EXECUTIVE_ROLES },
       isActive: true,
-    }).select("_id");
+    }).select("_id companyId");
 
     const leads = [];
     for (let i = 0; i < seedCount; i += 1) {
       const assignedTo = executives.length
-        ? executives[i % executives.length]._id
+        ? executives[i % executives.length]
         : null;
-      leads.push(buildLead(i, assignedTo));
+      leads.push(
+        buildLead(
+          i,
+          assignedTo?._id || null,
+          assignedTo?.companyId || null,
+        ),
+      );
     }
 
     const inserted = await Lead.insertMany(leads, { ordered: true });

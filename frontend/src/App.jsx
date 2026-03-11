@@ -27,6 +27,7 @@ const TeamManager = lazy(() => import("./modules/admin/TeamManager"));
 const UserDetailsEditor = lazy(() => import("./modules/admin/UserDetailsEditor"));
 const AdminNotifications = lazy(() => import("./modules/admin/AdminNotifications"));
 const AdminCommandConsole = lazy(() => import("./modules/admin/AdminCommandConsole"));
+const SuperAdminPanel = lazy(() => import("./modules/admin/SuperAdminPanel"));
 const TeamChat = lazy(() => import("./modules/chat/TeamChat"));
 
 const LeadsMatrix = lazy(() => import("./modules/leads/LeadsMatrix"));
@@ -62,6 +63,7 @@ const FORCE_LIGHT_ROUTE_PREFIXES = [
 const MANAGEMENT_ROLES = ["MANAGER", "ASSISTANT_MANAGER", "TEAM_LEADER"];
 const CHAT_REFRESH_FALLBACK_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
 const ROLE_LABELS = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   MANAGER: "Manager",
   ASSISTANT_MANAGER: "Assistant Manager",
@@ -73,6 +75,12 @@ const ROLE_LABELS = {
 
 const resolveHomeHeader = (userRole) => {
   switch (userRole) {
+    case "SUPER_ADMIN":
+      return {
+        title: "Platform Command Center",
+        subtitle: "Tenant lifecycle, plans, subscriptions and global oversight",
+        scopeLabel: "Platform",
+      };
     case "ADMIN":
       return {
         title: "Admin Command Center",
@@ -110,7 +118,15 @@ const resolveHomeHeader = (userRole) => {
 
 const resolvePageHeader = (pathname, userRole) => {
   if (!pathname) return null;
-  if (pathname === "/") return resolveHomeHeader(userRole);
+  if (pathname === "/" || pathname === "/dashboard") return resolveHomeHeader(userRole);
+
+  if (pathname.startsWith("/super-admin")) {
+    return {
+      title: "Super Admin Command Center",
+      subtitle: "Tenant control, pricing governance and platform analytics",
+      scopeLabel: "Platform",
+    };
+  }
 
   if (pathname.startsWith("/leads") || pathname.startsWith("/my-leads")) {
     return {
@@ -515,6 +531,8 @@ export default function App() {
   /* 🔥 Dashboard by role */
   const DashboardByRole = useMemo(() => {
     switch (userRole) {
+      case "SUPER_ADMIN":
+        return <Navigate to="/super-admin" />;
       case "ADMIN":
         return <ManagerDashboard theme={theme} />;
       case "MANAGER":
@@ -648,6 +666,11 @@ export default function App() {
                     <div className={routeViewportClass}>
                       <Routes>
                         <Route path="/" element={DashboardByRole} />
+                        <Route path="/dashboard" element={DashboardByRole} />
+                        <Route
+                          path="/super-admin"
+                          element={userRole === "SUPER_ADMIN" ? <SuperAdminPanel theme={theme} /> : <Navigate to="/" />}
+                        />
                         <Route
                           path="/leads"
                           element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}

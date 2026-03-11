@@ -1,4 +1,5 @@
 const USER_ROLES = Object.freeze({
+  SUPER_ADMIN: "SUPER_ADMIN",
   ADMIN: "ADMIN",
   MANAGER: "MANAGER",
   ASSISTANT_MANAGER: "ASSISTANT_MANAGER",
@@ -25,6 +26,7 @@ const LEAD_MANAGEMENT_ROLES = Object.freeze([
 ]);
 
 const ROLE_LABELS = Object.freeze({
+  [USER_ROLES.SUPER_ADMIN]: "Super Admin",
   [USER_ROLES.ADMIN]: "Admin",
   [USER_ROLES.MANAGER]: "Manager",
   [USER_ROLES.ASSISTANT_MANAGER]: "Assistant Manager",
@@ -35,6 +37,7 @@ const ROLE_LABELS = Object.freeze({
 });
 
 const ROLE_PARENT_RULES = Object.freeze({
+  [USER_ROLES.SUPER_ADMIN]: [],
   [USER_ROLES.ADMIN]: [],
   [USER_ROLES.MANAGER]: [USER_ROLES.ADMIN],
   [USER_ROLES.ASSISTANT_MANAGER]: [USER_ROLES.MANAGER],

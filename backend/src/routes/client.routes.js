@@ -17,5 +17,6 @@ router.use("/inventory", require("./inventory.routes"));
 router.use("/inventory-request", require("./inventoryRequest.routes"));
 router.use("/webhook", require("./webhook.routes"));
 router.use("/chat", require("./chat.routes"));
+router.use("/saas", require("./saas.routes"));
 
 module.exports = router;

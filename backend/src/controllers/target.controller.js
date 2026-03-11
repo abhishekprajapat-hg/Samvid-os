@@ -67,13 +67,17 @@ const getLeadScopeQueryForUser = async ({
   companyUserIds = [],
 }) => {
   if (!userDoc) return null;
+  if (!userDoc.companyId) return null;
+
+  const companyScope = { companyId: userDoc.companyId };
 
   if (userDoc.role === USER_ROLES.ADMIN) {
     if (!companyUserIds.length) {
-      return { _id: null };
+      return { ...companyScope, _id: null };
     }
 
     return {
+      ...companyScope,
       $or: [
         { assignedTo: { $in: companyUserIds } },
         { createdBy: { $in: companyUserIds } },
@@ -88,19 +92,20 @@ const getLeadScopeQueryForUser = async ({
     });
 
     return {
+      ...companyScope,
       assignedTo: { $in: teamExecutiveIds },
     };
   }
 
   if (EXECUTIVE_ROLES.includes(userDoc.role)) {
-    return { assignedTo: userDoc._id };
+    return { ...companyScope, assignedTo: userDoc._id };
   }
 
   if (userDoc.role === USER_ROLES.CHANNEL_PARTNER) {
-    return { createdBy: userDoc._id };
+    return { ...companyScope, createdBy: userDoc._id };
   }
 
-  return { createdBy: userDoc._id };
+  return { ...companyScope, createdBy: userDoc._id };
 };
 
 const computeTargetAchievement = async ({

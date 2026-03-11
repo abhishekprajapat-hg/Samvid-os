@@ -268,6 +268,7 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
   }
 
   const actorId = performedBy || requester?._id || null;
+  const resolvedCompanyId = requester?.companyId || lead?.companyId || null;
 
   if (requester && EXECUTIVE_ROLES.includes(requester.role) && requester.isActive) {
     await persistAssignment({
@@ -290,8 +291,8 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
     role: { $in: EXECUTIVE_ROLES },
     isActive: true,
   };
-  if (requester?.companyId) {
-    executiveQuery.companyId = requester.companyId;
+  if (resolvedCompanyId) {
+    executiveQuery.companyId = resolvedCompanyId;
   }
 
   const activeExecutives = await User.find(executiveQuery)
@@ -358,7 +359,7 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
       _id: { $in: leaderIds },
       role: { $in: MANAGEMENT_ROLES },
       isActive: true,
-      ...(requester?.companyId ? { companyId: requester.companyId } : {}),
+      ...(resolvedCompanyId ? { companyId: resolvedCompanyId } : {}),
     })
       .select("_id name role createdAt lastAssignedAt")
       .sort({ createdAt: 1 })
@@ -424,9 +425,12 @@ const redistributePipelineLeads = async ({ executiveIds = null } = {}) => {
   }
 
   const executiveObjectIds = executives.map((executive) => executive._id);
-  const pipelineLeads = await Lead.find({
+  const pipelineLeadQuery = {
     status: { $in: PIPELINE_STATUSES },
-  })
+    assignedTo: { $in: executiveObjectIds },
+  };
+
+  const pipelineLeads = await Lead.find(pipelineLeadQuery)
     .select("_id assignedTo createdAt")
     .sort({ createdAt: 1 })
     .lean();

@@ -9,6 +9,67 @@ const toPositiveInt = (value, fallback) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 const META_GRAPH_TIMEOUT_MS = toPositiveInt(process.env.META_GRAPH_TIMEOUT_MS, 10_000);
+const toNormalizedText = (value) => String(value || "").trim();
+const toPageIdList = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((row) => toNormalizedText(row))
+      .filter(Boolean);
+  }
+
+  const raw = toNormalizedText(value);
+  if (!raw) return [];
+
+  if (raw.startsWith("[") && raw.endsWith("]")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((row) => toNormalizedText(row))
+          .filter(Boolean);
+      }
+    } catch (_error) {
+      // Fall back to CSV parsing.
+    }
+  }
+
+  if (raw.includes(",")) {
+    return raw
+      .split(",")
+      .map((row) => toNormalizedText(row))
+      .filter(Boolean);
+  }
+
+  return [raw];
+};
+
+const getFirstNonEmpty = (...values) => {
+  for (const value of values) {
+    const normalized = toNormalizedText(value);
+    if (normalized) return normalized;
+  }
+  return "";
+};
+
+const resolveMetaAccessToken = (tenant = null) =>
+  getFirstNonEmpty(
+    tenant?.metadata?.metaAccessToken,
+    tenant?.metadata?.meta?.accessToken,
+    process.env.META_ACCESS_TOKEN,
+  );
+
+const resolveAllowedMetaPageIds = (tenant = null) => {
+  const ids = new Set([
+    ...toPageIdList(tenant?.metadata?.metaPageIds),
+    ...toPageIdList(tenant?.metadata?.meta?.pageIds),
+    ...toPageIdList(tenant?.metadata?.metaPageId),
+    ...toPageIdList(tenant?.metadata?.meta?.pageId),
+    ...toPageIdList(process.env.META_PAGE_IDS),
+    ...toPageIdList(process.env.META_PAGE_ID),
+  ]);
+
+  return ids;
+};
 
 const normalizeFieldData = (rows = []) => {
   const map = new Map();
@@ -87,7 +148,7 @@ const isInvalidMetaLeadError = (error) => {
   return status === 400 && (graphCode === 100 || graphCode === 33);
 };
 
-const ensureLeadAssignmentIfMissing = async (leadDoc, event) => {
+const ensureLeadAssignmentIfMissing = async (leadDoc, event, requester = null) => {
   if (!leadDoc) return null;
 
   const hasAssignee = Boolean(
@@ -95,7 +156,7 @@ const ensureLeadAssignmentIfMissing = async (leadDoc, event) => {
   );
   if (hasAssignee) return null;
 
-  const assignment = await autoAssignLead({ lead: leadDoc, requester: null });
+  const assignment = await autoAssignLead({ lead: leadDoc, requester });
   logger.info({
     leadId: leadDoc._id,
     metaLeadId: event.leadId,
@@ -126,15 +187,46 @@ exports.verifyWebhook = (req, res) => {
 
 exports.handleWebhook = async (req, res) => {
   try {
-    const accessToken = String(process.env.META_ACCESS_TOKEN || "").trim();
+    const tenantCompanyId = String(req.tenant?._id || "").trim();
+    if (!tenantCompanyId) {
+      return res.status(400).json({
+        message: "Tenant context is required for webhook processing",
+      });
+    }
+
+    const accessToken = resolveMetaAccessToken(req.tenant);
     if (!accessToken) {
-      logger.error({ message: "META_ACCESS_TOKEN is missing" });
+      logger.error({
+        companyId: tenantCompanyId,
+        message: "META access token is missing for webhook processing",
+      });
       return res.status(500).json({ message: "Server not configured for meta leads" });
     }
 
     const leadEvents = extractLeadEvents(req.body);
     if (!leadEvents.length) {
       return res.status(200).json({ message: "No leadgen event found" });
+    }
+
+    const allowedPageIds = resolveAllowedMetaPageIds(req.tenant);
+    const scopedLeadEvents = allowedPageIds.size
+      ? leadEvents.filter((event) => allowedPageIds.has(event.pageId))
+      : leadEvents;
+    const filteredOutCount = Math.max(0, leadEvents.length - scopedLeadEvents.length);
+
+    if (!scopedLeadEvents.length) {
+      logger.info({
+        companyId: tenantCompanyId,
+        receivedEvents: leadEvents.length,
+        allowedPageIds: [...allowedPageIds],
+        message: "No leadgen events matched tenant page scope",
+      });
+      return res.status(200).json({
+        message: "No leadgen event matched tenant page scope",
+        processed: 0,
+        received: leadEvents.length,
+        filteredOut: filteredOutCount,
+      });
     }
 
     let createdCount = 0;
@@ -144,7 +236,7 @@ exports.handleWebhook = async (req, res) => {
     let recoveredAssignments = 0;
     const processedLeadIds = new Set();
 
-    for (const event of leadEvents) {
+    for (const event of scopedLeadEvents) {
       if (processedLeadIds.has(event.leadId)) continue;
       processedLeadIds.add(event.leadId);
 
@@ -172,9 +264,18 @@ exports.handleWebhook = async (req, res) => {
           continue;
         }
 
-        const existingByMetaLeadId = await Lead.findOne({ metaLeadId: event.leadId });
+        const assignmentRequester = { companyId: tenantCompanyId };
+
+        const existingByMetaLeadId = await Lead.findOne({
+          metaLeadId: event.leadId,
+          companyId: tenantCompanyId,
+        });
         if (existingByMetaLeadId) {
-          const recovered = await ensureLeadAssignmentIfMissing(existingByMetaLeadId, event);
+          const recovered = await ensureLeadAssignmentIfMissing(
+            existingByMetaLeadId,
+            event,
+            assignmentRequester,
+          );
           if (recovered?.assigned) recoveredAssignments += 1;
           duplicateCount += 1;
           logger.info({
@@ -186,7 +287,7 @@ exports.handleWebhook = async (req, res) => {
           continue;
         }
 
-        const existingByPhone = await Lead.findOne({ phone });
+        const existingByPhone = await Lead.findOne({ phone, companyId: tenantCompanyId });
         if (existingByPhone) {
           duplicateCount += 1;
           logger.info({
@@ -204,6 +305,7 @@ exports.handleWebhook = async (req, res) => {
           email: normalized.email,
           city: normalized.city,
           projectInterested: normalized.projectInterested,
+          companyId: tenantCompanyId,
           metaLeadId: event.leadId,
           metaPageId: event.pageId,
           metaFormId: event.formId,
@@ -213,7 +315,10 @@ exports.handleWebhook = async (req, res) => {
           createdBy: null,
         });
 
-        const assignment = await autoAssignLead({ lead, requester: null });
+        const assignment = await autoAssignLead({
+          lead,
+          requester: assignmentRequester,
+        });
         createdCount += 1;
 
         logger.info({
@@ -257,7 +362,9 @@ exports.handleWebhook = async (req, res) => {
       message: failedCount
         ? "Meta lead webhook partially failed; returning 500 for retry"
         : "Meta lead webhook processed",
+      received: leadEvents.length,
       processed: processedLeadIds.size,
+      filteredOut: filteredOutCount,
       created: createdCount,
       duplicate: duplicateCount,
       invalid: invalidCount,

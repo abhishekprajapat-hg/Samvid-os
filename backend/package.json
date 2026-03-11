@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "seed:super-admin": "node src/seeder/createSuperAdmin.cjs",
     "seed:admin": "node src/seeder/createAdmin.cjs",
+    "seed:companies:backfill": "node src/seeder/backfillCompanies.cjs",
+    "seed:leads:backfill-company": "node src/seeder/backfillLeadCompany.cjs",
     "seed:leads": "node src/seeder/seedLeads.cjs",
     "seed:inventory": "node src/seeder/seedInventory.cjs",
     "migrate:company": "node src/seeder/backfillCompany.cjs"

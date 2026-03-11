@@ -611,8 +611,12 @@ const resolveLiveLocationForVerification = (user) => {
   };
 };
 
-const getLeadViewById = async (leadId) => {
-  const row = await Lead.findById(leadId).populate(LEAD_POPULATE_FIELDS).lean();
+const getLeadViewById = async (leadId, companyId = null) => {
+  const query = { _id: leadId };
+  if (companyId && isValidObjectId(companyId)) {
+    query.companyId = companyId;
+  }
+  const row = await Lead.findOne(query).populate(LEAD_POPULATE_FIELDS).lean();
   return toLeadView(row);
 };
 
@@ -621,14 +625,29 @@ const getExecutiveIdsForLeader = async (user) => getDescendantExecutiveIds({
   companyId: user?.companyId || null,
 });
 
+const resolveLeadCompanyScope = (user) => {
+  const companyId = toObjectIdString(user?.companyId);
+  if (!isValidObjectId(companyId)) {
+    return null;
+  }
+
+  return { companyId };
+};
+
 const buildLeadQueryForUser = async (user) => {
+  const companyScope = resolveLeadCompanyScope(user);
+  if (!companyScope) {
+    return null;
+  }
+
   if (user.role === USER_ROLES.ADMIN) {
-    return {};
+    return companyScope;
   }
 
   if (isManagementRole(user.role)) {
     const execIds = await getExecutiveIdsForLeader(user);
     return {
+      ...companyScope,
       $or: [
         { createdBy: user._id },
         { assignedTo: { $in: execIds } },
@@ -639,12 +658,13 @@ const buildLeadQueryForUser = async (user) => {
 
   if (EXECUTIVE_ROLES.includes(user.role)) {
     return {
+      ...companyScope,
       $or: [{ assignedTo: user._id }, { assignedTo: null }],
     };
   }
 
   if (user.role === USER_ROLES.CHANNEL_PARTNER) {
-    return { createdBy: user._id };
+    return { ...companyScope, createdBy: user._id };
   }
 
   return null;
@@ -867,7 +887,7 @@ const findAccessibleLeadById = async ({ leadId, user }) => {
     _id: leadId,
     ...scope,
   })
-    .select("_id")
+    .select("_id companyId")
     .lean();
 };
 
@@ -902,7 +922,12 @@ exports.createLead = async (req, res) => {
       siteLocation: rawSiteLocation,
     } = req.body;
 
-    const existing = await Lead.findOne({ phone }).select("_id").lean();
+    const companyId = toObjectIdString(req.user?.companyId);
+    if (!isValidObjectId(companyId)) {
+      return res.status(403).json({ message: "Company context is required" });
+    }
+
+    const existing = await Lead.findOne({ phone, companyId }).select("_id").lean();
     if (existing) {
       return res.status(400).json({ message: "Lead already exists" });
     }
@@ -948,6 +973,7 @@ exports.createLead = async (req, res) => {
       email,
       city: resolvedCity,
       projectInterested: resolvedProjectInterested,
+      companyId,
       source: "MANUAL",
       createdBy: req.user._id,
     };
@@ -989,7 +1015,7 @@ exports.createLead = async (req, res) => {
       });
     }
 
-    const populatedLead = await getLeadViewById(lead._id);
+    const populatedLead = await getLeadViewById(lead._id, companyId);
 
     return res.status(201).json({
       message: shouldAutoAssignLead
@@ -1023,19 +1049,19 @@ exports.getAllLeads = async (req, res) => {
       LEAD_SELECTABLE_FIELDS,
     );
 
-    const leadQuery = applyLeadQueryOptions({
+    const leadsQuery = applyLeadQueryOptions({
       queryBuilder: Lead.find(query),
       selectedFields,
       pagination,
     });
 
     if (!pagination.enabled) {
-      const leads = (await leadQuery).map((lead) => toLeadView(lead));
+      const leads = (await leadsQuery).map((lead) => toLeadView(lead));
       return res.json({ leads });
     }
 
     const [leadRows, totalCount] = await Promise.all([
-      leadQuery,
+      leadsQuery,
       Lead.countDocuments(query),
     ]);
     const leads = leadRows.map((lead) => toLeadView(lead));
@@ -1079,6 +1105,7 @@ exports.getCompanyPerformanceOverview = async (req, res) => {
 
     const leadScopeQuery = companyUserIds.length
       ? {
+        companyId: req.user.companyId,
         $or: [
           { assignedTo: { $in: companyUserIds } },
           { createdBy: { $in: companyUserIds } },
@@ -1087,7 +1114,7 @@ exports.getCompanyPerformanceOverview = async (req, res) => {
           { assignedFieldExecutive: { $in: companyUserIds } },
         ],
       }
-      : { _id: null };
+      : { companyId: req.user.companyId, _id: null };
 
     const leadRows = await Lead.find(leadScopeQuery)
       .select("_id status createdAt updatedAt assignedTo")
@@ -1132,7 +1159,10 @@ exports.assignLead = async (req, res) => {
     const { leadId } = req.params;
     const { executiveId } = req.body;
 
-    const lead = await Lead.findById(leadId);
+    const lead = await Lead.findOne({
+      _id: leadId,
+      companyId: req.user.companyId,
+    });
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -1201,7 +1231,7 @@ exports.assignLead = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
 
     return res.json({
       message: "Lead assigned successfully",
@@ -1258,7 +1288,10 @@ exports.addRelatedPropertyToLead = async (req, res) => {
       return res.status(400).json({ message: "Only available properties can be linked" });
     }
 
-    const lead = await Lead.findById(leadId);
+    const lead = await Lead.findOne({
+      _id: leadId,
+      companyId: req.user.companyId,
+    });
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -1269,7 +1302,7 @@ exports.addRelatedPropertyToLead = async (req, res) => {
     const inventoryIdStr = String(inventory._id);
 
     if (existingIds.includes(inventoryIdStr)) {
-      const populatedLead = await getLeadViewById(lead._id);
+      const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
       return res.json({
         message: "Property already linked to this lead",
         lead: populatedLead,
@@ -1289,7 +1322,7 @@ exports.addRelatedPropertyToLead = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
 
     return res.json({
       message: "Property linked to lead",
@@ -1338,7 +1371,10 @@ exports.selectRelatedPropertyForLead = async (req, res) => {
       return res.status(404).json({ message: "Inventory not found" });
     }
 
-    const lead = await Lead.findById(leadId);
+    const lead = await Lead.findOne({
+      _id: leadId,
+      companyId: req.user.companyId,
+    });
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -1355,7 +1391,7 @@ exports.selectRelatedPropertyForLead = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
     return res.json({
       message: "Property selected",
       lead: populatedLead,
@@ -1391,7 +1427,10 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    const lead = await Lead.findById(leadId);
+    const lead = await Lead.findOne({
+      _id: leadId,
+      companyId: req.user.companyId,
+    });
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -1402,7 +1441,7 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
     const targetInventoryId = String(inventoryId);
 
     if (!existingIds.includes(targetInventoryId)) {
-      const populatedLead = await getLeadViewById(lead._id);
+      const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
       return res.json({
         message: "Property is already not linked",
         lead: populatedLead,
@@ -1453,7 +1492,7 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
     return res.json({
       message: "Property removed",
       lead: populatedLead,
@@ -1484,6 +1523,7 @@ exports.getLeadPaymentRequests = async (req, res) => {
         : 200;
 
     const query = {
+      companyId: req.user.companyId,
       "dealPayment.approvalStatus": { $in: DEAL_PAYMENT_APPROVAL_VALUES },
     };
 
@@ -1533,7 +1573,10 @@ exports.updateLeadBasics = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    const lead = await Lead.findById(leadId);
+    const lead = await Lead.findOne({
+      _id: leadId,
+      companyId: req.user.companyId,
+    });
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -1584,7 +1627,10 @@ exports.updateLeadBasics = async (req, res) => {
     }
 
     if (!updates.length) {
-      return res.json({ message: "No profile changes", lead: await getLeadViewById(lead._id) });
+      return res.json({
+        message: "No profile changes",
+        lead: await getLeadViewById(lead._id, req.user.companyId),
+      });
     }
 
     await lead.save();
@@ -1594,7 +1640,7 @@ exports.updateLeadBasics = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
     return res.json({
       message: "Lead profile updated",
       lead: populatedLead,
@@ -1669,7 +1715,10 @@ exports.updateLeadStatus = async (req, res) => {
       });
     }
 
-    const lead = await Lead.findById(leadId);
+    const lead = await Lead.findOne({
+      _id: leadId,
+      companyId: req.user.companyId,
+    });
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -1696,6 +1745,7 @@ exports.updateLeadStatus = async (req, res) => {
 
         const existingLeadWithPhone = await Lead.findOne({
           _id: { $ne: lead._id },
+          companyId: req.user.companyId,
           phone: normalizedPhone,
         })
           .select("_id")
@@ -2112,7 +2162,7 @@ exports.updateLeadStatus = async (req, res) => {
         })),
     );
 
-    const populatedLead = await getLeadViewById(lead._id);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
 
     return res.json({
       message: "Lead status updated",
@@ -2317,7 +2367,10 @@ exports.approveLeadStatusRequest = async (req, res) => {
       return res.status(404).json({ message: "Pending request not found" });
     }
 
-    const lead = await Lead.findById(request.lead);
+    const lead = await Lead.findOne({
+      _id: request.lead,
+      companyId: req.user.companyId,
+    });
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -2351,7 +2404,7 @@ exports.approveLeadStatusRequest = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
     const populatedRequest = await LeadStatusRequest.findById(request._id)
       .populate("requestedBy", "name role")
       .populate("reviewedBy", "name role")
@@ -2435,6 +2488,15 @@ exports.rejectLeadStatusRequest = async (req, res) => {
 exports.getLeadActivity = async (req, res) => {
   try {
     const { leadId } = req.params;
+    if (!isValidObjectId(leadId)) {
+      return res.status(400).json({ message: "Invalid lead id" });
+    }
+
+    const accessibleLead = await findAccessibleLeadById({ leadId, user: req.user });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
     const pagination = parsePagination(req.query, {
       defaultLimit: Number.parseInt(process.env.LEAD_ACTIVITY_PAGE_LIMIT, 10) || 40,
       maxLimit: Number.parseInt(process.env.LEAD_ACTIVITY_PAGE_MAX_LIMIT, 10) || 200,
@@ -2487,6 +2549,11 @@ exports.getLeadActivity = async (req, res) => {
 
 exports.getTodayFollowUps = async (req, res) => {
   try {
+    const scope = await buildLeadQueryForUser(req.user);
+    if (!scope) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
@@ -2494,12 +2561,9 @@ exports.getTodayFollowUps = async (req, res) => {
     todayEnd.setHours(23, 59, 59, 999);
 
     const query = {
+      ...scope,
       nextFollowUp: { $gte: todayStart, $lte: todayEnd },
     };
-
-    if (EXECUTIVE_ROLES.includes(req.user.role)) {
-      query.assignedTo = req.user._id;
-    }
 
     const pagination = parsePagination(req.query, {
       defaultLimit: Number.parseInt(process.env.FOLLOWUP_PAGE_LIMIT, 10) || 50,

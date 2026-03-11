@@ -1,4 +1,5 @@
 import axios from "axios";
+import { buildTenantAwarePath, resolveTenantSlugFromWindow } from "../utils/tenantRouting";
 
 const configuredBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim();
 const defaultBaseUrl = import.meta.env.DEV
@@ -23,6 +24,23 @@ const clearSession = () => {
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("role");
   localStorage.removeItem("user");
+};
+
+const applyTenantHeader = (config = {}) => {
+  const tenantSlug = resolveTenantSlugFromWindow();
+  const headers = { ...(config.headers || {}) };
+
+  if (tenantSlug) {
+    headers["X-Tenant-Slug"] = tenantSlug;
+  } else {
+    delete headers["X-Tenant-Slug"];
+  }
+
+  return { ...config, headers };
+};
+
+const redirectToLogin = () => {
+  window.location.href = buildTenantAwarePath("/login");
 };
 
 const persistAuthPayload = (payload = {}) => {
@@ -64,19 +82,22 @@ const refreshAccessToken = async () => {
   return nextToken;
 };
 
-// Attach auth token for requests unless already overridden.
+// Attach auth + tenant context for all API calls.
 api.interceptors.request.use((config) => {
-  if (config.headers?.Authorization) {
-    return config;
+  const tenantAwareConfig = applyTenantHeader(config);
+  if (tenantAwareConfig.headers?.Authorization) {
+    return tenantAwareConfig;
   }
 
   const token = localStorage.getItem("token");
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+    tenantAwareConfig.headers.Authorization = `Bearer ${token}`;
   }
 
-  return config;
+  return tenantAwareConfig;
 });
+
+refreshClient.interceptors.request.use((config) => applyTenantHeader(config));
 
 api.interceptors.response.use(
   (response) => response,
@@ -111,14 +132,14 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         clearSession();
-        window.location.href = "/";
+        redirectToLogin();
         return Promise.reject(refreshError);
       }
     }
 
     if (statusCode === 401 && isAuthRefreshCall) {
       clearSession();
-      window.location.href = "/";
+      redirectToLogin();
     }
 
     return Promise.reject(error);
@@ -126,3 +147,4 @@ api.interceptors.response.use(
 );
 
 export default api;
+

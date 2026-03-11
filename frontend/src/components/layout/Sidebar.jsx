@@ -9,8 +9,11 @@ import { motion } from 'framer-motion';
 
 // --- MENU CONFIGURATION ---
 const MENU_CONFIG = {
+    super_admin: [
+        { name: 'Platform', icon: ShieldCheck, path: '/super-admin' },
+    ],
     admin: [
-        { name: 'Command', icon: LayoutGrid, path: '/' },
+        { name: 'Command', icon: LayoutGrid, path: '/dashboard' },
         { name: 'Pipeline', icon: Users, path: '/leads' },
         { name: 'Schedule', icon: Calendar, path: '/calendar' },
         { name: 'Finance', icon: PieChart, path: '/finance' },
@@ -24,7 +27,7 @@ const MENU_CONFIG = {
         { name: 'System', icon: Settings, path: '/settings' },
     ],
     manager: [
-        { name: 'Overview', icon: LayoutGrid, path: '/' },
+        { name: 'Overview', icon: LayoutGrid, path: '/dashboard' },
         { name: 'Schedule', icon: Calendar, path: '/calendar' },
         { name: 'Finance', icon: PieChart, path: '/finance' },
         { name: 'Pipeline', icon: Users, path: '/leads' },
@@ -38,7 +41,7 @@ const MENU_CONFIG = {
         { name: 'System', icon: Settings, path: '/settings' },
     ],
     executive: [
-        { name: 'My Desk', icon: Briefcase, path: '/' },
+        { name: 'My Desk', icon: Briefcase, path: '/dashboard' },
         { name: 'My Leads', icon: Users, path: '/my-leads' },
         { name: 'Inventory', icon: Building2, path: '/inventory' },
         { name: 'Chat', icon: MessageSquare, path: '/chat' },
@@ -48,7 +51,7 @@ const MENU_CONFIG = {
         { name: 'Profile', icon: UserCircle2, path: '/profile' },
     ],
     field_agent: [
-        { name: 'Route', icon: Map, path: '/' },
+        { name: 'Route', icon: Map, path: '/dashboard' },
         { name: 'My Leads', icon: Users, path: '/my-leads' },
         { name: 'Inventory', icon: Building2, path: '/inventory' },
         { name: 'Chat', icon: MessageSquare, path: '/chat' },
@@ -67,6 +70,7 @@ const MENU_CONFIG = {
 const Sidebar = ({ userRole = 'manager', onLogout, theme = "light", onToggleTheme }) => {
     const isDark = theme === "dark";
     const roleKeyMap = {
+        SUPER_ADMIN: "super_admin",
         ADMIN: "admin",
         MANAGER: "manager",
         ASSISTANT_MANAGER: "manager",

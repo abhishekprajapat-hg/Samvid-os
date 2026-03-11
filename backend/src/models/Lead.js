@@ -7,6 +7,12 @@ const leadSchema = new mongoose.Schema(
     email: String,
     city: String,
     projectInterested: String,
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+      index: true,
+    },
     metaLeadId: {
       type: String,
       default: "",
@@ -213,16 +219,25 @@ const leadSchema = new mongoose.Schema(
 );
 
 leadSchema.index({ createdAt: -1 });
+leadSchema.index({ companyId: 1, createdAt: -1 });
 leadSchema.index({ createdBy: 1, createdAt: -1 });
 leadSchema.index({ assignedTo: 1, createdAt: -1 });
+leadSchema.index({ companyId: 1, assignedTo: 1, createdAt: -1 });
+leadSchema.index({ companyId: 1, status: 1, createdAt: -1 });
 leadSchema.index({ assignedManager: 1, createdAt: -1 });
 leadSchema.index({ assignedExecutive: 1, createdAt: -1 });
 leadSchema.index({ assignedFieldExecutive: 1, createdAt: -1 });
 leadSchema.index({ nextFollowUp: 1, assignedTo: 1 });
 leadSchema.index({ relatedInventoryIds: 1, createdAt: -1 });
 leadSchema.index(
-  { metaLeadId: 1 },
-  { unique: true, partialFilterExpression: { metaLeadId: { $exists: true, $ne: "" } } },
+  { companyId: 1, metaLeadId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      companyId: { $type: "objectId" },
+      metaLeadId: { $exists: true, $ne: "" },
+    },
+  },
 );
 
 module.exports = mongoose.model("Lead", leadSchema);

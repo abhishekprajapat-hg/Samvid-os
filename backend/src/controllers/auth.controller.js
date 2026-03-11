@@ -1,7 +1,9 @@
 const mongoose = require("mongoose");
 const User = require("../models/User");
+const Company = require("../models/Company");
 const generateToken = require("../utils/generateToken");
 const logger = require("../config/logger");
+const { USER_ROLES } = require("../constants/role.constants");
 const {
   issueAuthTokens,
   rotateRefreshToken,
@@ -10,6 +12,13 @@ const {
 } = require("../services/authToken.service");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+const toBoolean = (value, fallback = false) => {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw === "true" || raw === "1" || raw === "yes") return true;
+  if (raw === "false" || raw === "0" || raw === "no") return false;
+  return fallback;
+};
 
 const resolveClientIp = (req) =>
   String(
@@ -22,9 +31,11 @@ const resolveClientIp = (req) =>
     .trim();
 
 const resolveCompanyContextForLogin = async (user) => {
+  if (user.role === USER_ROLES.SUPER_ADMIN) return null;
+
   if (user.companyId) return user.companyId;
 
-  if (user.role === "ADMIN") {
+  if (user.role === USER_ROLES.ADMIN) {
     user.companyId = user._id;
     await user.save();
     return user.companyId;
@@ -41,7 +52,7 @@ const resolveCompanyContextForLogin = async (user) => {
     );
     if (!parent || !parent.isActive) break;
 
-    if (!parent.companyId && parent.role === "ADMIN") {
+    if (!parent.companyId && parent.role === USER_ROLES.ADMIN) {
       parent.companyId = parent._id;
       await parent.save();
     }
@@ -59,7 +70,7 @@ const resolveCompanyContextForLogin = async (user) => {
   return null;
 };
 
-const toAuthResponse = ({ user, tokenBundle }) => ({
+const toAuthResponse = ({ user, tokenBundle, tenant = null }) => ({
   message: "Login successful",
   token: tokenBundle.token,
   accessToken: tokenBundle.accessToken,
@@ -74,6 +85,14 @@ const toAuthResponse = ({ user, tokenBundle }) => ({
     partnerCode: user.partnerCode || null,
     canViewInventory: Boolean(user.canViewInventory),
   },
+  tenant: tenant
+    ? {
+      id: tenant._id,
+      name: tenant.name,
+      subdomain: tenant.subdomain,
+      customDomain: tenant.customDomain || "",
+    }
+    : null,
 });
 
 exports.login = async (req, res) => {
@@ -100,23 +119,49 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    if (portal === "ADMIN" && user.role !== "ADMIN") {
+    if (portal === "ADMIN" && ![USER_ROLES.ADMIN, USER_ROLES.SUPER_ADMIN].includes(user.role)) {
       return res.status(403).json({
         message: "Access denied. Admin only.",
       });
     }
 
-    if (portal === "GENERAL" && user.role === "ADMIN") {
+    if (portal === "GENERAL" && [USER_ROLES.ADMIN, USER_ROLES.SUPER_ADMIN].includes(user.role)) {
       return res.status(403).json({
         message: "Admin must login via admin portal.",
       });
     }
 
-    const companyId = user.companyId || (await resolveCompanyContextForLogin(user));
-    if (!companyId) {
-      return res.status(403).json({
-        message: "Company context is missing for this account",
-      });
+    const isSuperAdmin = user.role === USER_ROLES.SUPER_ADMIN;
+    const requireTenantContext = toBoolean(process.env.SAAS_REQUIRE_TENANT_HOST, false);
+
+    if (!isSuperAdmin) {
+      const companyId = user.companyId || (await resolveCompanyContextForLogin(user));
+      if (!companyId) {
+        return res.status(403).json({
+          message: "Company context is missing for this account",
+        });
+      }
+
+      if (req.tenant?._id && String(req.tenant._id) !== String(companyId)) {
+        return res.status(403).json({
+          message: "Tenant mismatch. Use your own company route /<company-slug>/login.",
+        });
+      }
+
+      if (requireTenantContext && !req.tenant?._id) {
+        return res.status(403).json({
+          message: "Tenant context is required for this login. Use /<company-slug>/login",
+        });
+      }
+
+      const company = req.tenant?._id && String(req.tenant._id) === String(companyId)
+        ? req.tenant
+        : await Company.findById(companyId).select("_id status name subdomain customDomain").lean();
+      if (!company || company.status !== "ACTIVE") {
+        return res.status(403).json({
+          message: "Tenant is inactive. Please contact platform support.",
+        });
+      }
     }
 
     const tokenBundle = await issueAuthTokens({
@@ -125,7 +170,7 @@ exports.login = async (req, res) => {
       userAgent: req.headers["user-agent"] || "",
     });
 
-    return res.json(toAuthResponse({ user, tokenBundle }));
+    return res.json(toAuthResponse({ user, tokenBundle, tenant: req.tenant || null }));
   } catch (error) {
     logger.error({
       requestId: req.requestId || null,
@@ -227,6 +272,14 @@ exports.getMe = async (req, res) => {
         partnerCode: req.user.partnerCode || null,
         canViewInventory: Boolean(req.user.canViewInventory),
       },
+      tenant: req.tenant
+        ? {
+          id: req.tenant._id,
+          name: req.tenant.name,
+          subdomain: req.tenant.subdomain,
+          customDomain: req.tenant.customDomain || "",
+        }
+        : null,
     });
   } catch (error) {
     logger.error({

@@ -43,7 +43,10 @@ const userSchema = new mongoose.Schema(
 
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true,
+      required() {
+        return this.role !== USER_ROLES.SUPER_ADMIN;
+      },
+      default: null,
       index: true,
       ref: "Company",
     },
