@@ -51,6 +51,8 @@ const formatDate = (value?: string) => {
   });
 };
 
+const isRouteMissingError = (error: unknown) => /route not found|404|not found/i.test(toErrorMessage(error, ""));
+
 export const NotificationsScreen = () => {
   const { role } = useAuth();
   const isAdmin = role === "ADMIN";
@@ -113,9 +115,18 @@ export const NotificationsScreen = () => {
       setError("");
 
       const [leadRows, leadHistoryRows, inventoryRows] = await Promise.all([
-        getPendingLeadStatusRequests(),
-        getLeadStatusRequests(),
-        getPendingInventoryRequests(),
+        getPendingLeadStatusRequests().catch((err) => {
+          if (!isRouteMissingError(err)) throw err;
+          return [];
+        }),
+        getLeadStatusRequests().catch((err) => {
+          if (!isRouteMissingError(err)) throw err;
+          return [];
+        }),
+        getPendingInventoryRequests().catch((err) => {
+          if (!isRouteMissingError(err)) throw err;
+          return [];
+        }),
       ]);
 
       setLeadRequests(Array.isArray(leadRows) ? leadRows : []);
@@ -209,7 +220,6 @@ export const NotificationsScreen = () => {
 
   return (
     <Screen title="Notifications" subtitle="Approval Requests + Reviews" loading={loading} error={error}>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
       {success ? <Text style={styles.success}>{success}</Text> : null}
 
       <AppCard style={styles.summaryCard as object}>

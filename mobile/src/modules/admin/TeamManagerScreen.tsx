@@ -17,6 +17,7 @@ import {
   View,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Screen } from "../../components/common/Screen";
 import { useAuth } from "../../context/AuthContext";
 import { createUser, deleteUser, getUsers, rebalanceExecutives, updateUserById } from "../../services/userService";
@@ -82,6 +83,7 @@ const getRefId = (value: { _id?: string } | string | null | undefined) => {
 
 export const TeamManagerScreen = () => {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const { role, user } = useAuth();
   const isAdmin = role === "ADMIN";
   const canManageUsers = isAdmin || MANAGEMENT_ROLES.has(String(role || ""));
@@ -100,6 +102,7 @@ export const TeamManagerScreen = () => {
   const [editOpen, setEditOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState("");
   const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editRole, setEditRole] = useState("EXECUTIVE");
   const [editManagerId, setEditManagerId] = useState("");
@@ -260,6 +263,7 @@ export const TeamManagerScreen = () => {
 
     setEditingUserId(targetId);
     setEditName(String(target.name || ""));
+    setEditEmail(String(target.email || ""));
     setEditPhone(String(target.phone || ""));
     setEditRole(String(target.role || "EXECUTIVE"));
     setEditManagerId(typeof target.parentId === "object" ? String(target.parentId?._id || "") : String(target.parentId || ""));
@@ -281,6 +285,7 @@ export const TeamManagerScreen = () => {
       setEditOpen(false);
       setEditingUserId("");
       setEditName("");
+      setEditEmail("");
       setEditPhone("");
       setEditRole("EXECUTIVE");
       setEditManagerId("");
@@ -294,6 +299,7 @@ export const TeamManagerScreen = () => {
       setEditSaving(true);
       const payload: Record<string, unknown> = {
         name: editName.trim(),
+        email: editEmail.trim().toLowerCase(),
         phone: editPhone.trim(),
         isActive: editActive,
       };
@@ -419,23 +425,29 @@ export const TeamManagerScreen = () => {
     <Screen title="Team Manager" subtitle="Users + Workload" loading={loading} error={error}>
       {success ? <Text style={styles.success}>{success}</Text> : null}
 
-      <ScrollView
-        ref={scrollRef}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
-        contentContainerStyle={styles.container}
+      <KeyboardAvoidingView
+        style={styles.contentWrap}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 84 : 8}
       >
-        <View style={styles.topRow}>
-          <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} />
-          {isAdmin ? (
-            <AppButton
-              title={rebalancing ? "Rebalancing..." : "Rebalance Executives"}
-              variant="ghost"
-              onPress={rebalance}
-              disabled={rebalancing}
-            />
-          ) : null}
-        </View>
+        <ScrollView
+          ref={scrollRef}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+          contentContainerStyle={[styles.container, { paddingBottom: 14 + Math.max(insets.bottom, 14) }]}
+        >
+          <View style={styles.topRow}>
+            <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} />
+            {isAdmin ? (
+              <AppButton
+                title={rebalancing ? "Rebalancing..." : "Rebalance Executives"}
+                variant="ghost"
+                onPress={rebalance}
+                disabled={rebalancing}
+              />
+            ) : null}
+          </View>
 
         <View style={styles.metricsWrap}>
           {metricOptions.map((metric) => (
@@ -538,15 +550,6 @@ export const TeamManagerScreen = () => {
                   />
                   {isAdmin ? (
                     <AppButton
-                      title="Open Full Editor"
-                      variant="ghost"
-                      style={styles.editBtn as object}
-                      onPress={() => navigation.navigate("UserDetailsEditor", { userId })}
-                      disabled={!userId}
-                    />
-                  ) : null}
-                  {isAdmin ? (
-                    <AppButton
                       title={isSelf ? "Current User" : deletingId === userId ? "Deleting..." : "Delete"}
                       variant="ghost"
                       style={[styles.deleteBtn as object, (isSelf || deletingId === userId) && styles.deleteBtnDisabled]}
@@ -594,51 +597,66 @@ export const TeamManagerScreen = () => {
           />
         )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <Modal visible={editOpen} transparent animationType="none" onRequestClose={closeEditSheet}>
         <Pressable style={styles.sheetBackdrop} onPress={closeEditSheet} />
-        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <KeyboardAvoidingView
+          style={[styles.sheetWrap, { paddingBottom: Math.max(insets.bottom, 10) }]}
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 92 : 8}
+        >
           <Animated.View style={[styles.sheetCard, { transform: [{ translateY: slideAnim }] }]}>
-            <Text style={styles.sheetTitle}>Edit User</Text>
-            <AppInput style={styles.input as object} value={editName} onChangeText={setEditName} placeholder="Name" />
-            <AppInput style={styles.input as object} value={editPhone} onChangeText={setEditPhone} placeholder="Phone" keyboardType="phone-pad" />
+            <ScrollView contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
+              <Text style={styles.sheetTitle}>Edit User</Text>
+              <AppInput style={styles.input as object} value={editName} onChangeText={setEditName} placeholder="Name" />
+              <AppInput
+                style={styles.input as object}
+                value={editEmail}
+                onChangeText={setEditEmail}
+                placeholder="Email"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <AppInput style={styles.input as object} value={editPhone} onChangeText={setEditPhone} placeholder="Phone" keyboardType="phone-pad" />
 
-            {isAdmin ? (
-              <>
-                <Text style={styles.label}>Role</Text>
-                <View style={styles.roleRow}>
-                  {EDIT_ROLE_OPTIONS.map((opt) => (
-                    <AppChip key={opt.value} label={opt.label} active={editRole === opt.value} onPress={() => setEditRole(opt.value)} />
-                  ))}
-                </View>
-                {EXECUTIVE_ROLES.has(editRole) ? (
-                  <>
-                    <Text style={styles.label}>Manager</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.roleRow}>
-                      <AppChip label="No Change" active={editManagerId === ""} onPress={() => setEditManagerId("")} />
-                      {editManagerOptions.map((manager) => (
-                        <AppChip
-                          key={String(manager._id)}
-                          label={manager.name}
-                          active={editManagerId === manager._id}
-                          onPress={() => setEditManagerId(String(manager._id || ""))}
-                        />
-                      ))}
-                    </ScrollView>
-                  </>
-                ) : null}
-              </>
-            ) : null}
+              {isAdmin ? (
+                <>
+                  <Text style={styles.label}>Role</Text>
+                  <View style={styles.roleRow}>
+                    {EDIT_ROLE_OPTIONS.map((opt) => (
+                      <AppChip key={opt.value} label={opt.label} active={editRole === opt.value} onPress={() => setEditRole(opt.value)} />
+                    ))}
+                  </View>
+                  {EXECUTIVE_ROLES.has(editRole) ? (
+                    <>
+                      <Text style={styles.label}>Manager</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.roleRow}>
+                        <AppChip label="No Change" active={editManagerId === ""} onPress={() => setEditManagerId("")} />
+                        {editManagerOptions.map((manager) => (
+                          <AppChip
+                            key={String(manager._id)}
+                            label={manager.name}
+                            active={editManagerId === manager._id}
+                            onPress={() => setEditManagerId(String(manager._id || ""))}
+                          />
+                        ))}
+                      </ScrollView>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
 
-            <View style={styles.switchRow}>
-              <Text style={styles.meta}>Active</Text>
-              <Switch value={editActive} onValueChange={setEditActive} />
-            </View>
-            <View style={styles.sheetActions}>
-              <AppButton title="Cancel" variant="ghost" onPress={closeEditSheet} />
-              <AppButton title={editSaving ? "Saving..." : "Save"} onPress={saveEditedUser} disabled={editSaving} />
-            </View>
+              <View style={styles.switchRow}>
+                <Text style={styles.meta}>Active</Text>
+                <Switch value={editActive} onValueChange={setEditActive} />
+              </View>
+              <View style={styles.sheetActions}>
+                <AppButton title="Cancel" variant="ghost" onPress={closeEditSheet} />
+                <AppButton title={editSaving ? "Saving..." : "Save"} onPress={saveEditedUser} disabled={editSaving} />
+              </View>
+            </ScrollView>
           </Animated.View>
         </KeyboardAvoidingView>
       </Modal>
@@ -664,6 +682,9 @@ const Metric = ({
 );
 
 const styles = StyleSheet.create({
+  contentWrap: {
+    flex: 1,
+  },
   container: {
     gap: 10,
     paddingBottom: 14,
@@ -747,6 +768,7 @@ const styles = StyleSheet.create({
   input: { marginBottom: 8 },
   roleRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
     paddingBottom: 2,
   },
@@ -777,6 +799,7 @@ const styles = StyleSheet.create({
   },
   sheetCard: {
     marginTop: "auto",
+    maxHeight: "82%",
     backgroundColor: "#fff",
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -784,6 +807,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e2e8f0",
     gap: 6,
+  },
+  sheetWrap: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
+  sheetContent: {
+    paddingBottom: 8,
   },
   sheetTitle: {
     fontWeight: "700",

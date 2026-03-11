@@ -59,7 +59,6 @@ export const MoreMenuScreen = ({ navigation }: any) => {
         <Row label="Profile" onPress={() => open("Profile")} />
         {isManagement ? <Row label="Users" onPress={() => open("Users")} /> : null}
         {isManagement ? <Row label="Settings" onPress={() => open("Settings")} /> : null}
-        {isAdmin ? <Row label="Admin Console" onPress={() => open("AdminConsole")} /> : null}
         {isAdmin ? <Row label="Field Ops" onPress={() => open("Field Ops")} /> : null}
       </AppCard>
     </Screen>

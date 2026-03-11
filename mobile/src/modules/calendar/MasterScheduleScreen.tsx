@@ -4,7 +4,7 @@ import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/dat
 import { Ionicons } from "@expo/vector-icons";
 import { Screen } from "../../components/common/Screen";
 import { useAuth } from "../../context/AuthContext";
-import { addLeadDiaryEntry, getAllLeads, getLeadDiary, updateLeadStatus, type LeadDiaryEntry } from "../../services/leadService";
+import { addLeadDiaryEntry, clearLeadFollowUp, getAllLeads, getLeadDiary, updateLeadStatus, type LeadDiaryEntry } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
 
@@ -148,7 +148,10 @@ export const MasterScheduleScreen = () => {
   const deleteFollowUp = async (lead: Lead) => {
     try {
       setDeletingId(lead._id); setError("");
-      const updated = await updateLeadStatus(lead._id, { status: String(lead.status || "NEW"), nextFollowUp: null as any });
+      const updated = await clearLeadFollowUp(lead._id, String(lead.status || "NEW"));
+      if (!updated || updated.nextFollowUp) {
+        throw new Error("Follow-up not cleared");
+      }
       setLeads((p) => p.map((r) => (String(r._id) === String(updated._id) ? updated : r)));
       setOk("Follow-up deleted");
     } catch (e) {
@@ -336,7 +339,7 @@ const styles = StyleSheet.create({
   addDiary: { marginTop: 6, alignSelf: "flex-end", minWidth: 90, height: 30, borderRadius: 8, backgroundColor: "#38bdf8", alignItems: "center", justifyContent: "center" }, addDiaryText: { color: "#fff", fontSize: 12, fontWeight: "700" }, emptyInline: { color: "#64748b", fontSize: 12, marginTop: 8 },
   diaryList: { marginTop: 8, gap: 6 }, diaryItem: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#f8fafc", padding: 8 }, diaryItemText: { color: "#334155", fontSize: 12 }, diaryItemMeta: { marginTop: 3, color: "#64748b", fontSize: 10 },
   modal: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 12 }, modalCard: { borderWidth: 1, borderColor: "#dbe3ee", borderRadius: 12, backgroundColor: "#fff", padding: 12, maxHeight: "88%" }, modalInput: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, paddingHorizontal: 10, backgroundColor: "#fff" }, detailsScroll: { marginTop: 8, maxHeight: "88%" }, detailsContent: { paddingBottom: 6 },
-  webNativeDateTimeInput: { marginTop: 10, width: "100%", minHeight: 40, border: "1px solid #cbd5e1", borderRadius: 9, padding: "8px 10px", fontSize: 14, color: "#0f172a", backgroundColor: "#fff" },
+  webNativeDateTimeInput: { marginTop: 10, width: "100%", minHeight: 40, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14, color: "#0f172a", backgroundColor: "#fff" },
   modalRow: { marginTop: 10, flexDirection: "row", justifyContent: "flex-end", gap: 8 }, modalBtn: { minWidth: 88, height: 34, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, modalBtnText: { color: "#334155", fontSize: 12, fontWeight: "700" },
   leadRow: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 10, backgroundColor: "#fff", padding: 10, marginBottom: 6 }, leadRowA: { borderColor: "#38bdf8", backgroundColor: "#f0f9ff" }, leadName: { color: "#0f172a", fontSize: 14, fontWeight: "700" }, leadMeta: { marginTop: 3, color: "#64748b", fontSize: 11 },
   del: { marginTop: 8, alignSelf: "flex-end", minWidth: 120, height: 34, borderWidth: 1, borderColor: "#fca5a5", borderRadius: 9, backgroundColor: "#fff1f2", alignItems: "center", justifyContent: "center" }, delText: { color: "#dc2626", fontSize: 12, fontWeight: "700" },

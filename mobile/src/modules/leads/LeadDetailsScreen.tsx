@@ -88,10 +88,14 @@ const toLocalTenDigitPhone = (value?: string) => {
 };
 
 const toWhatsAppPhone = (value?: string) => {
-  const localTen = toLocalTenDigitPhone(value);
-  if (!localTen) return "";
-  return `91${localTen}`;
+  const digits = toDigits(value);
+  if (!digits) return "";
+  if (digits.length === 10) return `91${digits}`;
+  if (digits.length === 11 && digits.startsWith("0")) return `91${digits.slice(1)}`;
+  if (digits.length >= 11) return digits.slice(0, 15);
+  return "";
 };
+const IS_WEB = Platform.OS === ("web" as any);
 
 const formatFollowUpInput = (value?: string) => {
   if (!value) return "";
@@ -894,7 +898,9 @@ export const LeadDetailsScreen = () => {
 
   const buildProposalText = useCallback(() => {
     if (!lead) return "";
-    const selectedRows = selectedProposalProperties;
+    const selectedRows = selectedProposalProperties.length > 0
+      ? selectedProposalProperties
+      : selectedLeadRelatedInventories;
     const today = formatProposalDate(new Date());
     const validity = Number.parseInt(proposalValidityDays, 10);
     const lines = [
@@ -925,7 +931,7 @@ export const LeadDetailsScreen = () => {
     lines.push("", "Regards,", "Samvid Realty");
 
     return lines.join("\n");
-  }, [lead, proposalSpecialNote, proposalValidityDays, selectedProposalProperties]);
+  }, [lead, proposalSpecialNote, proposalValidityDays, selectedLeadRelatedInventories, selectedProposalProperties]);
 
   const buildProposalHtml = useCallback(() => {
     const proposalText = buildProposalText();
@@ -948,7 +954,7 @@ export const LeadDetailsScreen = () => {
 
   const copyProposalText = async () => {
     const message = buildProposalText();
-    if (!selectedProposalProperties.length) {
+    if (!selectedLeadRelatedInventories.length) {
       Alert.alert("Select property", "Please select at least one property for proposal.");
       return;
     }
@@ -982,11 +988,17 @@ export const LeadDetailsScreen = () => {
         // fall through
       }
     }
+    if (Platform.OS !== "web") {
+      await Share.share({ title: "Proposal Text", message }).catch(() => {
+        setError("Unable to share/copy proposal text");
+      });
+      return;
+    }
     Alert.alert("Copy unavailable", "Clipboard copy is not supported on this device/browser.");
   };
 
   const generateProposalPdf = async () => {
-    if (!selectedProposalProperties.length) {
+    if (!selectedLeadRelatedInventories.length) {
       Alert.alert("Select property", "Please select at least one property for proposal.");
       return "";
     }
@@ -1026,7 +1038,7 @@ export const LeadDetailsScreen = () => {
       }
     };
 
-    const addLine = (line) => {
+    const addLine = (line: string) => {
       const text = String(line || "");
       const lines = doc.splitTextToSize(text, contentWidth);
       const lineHeight = 15;
@@ -1098,7 +1110,7 @@ export const LeadDetailsScreen = () => {
     const pdfUri = await generateProposalPdf();
     if (!pdfUri) return false;
 
-    if (Platform.OS !== "web" && options.preferNativeShareOnWeb && nav?.navigator?.share) {
+    if (!IS_WEB && options.preferNativeShareOnWeb && nav?.navigator?.share) {
       try {
         const { file } = await buildWebShareFile(fileName);
         await nav.navigator.share({
@@ -1112,7 +1124,7 @@ export const LeadDetailsScreen = () => {
       }
     }
 
-    if (Platform.OS !== "web" && await Sharing.isAvailableAsync()) {
+    if (!IS_WEB && await Sharing.isAvailableAsync()) {
       await Sharing.shareAsync(pdfUri, {
         mimeType: "application/pdf",
         dialogTitle: options.title,
@@ -1145,7 +1157,7 @@ export const LeadDetailsScreen = () => {
       const pdfUri = await generateProposalPdf();
       if (!pdfUri) return;
 
-      if (Platform.OS !== "web" && await Sharing.isAvailableAsync()) {
+      if (!IS_WEB && await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(pdfUri, {
           mimeType: "application/pdf",
           dialogTitle: "Save/Download Proposal PDF",
@@ -1182,7 +1194,7 @@ export const LeadDetailsScreen = () => {
   };
 
   const shareProposalWhatsApp = async () => {
-    if (!selectedProposalProperties.length) {
+    if (!selectedLeadRelatedInventories.length) {
       Alert.alert("Select property", "Please select at least one property for proposal.");
       return;
     }
@@ -1222,7 +1234,7 @@ export const LeadDetailsScreen = () => {
   };
 
   const shareProposalEmail = async () => {
-    if (!selectedProposalProperties.length) {
+    if (!selectedLeadRelatedInventories.length) {
       Alert.alert("Select property", "Please select at least one property for proposal.");
       return;
     }
@@ -3387,6 +3399,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 8,
+    color: "#0f172a",
+    fontSize: 12,
     textAlignVertical: "top",
   },
   diarySaveBtn: {

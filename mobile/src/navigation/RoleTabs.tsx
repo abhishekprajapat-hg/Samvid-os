@@ -1,7 +1,7 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Pressable, Text } from "react-native";
+import { Platform, Pressable, Text } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../context/AuthContext";
@@ -66,7 +66,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
   const { logout } = useAuth();
   const { chatUnreadTotal, notificationUnreadTotal } = useRealtimeAlerts();
   const insets = useSafeAreaInsets();
-  const bottomSpacing = Math.max(insets.bottom, 10);
+  const bottomSpacing = Math.max(insets.bottom, Platform.OS === "android" ? 16 : 10);
   const chatBadge = toTabBadge(chatUnreadTotal);
   const notificationBadge = toTabBadge(notificationUnreadTotal);
 
@@ -107,6 +107,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         <Tab.Screen name="Reports" component={IntelligenceReportsScreen} />
         <Tab.Screen name="Targets" component={PerformanceScreen} />
         <Tab.Screen name="Finance" component={FinancialCoreScreen} />
+        <Tab.Screen name="Calendar" component={MasterScheduleScreen} />
         <Tab.Screen
           name="Notifications"
           component={NotificationsScreen}

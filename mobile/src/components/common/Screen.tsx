@@ -1,5 +1,6 @@
 import React from "react";
-import { ActivityIndicator, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, radii, spacing, typography } from "../../theme/tokens";
 
 export const Screen = ({ title, subtitle, loading, error, children }: {
@@ -8,24 +9,28 @@ export const Screen = ({ title, subtitle, loading, error, children }: {
   loading?: boolean;
   error?: string;
   children?: React.ReactNode;
-}) => (
-  <SafeAreaView style={styles.root}>
-    <View style={styles.header}>
-      <Text style={styles.title}>{title}</Text>
-      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-    </View>
-
-    {error ? <Text style={styles.error}>{error}</Text> : null}
-
-    {loading ? (
-      <View style={styles.loadingWrap}>
-        <ActivityIndicator size="large" color={colors.primary} />
+}) => {
+  const insets = useSafeAreaInsets();
+  const androidBottom = Platform.OS === "android" ? 16 : 0;
+  return (
+    <SafeAreaView style={styles.root}>
+      <View style={styles.header}>
+        <Text style={styles.title}>{title}</Text>
+        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
       </View>
-    ) : (
-      <View style={styles.body}>{children}</View>
-    )}
-  </SafeAreaView>
-);
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+
+      {loading ? (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      ) : (
+        <View style={[styles.body, { paddingBottom: 12 + Math.max(insets.bottom, androidBottom) }]}>{children}</View>
+      )}
+    </SafeAreaView>
+  );
+};
 
 const styles = StyleSheet.create({
   root: {

@@ -71,6 +71,41 @@ export const updateLeadStatus = async (leadId: string, payload: Partial<Lead>): 
   return res.data?.lead;
 };
 
+const isFollowUpCleared = (lead: any) => {
+  const value = lead?.nextFollowUp;
+  return value === null || value === undefined || String(value).trim() === "";
+};
+
+export const clearLeadFollowUp = async (leadId: string, status = "NEW"): Promise<Lead | null> => {
+  let lastLead: Lead | null = null;
+
+  try {
+    const res = await api.patch(`/leads/${leadId}/status`, { status, nextFollowUp: null });
+    lastLead = res.data?.lead || null;
+    if (isFollowUpCleared(lastLead)) return lastLead;
+  } catch {}
+
+  try {
+    const res = await api.patch(`/leads/${leadId}/status`, { status, nextFollowUp: "" });
+    lastLead = res.data?.lead || null;
+    if (isFollowUpCleared(lastLead)) return lastLead;
+  } catch {}
+
+  try {
+    const res = await api.patch(`/leads/${leadId}`, { nextFollowUp: null });
+    lastLead = res.data?.lead || null;
+    if (isFollowUpCleared(lastLead)) return lastLead;
+  } catch {}
+
+  try {
+    const res = await api.patch(`/leads/${leadId}`, { nextFollowUp: "" });
+    lastLead = res.data?.lead || null;
+    if (isFollowUpCleared(lastLead)) return lastLead;
+  } catch {}
+
+  return lastLead;
+};
+
 export const assignLead = async (leadId: string, executiveId: string): Promise<Lead> => {
   const res = await api.patch(`/leads/${leadId}/assign`, { executiveId });
   return res.data?.lead;

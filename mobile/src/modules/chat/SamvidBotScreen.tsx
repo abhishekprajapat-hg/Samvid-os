@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppInput } from "../../components/common/ui";
 import { askSamvid } from "../../services/samvidService";
@@ -20,6 +21,7 @@ export const SamvidBotScreen = () => {
   const [error, setError] = useState("");
   const [isListening, setIsListening] = useState(false);
   const [isMicSupported, setIsMicSupported] = useState(false);
+  const [speechPermissionGranted, setSpeechPermissionGranted] = useState(false);
   const [messages, setMessages] = useState<BotMessage[]>([
     {
       id: uid(),
@@ -29,59 +31,72 @@ export const SamvidBotScreen = () => {
   ]);
 
   const scrollRef = useRef<ScrollView | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const micTranscriptRef = useRef("");
 
-  const canSend = useMemo(() => input.trim().length > 1 && !loading, [input, loading]);
+  const canSend = useMemo(() => !loading, [loading]);
 
   useEffect(() => {
-    const win = globalThis as any;
-    const SpeechRecognition = win?.SpeechRecognition || win?.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setIsMicSupported(false);
-      recognitionRef.current = null;
-      return;
-    }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.lang = "en-IN";
-      recognition.continuous = false;
-      recognition.interimResults = false;
-
-      recognition.onstart = () => setIsListening(true);
-      recognition.onend = () => setIsListening(false);
-      recognition.onerror = () => setIsListening(false);
-      recognition.onresult = (event: any) => {
-        const parts = [];
-        for (let i = event?.resultIndex || 0; i < (event?.results?.length || 0); i += 1) {
-          if (!event.results[i]?.isFinal) continue;
-          const transcript = String(event.results[i]?.[0]?.transcript || "").trim();
-          if (transcript) parts.push(transcript);
-        }
-
-        const finalText = parts.join(" ").replace(/\s+/g, " ").trim();
-        if (!finalText) return;
-        setInput((prev) => `${String(prev || "").trim()} ${finalText}`.trim());
-      };
-
-      recognitionRef.current = recognition;
-      setIsMicSupported(true);
-    } catch {
-      setIsMicSupported(false);
-      recognitionRef.current = null;
-    }
-
-    return () => {
-      if (!recognitionRef.current) return;
+    let active = true;
+    const bootstrapSpeech = async () => {
       try {
-        recognitionRef.current.stop();
+        const available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+        if (!available) {
+          if (active) {
+            setIsMicSupported(false);
+            setSpeechPermissionGranted(false);
+          }
+          return;
+        }
+        const permission = await ExpoSpeechRecognitionModule.getPermissionsAsync();
+        if (active) {
+          setSpeechPermissionGranted(Boolean(permission.granted));
+          setIsMicSupported(true);
+        }
+      } catch {
+        if (active) {
+          setIsMicSupported(false);
+          setSpeechPermissionGranted(false);
+        }
+      }
+    };
+    void bootstrapSpeech();
+    return () => {
+      active = false;
+      try {
+        ExpoSpeechRecognitionModule.abort();
       } catch {}
     };
   }, []);
 
+  useSpeechRecognitionEvent("start", () => {
+    setIsListening(true);
+    micTranscriptRef.current = "";
+  });
+
+  useSpeechRecognitionEvent("end", () => {
+    setIsListening(false);
+    micTranscriptRef.current = "";
+  });
+
+  useSpeechRecognitionEvent("error", (event) => {
+    setIsListening(false);
+    const message = String(event?.message || "").trim() || "Voice input start nahi ho paaya. Dobara try karein.";
+    setError(message);
+  });
+
+  useSpeechRecognitionEvent("result", (event) => {
+    const result = Array.isArray(event?.results) ? event.results[0] : null;
+    const transcript = String(result?.transcript || "").replace(/\s+/g, " ").trim();
+    if (!transcript) return;
+    if (!event?.isFinal && transcript === micTranscriptRef.current) return;
+    micTranscriptRef.current = transcript;
+    if (!event?.isFinal) return;
+    setInput((prev) => `${String(prev || "").trim()} ${transcript}`.trim());
+  });
+
   const sendQuery = async (queryText?: string) => {
     const query = String(queryText || input || "").trim();
-    if (query.length < 2 || loading) return;
+    if (!query || loading) return;
 
     const userMessage: BotMessage = {
       id: uid(),
@@ -122,19 +137,32 @@ export const SamvidBotScreen = () => {
     }
   };
 
-  const toggleVoice = () => {
-    if (!recognitionRef.current) {
-      setError("Voice input browser me supported nahi hai");
+  const toggleVoice = async () => {
+    if (!isMicSupported) {
+      setError("Voice input is not supported on this device.");
       return;
     }
-
     try {
       setError("");
-      if (isListening) {
-        recognitionRef.current.stop();
-      } else {
-        recognitionRef.current.start();
+      if (!speechPermissionGranted) {
+        const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+        setSpeechPermissionGranted(Boolean(permission.granted));
+        if (!permission.granted) {
+          setError("Microphone permission required for voice input.");
+          return;
+        }
       }
+      if (isListening) {
+        ExpoSpeechRecognitionModule.stop();
+        return;
+      }
+      ExpoSpeechRecognitionModule.start({
+        lang: "en-IN",
+        interimResults: true,
+        maxAlternatives: 1,
+        addsPunctuation: true,
+        continuous: false,
+      });
     } catch {
       setError("Voice input start nahi ho paaya. Dobara try karein.");
       setIsListening(false);

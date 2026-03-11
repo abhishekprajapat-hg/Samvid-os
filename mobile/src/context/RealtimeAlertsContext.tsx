@@ -7,12 +7,14 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { Audio } from "expo-av";
 import { createChatSocket } from "../services/chatSocket";
-import { getMessengerConversations } from "../services/chatService";
+import { getMessengerConversations, updateCallLog } from "../services/chatService";
 import { getPendingLeadStatusRequests } from "../services/leadService";
 import { getPendingInventoryRequests } from "../services/inventoryService";
 import { useAuth } from "./AuthContext";
 import type { ChatConversation } from "../types";
+import { navigateFromAnywhere } from "../navigation/navigationRef";
 
 type PopupKind = "CHAT" | "CALL" | "NOTIFICATION";
 
@@ -22,6 +24,13 @@ export type RealtimePopup = {
   title: string;
   message: string;
   createdAt: string;
+  callMeta?: {
+    callId: string;
+    callType: "VOICE" | "VIDEO";
+    conversationId: string;
+    callerId: string;
+    callerName: string;
+  };
 };
 
 type RealtimeAlertsContextValue = {
@@ -34,6 +43,9 @@ type RealtimeAlertsContextValue = {
   markAllChatRead: () => void;
   markNotificationsRead: () => void;
   dismissPopup: (popupId: string) => void;
+  acceptCallPopup: (popupId: string) => void;
+  rejectCallPopup: (popupId: string) => void;
+  dismissCallPopups: () => void;
   clearPopups: () => void;
 };
 
@@ -49,6 +61,9 @@ const RealtimeAlertsContext = createContext<RealtimeAlertsContextValue>({
   markAllChatRead: noop,
   markNotificationsRead: noop,
   dismissPopup: noop,
+  acceptCallPopup: noop,
+  rejectCallPopup: noop,
+  dismissCallPopups: noop,
   clearPopups: noop,
 });
 
@@ -157,6 +172,9 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
   const seenMessageIdsRef = useRef(new Set<string>());
   const seenNotificationIdsRef = useRef(new Set<string>());
   const seenCallIdsRef = useRef(new Set<string>());
+  const socketRef = useRef<ReturnType<typeof createChatSocket> | null>(null);
+  const ringtoneRef = useRef<Audio.Sound | null>(null);
+  const activeRingtoneCallIdRef = useRef("");
 
   const pushPopup = useCallback((popup: RealtimePopup) => {
     setPopupItems((prev) => [popup, ...prev].slice(0, MAX_POPUPS));
@@ -168,9 +186,99 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
     setPopupItems((prev) => prev.filter((row) => row.id !== id));
   }, []);
 
+  const stopIncomingRingtone = useCallback(async () => {
+    try {
+      if (ringtoneRef.current) {
+        await ringtoneRef.current.stopAsync().catch(() => {});
+        await ringtoneRef.current.unloadAsync().catch(() => {});
+      }
+    } finally {
+      ringtoneRef.current = null;
+      activeRingtoneCallIdRef.current = "";
+    }
+  }, []);
+
+  const playIncomingRingtone = useCallback(async (callId: string) => {
+    if (!callId || activeRingtoneCallIdRef.current === callId) return;
+    await stopIncomingRingtone();
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg" },
+        { shouldPlay: true, isLooping: true, volume: 1.0 },
+      );
+      ringtoneRef.current = sound;
+      activeRingtoneCallIdRef.current = callId;
+    } catch {
+      // ringtone is optional
+    }
+  }, [stopIncomingRingtone]);
+
+  const dismissCallPopups = useCallback(() => {
+    setPopupItems((prev) => prev.filter((row) => row.kind !== "CALL"));
+    void stopIncomingRingtone();
+  }, [stopIncomingRingtone]);
+
+  const acceptCallPopup = useCallback((popupId: string) => {
+    const popup = popupItems.find((row) => row.id === popupId && row.kind === "CALL");
+    if (!popup?.callMeta) return;
+
+    const { callId, callType, conversationId, callerId, callerName } = popup.callMeta;
+    void stopIncomingRingtone();
+    setPopupItems((prev) => prev.filter((row) => row.id !== popupId));
+
+    socketRef.current?.emit("chat:call:accept", {
+      callId,
+      conversationId: conversationId || null,
+    });
+    socketRef.current?.emit("messenger:call:update", {
+      callId,
+      conversationId: conversationId || null,
+      recipientId: callerId || null,
+      status: "ACCEPTED",
+    });
+    void updateCallLog({ callId, status: "ACCEPTED" }).catch(() => {});
+
+    navigateFromAnywhere("CallScreen", {
+      callId,
+      callType,
+      peerId: callerId,
+      peerName: callerName,
+      conversationId,
+      incoming: true,
+    });
+  }, [popupItems, stopIncomingRingtone]);
+
+  const rejectCallPopup = useCallback((popupId: string) => {
+    const popup = popupItems.find((row) => row.id === popupId && row.kind === "CALL");
+    if (!popup?.callMeta) return;
+
+    const { callId, conversationId, callerId } = popup.callMeta;
+    void stopIncomingRingtone();
+    setPopupItems((prev) => prev.filter((row) => row.id !== popupId));
+
+    socketRef.current?.emit("chat:call:reject", {
+      callId,
+      conversationId: conversationId || null,
+    });
+    socketRef.current?.emit("messenger:call:update", {
+      callId,
+      conversationId: conversationId || null,
+      recipientId: callerId || null,
+      status: "REJECTED",
+    });
+    void updateCallLog({ callId, status: "REJECTED", durationSec: 0 }).catch(() => {});
+  }, [popupItems, stopIncomingRingtone]);
+
   const clearPopups = useCallback(() => {
     setPopupItems([]);
-  }, []);
+    void stopIncomingRingtone();
+  }, [stopIncomingRingtone]);
 
   const setActiveChatConversation = useCallback((conversationId: string) => {
     activeConversationIdRef.current = String(conversationId || "").trim();
@@ -209,7 +317,8 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
     seenMessageIdsRef.current.clear();
     seenNotificationIdsRef.current.clear();
     seenCallIdsRef.current.clear();
-  }, []);
+    void stopIncomingRingtone();
+  }, [stopIncomingRingtone]);
 
   const syncInitialCounts = useCallback(async () => {
     if (!token || !isLoggedIn) return;
@@ -238,6 +347,7 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
     void syncInitialCounts();
 
     const socket = createChatSocket(token);
+    socketRef.current = socket;
 
     const onMessage = (payload: any) => {
       const message = payload?.message || null;
@@ -296,9 +406,11 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
       }
 
       const callId = resolvedCallId || `call-${Date.now()}`;
-      const callType = String(payload?.callType || payload?.mode || "VOICE").toUpperCase() === "VIDEO" ? "Video" : "Voice";
+      const isVideo = String(payload?.callType || payload?.mode || "VOICE").toUpperCase() === "VIDEO";
+      const callType = isVideo ? "Video" : "Voice";
       const callerName = String(caller?.name || "").trim() || "Unknown";
       const conversationId = String(payload?.conversationId || payload?.roomId || "").trim();
+      const callerIdResolved = String(caller?._id || "").trim();
 
       if (conversationId && activeConversationIdRef.current !== conversationId) {
         setUnreadByConversation((prev) => ({
@@ -315,7 +427,15 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
         title: `Incoming ${callType} call`,
         message: callerName,
         createdAt: new Date().toISOString(),
+        callMeta: {
+          callId,
+          callType: isVideo ? "VIDEO" : "VOICE",
+          conversationId,
+          callerId: callerIdResolved,
+          callerName,
+        },
       });
+      void playIncomingRingtone(callId);
     };
 
     const onNotification = (eventName: string, payload: any) => {
@@ -341,6 +461,14 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
     const onLeadPayment = (payload: any) => onNotification("lead:payment:request:created", payload);
     const onInventoryCreated = (payload: any) => onNotification("inventory:request:created", payload);
     const onInventoryReviewed = (payload: any) => onNotification("inventory:request:reviewed", payload);
+    const onCallUpdate = (payload: any) => {
+      const status = String(payload?.status || payload?.event || "").toUpperCase();
+      const callId = String(payload?.callId || "").trim();
+      if (!callId || !status) return;
+      if (!["ACCEPTED", "CONNECTED", "REJECTED", "MISSED", "ENDED", "FAILED", "CANCELLED", "DISCONNECTED"].includes(status)) return;
+      setPopupItems((prev) => prev.filter((row) => row.kind !== "CALL" || row.callMeta?.callId !== callId));
+      void stopIncomingRingtone();
+    };
 
     socket.on("messenger:message:new", onMessage);
     socket.on("chat:message:new", onMessage);
@@ -351,6 +479,10 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
     socket.on("lead:payment:request:created", onLeadPayment);
     socket.on("inventory:request:created", onInventoryCreated);
     socket.on("inventory:request:reviewed", onInventoryReviewed);
+    socket.on("messenger:call:update", onCallUpdate);
+    socket.on("chat:call:accepted", onCallUpdate);
+    socket.on("chat:call:rejected", onCallUpdate);
+    socket.on("chat:call:ended", onCallUpdate);
 
     return () => {
       socket.off("messenger:message:new", onMessage);
@@ -362,10 +494,16 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
       socket.off("lead:payment:request:created", onLeadPayment);
       socket.off("inventory:request:created", onInventoryCreated);
       socket.off("inventory:request:reviewed", onInventoryReviewed);
+      socket.off("messenger:call:update", onCallUpdate);
+      socket.off("chat:call:accepted", onCallUpdate);
+      socket.off("chat:call:rejected", onCallUpdate);
+      socket.off("chat:call:ended", onCallUpdate);
       socket.disconnect();
+      socketRef.current = null;
       activeConversationIdRef.current = "";
+      void stopIncomingRingtone();
     };
-  }, [isLoggedIn, markChatConversationRead, pushPopup, resetState, syncInitialCounts, token, userId]);
+  }, [isLoggedIn, markChatConversationRead, playIncomingRingtone, pushPopup, resetState, stopIncomingRingtone, syncInitialCounts, token, userId]);
 
   const chatUnreadTotal = useMemo(
     () => sumUnreadCounts(unreadByConversation) + chatSignalCount,
@@ -383,17 +521,23 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
       markAllChatRead,
       markNotificationsRead,
       dismissPopup,
+      acceptCallPopup,
+      rejectCallPopup,
+      dismissCallPopups,
       clearPopups,
     }),
     [
       chatUnreadTotal,
       clearPopups,
+      acceptCallPopup,
       dismissPopup,
+      dismissCallPopups,
       markAllChatRead,
       markChatConversationRead,
       markNotificationsRead,
       notificationUnreadTotal,
       popupItems,
+      rejectCallPopup,
       setActiveChatConversation,
       syncChatUnreadFromConversations,
     ],
