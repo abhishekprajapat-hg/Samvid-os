@@ -25,6 +25,11 @@ export const deleteCompany = async (companyId) => {
   return res.data;
 };
 
+export const resetCompanyAdminPassword = async (companyId, payload = {}) => {
+  const res = await api.post(`/saas/companies/${companyId}/admin/reset-password`, payload);
+  return res.data;
+};
+
 export const getMyTenantMetaIntegration = async () => {
   const res = await api.get("/saas/tenant/meta");
   return res.data?.integration || null;

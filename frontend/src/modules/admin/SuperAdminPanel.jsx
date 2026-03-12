@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Building2, CreditCard, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
+import { Activity, Building2, CreditCard, KeyRound, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import {
   assignSubscription,
   createCompany,
@@ -9,6 +9,7 @@ import {
   getGlobalAnalytics,
   listCompanies,
   listPlans,
+  resetCompanyAdminPassword,
   updateCompany,
   updatePlan,
 } from "../../services/saasService";
@@ -113,6 +114,7 @@ const SuperAdminPanel = ({ theme = "light" }) => {
   const [assigningSubscription, setAssigningSubscription] = useState(false);
   const [updatingCompanyId, setUpdatingCompanyId] = useState("");
   const [deletingCompanyId, setDeletingCompanyId] = useState("");
+  const [resettingAdminPasswordCompanyId, setResettingAdminPasswordCompanyId] = useState("");
   const [updatingPlanId, setUpdatingPlanId] = useState("");
 
   const [usageCompanyId, setUsageCompanyId] = useState("");
@@ -386,6 +388,36 @@ const SuperAdminPanel = ({ theme = "light" }) => {
     }
   };
 
+  const handleResetCompanyAdminPassword = async (company) => {
+    const companyId = toId(company);
+    if (!companyId) return;
+
+    const companyName = String(company?.name || "this company").trim() || "this company";
+    const newPassword = window.prompt(
+      `Enter new password for ${companyName} admin (minimum 6 characters):`,
+    );
+    if (newPassword === null) return;
+
+    if (String(newPassword).length < 6) {
+      setError("Admin password must be at least 6 characters.");
+      return;
+    }
+
+    try {
+      setResettingAdminPasswordCompanyId(companyId);
+      setError("");
+      const response = await resetCompanyAdminPassword(companyId, {
+        newPassword: String(newPassword),
+      });
+      const revoked = Number(response?.revokedSessions || 0);
+      setNotice(`Admin password reset. Revoked active sessions: ${revoked}.`);
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to reset admin password"));
+    } finally {
+      setResettingAdminPasswordCompanyId("");
+    }
+  };
+
   const handleTogglePlanStatus = async (plan) => {
     const planId = toId(plan);
     if (!planId) return;
@@ -559,6 +591,19 @@ const SuperAdminPanel = ({ theme = "light" }) => {
                               : status === "ACTIVE"
                                 ? "Deactivate"
                                 : "Activate"}
+                          </button>
+                          <button
+                            type="button"
+                            className={`h-8 rounded-lg border px-3 text-xs inline-flex items-center gap-1 ${
+                              isDark
+                                ? "border-amber-500/45 text-amber-200 hover:bg-amber-500/10"
+                                : "border-amber-300 text-amber-700 hover:bg-amber-50"
+                            }`}
+                            onClick={() => handleResetCompanyAdminPassword(company)}
+                            disabled={resettingAdminPasswordCompanyId === companyId}
+                          >
+                            <KeyRound size={12} />
+                            {resettingAdminPasswordCompanyId === companyId ? "Resetting..." : "Reset Admin PW"}
                           </button>
                           <button
                             type="button"

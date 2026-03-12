@@ -62,6 +62,12 @@ router.delete(
   authMiddleware.checkRole([USER_ROLES.SUPER_ADMIN]),
   saasController.deleteCompany,
 );
+router.post(
+  "/companies/:companyId/admin/reset-password",
+  writeLimiter,
+  authMiddleware.checkRole([USER_ROLES.SUPER_ADMIN]),
+  saasController.resetCompanyAdminPassword,
+);
 
 router.get(
   "/plans",

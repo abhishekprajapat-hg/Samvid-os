@@ -19,12 +19,23 @@ const ChatMessage = require("../models/ChatMessage");
 const ChatEscalationLog = require("../models/ChatEscalationLog");
 const ChatCallHistory = require("../models/ChatCallHistory");
 const ChatConversation = require("../models/ChatConversation");
+const { revokeAllUserRefreshTokens } = require("../services/authToken.service");
 const { USER_ROLES } = require("../constants/role.constants");
 
 const toPositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+
+const resolveClientIp = (req) =>
+  String(
+    req.headers["x-forwarded-for"]
+    || req.ip
+    || req.connection?.remoteAddress
+    || "",
+  )
+    .split(",")[0]
+    .trim();
 
 const META_GRAPH_VERSION = String(process.env.META_GRAPH_VERSION || "v24.0").trim();
 const META_GRAPH_TIMEOUT_MS = toPositiveInt(process.env.META_GRAPH_TIMEOUT_MS, 10_000);
@@ -1260,6 +1271,85 @@ exports.deleteCompany = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "deleteCompany failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.resetCompanyAdminPassword = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(companyId)) {
+      return res.status(400).json({ message: "Invalid company id" });
+    }
+
+    const rawPassword = String(req.body?.newPassword || "");
+    if (!rawPassword || rawPassword.length < 6) {
+      return res.status(400).json({
+        message: "newPassword must be at least 6 characters",
+      });
+    }
+
+    const company = await Company.findById(companyId)
+      .select("_id name ownerUserId")
+      .lean();
+    if (!company) {
+      return res.status(404).json({ message: "Company not found" });
+    }
+
+    const requestedAdminId = String(req.body?.adminUserId || "").trim();
+    const adminFilter = {
+      companyId,
+      role: USER_ROLES.ADMIN,
+    };
+
+    if (requestedAdminId) {
+      if (!mongoose.Types.ObjectId.isValid(requestedAdminId)) {
+        return res.status(400).json({ message: "Invalid adminUserId" });
+      }
+      adminFilter._id = requestedAdminId;
+    } else if (mongoose.Types.ObjectId.isValid(company.ownerUserId)) {
+      adminFilter._id = company.ownerUserId;
+    }
+
+    let adminUser = await User.findOne(adminFilter).select("+password");
+    if (!adminUser && !requestedAdminId && !adminFilter._id) {
+      adminUser = await User.findOne({
+        companyId,
+        role: USER_ROLES.ADMIN,
+      })
+        .sort({ createdAt: 1 })
+        .select("+password");
+    }
+
+    if (!adminUser) {
+      return res.status(404).json({ message: "Admin user not found for this company" });
+    }
+
+    adminUser.password = rawPassword;
+    await adminUser.save();
+
+    const revokedSessions = await revokeAllUserRefreshTokens({
+      userId: adminUser._id,
+      ip: resolveClientIp(req),
+    });
+
+    return res.json({
+      message: "Company admin password reset successfully",
+      admin: {
+        id: adminUser._id,
+        name: adminUser.name,
+        email: adminUser.email,
+        companyId: adminUser.companyId,
+        isActive: Boolean(adminUser.isActive),
+      },
+      revokedSessions,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "resetCompanyAdminPassword failed",
     });
     return res.status(500).json({ message: "Server error" });
   }
