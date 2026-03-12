@@ -3,6 +3,7 @@ const Lead = require("../models/Lead");
 const Inventory = require("../models/Inventory");
 const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
+const TenantSubscription = require("../models/TenantSubscription");
 const mongoose = require("mongoose");
 const logger = require("../config/logger");
 const {
@@ -66,6 +67,7 @@ const USER_SELECTABLE_FIELDS = [
   "updatedAt",
 ];
 const USER_ROLE_VALUES = Object.values(USER_ROLES);
+const BILLABLE_SUBSCRIPTION_STATUSES = ["TRIAL", "ACTIVE", "PAST_DUE"];
 const LEADERBOARD_ROLE_OPTIONS_BY_ACTOR = Object.freeze({
   [USER_ROLES.ADMIN]: [
     USER_ROLES.MANAGER,
@@ -131,6 +133,36 @@ const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
 const toRoleExpectationLabel = (roles = []) =>
   roles.map((parentRole) => ROLE_LABELS[parentRole] || parentRole).join(" / ");
+
+const getCompanySeatSnapshot = async (companyId) => {
+  if (!isValidObjectId(companyId)) return null;
+
+  const [subscription, activeUsers] = await Promise.all([
+    TenantSubscription.findOne({
+      companyId,
+      isCurrent: true,
+      status: { $in: BILLABLE_SUBSCRIPTION_STATUSES },
+    })
+      .select("_id seats status")
+      .lean(),
+    User.countDocuments({
+      companyId,
+      isActive: true,
+    }),
+  ]);
+
+  if (!subscription) return null;
+
+  const seatLimit = Number.parseInt(subscription.seats, 10);
+  if (!Number.isFinite(seatLimit) || seatLimit < 1) return null;
+
+  return {
+    seatLimit,
+    activeUsers: Number(activeUsers || 0),
+    status: String(subscription.status || "").trim().toUpperCase(),
+    remainingSeats: Math.max(0, seatLimit - Number(activeUsers || 0)),
+  };
+};
 
 const getLeadScopeLabel = (role) => {
   if (role === USER_ROLES.ADMIN) return "Global Leads";
@@ -1077,6 +1109,20 @@ exports.createUserByRole = async (req, res) => {
       });
     }
 
+    const seatSnapshot = await getCompanySeatSnapshot(req.user.companyId);
+    if (!seatSnapshot) {
+      return res.status(403).json({
+        message:
+          "No active subscription seats found for your company. Ask Super Admin to assign seats first.",
+      });
+    }
+
+    if (seatSnapshot.activeUsers >= seatSnapshot.seatLimit) {
+      return res.status(400).json({
+        message: `Seat limit reached (${seatSnapshot.seatLimit} total users including admin).`,
+      });
+    }
+
     const requestedReportingToId = reportingToId || managerId || parentId || null;
     const allowedParentRoles = getAllowedParentRoles(role);
     let resolvedParentId = req.user._id;
@@ -1272,6 +1318,22 @@ exports.updateUserByAdmin = async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "isActive")) {
       patch.isActive = Boolean(req.body?.isActive);
+    }
+
+    if (patch.isActive === true && !user.isActive) {
+      const seatSnapshot = await getCompanySeatSnapshot(req.user.companyId);
+      if (!seatSnapshot) {
+        return res.status(403).json({
+          message:
+            "No active subscription seats found for your company. Ask Super Admin to assign seats first.",
+        });
+      }
+
+      if (seatSnapshot.activeUsers >= seatSnapshot.seatLimit) {
+        return res.status(400).json({
+          message: `Seat limit reached (${seatSnapshot.seatLimit} total users including admin).`,
+        });
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "password")) {
@@ -1962,7 +2024,7 @@ exports.updateUserByRole = async (req, res) => {
       _id: userId,
       companyId: req.user.companyId,
     })
-      .select("_id role parentId companyId")
+      .select("_id role parentId companyId isActive")
       .lean();
     if (!targetUser) {
       return res.status(404).json({ message: "User not found" });
@@ -2022,6 +2084,22 @@ exports.updateUserByRole = async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "isActive")) {
       patch.isActive = Boolean(req.body.isActive);
+    }
+
+    if (patch.isActive === true && !targetUser.isActive) {
+      const seatSnapshot = await getCompanySeatSnapshot(req.user.companyId);
+      if (!seatSnapshot) {
+        return res.status(403).json({
+          message:
+            "No active subscription seats found for your company. Ask Super Admin to assign seats first.",
+        });
+      }
+
+      if (seatSnapshot.activeUsers >= seatSnapshot.seatLimit) {
+        return res.status(400).json({
+          message: `Seat limit reached (${seatSnapshot.seatLimit} total users including admin).`,
+        });
+      }
     }
 
     if (canEditAsAdmin) {

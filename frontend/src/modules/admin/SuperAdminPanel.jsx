@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, Building2, CreditCard, RefreshCw, ShieldCheck } from "lucide-react";
+import { Activity, Building2, CreditCard, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import {
   assignSubscription,
   createCompany,
   createPlan,
+  deleteCompany,
   getCompanyUsage,
   getGlobalAnalytics,
   listCompanies,
@@ -111,6 +112,7 @@ const SuperAdminPanel = ({ theme = "light" }) => {
   const [creatingPlan, setCreatingPlan] = useState(false);
   const [assigningSubscription, setAssigningSubscription] = useState(false);
   const [updatingCompanyId, setUpdatingCompanyId] = useState("");
+  const [deletingCompanyId, setDeletingCompanyId] = useState("");
   const [updatingPlanId, setUpdatingPlanId] = useState("");
 
   const [usageCompanyId, setUsageCompanyId] = useState("");
@@ -343,6 +345,47 @@ const SuperAdminPanel = ({ theme = "light" }) => {
     }
   };
 
+  const handleDeleteCompany = async (company) => {
+    const companyId = toId(company);
+    if (!companyId) return;
+
+    const companyName = String(company?.name || "this company").trim() || "this company";
+    const confirmed = window.confirm(
+      `Delete ${companyName} permanently?\n\nThis will remove users, leads, inventory, subscriptions, and related records.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeletingCompanyId(companyId);
+      setError("");
+
+      const response = await deleteCompany(companyId);
+      const deletedUsers = Number(response?.summary?.users || 0);
+      const deletedLeads = Number(response?.summary?.leads || 0);
+      const deletedInventory = Number(response?.summary?.inventory || 0);
+      setNotice(
+        `Company deleted. Users: ${deletedUsers}, Leads: ${deletedLeads}, Inventory: ${deletedInventory}.`,
+      );
+
+      if (usageCompanyId === companyId) {
+        setUsageCompanyId("");
+        setUsage(null);
+      }
+
+      setSubscriptionForm((prev) =>
+        prev.companyId === companyId
+          ? { ...prev, companyId: "" }
+          : prev,
+      );
+
+      await loadData(true);
+    } catch (err) {
+      setError(toErrorMessage(err, "Failed to delete company"));
+    } finally {
+      setDeletingCompanyId("");
+    }
+  };
+
   const handleTogglePlanStatus = async (plan) => {
     const planId = toId(plan);
     if (!planId) return;
@@ -516,6 +559,19 @@ const SuperAdminPanel = ({ theme = "light" }) => {
                               : status === "ACTIVE"
                                 ? "Deactivate"
                                 : "Activate"}
+                          </button>
+                          <button
+                            type="button"
+                            className={`h-8 rounded-lg border px-3 text-xs inline-flex items-center gap-1 ${
+                              isDark
+                                ? "border-rose-500/45 text-rose-200 hover:bg-rose-500/10"
+                                : "border-rose-300 text-rose-700 hover:bg-rose-50"
+                            }`}
+                            onClick={() => handleDeleteCompany(company)}
+                            disabled={deletingCompanyId === companyId}
+                          >
+                            <Trash2 size={12} />
+                            {deletingCompanyId === companyId ? "Deleting..." : "Delete"}
                           </button>
                         </div>
                       </td>

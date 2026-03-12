@@ -56,6 +56,12 @@ router.patch(
   authMiddleware.checkRole([USER_ROLES.SUPER_ADMIN]),
   saasController.updateCompany,
 );
+router.delete(
+  "/companies/:companyId",
+  writeLimiter,
+  authMiddleware.checkRole([USER_ROLES.SUPER_ADMIN]),
+  saasController.deleteCompany,
+);
 
 router.get(
   "/plans",

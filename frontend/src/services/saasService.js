@@ -20,6 +20,11 @@ export const updateCompany = async (companyId, payload = {}) => {
   return res.data;
 };
 
+export const deleteCompany = async (companyId) => {
+  const res = await api.delete(`/saas/companies/${companyId}`);
+  return res.data;
+};
+
 export const getMyTenantMetaIntegration = async () => {
   const res = await api.get("/saas/tenant/meta");
   return res.data?.integration || null;

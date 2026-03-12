@@ -8,6 +8,7 @@ This documentation set is generated directly from source code to cover pages, co
 - [Web Frontend Pages and Components](./FRONTEND_WEB_DOCUMENTATION.md)
 - [Mobile Screens and Components](./MOBILE_APP_DOCUMENTATION.md)
 - [Backend Functionality and API Surface](./BACKEND_FUNCTIONALITY_DOCUMENTATION.md)
+- [End-to-End Testing Flow](./TESTING_FLOW.md)
 
 ## Scope
 - Every web page/component under `frontend/src/modules`, `frontend/src/components`, and app shell files.

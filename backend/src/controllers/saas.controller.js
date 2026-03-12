@@ -8,6 +8,17 @@ const InventoryRequest = require("../models/InventoryRequest");
 const Company = require("../models/Company");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
 const TenantSubscription = require("../models/TenantSubscription");
+const TargetAssignment = require("../models/TargetAssignment");
+const LeadStatusRequest = require("../models/LeadStatusRequest");
+const InventoryActivity = require("../models/InventoryActivity");
+const LeadActivity = require("../models/leadActivity.model");
+const LeadDiary = require("../models/leadDiary.model");
+const RefreshToken = require("../models/RefreshToken");
+const ChatRoom = require("../models/ChatRoom");
+const ChatMessage = require("../models/ChatMessage");
+const ChatEscalationLog = require("../models/ChatEscalationLog");
+const ChatCallHistory = require("../models/ChatCallHistory");
+const ChatConversation = require("../models/ChatConversation");
 const { USER_ROLES } = require("../constants/role.constants");
 
 const toPositiveInt = (value, fallback) => {
@@ -1068,6 +1079,192 @@ exports.updateCompany = async (req, res) => {
   }
 };
 
+exports.deleteCompany = async (req, res) => {
+  try {
+    const { companyId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(companyId)) {
+      return res.status(400).json({ message: "Invalid company id" });
+    }
+
+    const company = await Company.findById(companyId)
+      .select("_id name subdomain ownerUserId")
+      .lean();
+    if (!company) {
+      return res.status(404).json({ message: "Company not found" });
+    }
+
+    const [userRows, leadRows] = await Promise.all([
+      User.find({ companyId }).select("_id").lean(),
+      Lead.find({ companyId }).select("_id").lean(),
+    ]);
+
+    const userIds = userRows.map((row) => row._id);
+    const leadIds = leadRows.map((row) => row._id);
+
+    const roomQuery = [];
+    if (userIds.length) {
+      roomQuery.push(
+        { participants: { $in: userIds } },
+        { createdBy: { $in: userIds } },
+        { teamId: { $in: userIds } },
+      );
+    }
+    if (leadIds.length) {
+      roomQuery.push({ leadId: { $in: leadIds } });
+    }
+
+    const roomRows = roomQuery.length
+      ? await ChatRoom.find({ $or: roomQuery }).select("_id").lean()
+      : [];
+    const roomIds = roomRows.map((row) => row._id);
+
+    const summary = {
+      users: 0,
+      leads: 0,
+      leadActivities: 0,
+      leadDiaries: 0,
+      inventory: 0,
+      inventoryRequests: 0,
+      inventoryActivities: 0,
+      leadStatusRequests: 0,
+      targetAssignments: 0,
+      subscriptions: 0,
+      refreshTokens: 0,
+      chatRooms: 0,
+      chatMessages: 0,
+      chatEscalations: 0,
+      chatCalls: 0,
+      chatConversations: 0,
+      company: 0,
+    };
+
+    const deletionJobs = [
+      RefreshToken.deleteMany(userIds.length ? { userId: { $in: userIds } } : { _id: null }),
+      LeadActivity.deleteMany(leadIds.length ? { lead: { $in: leadIds } } : { _id: null }),
+      LeadDiary.deleteMany(leadIds.length ? { lead: { $in: leadIds } } : { _id: null }),
+      LeadStatusRequest.deleteMany({ companyId }),
+      TargetAssignment.deleteMany({ companyId }),
+      InventoryActivity.deleteMany({ companyId }),
+      InventoryRequest.deleteMany({ companyId }),
+      Inventory.deleteMany({ companyId }),
+      TenantSubscription.deleteMany({ companyId }),
+      ChatMessage.deleteMany(
+        roomIds.length || userIds.length
+          ? {
+            $or: [
+              ...(roomIds.length ? [{ room: { $in: roomIds } }] : []),
+              ...(userIds.length ? [{ sender: { $in: userIds } }] : []),
+            ],
+          }
+          : { _id: null },
+      ),
+      ChatEscalationLog.deleteMany(
+        roomIds.length || leadIds.length || userIds.length
+          ? {
+            $or: [
+              ...(roomIds.length ? [{ room: { $in: roomIds } }] : []),
+              ...(leadIds.length ? [{ leadId: { $in: leadIds } }] : []),
+              ...(userIds.length
+                ? [
+                  { initiatedBy: { $in: userIds } },
+                  { managerId: { $in: userIds } },
+                  { adminId: { $in: userIds } },
+                ]
+                : []),
+            ],
+          }
+          : { _id: null },
+      ),
+      ChatCallHistory.deleteMany(
+        roomIds.length || userIds.length
+          ? {
+            $or: [
+              ...(roomIds.length ? [{ room: { $in: roomIds } }] : []),
+              ...(userIds.length
+                ? [
+                  { participants: { $in: userIds } },
+                  { caller: { $in: userIds } },
+                  { answeredBy: { $in: userIds } },
+                  { endedBy: { $in: userIds } },
+                ]
+                : []),
+            ],
+          }
+          : { _id: null },
+      ),
+      ChatConversation.deleteMany(
+        userIds.length
+          ? {
+            $or: [
+              { participants: { $in: userIds } },
+              { lastMessageSender: { $in: userIds } },
+            ],
+          }
+          : { _id: null },
+      ),
+      ChatRoom.deleteMany(roomIds.length ? { _id: { $in: roomIds } } : { _id: null }),
+      Lead.deleteMany({ companyId }),
+      User.deleteMany({ companyId }),
+      Company.deleteOne({ _id: companyId }),
+    ];
+
+    const [
+      refreshTokenResult,
+      leadActivityResult,
+      leadDiaryResult,
+      leadStatusRequestResult,
+      targetAssignmentResult,
+      inventoryActivityResult,
+      inventoryRequestResult,
+      inventoryResult,
+      tenantSubscriptionResult,
+      chatMessageResult,
+      chatEscalationResult,
+      chatCallResult,
+      chatConversationResult,
+      chatRoomResult,
+      leadResult,
+      userResult,
+      companyResult,
+    ] = await Promise.all(deletionJobs);
+
+    summary.refreshTokens = Number(refreshTokenResult?.deletedCount || 0);
+    summary.leadActivities = Number(leadActivityResult?.deletedCount || 0);
+    summary.leadDiaries = Number(leadDiaryResult?.deletedCount || 0);
+    summary.leadStatusRequests = Number(leadStatusRequestResult?.deletedCount || 0);
+    summary.targetAssignments = Number(targetAssignmentResult?.deletedCount || 0);
+    summary.inventoryActivities = Number(inventoryActivityResult?.deletedCount || 0);
+    summary.inventoryRequests = Number(inventoryRequestResult?.deletedCount || 0);
+    summary.inventory = Number(inventoryResult?.deletedCount || 0);
+    summary.subscriptions = Number(tenantSubscriptionResult?.deletedCount || 0);
+    summary.chatMessages = Number(chatMessageResult?.deletedCount || 0);
+    summary.chatEscalations = Number(chatEscalationResult?.deletedCount || 0);
+    summary.chatCalls = Number(chatCallResult?.deletedCount || 0);
+    summary.chatConversations = Number(chatConversationResult?.deletedCount || 0);
+    summary.chatRooms = Number(chatRoomResult?.deletedCount || 0);
+    summary.leads = Number(leadResult?.deletedCount || 0);
+    summary.users = Number(userResult?.deletedCount || 0);
+    summary.company = Number(companyResult?.deletedCount || 0);
+
+    return res.json({
+      message: "Company deleted successfully",
+      deletedCompany: {
+        id: company._id,
+        name: company.name,
+        subdomain: company.subdomain,
+      },
+      summary,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "deleteCompany failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.getCompanyMetaIntegration = async (req, res) => {
   try {
     const { companyId } = req.params;
@@ -1265,12 +1462,28 @@ exports.assignSubscription = async (req, res) => {
       return res.status(400).json({ message: "Valid companyId and planId are required" });
     }
 
+    const normalizedStatus = String(status || "ACTIVE").trim().toUpperCase();
+    const normalizedSeats = toPositiveInt(seats, 5);
+
     const [company, plan] = await Promise.all([
       Company.findById(companyId).select("_id").lean(),
       SubscriptionPlan.findById(planId).select("_id").lean(),
     ]);
     if (!company) return res.status(404).json({ message: "Company not found" });
     if (!plan) return res.status(404).json({ message: "Plan not found" });
+
+    if (["TRIAL", "ACTIVE", "PAST_DUE"].includes(normalizedStatus)) {
+      const activeUsers = await User.countDocuments({
+        companyId,
+        isActive: true,
+      });
+
+      if (activeUsers > normalizedSeats) {
+        return res.status(400).json({
+          message: `Assigned seats (${normalizedSeats}) cannot be lower than active users (${activeUsers}) including admin.`,
+        });
+      }
+    }
 
     await TenantSubscription.updateMany(
       { companyId, isCurrent: true },
@@ -1280,9 +1493,9 @@ exports.assignSubscription = async (req, res) => {
     const created = await TenantSubscription.create({
       companyId,
       planId,
-      status: String(status || "ACTIVE").trim().toUpperCase(),
+      status: normalizedStatus,
       billingCycle: String(billingCycle || "MONTHLY").trim().toUpperCase(),
-      seats: toPositiveInt(seats, 5),
+      seats: normalizedSeats,
       startsAt: startsAt ? new Date(startsAt) : new Date(),
       endsAt: endsAt ? new Date(endsAt) : null,
       trialEndsAt: trialEndsAt ? new Date(trialEndsAt) : null,
