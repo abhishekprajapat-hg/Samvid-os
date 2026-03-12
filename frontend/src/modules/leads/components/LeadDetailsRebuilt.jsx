@@ -354,6 +354,7 @@ const LeadDetailsRebuiltContent = ({
       : null;
   const requiresRemainingPaymentFollowUp =
     isClosedDealFlow && normalizedPaymentType === "PARTIAL";
+  const hasFollowUpDraft = String(followUpDraft || "").trim().length > 0;
   const isClosedStatusSelected =
     statusDraft === "CLOSED" || String(selectedLead?.status || "").toUpperCase() === "CLOSED";
   const normalizedActiveInventoryId = String(selectedLeadActiveInventoryId || "").trim();
@@ -470,6 +471,10 @@ const LeadDetailsRebuiltContent = ({
       clearTimeout(proposalMessageTimerRef.current);
     }
   }, []);
+
+  const handleCreateRemainingPaymentFollowUp = React.useCallback(() => {
+    setFollowUpDraft(buildDefaultCollectionFollowUp());
+  }, [setFollowUpDraft]);
 
   const showProposalActionMessage = React.useCallback((message) => {
     setProposalActionMessage(message);
@@ -1743,6 +1748,17 @@ const LeadDetailsRebuiltContent = ({
                   Required for collection of pending amount
                   {remainingAmountForCollection ? ` (${formatCurrencyInr(remainingAmountForCollection)})` : ""}.
                 </div>
+              ) : null}
+              {requiresRemainingPaymentFollowUp ? (
+                <button
+                  type="button"
+                  onClick={handleCreateRemainingPaymentFollowUp}
+                  className={`mt-2 inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-[11px] font-semibold ${button}`}
+                >
+                  <CalendarClock size={12} />
+                  {hasFollowUpDraft ? "Recreate Follow-up" : "Create Follow-up"}
+                  {remainingAmountForCollection ? ` (${formatCurrencyInr(remainingAmountForCollection)})` : ""}
+                </button>
               ) : null}
             </div>
 

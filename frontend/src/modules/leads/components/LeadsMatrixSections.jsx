@@ -28,6 +28,27 @@ import {
   X,
 } from "lucide-react";
 
+const INR_CURRENCY_FORMATTER = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 0,
+});
+
+const formatCurrencyInr = (value) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return "-";
+  return INR_CURRENCY_FORMATTER.format(amount);
+};
+
+const getLeadPendingAmount = (lead) => {
+  if (!lead || typeof lead !== "object") return null;
+  const paymentType = String(lead?.dealPayment?.paymentType || "").trim().toUpperCase();
+  const amount = Number(lead?.dealPayment?.remainingAmount);
+  if (paymentType !== "PARTIAL") return null;
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return amount;
+};
+
 export const LeadsMatrixToolbar = ({
   isDark,
   refreshing,
@@ -369,53 +390,59 @@ export const LeadsMatrixTable = ({
         <>
           <div className="max-h-[62vh] overflow-y-auto p-2 custom-scrollbar md:hidden">
             <div className="space-y-2">
-              {filteredLeads.map((lead) => (
-                <Motion.button
-                  type="button"
-                  key={lead._id}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  onClick={() => onOpenLeadDetails(lead)}
-                  className={`w-full rounded-xl border p-3 text-left transition-colors ${
-                    isDark
-                      ? "border-slate-700 bg-slate-950/60 hover:border-cyan-400/40"
-                      : "border-slate-200 bg-white hover:border-cyan-300 hover:bg-slate-50"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                        {lead.name || "Unnamed lead"}
+              {filteredLeads.map((lead) => {
+                const pendingAmount = getLeadPendingAmount(lead);
+                return (
+                  <Motion.button
+                    type="button"
+                    key={lead._id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    onClick={() => onOpenLeadDetails(lead)}
+                    className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                      isDark
+                        ? "border-slate-700 bg-slate-950/60 hover:border-cyan-400/40"
+                        : "border-slate-200 bg-white hover:border-cyan-300 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                          {lead.name || "Unnamed lead"}
+                        </p>
+                        <p className={`mt-0.5 truncate text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {lead.projectInterested || "Project not set"}
+                        </p>
+                      </div>
+                      <span className={`rounded border px-2 py-1 text-[10px] font-bold uppercase ${getStatusColor(lead.status)}`}>
+                        {getStatusLabel(lead.status) || "-"}
+                      </span>
+                    </div>
+
+                    <div className={`mt-2 space-y-1 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                      <p className="flex items-center gap-1.5">
+                        <Phone size={12} />
+                        {lead.phone || "-"}
                       </p>
-                      <p className={`mt-0.5 truncate text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        {lead.projectInterested || "Project not set"}
+                      <p className="truncate">{lead.email || "-"}</p>
+                      <p className="truncate">City: {lead.city || "-"}</p>
+                      <p className={isFollowUpDue(lead) ? "text-rose-600 font-semibold" : ""}>
+                        Follow-up: {formatDate(lead.nextFollowUp)}
+                      </p>
+                      <p className={pendingAmount ? (isDark ? "text-amber-200" : "text-amber-700") : ""}>
+                        Remaining: {pendingAmount ? formatCurrencyInr(pendingAmount) : "-"}
                       </p>
                     </div>
-                    <span className={`rounded border px-2 py-1 text-[10px] font-bold uppercase ${getStatusColor(lead.status)}`}>
-                      {getStatusLabel(lead.status) || "-"}
-                    </span>
-                  </div>
 
-                  <div className={`mt-2 space-y-1 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                    <p className="flex items-center gap-1.5">
-                      <Phone size={12} />
-                      {lead.phone || "-"}
-                    </p>
-                    <p className="truncate">{lead.email || "-"}</p>
-                    <p className="truncate">City: {lead.city || "-"}</p>
-                    <p className={isFollowUpDue(lead) ? "text-rose-600 font-semibold" : ""}>
-                      Follow-up: {formatDate(lead.nextFollowUp)}
-                    </p>
-                  </div>
-
-                  <div className={`mt-3 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.12em] ${
-                    isDark ? "text-cyan-200" : "text-cyan-700"
-                  }`}>
-                    Open
-                    <ArrowUpRight size={12} />
-                  </div>
-                </Motion.button>
-              ))}
+                    <div className={`mt-3 inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.12em] ${
+                      isDark ? "text-cyan-200" : "text-cyan-700"
+                    }`}>
+                      Open
+                      <ArrowUpRight size={12} />
+                    </div>
+                  </Motion.button>
+                );
+              })}
             </div>
           </div>
 
@@ -426,66 +453,72 @@ export const LeadsMatrixTable = ({
               <div className="col-span-3">Lead</div>
               <div className="col-span-3">Contact</div>
               <div className="col-span-2">Status</div>
-              <div className="col-span-2">Follow-up</div>
+              <div className="col-span-2">Follow-up / Pending</div>
               <div className="col-span-2">Assigned</div>
             </div>
 
             <div className="max-h-[62vh] overflow-y-auto p-2 custom-scrollbar">
               <div className="space-y-1.5">
-                {filteredLeads.map((lead) => (
-                  <Motion.button
-                    type="button"
-                    key={lead._id}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    onClick={() => onOpenLeadDetails(lead)}
-                    className={`grid w-full grid-cols-12 items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${
-                      isDark
-                        ? "border-slate-700 bg-slate-950/55 hover:border-cyan-400/40 hover:bg-slate-900"
-                        : "border-slate-200 bg-white hover:border-cyan-300 hover:bg-slate-50"
-                    }`}
-                  >
-                    <div className="col-span-3 min-w-0">
-                      <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                        {lead.name || "Unnamed lead"}
-                      </p>
-                      <p className={`mt-0.5 truncate text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        {lead.projectInterested || "Project not set"}
-                      </p>
-                    </div>
+                {filteredLeads.map((lead) => {
+                  const pendingAmount = getLeadPendingAmount(lead);
+                  return (
+                    <Motion.button
+                      type="button"
+                      key={lead._id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      onClick={() => onOpenLeadDetails(lead)}
+                      className={`grid w-full grid-cols-12 items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${
+                        isDark
+                          ? "border-slate-700 bg-slate-950/55 hover:border-cyan-400/40 hover:bg-slate-900"
+                          : "border-slate-200 bg-white hover:border-cyan-300 hover:bg-slate-50"
+                      }`}
+                    >
+                      <div className="col-span-3 min-w-0">
+                        <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+                          {lead.name || "Unnamed lead"}
+                        </p>
+                        <p className={`mt-0.5 truncate text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {lead.projectInterested || "Project not set"}
+                        </p>
+                      </div>
 
-                    <div className={`col-span-3 min-w-0 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                      <p className="truncate">{lead.phone || "-"}</p>
-                      <p className="truncate">{lead.email || "-"}</p>
-                      <p className="truncate">{lead.city || "-"}</p>
-                    </div>
+                      <div className={`col-span-3 min-w-0 text-xs ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                        <p className="truncate">{lead.phone || "-"}</p>
+                        <p className="truncate">{lead.email || "-"}</p>
+                        <p className="truncate">{lead.city || "-"}</p>
+                      </div>
 
-                    <div className="col-span-2">
-                      <span className={`rounded border px-2 py-1 text-[11px] font-bold uppercase ${getStatusColor(lead.status)}`}>
-                        {getStatusLabel(lead.status) || "-"}
-                      </span>
-                    </div>
+                      <div className="col-span-2">
+                        <span className={`rounded border px-2 py-1 text-[11px] font-bold uppercase ${getStatusColor(lead.status)}`}>
+                          {getStatusLabel(lead.status) || "-"}
+                        </span>
+                      </div>
 
-                    <div className={`col-span-2 text-xs ${
-                      isFollowUpDue(lead)
-                        ? "font-semibold text-rose-600"
-                        : isDark
-                          ? "text-slate-300"
-                          : "text-slate-600"
-                    }`}>
-                      {formatDate(lead.nextFollowUp)}
-                    </div>
+                      <div className={`col-span-2 text-xs ${
+                        isFollowUpDue(lead)
+                          ? "font-semibold text-rose-600"
+                          : isDark
+                            ? "text-slate-300"
+                            : "text-slate-600"
+                      }`}>
+                        <p>{formatDate(lead.nextFollowUp)}</p>
+                        <p className={`mt-1 ${pendingAmount ? (isDark ? "text-amber-200" : "text-amber-700") : ""}`}>
+                          Remaining: {pendingAmount ? formatCurrencyInr(pendingAmount) : "-"}
+                        </p>
+                      </div>
 
-                    <div className={`col-span-2 min-w-0 text-xs ${isDark ? "text-cyan-200" : "text-cyan-700"}`}>
-                      <p className="truncate font-semibold">
-                        {lead.assignedTo?.name || "Unassigned"}
-                      </p>
-                      <p className={`truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        {lead.assignedTo?.role || "Tap to manage"}
-                      </p>
-                    </div>
-                  </Motion.button>
-                ))}
+                      <div className={`col-span-2 min-w-0 text-xs ${isDark ? "text-cyan-200" : "text-cyan-700"}`}>
+                        <p className="truncate font-semibold">
+                          {lead.assignedTo?.name || "Unassigned"}
+                        </p>
+                        <p className={`truncate ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          {lead.assignedTo?.role || "Tap to manage"}
+                        </p>
+                      </div>
+                    </Motion.button>
+                  );
+                })}
               </div>
             </div>
           </div>
