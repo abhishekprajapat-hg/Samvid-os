@@ -34,6 +34,19 @@ const MAX_SALE_PAYMENT_REFERENCE_LENGTH = 120;
 const MAX_INVENTORY_REQUEST_NOTE_LENGTH = 500;
 const DEFAULT_SITE_VISIT_RADIUS_METERS =
   Number.parseInt(process.env.SITE_VISIT_RADIUS_METERS, 10) || 200;
+const INVENTORY_CREATE_REQUEST_ROLES = Object.freeze([
+  USER_ROLES.ADMIN,
+  ...MANAGEMENT_ROLES,
+  USER_ROLES.EXECUTIVE,
+  USER_ROLES.FIELD_EXECUTIVE,
+  USER_ROLES.CHANNEL_PARTNER,
+]);
+const INVENTORY_UPDATE_REQUEST_ROLES = Object.freeze([
+  USER_ROLES.ADMIN,
+  ...MANAGEMENT_ROLES,
+  USER_ROLES.EXECUTIVE,
+  USER_ROLES.FIELD_EXECUTIVE,
+]);
 
 const createHttpError = (statusCode, message) => {
   const error = new Error(message);
@@ -1107,8 +1120,8 @@ const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
 };
 
 const createInventoryCreateRequest = async ({ user, payload, io }) => {
-  if (user.role !== USER_ROLES.FIELD_EXECUTIVE) {
-    throw createHttpError(403, "Only FIELD_EXECUTIVE can submit create requests");
+  if (!INVENTORY_CREATE_REQUEST_ROLES.includes(user.role)) {
+    throw createHttpError(403, "This role cannot submit create requests");
   }
 
   const companyId = getCompanyIdForUser(user);
@@ -1150,10 +1163,10 @@ const createInventoryCreateRequest = async ({ user, payload, io }) => {
 const createInventoryUpdateRequest = async ({
   user, inventoryId, payload, requestNote, relatedLeadId, io,
 }) => {
-  if (![USER_ROLES.FIELD_EXECUTIVE, USER_ROLES.EXECUTIVE, ...MANAGEMENT_ROLES].includes(user.role)) {
+  if (!INVENTORY_UPDATE_REQUEST_ROLES.includes(user.role)) {
     throw createHttpError(
       403,
-      "Only leadership or executive roles can submit update requests",
+      "Channel partner cannot submit update/status-change requests",
     );
   }
 

@@ -574,6 +574,115 @@ const emitAdminPaymentRequestCreated = ({
   io.to(adminRoom).emit("admin:request:new", payload);
 };
 
+const emitAdminLeadDealClosed = ({
+  io,
+  lead,
+  closedBy,
+  companyId,
+}) => {
+  const resolvedCompanyId = String(companyId || "").trim();
+  if (!io || !lead?._id || !resolvedCompanyId) return;
+
+  const closedAtValue = lead?.updatedAt || new Date();
+  const closedAtDate = new Date(closedAtValue);
+  const closedAtIso = Number.isNaN(closedAtDate.getTime())
+    ? new Date().toISOString()
+    : closedAtDate.toISOString();
+  const eventId = `lead-closed:${lead._id}:${new Date(closedAtIso).getTime()}`;
+  const payload = {
+    eventId,
+    source: "lead",
+    requestType: "LEAD_DEAL_CLOSED",
+    leadId: lead._id,
+    status: "CLOSED",
+    companyId: resolvedCompanyId,
+    createdAt: closedAtIso,
+    message: "Lead deal closed",
+    lead: {
+      _id: lead._id,
+      name: lead.name || "",
+      phone: lead.phone || "",
+      projectInterested: lead.projectInterested || "",
+      status: lead.status || "",
+    },
+    payment: {
+      mode: lead?.dealPayment?.mode || "",
+      paymentType: lead?.dealPayment?.paymentType || "",
+      remainingAmount: lead?.dealPayment?.remainingAmount ?? null,
+      paymentReference: lead?.dealPayment?.paymentReference || "",
+      note: lead?.dealPayment?.note || "",
+      approvalStatus: lead?.dealPayment?.approvalStatus || "",
+    },
+    closedBy: closedBy
+      ? {
+        _id: closedBy._id || null,
+        name: closedBy.name || "",
+        role: closedBy.role || "",
+      }
+      : null,
+  };
+
+  const adminRoom = `company:${resolvedCompanyId}:role:${USER_ROLES.ADMIN}`;
+  io.to(adminRoom).emit("lead:deal:closed", payload);
+  io.to(adminRoom).emit("admin:request:new", payload);
+};
+
+const emitAdminRemainingPaymentCollected = ({
+  io,
+  lead,
+  collectedBy,
+  previousRemainingAmount,
+  companyId,
+}) => {
+  const resolvedCompanyId = String(companyId || "").trim();
+  if (!io || !lead?._id || !resolvedCompanyId) return;
+
+  const collectedAtValue = lead?.updatedAt || new Date();
+  const collectedAtDate = new Date(collectedAtValue);
+  const collectedAtIso = Number.isNaN(collectedAtDate.getTime())
+    ? new Date().toISOString()
+    : collectedAtDate.toISOString();
+  const eventId = `lead-remaining-collected:${lead._id}:${new Date(collectedAtIso).getTime()}`;
+  const payload = {
+    eventId,
+    source: "lead",
+    requestType: "LEAD_REMAINING_PAYMENT_COLLECTED",
+    leadId: lead._id,
+    status: String(lead?.status || "").toUpperCase() || CLOSED_STATUS,
+    companyId: resolvedCompanyId,
+    createdAt: collectedAtIso,
+    message: "Remaining payment collected",
+    lead: {
+      _id: lead._id,
+      name: lead.name || "",
+      phone: lead.phone || "",
+      projectInterested: lead.projectInterested || "",
+      status: lead.status || "",
+    },
+    payment: {
+      mode: lead?.dealPayment?.mode || "",
+      paymentType: lead?.dealPayment?.paymentType || "",
+      previousRemainingAmount:
+        previousRemainingAmount !== null ? previousRemainingAmount : null,
+      remainingAmount: lead?.dealPayment?.remainingAmount ?? null,
+      paymentReference: lead?.dealPayment?.paymentReference || "",
+      note: lead?.dealPayment?.note || "",
+      approvalStatus: lead?.dealPayment?.approvalStatus || "",
+    },
+    collectedBy: collectedBy
+      ? {
+        _id: collectedBy._id || null,
+        name: collectedBy.name || "",
+        role: collectedBy.role || "",
+      }
+      : null,
+  };
+
+  const adminRoom = `company:${resolvedCompanyId}:role:${USER_ROLES.ADMIN}`;
+  io.to(adminRoom).emit("lead:payment:remaining:collected", payload);
+  io.to(adminRoom).emit("admin:request:new", payload);
+};
+
 const toRadians = (degrees) => (degrees * Math.PI) / 180;
 
 const calculateDistanceMeters = (aLat, aLng, bLat, bLng) => {
@@ -1032,6 +1141,201 @@ exports.createLead = async (req, res) => {
     });
     return res.status(500).json({ message: "Server error" });
   }
+};
+
+const syncSelectedInventoryAsSoldForLeadClosure = async ({
+  lead,
+  user,
+}) => {
+  const leadId = String(lead?._id || "");
+  const selectedInventoryId = toObjectIdString(lead?.inventoryId);
+  if (!isValidObjectId(selectedInventoryId)) {
+    return {
+      error: "Select a property before closing the deal",
+    };
+  }
+
+  const inventory = await Inventory.findOne(
+    buildCompanyInventoryQuery({
+      inventoryId: selectedInventoryId,
+      companyId: user?.companyId || null,
+    }),
+  );
+
+  if (!inventory) {
+    return {
+      error: "Selected property not found",
+    };
+  }
+
+  const inventoryStatus = String(inventory?.status || "").trim().toLowerCase();
+  const reservedLeadId = toObjectIdString(inventory?.reservationLeadId);
+  if (inventoryStatus === "blocked" && reservedLeadId && reservedLeadId !== leadId) {
+    return {
+      error: "Selected property is reserved for another lead",
+    };
+  }
+
+  const soldLeadId = toObjectIdString(inventory?.saleDetails?.leadId);
+  const isSoldToOtherLead =
+    inventoryStatus === "sold"
+    && soldLeadId
+    && soldLeadId !== leadId;
+  if (isSoldToOtherLead) {
+    return {
+      error: "Selected property is already sold to another lead",
+    };
+  }
+
+  const paymentMode = normalizeEnumValue(lead?.dealPayment?.mode);
+  const paymentType = normalizeEnumValue(lead?.dealPayment?.paymentType);
+  const remainingAmount = toFiniteNumber(lead?.dealPayment?.remainingAmount);
+  const paymentReference = String(lead?.dealPayment?.paymentReference || "").trim();
+  const paymentNote = String(lead?.dealPayment?.note || "").trim();
+  const totalAmount = toFiniteNumber(inventory?.price);
+
+  if (!paymentMode || !paymentType) {
+    return {
+      error: "Payment mode and payment type are required to close and sell selected property",
+    };
+  }
+
+  if (!DEAL_PAYMENT_MODE_VALUES.includes(paymentMode)) {
+    return {
+      error: `Payment mode must be one of: ${DEAL_PAYMENT_MODE_VALUES.join(", ")}`,
+    };
+  }
+
+  if (!DEAL_PAYMENT_TYPE_VALUES.includes(paymentType)) {
+    return {
+      error: `Payment type must be one of: ${DEAL_PAYMENT_TYPE_VALUES.join(", ")}`,
+    };
+  }
+
+  if (paymentMode !== "CASH" && !paymentReference) {
+    return {
+      error: "Payment reference is required for non-cash sold payments",
+    };
+  }
+
+  if (paymentType === "PARTIAL" && (remainingAmount === null || remainingAmount <= 0)) {
+    return {
+      error: "Remaining amount must be greater than 0 for partial payment",
+    };
+  }
+
+  if (totalAmount === null || totalAmount <= 0) {
+    return {
+      error: "Selected property price is invalid. Update inventory price before closing deal",
+    };
+  }
+
+  inventory.status = "Sold";
+  inventory.updatedBy = user?._id || null;
+  inventory.saleDetails = {
+    leadId: lead._id,
+    paymentMode,
+    paymentType,
+    totalAmount,
+    remainingAmount: paymentType === "PARTIAL" ? (remainingAmount || 0) : 0,
+    paymentReference: paymentMode === "CASH" ? "" : paymentReference,
+    note: paymentNote,
+    soldAt: inventory?.saleDetails?.soldAt || new Date(),
+  };
+
+  await inventory.save();
+
+  return {
+    inventory,
+  };
+};
+
+const syncSelectedInventoryAsReservedForCloseRequest = async ({
+  lead,
+  user,
+}) => {
+  const leadId = String(lead?._id || "");
+  const selectedInventoryId = toObjectIdString(lead?.inventoryId);
+  if (!isValidObjectId(selectedInventoryId)) {
+    return {
+      error: "Select a property before sending close request",
+    };
+  }
+
+  const inventory = await Inventory.findOne(
+    buildCompanyInventoryQuery({
+      inventoryId: selectedInventoryId,
+      companyId: user?.companyId || null,
+    }),
+  );
+
+  if (!inventory) {
+    return {
+      error: "Selected property not found",
+    };
+  }
+
+  const inventoryStatus = String(inventory?.status || "").trim().toLowerCase();
+  const reservedLeadId = toObjectIdString(inventory?.reservationLeadId);
+  if (inventoryStatus === "sold") {
+    return {
+      error: "Selected property is already sold",
+    };
+  }
+
+  if (inventoryStatus === "blocked" && reservedLeadId && reservedLeadId !== leadId) {
+    return {
+      error: "Selected property is already reserved for another lead",
+    };
+  }
+
+  inventory.status = "Blocked";
+  inventory.reservationLeadId = lead._id;
+  inventory.reservationReason = `Deal close request pending for ${String(lead?.name || "lead").trim() || "lead"}`;
+  inventory.updatedBy = user?._id || null;
+  await inventory.save();
+
+  return {
+    inventory,
+  };
+};
+
+const releaseSelectedInventoryReservationForLead = async ({
+  lead,
+  user,
+}) => {
+  const leadId = String(lead?._id || "");
+  const selectedInventoryId = toObjectIdString(lead?.inventoryId);
+  if (!isValidObjectId(selectedInventoryId)) {
+    return { inventory: null };
+  }
+
+  const inventory = await Inventory.findOne(
+    buildCompanyInventoryQuery({
+      inventoryId: selectedInventoryId,
+      companyId: user?.companyId || null,
+    }),
+  );
+
+  if (!inventory) {
+    return { inventory: null };
+  }
+
+  const inventoryStatus = String(inventory?.status || "").trim().toLowerCase();
+  const reservedLeadId = toObjectIdString(inventory?.reservationLeadId);
+  if (inventoryStatus !== "blocked" || !reservedLeadId || reservedLeadId !== leadId) {
+    return { inventory: null };
+  }
+
+  inventory.status = "Available";
+  inventory.reservationLeadId = null;
+  inventory.reservationReason = "";
+  inventory.updatedBy = user?._id || null;
+  await inventory.save();
+
+  return {
+    inventory,
+  };
 };
 
 exports.bulkUploadLeads = async (req, res) => {
@@ -1943,6 +2247,9 @@ exports.updateLeadStatus = async (req, res) => {
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
+    const previousLeadStatus = normalizeEnumValue(lead.status);
+    const previousPaymentType = normalizeEnumValue(lead?.dealPayment?.paymentType);
+    const previousRemainingAmount = toFiniteNumber(lead?.dealPayment?.remainingAmount);
 
     const updatedProfileFields = [];
     if (hasNameField) {
@@ -2021,8 +2328,10 @@ exports.updateLeadStatus = async (req, res) => {
     const dealPaymentPayload = parsedDealPayment.value || {};
     const isAdminUser = req.user.role === USER_ROLES.ADMIN;
     const isExecutiveUser = EXECUTIVE_ROLES.includes(req.user.role);
-    const isExecutiveCloseRequest =
-      isExecutiveUser && requestedStatus === CLOSED_STATUS;
+    const isNonAdminCloseIntent =
+      !isAdminUser && requestedStatus === CLOSED_STATUS;
+    const isNewCloseApprovalRequest =
+      isNonAdminCloseIntent && previousLeadStatus !== CLOSED_STATUS;
 
     if (
       requestedStatus === REQUESTED_STATUS
@@ -2034,12 +2343,12 @@ exports.updateLeadStatus = async (req, res) => {
       });
     }
 
-    let nextLeadStatus = isExecutiveCloseRequest
+    let nextLeadStatus = isNewCloseApprovalRequest
       ? REQUESTED_STATUS
       : requestedStatus;
     const isDealPaymentWorkflowStatus = [REQUESTED_STATUS, CLOSED_STATUS].includes(nextLeadStatus);
     const wasDealPaymentWorkflowStatus = [REQUESTED_STATUS, CLOSED_STATUS].includes(
-      normalizeEnumValue(lead.status),
+      previousLeadStatus,
     );
 
     if (parsedDealPayment.provided && !isDealPaymentWorkflowStatus && !wasDealPaymentWorkflowStatus) {
@@ -2115,18 +2424,18 @@ exports.updateLeadStatus = async (req, res) => {
       }
     }
 
-    if (isExecutiveCloseRequest && lead.status !== CLOSED_STATUS) {
+    if (isNewCloseApprovalRequest) {
       if (!hasDealPaymentInput) {
         return res.status(400).json({
           message:
-            "Payment mode and payment type are required when executive closes the deal",
+            "Payment mode and payment type are required when submitting close request",
         });
       }
 
       if (!dealPaymentPayload.mode || !dealPaymentPayload.paymentType) {
         return res.status(400).json({
           message:
-            "Payment mode and payment type are required when executive closes the deal",
+            "Payment mode and payment type are required when submitting close request",
         });
       }
     }
@@ -2193,9 +2502,8 @@ exports.updateLeadStatus = async (req, res) => {
     }
 
     if (
-      isExecutiveCloseRequest
+      isNewCloseApprovalRequest
       && hasDealPaymentInput
-      && normalizeEnumValue(lead.status) !== CLOSED_STATUS
     ) {
       const existingRequestedFromStatus = normalizeEnumValue(
         lead?.dealPayment?.requestedFromStatus,
@@ -2320,6 +2628,21 @@ exports.updateLeadStatus = async (req, res) => {
       });
     }
 
+    const isCloseRequestTransition =
+      previousLeadStatus !== REQUESTED_STATUS
+      && nextLeadStatus === REQUESTED_STATUS
+      && isNewCloseApprovalRequest;
+    const isClosingTransition =
+      previousLeadStatus !== CLOSED_STATUS
+      && nextLeadStatus === CLOSED_STATUS;
+    const shouldReleaseReservedProperty =
+      previousLeadStatus === REQUESTED_STATUS
+      && nextLeadStatus !== REQUESTED_STATUS
+      && nextLeadStatus !== CLOSED_STATUS;
+    let reservedInventory = null;
+    let soldInventory = null;
+    let releasedInventory = null;
+
     lead.status = nextLeadStatus;
     lead.lastContactedAt = new Date();
 
@@ -2329,13 +2652,76 @@ exports.updateLeadStatus = async (req, res) => {
       lead.nextFollowUp = null;
     }
 
+    if (isCloseRequestTransition) {
+      const reserveResult = await syncSelectedInventoryAsReservedForCloseRequest({
+        lead,
+        user: req.user,
+      });
+      if (reserveResult?.error) {
+        return res.status(400).json({ message: reserveResult.error });
+      }
+      reservedInventory = reserveResult?.inventory || null;
+    }
+
+    if (isClosingTransition) {
+      const soldSyncResult = await syncSelectedInventoryAsSoldForLeadClosure({
+        lead,
+        user: req.user,
+      });
+      if (soldSyncResult?.error) {
+        return res.status(400).json({ message: soldSyncResult.error });
+      }
+      soldInventory = soldSyncResult?.inventory || null;
+    }
+
+    if (shouldReleaseReservedProperty) {
+      const releaseResult = await releaseSelectedInventoryReservationForLead({
+        lead,
+        user: req.user,
+      });
+      releasedInventory = releaseResult?.inventory || null;
+    }
+
     await lead.save();
+
+    const didTransitionToClosed =
+      previousLeadStatus !== CLOSED_STATUS
+      && nextLeadStatus === CLOSED_STATUS;
+    const nextRemainingAmount = toFiniteNumber(lead?.dealPayment?.remainingAmount);
+    const didCollectRemainingPayment =
+      !isAdminUser
+      && previousLeadStatus === CLOSED_STATUS
+      && previousPaymentType === "PARTIAL"
+      && previousRemainingAmount !== null
+      && previousRemainingAmount > 0
+      && nextRemainingAmount !== null
+      && nextRemainingAmount <= 0
+      && nextLeadStatus === CLOSED_STATUS;
 
     if (paymentRequestAction) {
       emitAdminPaymentRequestCreated({
         io: req.app.get("io"),
         lead,
         requestedBy: req.user,
+        companyId: req.user?.companyId || null,
+      });
+    }
+
+    if (didTransitionToClosed) {
+      emitAdminLeadDealClosed({
+        io: req.app.get("io"),
+        lead,
+        closedBy: req.user,
+        companyId: req.user?.companyId || null,
+      });
+    }
+
+    if (didCollectRemainingPayment) {
+      emitAdminRemainingPaymentCollected({
+        io: req.app.get("io"),
+        lead,
+        collectedBy: req.user,
+        previousRemainingAmount,
         companyId: req.user?.companyId || null,
       });
     }
@@ -2352,6 +2738,28 @@ exports.updateLeadStatus = async (req, res) => {
 
     if (paymentDecisionAction) {
       activityActions.push(paymentDecisionAction);
+    }
+
+    if (didCollectRemainingPayment) {
+      activityActions.push("Remaining payment collected and admin notified");
+    }
+
+    if (didTransitionToClosed && soldInventory) {
+      activityActions.push(
+        `Selected property marked as Sold (${buildInventoryLeadProjectLabel(soldInventory) || String(soldInventory._id)})`,
+      );
+    }
+
+    if (isCloseRequestTransition && reservedInventory) {
+      activityActions.push(
+        `Selected property marked as Reserved (${buildInventoryLeadProjectLabel(reservedInventory) || String(reservedInventory._id)})`,
+      );
+    }
+
+    if (shouldReleaseReservedProperty && releasedInventory) {
+      activityActions.push(
+        `Selected property released to Available (${buildInventoryLeadProjectLabel(releasedInventory) || String(releasedInventory._id)})`,
+      );
     }
 
     if (parsedClosureDocuments.provided) {

@@ -13,7 +13,15 @@ router.use(companyMiddleware.requireCompanyContext);
 router.post(
   "/",
   writeLimiter,
-  authMiddleware.checkRole(["FIELD_EXECUTIVE", "EXECUTIVE"]),
+  authMiddleware.checkRole([
+    "ADMIN",
+    "MANAGER",
+    "ASSISTANT_MANAGER",
+    "TEAM_LEADER",
+    "EXECUTIVE",
+    "FIELD_EXECUTIVE",
+    "CHANNEL_PARTNER",
+  ]),
   companyMiddleware.enforceBodyCompanyMatch("companyId"),
   inventoryRequestController.createRequest,
 );
@@ -22,7 +30,15 @@ router.post(
 router.post(
   "/create",
   writeLimiter,
-  authMiddleware.checkRole(["FIELD_EXECUTIVE", "EXECUTIVE"]),
+  authMiddleware.checkRole([
+    "ADMIN",
+    "MANAGER",
+    "ASSISTANT_MANAGER",
+    "TEAM_LEADER",
+    "EXECUTIVE",
+    "FIELD_EXECUTIVE",
+    "CHANNEL_PARTNER",
+  ]),
   companyMiddleware.enforceBodyCompanyMatch("companyId"),
   inventoryRequestController.createRequest,
 );
@@ -64,6 +80,7 @@ router.get(
     "ASSISTANT_MANAGER",
     "MANAGER",
     "ADMIN",
+    "CHANNEL_PARTNER",
   ]),
   inventoryRequestController.getMyInventoryRequests,
 );
@@ -71,7 +88,14 @@ router.get(
 router.post(
   "/update/:inventoryId",
   writeLimiter,
-  authMiddleware.checkRole(["FIELD_EXECUTIVE", "EXECUTIVE", "TEAM_LEADER", "ASSISTANT_MANAGER", "MANAGER"]),
+  authMiddleware.checkRole([
+    "FIELD_EXECUTIVE",
+    "EXECUTIVE",
+    "TEAM_LEADER",
+    "ASSISTANT_MANAGER",
+    "MANAGER",
+    "ADMIN",
+  ]),
   inventoryRequestController.updateRequest,
 );
 

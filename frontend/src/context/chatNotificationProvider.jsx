@@ -125,12 +125,51 @@ const normalizeAdminRequestEvent = (payload = {}) => {
     if (!leadId) return null;
 
     const leadName = String(payload.lead?.name || "").trim() || "Lead";
+    const leadRequestType = String(payload.requestType || "").trim().toUpperCase();
     const paymentMode = String(payload.payment?.mode || "").trim();
     const paymentType = String(payload.payment?.paymentType || "").trim();
     const createdAt = payload.createdAt || new Date().toISOString();
+    const timestamp = new Date(createdAt).getTime();
+
+    if (leadRequestType === "LEAD_DEAL_CLOSED") {
+      const eventId =
+        String(payload.eventId || "").trim()
+        || `lead-closed:${leadId}:${timestamp}`;
+
+      return {
+        eventId,
+        source: "lead",
+        requestType: "LEAD_DEAL_CLOSED",
+        createdAt,
+        preview: `${leadName} deal closed`,
+        leadId,
+        requestId: "",
+        inventoryId: "",
+        payload,
+      };
+    }
+
+    if (leadRequestType === "LEAD_REMAINING_PAYMENT_COLLECTED") {
+      const eventId =
+        String(payload.eventId || "").trim()
+        || `lead-remaining-collected:${leadId}:${timestamp}`;
+
+      return {
+        eventId,
+        source: "lead",
+        requestType: "LEAD_REMAINING_PAYMENT_COLLECTED",
+        createdAt,
+        preview: `${leadName} remaining payment collected`,
+        leadId,
+        requestId: "",
+        inventoryId: "",
+        payload,
+      };
+    }
+
     const eventId =
       String(payload.eventId || "").trim()
-      || `lead-payment:${leadId}:${new Date(createdAt).getTime()}`;
+      || `lead-payment:${leadId}:${timestamp}`;
 
     return {
       eventId,
@@ -449,6 +488,8 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
     socket.on("chat:room:read", onRoomRead);
     socket.on("admin:request:new", onAdminRequestEvent);
     socket.on("lead:payment:request:created", onAdminRequestEvent);
+    socket.on("lead:deal:closed", onAdminRequestEvent);
+    socket.on("lead:payment:remaining:collected", onAdminRequestEvent);
     socket.on("inventory:request:created", onAdminRequestEvent);
 
     return () => {
@@ -461,6 +502,8 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
       socket.off("chat:room:read", onRoomRead);
       socket.off("admin:request:new", onAdminRequestEvent);
       socket.off("lead:payment:request:created", onAdminRequestEvent);
+      socket.off("lead:deal:closed", onAdminRequestEvent);
+      socket.off("lead:payment:remaining:collected", onAdminRequestEvent);
       socket.off("inventory:request:created", onAdminRequestEvent);
       socket.disconnect();
       setSocketConnected(false);

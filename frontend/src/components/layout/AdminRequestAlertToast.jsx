@@ -21,6 +21,11 @@ const resolveLeadStatus = (request) => {
   return status || "REQUESTED";
 };
 
+const resolveRequestType = (request) =>
+  String(request?.requestType || request?.payload?.requestType || "")
+    .trim()
+    .toUpperCase();
+
 const resolveRequestId = (request) =>
   toIdString(request?.requestId || request?.payload?.requestId || request?.payload?._id);
 
@@ -81,6 +86,15 @@ const AdminRequestAlertToast = ({ userRole }) => {
       }) || null
     );
   }, [dismissedIds, recentAdminRequests, resolvedIds, userRole]);
+
+  const activeRequestType = resolveRequestType(activeAlert);
+  const isLeadDealClosedAlert =
+    activeAlert?.source === "lead" && activeRequestType === "LEAD_DEAL_CLOSED";
+  const isLeadRemainingCollectedAlert =
+    activeAlert?.source === "lead" && activeRequestType === "LEAD_REMAINING_PAYMENT_COLLECTED";
+  const canReviewAlert =
+    activeAlert?.source === "inventory"
+    || (activeAlert?.source === "lead" && activeRequestType === "LEAD_PAYMENT_APPROVAL");
 
   useEffect(() => {
     setError("");
@@ -145,7 +159,7 @@ const AdminRequestAlertToast = ({ userRole }) => {
   }, [actionLoading, activeAlert, markResolved]);
 
   const handleApprove = useCallback(() => {
-    if (!activeAlert) return;
+    if (!activeAlert || !canReviewAlert) return;
 
     if (activeAlert.source === "inventory") {
       const requestId = resolveRequestId(activeAlert);
@@ -171,10 +185,10 @@ const AdminRequestAlertToast = ({ userRole }) => {
           approvalNote: "Approved from realtime alert",
         },
       }));
-  }, [activeAlert, runAction]);
+  }, [activeAlert, canReviewAlert, runAction]);
 
   const handleReject = useCallback(() => {
-    if (!activeAlert) return;
+    if (!activeAlert || !canReviewAlert) return;
 
     const reason = window.prompt("Rejection reason", "Rejected from realtime alert");
     if (reason === null) return;
@@ -209,7 +223,7 @@ const AdminRequestAlertToast = ({ userRole }) => {
           approvalNote: trimmedReason,
         },
       }));
-  }, [activeAlert, runAction]);
+  }, [activeAlert, canReviewAlert, runAction]);
 
   if (!activeAlert) return null;
 
@@ -226,7 +240,11 @@ const AdminRequestAlertToast = ({ userRole }) => {
               isDark ? "text-cyan-300" : "text-cyan-700"
             }`}>
               <BellRing size={12} />
-              New Admin Request
+              {isLeadDealClosedAlert
+                ? "Deal Closed Alert"
+                : isLeadRemainingCollectedAlert
+                  ? "Remaining Payment Alert"
+                  : "New Admin Request"}
             </div>
             <p className="mt-1 text-sm font-semibold leading-5 break-words">
               {activeAlert.preview || "New request received"}
@@ -234,7 +252,13 @@ const AdminRequestAlertToast = ({ userRole }) => {
             <p className={`mt-1 text-[11px] ${
               isDark ? "text-slate-400" : "text-slate-500"
             }`}>
-              {activeAlert.source === "inventory" ? "Inventory workflow" : "Lead payment approval"} | {formatDate(activeAlert.createdAt)}
+              {activeAlert.source === "inventory"
+                ? "Inventory workflow"
+                : isLeadDealClosedAlert
+                  ? "Lead deal closed"
+                  : isLeadRemainingCollectedAlert
+                    ? "Remaining payment collected"
+                  : "Lead payment approval"} | {formatDate(activeAlert.createdAt)}
             </p>
           </div>
 
@@ -261,34 +285,38 @@ const AdminRequestAlertToast = ({ userRole }) => {
           </div>
         ) : null}
 
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <button
-            type="button"
-            onClick={handleApprove}
-            disabled={actionLoading}
-            className={`h-9 rounded-lg border px-3 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60 ${
-              isDark
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/60"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300"
-            }`}
-          >
-            {actionLoading ? <Loader size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-            Approve
-          </button>
+        <div className={`mt-3 grid grid-cols-1 gap-2 ${canReviewAlert ? "sm:grid-cols-3" : "sm:grid-cols-1"}`}>
+          {canReviewAlert ? (
+            <>
+              <button
+                type="button"
+                onClick={handleApprove}
+                disabled={actionLoading}
+                className={`h-9 rounded-lg border px-3 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60 ${
+                  isDark
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/60"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300"
+                }`}
+              >
+                {actionLoading ? <Loader size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                Approve
+              </button>
 
-          <button
-            type="button"
-            onClick={handleReject}
-            disabled={actionLoading}
-            className={`h-9 rounded-lg border px-3 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60 ${
-              isDark
-                ? "border-rose-500/40 bg-rose-500/10 text-rose-200 hover:border-rose-300/60"
-                : "border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300"
-            }`}
-          >
-            <XCircle size={13} />
-            Reject
-          </button>
+              <button
+                type="button"
+                onClick={handleReject}
+                disabled={actionLoading}
+                className={`h-9 rounded-lg border px-3 text-xs font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-60 ${
+                  isDark
+                    ? "border-rose-500/40 bg-rose-500/10 text-rose-200 hover:border-rose-300/60"
+                    : "border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300"
+                }`}
+              >
+                <XCircle size={13} />
+                Reject
+              </button>
+            </>
+          ) : null}
 
           <button
             type="button"

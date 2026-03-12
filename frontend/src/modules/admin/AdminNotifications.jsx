@@ -722,10 +722,21 @@ const AdminNotifications = () => {
             {filteredRecentAlerts.map((alert) => {
               const payload = alert?.payload || {};
               const source = String(alert?.source || "").toLowerCase();
+              const requestType = String(alert?.requestType || payload?.requestType || "").toUpperCase();
+              const isLeadDealClosedAlert =
+                source === "lead" && requestType === "LEAD_DEAL_CLOSED";
+              const isLeadRemainingCollectedAlert =
+                source === "lead" && requestType === "LEAD_REMAINING_PAYMENT_COLLECTED";
               const inventoryLabel = getInventoryUnitLabel(payload?.inventory || payload?.inventoryId || {});
               const leadName = String(payload?.lead?.name || "").trim();
               const requestTag = source === "lead"
-                ? "Payment Request"
+                ? (
+                  isLeadDealClosedAlert
+                    ? "Deal Closed"
+                    : isLeadRemainingCollectedAlert
+                      ? "Remaining Collected"
+                      : "Payment Request"
+                )
                 : `${String(payload?.inventoryRequestType || payload?.type || "UPDATE").toUpperCase()} Inventory Request`;
               const openAlertTarget = () => handleOpenAlertTarget(alert);
               const handleAlertCardClick = (event) => {
@@ -769,8 +780,22 @@ const AdminNotifications = () => {
                         <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Lead:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{leadName || "-"}</span></div>
                         <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Phone:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.lead?.phone || "-"}</span></div>
                         <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Project:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.lead?.projectInterested || "-"}</span></div>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Mode/Type:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatPaymentMode(payload?.payment?.mode)} / {formatPaymentType(payload?.payment?.paymentType)}</span></div>
-                        <div className="sm:col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Reference:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.payment?.paymentReference || "-"}</span></div>
+                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Status:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.status || payload?.lead?.status || "-"}</span></div>
+                        {isLeadDealClosedAlert ? (
+                          <div className="sm:col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Closed By:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.closedBy?.name || "-"}</span></div>
+                        ) : isLeadRemainingCollectedAlert ? (
+                          <>
+                            <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Prev Remaining:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatAmount(payload?.payment?.previousRemainingAmount)}</span></div>
+                            <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Current Remaining:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatAmount(payload?.payment?.remainingAmount)}</span></div>
+                            <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Mode/Type:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatPaymentMode(payload?.payment?.mode)} / {formatPaymentType(payload?.payment?.paymentType)}</span></div>
+                            <div className="sm:col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Collected By:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.collectedBy?.name || "-"}</span></div>
+                          </>
+                        ) : (
+                          <>
+                            <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Mode/Type:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatPaymentMode(payload?.payment?.mode)} / {formatPaymentType(payload?.payment?.paymentType)}</span></div>
+                            <div className="sm:col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Reference:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.payment?.paymentReference || "-"}</span></div>
+                          </>
+                        )}
                       </>
                     ) : (
                       <>

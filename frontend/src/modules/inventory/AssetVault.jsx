@@ -239,6 +239,25 @@ const REQUEST_FIELD_LABELS = {
   documents: "Documents",
 };
 
+const CREATE_REQUEST_ROLES = new Set([
+  "ADMIN",
+  "MANAGER",
+  "ASSISTANT_MANAGER",
+  "TEAM_LEADER",
+  "EXECUTIVE",
+  "FIELD_EXECUTIVE",
+  "CHANNEL_PARTNER",
+]);
+
+const UPDATE_STATUS_REQUEST_ROLES = new Set([
+  "ADMIN",
+  "MANAGER",
+  "ASSISTANT_MANAGER",
+  "TEAM_LEADER",
+  "EXECUTIVE",
+  "FIELD_EXECUTIVE",
+]);
+
 const toCoordinateNumber = (value) => {
   if (value === null || value === undefined) return null;
   if (typeof value === "string" && value.trim() === "") return null;
@@ -342,13 +361,13 @@ const AssetVault = () => {
   const googleAutocompleteServiceRef = useRef(null);
   const googleGeocoderRef = useRef(null);
 
-  const role = localStorage.getItem("role") || "";
+  const role = String(localStorage.getItem("role") || "").trim().toUpperCase();
   const canManage = role === "ADMIN";
-  const canRequestCreate = role === "FIELD_EXECUTIVE";
+  const canRequestCreate = CREATE_REQUEST_ROLES.has(role);
   const canOpenCreateModal = canManage || canRequestCreate;
-  const canRequestEdit = role === "FIELD_EXECUTIVE";
+  const canRequestEdit = UPDATE_STATUS_REQUEST_ROLES.has(role);
   const canOpenEditModal = canManage || canRequestEdit;
-  const canRequestStatusChange = role === "FIELD_EXECUTIVE";
+  const canRequestStatusChange = UPDATE_STATUS_REQUEST_ROLES.has(role);
 
   const fetchAssets = useCallback(async () => {
     try {
@@ -1585,7 +1604,7 @@ const AssetVault = () => {
       )}
 
       <AnimatePresence>
-        {(isAddModalOpen || isEditModalOpen) && canOpenCreateModal && (
+        {((isAddModalOpen && canOpenCreateModal) || (isEditModalOpen && canOpenEditModal)) && (
           <Motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
