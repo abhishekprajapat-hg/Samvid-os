@@ -1298,32 +1298,46 @@ exports.resetCompanyAdminPassword = async (req, res) => {
     }
 
     const requestedAdminId = String(req.body?.adminUserId || "").trim();
-    const adminFilter = {
-      companyId,
-      role: USER_ROLES.ADMIN,
-    };
+    let adminUser = null;
 
     if (requestedAdminId) {
       if (!mongoose.Types.ObjectId.isValid(requestedAdminId)) {
         return res.status(400).json({ message: "Invalid adminUserId" });
       }
-      adminFilter._id = requestedAdminId;
-    } else if (mongoose.Types.ObjectId.isValid(company.ownerUserId)) {
-      adminFilter._id = company.ownerUserId;
-    }
 
-    let adminUser = await User.findOne(adminFilter).select("+password");
-    if (!adminUser && !requestedAdminId && !adminFilter._id) {
       adminUser = await User.findOne({
+        _id: requestedAdminId,
         companyId,
         role: USER_ROLES.ADMIN,
-      })
-        .sort({ createdAt: 1 })
-        .select("+password");
+      }).select("+password");
+    } else {
+      if (mongoose.Types.ObjectId.isValid(company.ownerUserId)) {
+        adminUser = await User.findOne({
+          _id: company.ownerUserId,
+          companyId,
+          role: USER_ROLES.ADMIN,
+        }).select("+password");
+      }
+
+      if (!adminUser) {
+        adminUser = await User.findOne({
+          companyId,
+          role: USER_ROLES.ADMIN,
+        })
+          .sort({ createdAt: 1 })
+          .select("+password");
+      }
     }
 
     if (!adminUser) {
       return res.status(404).json({ message: "Admin user not found for this company" });
+    }
+
+    if (String(company.ownerUserId || "") !== String(adminUser._id)) {
+      await Company.updateOne(
+        { _id: companyId },
+        { $set: { ownerUserId: adminUser._id } },
+      );
     }
 
     adminUser.password = rawPassword;
