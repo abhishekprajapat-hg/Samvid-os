@@ -371,6 +371,7 @@ const LeadDetailsRebuiltContent = ({
   const [uploadingClosureDocuments, setUploadingClosureDocuments] = React.useState(false);
   const [proposalSelectedPropertyIds, setProposalSelectedPropertyIds] = React.useState([]);
   const [isGeneratingProposalPdf, setIsGeneratingProposalPdf] = React.useState(false);
+  const [linkableInventoryTypeFilter, setLinkableInventoryTypeFilter] = React.useState("ALL");
   const [visiblePropertiesCount, setVisiblePropertiesCount] = React.useState(INITIAL_PROPERTIES_RENDER_COUNT);
   const [visibleProposalOptionsCount, setVisibleProposalOptionsCount] = React.useState(
     INITIAL_PROPOSAL_OPTIONS_RENDER_COUNT,
@@ -435,6 +436,7 @@ const LeadDetailsRebuiltContent = ({
     setIsGeneratingProposalPdf(false);
     setClosureUploadMessage("");
     setUploadingClosureDocuments(false);
+    setLinkableInventoryTypeFilter("ALL");
     setVisiblePropertiesCount(INITIAL_PROPERTIES_RENDER_COUNT);
     setVisibleProposalOptionsCount(INITIAL_PROPOSAL_OPTIONS_RENDER_COUNT);
     setVisibleDiaryCount(INITIAL_DIARY_RENDER_COUNT);
@@ -651,6 +653,12 @@ const LeadDetailsRebuiltContent = ({
     () =>
       [...(Array.isArray(availableRelatedInventoryOptions) ? availableRelatedInventoryOptions : [])]
         .filter((inventory) => toInventoryApiStatus(inventory?.status) === "Available")
+        .filter((inventory) => {
+          const inventoryType = String(inventory?.type || "").trim().toUpperCase();
+          if (linkableInventoryTypeFilter === "SALE") return inventoryType === "SALE";
+          if (linkableInventoryTypeFilter === "RENT") return inventoryType === "RENT";
+          return true;
+        })
         .sort((a, b) => {
           const aLabel = String(getInventoryLeadLabel(a) || a?.title || a?._id || "").toLowerCase();
           const bLabel = String(getInventoryLeadLabel(b) || b?.title || b?._id || "").toLowerCase();
@@ -658,8 +666,23 @@ const LeadDetailsRebuiltContent = ({
           const bText = `${bLabel} ${String(b?.location || "").toLowerCase()}`;
           return aText.localeCompare(bText);
         }),
-    [availableRelatedInventoryOptions, getInventoryLeadLabel, toInventoryApiStatus],
+    [
+      availableRelatedInventoryOptions,
+      getInventoryLeadLabel,
+      linkableInventoryTypeFilter,
+      toInventoryApiStatus,
+    ],
   );
+
+  React.useEffect(() => {
+    if (!relatedInventoryDraft) return;
+    const exists = sortedLinkableInventoryOptions.some(
+      (inventory) => String(inventory?._id || "") === String(relatedInventoryDraft || ""),
+    );
+    if (!exists) {
+      setRelatedInventoryDraft("");
+    }
+  }, [relatedInventoryDraft, setRelatedInventoryDraft, sortedLinkableInventoryOptions]);
 
   const selectedPropertyCount = selectedProposalProperties.length;
   const proposalSubjectPropertyLabel = React.useMemo(() => {
@@ -904,6 +927,67 @@ const LeadDetailsRebuiltContent = ({
         spacing: isTitle ? 8 : 4,
       });
     });
+
+    if (proposalImageEntries.length > 0) {
+      addText("", { spacing: 2 });
+      addText("Property Photos", {
+        fontSize: 12,
+        bold: true,
+        spacing: 8,
+      });
+    }
+
+    const addProposalImage = async (imageEntry, index) => {
+      const imageLabel = String(imageEntry?.propertyLabel || `Property ${index + 1}`).trim();
+      const imageNumber = Number(imageEntry?.imageIndex || index + 1);
+      addText(`${imageLabel} - Image ${imageNumber}`, {
+        fontSize: 10,
+        bold: true,
+        spacing: 4,
+      });
+
+      try {
+        const source = await fetchPdfImageSource(imageEntry?.url);
+        const imageProps = doc.getImageProperties(source.dataUrl);
+        const rawWidth = Number(imageProps?.width) || 1;
+        const rawHeight = Number(imageProps?.height) || 1;
+        const safeRatio = rawHeight / rawWidth;
+        const maxRenderWidth = contentWidth;
+        const maxRenderHeight = Math.max(160, pageHeight - (margin * 2) - 90);
+        let renderWidth = maxRenderWidth;
+        let renderHeight = renderWidth * safeRatio;
+
+        if (renderHeight > maxRenderHeight) {
+          renderHeight = maxRenderHeight;
+          renderWidth = renderHeight / safeRatio;
+        }
+
+        ensureSpace(renderHeight + 14);
+        doc.addImage(
+          source.dataUrl,
+          source.format || "JPEG",
+          margin,
+          cursorY,
+          renderWidth,
+          renderHeight,
+          undefined,
+          "FAST",
+        );
+        cursorY += renderHeight + 10;
+      } catch {
+        addText("Image unavailable in PDF", {
+          fontSize: 10,
+          color: [148, 163, 184],
+          spacing: 10,
+        });
+      }
+    };
+
+    for (let index = 0; index < proposalImageEntries.length; index += 1) {
+      // Keep image rendering sequential for predictable PDF layout and memory usage.
+      // eslint-disable-next-line no-await-in-loop
+      await addProposalImage(proposalImageEntries[index], index);
+    }
 
     return doc.output("blob");
   };
@@ -1423,6 +1507,41 @@ const LeadDetailsRebuiltContent = ({
             )}
             {canManageLeadProperties ? (
               <div className={`mt-3 rounded-xl border p-2.5 ${softCard}`}>
+                <div className="mb-2 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setLinkableInventoryTypeFilter("ALL")}
+                    className={`inline-flex h-7 items-center rounded border px-2 text-[10px] font-semibold ${
+                      linkableInventoryTypeFilter === "ALL"
+                        ? "border-transparent bg-emerald-600 text-white hover:bg-emerald-500"
+                        : button
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLinkableInventoryTypeFilter("SALE")}
+                    className={`inline-flex h-7 items-center rounded border px-2 text-[10px] font-semibold ${
+                      linkableInventoryTypeFilter === "SALE"
+                        ? "border-transparent bg-emerald-600 text-white hover:bg-emerald-500"
+                        : button
+                    }`}
+                  >
+                    For Sale
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLinkableInventoryTypeFilter("RENT")}
+                    className={`inline-flex h-7 items-center rounded border px-2 text-[10px] font-semibold ${
+                      linkableInventoryTypeFilter === "RENT"
+                        ? "border-transparent bg-emerald-600 text-white hover:bg-emerald-500"
+                        : button
+                    }`}
+                  >
+                    Rental
+                  </button>
+                </div>
                 <div className="flex min-w-0 items-center gap-2">
                   <select
                     value={relatedInventoryDraft}
@@ -1441,10 +1560,19 @@ const LeadDetailsRebuiltContent = ({
                         || inventoryId;
                       const inventoryLocation = String(inventory?.location || "").trim();
                       const inventoryPriceLabel = formatCurrencyInr(inventory?.price);
+                      const inventoryTypeLabel =
+                        String(inventory?.type || "").trim().toUpperCase() === "RENT"
+                          ? "Rental"
+                          : "For Sale";
 
                       return (
                         <option key={inventoryId} value={inventoryId}>
-                          {[inventoryLabel, inventoryLocation ? `(${inventoryLocation})` : "", `Price: ${inventoryPriceLabel}`]
+                          {[
+                            inventoryLabel,
+                            inventoryLocation ? `(${inventoryLocation})` : "",
+                            `Type: ${inventoryTypeLabel}`,
+                            `Price: ${inventoryPriceLabel}`,
+                          ]
                             .filter(Boolean)
                             .join(" ")}
                         </option>

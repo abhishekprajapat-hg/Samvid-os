@@ -73,9 +73,38 @@ export const deleteInventoryAsset = async (assetId) => {
   await api.delete(`/inventory/${assetId}`);
 };
 
-export const requestInventoryStatusChange = async (assetId, status, reservationReason = "") => {
+export const requestInventoryStatusChange = async (
+  assetId,
+  status,
+  options = {},
+) => {
+  const normalizedStatus = String(status || "").trim();
+  const isLegacyReasonMode = typeof options === "string";
+  const reservationReason = isLegacyReasonMode
+    ? String(options || "").trim()
+    : String(options?.reservationReason || "").trim();
+  const leadId = isLegacyReasonMode
+    ? ""
+    : String(options?.leadId || options?.reservationLeadId || "").trim();
+
+  const payload = {
+    proposedData: {
+      status: normalizedStatus,
+      reservationReason: reservationReason || "",
+    },
+  };
+
+  if (leadId) {
+    payload.proposedData.reservationLeadId = leadId;
+    payload.relatedLeadId = leadId;
+  }
+
+  if (reservationReason) {
+    payload.requestNote = reservationReason;
+  }
+
   const res = await api.post(`/inventory-request/update/${assetId}`, {
-    proposedData: { status, reservationReason },
+    ...payload,
   });
 
   return res.data?.request || null;

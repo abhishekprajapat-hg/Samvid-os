@@ -342,6 +342,12 @@ const AssetVault = () => {
   const [deletingId, setDeletingId] = useState("");
   const [updatingStatusId, setUpdatingStatusId] = useState("");
   const [requestingStatusId, setRequestingStatusId] = useState("");
+  const [isReserveModalOpen, setIsReserveModalOpen] = useState(false);
+  const [reserveMode, setReserveMode] = useState("direct");
+  const [reserveAssetId, setReserveAssetId] = useState("");
+  const [reserveLeadId, setReserveLeadId] = useState("");
+  const [reserveReason, setReserveReason] = useState("");
+  const [reserveSubmitting, setReserveSubmitting] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
   const [reviewingRequestId, setReviewingRequestId] = useState("");
   const [leadOptions, setLeadOptions] = useState([]);
@@ -374,6 +380,44 @@ const AssetVault = () => {
   const canRequestEdit = UPDATE_STATUS_REQUEST_ROLES.has(role);
   const canOpenEditModal = canManage || canRequestEdit;
   const canRequestStatusChange = UPDATE_STATUS_REQUEST_ROLES.has(role);
+  const reserveTargetAsset = useMemo(
+    () => assets.find((asset) => String(asset?._id || "") === String(reserveAssetId || "")) || null,
+    [assets, reserveAssetId],
+  );
+
+  const sortedLeadOptions = useMemo(
+    () =>
+      [...leadOptions].sort((a, b) =>
+        String(a?.name || "").localeCompare(String(b?.name || ""), "en", { sensitivity: "base" })),
+    [leadOptions],
+  );
+
+  const closeReserveModal = useCallback(() => {
+    setIsReserveModalOpen(false);
+    setReserveMode("direct");
+    setReserveAssetId("");
+    setReserveLeadId("");
+    setReserveReason("");
+    setReserveSubmitting(false);
+  }, []);
+
+  const openReserveModal = useCallback((assetId, mode = "direct") => {
+    const targetAsset = assets.find((asset) => String(asset?._id || "") === String(assetId || ""));
+    if (!targetAsset) return;
+
+    const existingLeadId = String(
+      targetAsset?.reservationLeadId?._id
+      || targetAsset?.reservationLeadId
+      || targetAsset?.reservationLead?._id
+      || "",
+    ).trim();
+
+    setReserveMode(mode === "request" ? "request" : "direct");
+    setReserveAssetId(String(assetId || ""));
+    setReserveLeadId(existingLeadId);
+    setReserveReason(String(targetAsset?.reservationReason || "").trim());
+    setIsReserveModalOpen(true);
+  }, [assets]);
 
   const fetchAssets = useCallback(async () => {
     try {
@@ -1241,18 +1285,10 @@ const AssetVault = () => {
       return;
     }
 
-    let reservationReason = "";
-
     if (status === "Blocked") {
-      const suggestedReason = String(asset?.reservationReason || "").trim();
-      const reasonInput = window.prompt("Reservation reason:", suggestedReason);
-      if (reasonInput === null) return;
-
-      reservationReason = String(reasonInput || "").trim();
-      if (!reservationReason) {
-        setError("Reservation reason is required when status is Reserved");
-        return;
-      }
+      setError("");
+      openReserveModal(assetId, "direct");
+      return;
     }
 
     try {
@@ -1262,7 +1298,7 @@ const AssetVault = () => {
 
       const updated = await updateInventoryAsset(assetId, {
         status,
-        reservationReason: status === "Blocked" ? reservationReason : "",
+        reservationReason: "",
       });
       setAssets((prev) => prev.map((asset) => (asset._id === assetId ? updated : asset)));
       setSuccess("Asset status updated");
@@ -1291,16 +1327,10 @@ const AssetVault = () => {
       return;
     }
 
-    let reservationReason = "";
     if (status === "Blocked") {
-      const reasonInput = window.prompt("Reservation reason:");
-      if (reasonInput === null) return;
-
-      reservationReason = String(reasonInput || "").trim();
-      if (!reservationReason) {
-        setError("Reservation reason is required when status is Reserved");
-        return;
-      }
+      setError("");
+      openReserveModal(assetId, "request");
+      return;
     }
 
     try {
@@ -1308,16 +1338,63 @@ const AssetVault = () => {
       setError("");
       setSuccess("");
 
-      await requestInventoryStatusChange(
-        assetId,
-        status,
-        status === "Blocked" ? reservationReason : "",
-      );
+      await requestInventoryStatusChange(assetId, status);
       setSuccess("Status change request submitted for admin approval");
     } catch (requestError) {
       console.error(`Request status change failed: ${toErrorMessage(requestError, "Unknown error")}`);
       setError(toErrorMessage(requestError, "Failed to submit status change request"));
     } finally {
+      setRequestingStatusId("");
+    }
+  };
+
+  const handleReserveSubmit = async () => {
+    if (!reserveAssetId) return;
+
+    const normalizedLeadId = String(reserveLeadId || "").trim();
+    const normalizedReason = String(reserveReason || "").trim();
+
+    if (!normalizedLeadId) {
+      setError("Lead selection is required when status is Reserved");
+      return;
+    }
+
+    if (!normalizedReason) {
+      setError("Reservation reason is required when status is Reserved");
+      return;
+    }
+
+    try {
+      setReserveSubmitting(true);
+      setError("");
+      setSuccess("");
+
+      if (reserveMode === "request") {
+        setRequestingStatusId(reserveAssetId);
+        await requestInventoryStatusChange(reserveAssetId, "Blocked", {
+          leadId: normalizedLeadId,
+          reservationReason: normalizedReason,
+        });
+        setSuccess("Reserve request submitted for admin approval");
+      } else {
+        setUpdatingStatusId(reserveAssetId);
+        const updated = await updateInventoryAsset(reserveAssetId, {
+          status: "Blocked",
+          reservationLeadId: normalizedLeadId,
+          reservationReason: normalizedReason,
+        });
+        setAssets((prev) =>
+          prev.map((asset) => (String(asset._id) === String(reserveAssetId) ? updated : asset)));
+        setSuccess("Property reserved successfully");
+      }
+
+      closeReserveModal();
+    } catch (reserveError) {
+      console.error(`Reserve property failed: ${toErrorMessage(reserveError, "Unknown error")}`);
+      setError(toErrorMessage(reserveError, "Failed to reserve property"));
+    } finally {
+      setReserveSubmitting(false);
+      setUpdatingStatusId("");
       setRequestingStatusId("");
     }
   };
@@ -2071,6 +2148,113 @@ const AssetVault = () => {
                       : canManage
                         ? "Save Asset"
                         : "Submit Request"}
+                </button>
+              </div>
+            </Motion.div>
+          </Motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isReserveModalOpen && (
+          <Motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm"
+          >
+            <Motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/60 p-5">
+                <div>
+                  <h3 className="font-display text-lg text-slate-900">
+                    Reserve Property
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Link this property with a lead and add reservation reason.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeReserveModal}
+                  disabled={reserveSubmitting}
+                  className="rounded-full p-2 text-slate-400 hover:bg-slate-200 disabled:opacity-60"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Property
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-slate-800">
+                    {getAssetTitle(reserveTargetAsset)}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {String(reserveTargetAsset?.location || "-").trim() || "-"}
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Reserve For Lead *
+                  </label>
+                  <select
+                    value={reserveLeadId}
+                    onChange={(event) => setReserveLeadId(event.target.value)}
+                    disabled={reserveSubmitting || loadingLeadOptions}
+                    className="mt-1 w-full rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none disabled:opacity-60"
+                  >
+                    <option value="">
+                      {loadingLeadOptions ? "Loading leads..." : "Select lead"}
+                    </option>
+                    {sortedLeadOptions.map((lead) => (
+                      <option key={lead._id} value={lead._id}>
+                        {getLeadOptionLabel(lead)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                    Reservation Reason *
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={reserveReason}
+                    onChange={(event) => setReserveReason(event.target.value)}
+                    placeholder="Why are you reserving this property?"
+                    disabled={reserveSubmitting}
+                    className="mt-1 w-full resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none disabled:opacity-60"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 border-t border-slate-100 bg-slate-50/50 p-5">
+                <button
+                  type="button"
+                  onClick={closeReserveModal}
+                  disabled={reserveSubmitting}
+                  className="flex-1 rounded-xl py-2.5 text-xs font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-100 disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReserveSubmit}
+                  disabled={reserveSubmitting || loadingLeadOptions}
+                  className="flex-1 rounded-xl bg-emerald-600 py-2.5 text-xs font-bold uppercase tracking-widest text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {reserveSubmitting
+                    ? (reserveMode === "request" ? "Submitting..." : "Reserving...")
+                    : (reserveMode === "request" ? "Submit Reserve Request" : "Reserve Property")}
                 </button>
               </div>
             </Motion.div>
