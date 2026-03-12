@@ -16,8 +16,6 @@ import { useNavigation } from "@react-navigation/native";
 import { useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import * as MailComposer from "expo-mail-composer";
-import * as Print from "expo-print";
 import { Screen } from "../../components/common/Screen";
 import {
   assignLead,
@@ -26,11 +24,12 @@ import {
   getLeadActivity,
   updateLeadStatus,
 } from "../../services/leadService";
+import { getInventoryAssets } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { useAuth } from "../../context/AuthContext";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
-import type { Lead } from "../../types";
+import type { InventoryAsset, Lead } from "../../types";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { colors } from "../../theme/tokens";
 
@@ -81,6 +80,11 @@ const toWhatsAppPhone = (value?: string) => {
 };
 
 const formatCurrency = (value: number) => `Rs ${Math.round(value).toLocaleString("en-IN")}`;
+
+const buildInventoryLabel = (asset: InventoryAsset) => {
+  const parts = [asset.title, asset.location].map((value) => String(value || "").trim()).filter(Boolean);
+  return parts.join(" | ") || "Inventory";
+};
 
 const getPendingPaymentRows = (lead: Lead) => {
   const merged: any[] = [];
@@ -141,6 +145,10 @@ export const LeadsMatrixScreen = () => {
   const [city, setCity] = useState("");
   const [email, setEmail] = useState("");
   const [projectInterested, setProjectInterested] = useState("");
+  const [selectedInventoryId, setSelectedInventoryId] = useState("");
+  const [inventoryOptions, setInventoryOptions] = useState<InventoryAsset[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [inventoryPickerOpen, setInventoryPickerOpen] = useState(false);
 
   const [selected, setSelected] = useState<Lead | null>(null);
   const [statusDraft, setStatusDraft] = useState("NEW");
@@ -270,6 +278,21 @@ export const LeadsMatrixScreen = () => {
     setCity("");
     setEmail("");
     setProjectInterested("");
+    setSelectedInventoryId("");
+    setInventoryPickerOpen(false);
+  };
+
+  const openAddLeadModal = async () => {
+    setAddOpen(true);
+    try {
+      setInventoryLoading(true);
+      const assets = await getInventoryAssets();
+      setInventoryOptions(Array.isArray(assets) ? assets : []);
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to load inventory"));
+    } finally {
+      setInventoryLoading(false);
+    }
   };
 
   const saveNewLead = async () => {
@@ -294,6 +317,7 @@ export const LeadsMatrixScreen = () => {
         city: city.trim(),
         email: email.trim(),
         projectInterested: projectInterested.trim(),
+        inventoryId: selectedInventoryId || undefined,
       });
       setLeads((prev) => [created, ...prev]);
       setSuccess("Lead created");
@@ -394,302 +418,37 @@ export const LeadsMatrixScreen = () => {
     }
   };
 
-  const openProposalGenerator = async () => {
+  const openMail = async (email?: string) => {
+    const safeEmail = String(email || "").trim();
+    if (!safeEmail) {
+      Alert.alert("No email", "Email is not available for this lead.");
+      return;
+    }
+
+    const url = `mailto:${safeEmail}`;
     try {
-      setProposalOpen(true);
-      setProposalLeadId("");
-      setProposalLeadDropdownOpen(false);
-      setProposalSelectedAssetIds([]);
-      setLastGeneratedPdfUri("");
-      setProposalLoading(true);
-      const assets = await getInventoryAssets();
-      setProposalAssets(Array.isArray(assets) ? assets : []);
-    } catch (e) {
-      setError(toErrorMessage(e, "Failed to load inventory for proposal"));
-    } finally {
-      setProposalLoading(false);
-    }
-  };
-
-  const toggleProposalAsset = (assetId: string) => {
-    setProposalSelectedAssetIds((prev) =>
-      prev.includes(assetId) ? prev.filter((id) => id !== assetId) : [...prev, assetId],
-    );
-  };
-
-  const buildProposalHtml = (items: InventoryAsset[], lead: Lead | null) => {
-    const generatedAt = new Date().toLocaleString("en-IN");
-    const leadName = escapeHtml(String(lead?.name || "-"));
-    const leadPhone = escapeHtml(String(lead?.phone || "-"));
-    const blocks = items
-      .map((asset, index) => {
-        const name = escapeHtml(buildInventoryLabel(asset));
-        const location = escapeHtml(String(asset.location || "-"));
-        const category = escapeHtml(String(asset.category || "-"));
-        const type = escapeHtml(String(asset.type || "-"));
-        const status = escapeHtml(String(asset.status || "-"));
-        const description = escapeHtml(String(asset.description || "-"));
-        const price = Number(asset.price || 0);
-        const formattedPrice = Number.isFinite(price) && price > 0 ? `Rs ${Math.round(price).toLocaleString("en-IN")}` : "-";
-        const imageRows = (Array.isArray(asset.images) ? asset.images : [])
-          .map((url) => resolveMediaUrl(String(url || "").trim()))
-          .filter(Boolean)
-          .slice(0, 6)
-          .map((url) => `<img src="${escapeHtml(url)}" alt="Property" />`)
-          .join("");
-
-        return `
-          <div class="card">
-            <div class="title">${index + 1}. ${name}</div>
-            <div class="line"><strong>Location:</strong> ${location}</div>
-            <div class="line"><strong>Category:</strong> ${category}</div>
-            <div class="line"><strong>Type:</strong> ${type}</div>
-            <div class="line"><strong>Status:</strong> ${status}</div>
-            <div class="line"><strong>Price:</strong> ${escapeHtml(formattedPrice)}</div>
-            <div class="line"><strong>Description:</strong> ${description}</div>
-            ${imageRows ? `<div class="imageGrid">${imageRows}</div>` : ""}
-          </div>
-        `;
-      })
-      .join("");
-
-    return `
-      <html>
-        <head>
-          <meta charset="UTF-8" />
-          <style>
-            body { font-family: Arial, sans-serif; color: #0f172a; padding: 20px; }
-            h1 { margin: 0 0 6px; font-size: 24px; }
-            .meta { color: #475569; margin-bottom: 4px; font-size: 12px; }
-            .card { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px; margin-top: 12px; }
-            .title { font-size: 14px; font-weight: 700; margin-bottom: 6px; }
-            .line { font-size: 12px; margin-top: 2px; }
-            .imageGrid { margin-top: 10px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-            .imageGrid img { width: 100%; max-height: 180px; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 6px; }
-          </style>
-        </head>
-        <body>
-          <h1>Property Proposal</h1>
-          <div class="meta">Generated: ${escapeHtml(generatedAt)}</div>
-          <div class="meta">Lead: ${leadName}</div>
-          <div class="meta">Phone: ${leadPhone}</div>
-          ${blocks}
-        </body>
-      </html>
-    `;
-  };
-
-  const generateProposalPdf = async () => {
-    if (!selectedProposalLead) {
-      Alert.alert("Select lead", "Please select lead first.");
-      return "";
-    }
-    if (!selectedProposalAssets.length) {
-      Alert.alert("Select inventory", "At least one inventory is required.");
-      return "";
-    }
-
-    try {
-      setProposalGenerating(true);
-      const lead = selectedProposalLead;
-      const safeLeadName = String(lead?.name || "lead").replace(/[^a-z0-9]/gi, "_").toLowerCase() || "lead";
-      const fileName = `proposal_${safeLeadName}_${Date.now()}.pdf`;
-
-      if (Platform.OS === "web") {
-        const { jsPDF } = await import("jspdf");
-
-        const loadImageForPdf = async (url: string): Promise<{ dataUrl: string; width: number; height: number } | null> =>
-          new Promise((resolve) => {
-            const img = new Image();
-            img.crossOrigin = "anonymous";
-            img.onload = () => {
-              try {
-                const canvas = document.createElement("canvas");
-                canvas.width = img.naturalWidth || img.width;
-                canvas.height = img.naturalHeight || img.height;
-                const ctx = canvas.getContext("2d");
-                if (!ctx) {
-                  resolve(null);
-                  return;
-                }
-                ctx.drawImage(img, 0, 0);
-                const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-                resolve({
-                  dataUrl,
-                  width: img.naturalWidth || img.width || 1,
-                  height: img.naturalHeight || img.height || 1,
-                });
-              } catch {
-                resolve(null);
-              }
-            };
-            img.onerror = () => resolve(null);
-            img.src = url;
-          });
-
-        const doc = new jsPDF({ unit: "pt", format: "a4" });
-        let y = 40;
-        doc.setFontSize(18);
-        doc.text("Property Proposal", 40, y);
-        y += 22;
-        doc.setFontSize(11);
-        doc.text(`Generated: ${new Date().toLocaleString("en-IN")}`, 40, y);
-        y += 16;
-        doc.text(`Lead: ${String(lead?.name || "-")}`, 40, y);
-        y += 16;
-        doc.text(`Phone: ${String(lead?.phone || "-")}`, 40, y);
-        y += 20;
-        doc.setFontSize(10);
-
-        for (let index = 0; index < selectedProposalAssets.length; index += 1) {
-          const asset = selectedProposalAssets[index];
-          const rows = [
-            `${index + 1}. ${buildInventoryLabel(asset)}`,
-            `Location: ${asset.location || "-"}`,
-            `Category: ${asset.category || "-"}`,
-            `Type: ${asset.type || "-"}`,
-            `Status: ${asset.status || "-"}`,
-            `Price: ${formatCurrency(Number(asset.price || 0))}`,
-            `Description: ${asset.description || "-"}`,
-          ];
-          rows.forEach((row) => {
-            const lines = doc.splitTextToSize(row, 500);
-            lines.forEach((line: string) => {
-              if (y > 780) {
-                doc.addPage();
-                y = 40;
-              }
-              doc.text(line, 40, y);
-              y += 14;
-            });
-          });
-
-          const imageUrls = (Array.isArray(asset.images) ? asset.images : [])
-            .map((raw) => resolveMediaUrl(String(raw || "").trim()))
-            .filter(Boolean)
-            .slice(0, 2);
-
-          for (let imageIndex = 0; imageIndex < imageUrls.length; imageIndex += 1) {
-            const loaded = await loadImageForPdf(imageUrls[imageIndex]);
-            if (!loaded) continue;
-            const maxWidth = 220;
-            const maxHeight = 160;
-            const ratio = Math.min(maxWidth / loaded.width, maxHeight / loaded.height);
-            const drawWidth = Math.max(1, Math.round(loaded.width * ratio));
-            const drawHeight = Math.max(1, Math.round(loaded.height * ratio));
-
-            if (y + drawHeight + 12 > 790) {
-              doc.addPage();
-              y = 40;
-            }
-            doc.addImage(
-              loaded.dataUrl,
-              "JPEG",
-              40 + (imageIndex % 2) * (maxWidth + 12),
-              y,
-              drawWidth,
-              drawHeight,
-            );
-          }
-
-          if (imageUrls.length) {
-            y += 174;
-          }
-
-          y += 12;
-          if (y > 790) {
-            doc.addPage();
-            y = 40;
-          }
-          doc.setDrawColor(203, 213, 225);
-          doc.line(40, y, 555, y);
-          y += 12;
-
-          if (y > 790) {
-            doc.addPage();
-            y = 40;
-          }
-        }
-
-        doc.save(fileName);
-        setLastGeneratedPdfUri(fileName);
-        setSuccess("Proposal PDF downloaded");
-        return fileName;
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        Alert.alert("Mail unavailable", "Could not open mail app on this device.");
+        return;
       }
-
-      const html = buildProposalHtml(selectedProposalAssets, lead);
-      const printed = await Print.printToFileAsync({ html, base64: false });
-      setLastGeneratedPdfUri(printed.uri);
-      setSuccess("Proposal PDF ready");
-      return printed.uri;
-    } catch (e) {
-      setError(toErrorMessage(e, "Failed to generate proposal PDF"));
-      return "";
-    } finally {
-      setProposalGenerating(false);
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Mail failed", "Unable to open mail app right now.");
     }
   };
 
-  const ensurePdfUri = async () => {
-    if (lastGeneratedPdfUri) return lastGeneratedPdfUri;
-    return generateProposalPdf();
-  };
-
-  const shareProposalOnWhatsApp = async () => {
-    if (!selectedProposalLead) {
-      Alert.alert("Select lead", "Please select lead first.");
+  const openMaps = async (lead: Lead) => {
+    const query = [String(lead.projectInterested || "").trim(), String(lead.city || "").trim()]
+      .filter(Boolean)
+      .join(", ");
+    if (!query) {
+      Alert.alert("Location missing", "Lead location is not available.");
       return;
     }
-
-    const phone = toWhatsAppPhone(selectedProposalLead.phone);
-    if (!phone) {
-      Alert.alert("Invalid number", "Lead phone number is invalid.");
-      return;
-    }
-    const pdfUri = await ensurePdfUri();
-    if (!pdfUri) return;
-
-    const text = encodeURIComponent(`Hi ${selectedProposalLead.name}, proposal ready hai. Please check.`);
-    const appUrl = `whatsapp://send?phone=${phone}&text=${text}`;
-    const webUrl = `https://wa.me/${phone}?text=${text}`;
-    const canApp = await Linking.canOpenURL(appUrl).catch(() => false);
-    if (canApp) {
-      await Linking.openURL(appUrl);
-      return;
-    }
-    await Linking.openURL(webUrl);
-  };
-
-  const shareProposalByEmail = async () => {
-    if (!selectedProposalLead) {
-      Alert.alert("Select lead", "Please select lead first.");
-      return;
-    }
-    const to = String(selectedProposalLead.email || "").trim();
-    if (!to) {
-      Alert.alert("Email missing", "Selected lead me email available nahi hai.");
-      return;
-    }
-
-    const pdfUri = await ensurePdfUri();
-    if (!pdfUri) return;
-
-    const subject = `Proposal for ${selectedProposalLead.name}`;
-    const body = `Dear ${selectedProposalLead.name},\n\nPlease find attached proposal PDF.\n\nRegards`;
-
-    if (Platform.OS !== "web" && (await MailComposer.isAvailableAsync())) {
-      await MailComposer.composeAsync({
-        recipients: [to],
-        subject,
-        body,
-        attachments: [pdfUri],
-      });
-      return;
-    }
-
-    const mailto = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    await Linking.openURL(mailto).catch(() => {
-      Alert.alert("Mail unavailable", "Unable to open mail client.");
+    const url = `https://maps.google.com/?q=${encodeURIComponent(query)}`;
+    await Linking.openURL(url).catch(() => {
+      Alert.alert("Maps unavailable", "Unable to open maps right now.");
     });
   };
 
@@ -718,7 +477,7 @@ export const LeadsMatrixScreen = () => {
               <View style={styles.topActionsLeft}>
                 <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} />
                 {canAddLead ? (
-                  <AppButton title="+ Add Lead" onPress={() => setAddOpen(true)} />
+                  <AppButton title="+ Add Lead" onPress={() => void openAddLeadModal()} />
                 ) : null}
               </View>
             </View>
@@ -819,10 +578,59 @@ export const LeadsMatrixScreen = () => {
               value={projectInterested}
               onChangeText={setProjectInterested}
             />
+            <Pressable
+              style={styles.selectField}
+              onPress={() => setInventoryPickerOpen(true)}
+              disabled={inventoryLoading || saving}
+            >
+              <Text style={selectedInventoryId ? styles.selectText : styles.selectPlaceholder}>
+                {selectedInventoryId
+                  ? buildInventoryLabel(inventoryOptions.find((row) => row._id === selectedInventoryId) || { _id: "", title: "" })
+                  : inventoryLoading
+                    ? "Loading inventory..."
+                    : "Select Inventory (Optional)"}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color="#64748b" />
+            </Pressable>
             <View style={styles.modalRow}>
               <AppButton title="Cancel" variant="ghost" onPress={() => setAddOpen(false)} disabled={saving} />
               <AppButton title={saving ? "Saving..." : "Save"} onPress={saveNewLead} disabled={saving} />
             </View>
+          </AppCard>
+        </View>
+      </Modal>
+
+      <Modal visible={inventoryPickerOpen} transparent animationType="fade" onRequestClose={() => setInventoryPickerOpen(false)}>
+        <View style={styles.modalWrap}>
+          <AppCard style={styles.pickerCard as object}>
+            <Text style={styles.modalTitle}>Select Inventory</Text>
+            <ScrollView style={styles.pickerList} showsVerticalScrollIndicator={false}>
+              <Pressable
+                style={styles.pickerRow}
+                onPress={() => {
+                  setSelectedInventoryId("");
+                  setInventoryPickerOpen(false);
+                }}
+              >
+                <Text style={styles.pickerRowText}>None</Text>
+              </Pressable>
+              {inventoryOptions.map((asset) => (
+                <Pressable
+                  key={asset._id}
+                  style={styles.pickerRow}
+                  onPress={() => {
+                    setSelectedInventoryId(asset._id);
+                    if (!projectInterested.trim()) {
+                      setProjectInterested(String(asset.title || ""));
+                    }
+                    setInventoryPickerOpen(false);
+                  }}
+                >
+                  <Text style={styles.pickerRowText}>{buildInventoryLabel(asset)}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <AppButton title="Close" variant="ghost" onPress={() => setInventoryPickerOpen(false)} />
           </AppCard>
         </View>
       </Modal>
@@ -970,9 +778,53 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   input: { height: 42, marginBottom: 10 },
+  selectField: {
+    minHeight: 42,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: "#cbd5e1",
+    borderRadius: 10,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  selectText: {
+    color: "#0f172a",
+    fontSize: 16,
+    flex: 1,
+  },
+  selectPlaceholder: {
+    color: "#94a3b8",
+    fontSize: 16,
+    flex: 1,
+  },
   modalRow: {
     flexDirection: "row",
     gap: 10,
+  },
+  pickerCard: {
+    borderRadius: 14,
+    padding: 14,
+    maxHeight: "70%",
+  },
+  pickerList: {
+    marginBottom: 10,
+  },
+  pickerRow: {
+    borderWidth: 1,
+    borderColor: "#e2e8f0",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    backgroundColor: "#fff",
+  },
+  pickerRowText: {
+    color: "#0f172a",
+    fontSize: 14,
   },
   detailRoot: {
     flex: 1,
@@ -1006,10 +858,11 @@ const styles = StyleSheet.create({
   quickActionRow: {
     marginTop: 10,
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   quickActionBtn: {
-    flex: 1,
+    width: "49%",
     height: 36,
     borderWidth: 1,
     borderColor: "#cbd5e1",

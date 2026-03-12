@@ -307,3 +307,44 @@ export const rejectLeadStatusRequest = async (
     request: res.data?.request,
   };
 };
+
+export type LeadPaymentApprovalRequest = Lead & {
+  dealPayment?: {
+    mode?: string;
+    paymentType?: string;
+    remainingAmount?: number;
+    paymentReference?: string;
+    note?: string;
+    approvalStatus?: "PENDING" | "APPROVED" | "REJECTED" | string;
+    approvalNote?: string;
+    approvalRequestedAt?: string;
+    approvalReviewedAt?: string;
+    approvalRequestedBy?: { _id?: string; name?: string; role?: string };
+    approvalReviewedBy?: { _id?: string; name?: string; role?: string };
+  };
+};
+
+export const getLeadPaymentRequests = async (
+  params: { approvalStatus?: "ALL" | "PENDING" | "APPROVED" | "REJECTED"; limit?: number } = {},
+): Promise<LeadPaymentApprovalRequest[]> => {
+  const res = await api.get("/leads/payment-requests", { params });
+  return Array.isArray(res.data?.requests) ? res.data.requests : [];
+};
+
+export const reviewLeadPaymentRequest = async (
+  leadId: string,
+  payload: {
+    status: string;
+    approvalStatus: "APPROVED" | "REJECTED";
+    approvalNote?: string;
+  },
+): Promise<Lead | null> => {
+  const res = await api.patch(`/leads/${leadId}/status`, {
+    status: payload.status,
+    dealPayment: {
+      approvalStatus: payload.approvalStatus,
+      approvalNote: String(payload.approvalNote || "").trim(),
+    },
+  });
+  return res.data?.lead || null;
+};

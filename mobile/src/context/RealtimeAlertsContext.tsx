@@ -8,10 +8,12 @@ import React, {
   useState,
 } from "react";
 import { Audio } from "expo-av";
+import { Vibration } from "react-native";
 import { createChatSocket } from "../services/chatSocket";
 import { getMessengerConversations, updateCallLog } from "../services/chatService";
-import { getPendingLeadStatusRequests } from "../services/leadService";
+import { getLeadPaymentRequests, getPendingLeadStatusRequests } from "../services/leadService";
 import { getPendingInventoryRequests } from "../services/inventoryService";
+import { notifyChatMessage } from "../services/pushNotifications";
 import { useAuth } from "./AuthContext";
 import type { ChatConversation } from "../types";
 import { navigateFromAnywhere } from "../navigation/navigationRef";
@@ -148,6 +150,13 @@ const getPendingNotificationCount = async () => {
   }
 
   try {
+    const paymentRequests = await getLeadPaymentRequests({ approvalStatus: "PENDING", limit: 200 });
+    total += Array.isArray(paymentRequests) ? paymentRequests.length : 0;
+  } catch {
+    // keep 0 for this source
+  }
+
+  try {
     const inventoryRequests = await getPendingInventoryRequests();
     total += Array.isArray(inventoryRequests) ? inventoryRequests.length : 0;
   } catch (error) {
@@ -188,6 +197,7 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
 
   const stopIncomingRingtone = useCallback(async () => {
     try {
+      Vibration.cancel();
       if (ringtoneRef.current) {
         await ringtoneRef.current.stopAsync().catch(() => {});
         await ringtoneRef.current.unloadAsync().catch(() => {});
@@ -201,6 +211,7 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
   const playIncomingRingtone = useCallback(async (callId: string) => {
     if (!callId || activeRingtoneCallIdRef.current === callId) return;
     await stopIncomingRingtone();
+    Vibration.vibrate([0, 450, 250, 450], true);
     try {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
@@ -374,14 +385,24 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
         setChatSignalCount((prev) => prev + 1);
       }
 
-      const senderName = String(message?.sender?.name || "").trim() || "New message";
-      pushPopup({
-        id: `chat-${messageId}`,
-        kind: "CHAT",
-        title: senderName,
+      const participants = Array.isArray(conversation?.participants) ? conversation.participants : [];
+      const peer = participants.find((participant: any) => String(participant?._id || "").trim() !== userId) || null;
+      const conversationContactId = String(peer?._id || senderId || "").trim();
+      const conversationContactName =
+        String(peer?.name || message?.sender?.name || "").trim() || "New message";
+      const conversationContactRole = String(peer?.role || "").trim();
+      const conversationContactAvatar = String(peer?.avatarUrl || peer?.profileImageUrl || "").trim();
+
+      if (conversationId && activeConversationIdRef.current === conversationId) return;
+
+      void notifyChatMessage({
+        conversationId,
+        contactId: conversationContactId,
+        contactName: conversationContactName,
+        contactRole: conversationContactRole,
+        contactAvatar: conversationContactAvatar,
         message: getMessagePreview(message),
-        createdAt: new Date().toISOString(),
-      });
+      }).catch(() => {});
     };
 
     const onRoomRead = (payload: any) => {
@@ -448,13 +469,7 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
       }
 
       setNotificationUnreadTotal((prev) => prev + 1);
-      pushPopup({
-        id: `notification-${eventId}`,
-        kind: "NOTIFICATION",
-        title: "Notification",
-        message: buildNotificationText(eventName, payload),
-        createdAt: new Date().toISOString(),
-      });
+      // Notification center badge only; in-app popup is intentionally disabled for mobile UX.
     };
 
     const onAdminRequest = (payload: any) => onNotification("admin:request:new", payload);

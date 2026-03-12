@@ -5,9 +5,12 @@ import { AppButton, AppCard, AppInput } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
 import {
   approveLeadStatusRequest,
+  getLeadPaymentRequests,
   getLeadStatusRequests,
   getPendingLeadStatusRequests,
   rejectLeadStatusRequest,
+  reviewLeadPaymentRequest,
+  type LeadPaymentApprovalRequest,
   type LeadStatusRequest,
 } from "../../services/leadService";
 import {
@@ -31,7 +34,8 @@ type InventoryRequest = {
 
 type NotificationItem =
   | { kind: "LEAD"; id: string; createdAt: string; request: LeadStatusRequest }
-  | { kind: "INVENTORY"; id: string; createdAt: string; request: InventoryRequest };
+  | { kind: "INVENTORY"; id: string; createdAt: string; request: InventoryRequest }
+  | { kind: "PAYMENT"; id: string; createdAt: string; request: LeadPaymentApprovalRequest };
 
 const asDate = (value?: string) => {
   if (!value) return null;
@@ -66,6 +70,8 @@ export const NotificationsScreen = () => {
   const [leadRequests, setLeadRequests] = useState<LeadStatusRequest[]>([]);
   const [leadRequestHistory, setLeadRequestHistory] = useState<LeadStatusRequest[]>([]);
   const [inventoryRequests, setInventoryRequests] = useState<InventoryRequest[]>([]);
+  const [paymentRequests, setPaymentRequests] = useState<LeadPaymentApprovalRequest[]>([]);
+  const [paymentRequestHistory, setPaymentRequestHistory] = useState<LeadPaymentApprovalRequest[]>([]);
 
   const [previewItem, setPreviewItem] = useState<NotificationItem | null>(null);
   const [rejectItem, setRejectItem] = useState<NotificationItem | null>(null);
@@ -114,12 +120,16 @@ export const NotificationsScreen = () => {
       else setLoading(true);
       setError("");
 
-      const [leadRows, leadHistoryRows, inventoryRows] = await Promise.all([
+      const [leadRows, leadApprovedRows, leadRejectedRows, inventoryRows, paymentRows] = await Promise.all([
         getPendingLeadStatusRequests().catch((err) => {
           if (!isRouteMissingError(err)) throw err;
           return [];
         }),
-        getLeadStatusRequests().catch((err) => {
+        getLeadStatusRequests({ status: "approved" }).catch((err) => {
+          if (!isRouteMissingError(err)) throw err;
+          return [];
+        }),
+        getLeadStatusRequests({ status: "rejected" }).catch((err) => {
           if (!isRouteMissingError(err)) throw err;
           return [];
         }),
@@ -127,14 +137,36 @@ export const NotificationsScreen = () => {
           if (!isRouteMissingError(err)) throw err;
           return [];
         }),
+        getLeadPaymentRequests({ approvalStatus: "ALL", limit: 300 }).catch((err) => {
+          if (!isRouteMissingError(err)) throw err;
+          return [];
+        }),
       ]);
 
       setLeadRequests(Array.isArray(leadRows) ? leadRows : []);
-      const history = Array.isArray(leadHistoryRows)
-        ? leadHistoryRows.filter((row) => String(row?.status || "") !== "pending").slice(0, 50)
-        : [];
+      const historyMap = new Map<string, LeadStatusRequest>();
+      const mergedRows = [
+        ...(Array.isArray(leadApprovedRows) ? leadApprovedRows : []),
+        ...(Array.isArray(leadRejectedRows) ? leadRejectedRows : []),
+      ];
+      mergedRows.forEach((row) => {
+        const id = String(row?._id || "").trim();
+        if (!id) return;
+        historyMap.set(id, row);
+      });
+      const history = Array.from(historyMap.values())
+        .sort((a, b) => (asDate(String(b?.reviewedAt || b?.createdAt || ""))?.getTime() || 0) - (asDate(String(a?.reviewedAt || a?.createdAt || ""))?.getTime() || 0))
+        .slice(0, 80);
       setLeadRequestHistory(history);
       setInventoryRequests(Array.isArray(inventoryRows) ? (inventoryRows as InventoryRequest[]) : []);
+      const paymentPending = Array.isArray(paymentRows)
+        ? paymentRows.filter((row: any) => String(row?.dealPayment?.approvalStatus || "").toUpperCase() === "PENDING")
+        : [];
+      const paymentHistory = Array.isArray(paymentRows)
+        ? paymentRows.filter((row: any) => ["APPROVED", "REJECTED"].includes(String(row?.dealPayment?.approvalStatus || "").toUpperCase())).slice(0, 80)
+        : [];
+      setPaymentRequests(paymentPending);
+      setPaymentRequestHistory(paymentHistory);
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load notifications"));
     } finally {
@@ -166,12 +198,18 @@ export const NotificationsScreen = () => {
       createdAt: String(row.createdAt || ""),
       request: row,
     }));
-    return [...leadItems, ...inventoryItems].sort((a, b) => {
+    const paymentItems: NotificationItem[] = paymentRequests.map((row) => ({
+      kind: "PAYMENT",
+      id: String(row._id || ""),
+      createdAt: String((row as any)?.dealPayment?.approvalRequestedAt || row.updatedAt || row.createdAt || ""),
+      request: row,
+    }));
+    return [...leadItems, ...inventoryItems, ...paymentItems].sort((a, b) => {
       const ta = asDate(a.createdAt)?.getTime() || 0;
       const tb = asDate(b.createdAt)?.getTime() || 0;
       return tb - ta;
     });
-  }, [leadRequests, inventoryRequests]);
+  }, [leadRequests, inventoryRequests, paymentRequests]);
 
   const doApprove = async (item: NotificationItem) => {
     try {
@@ -179,6 +217,14 @@ export const NotificationsScreen = () => {
       setError("");
       if (item.kind === "LEAD") {
         await approveLeadStatusRequest(item.id);
+      } else if (item.kind === "PAYMENT") {
+        const leadId = String(item.request?._id || "").trim();
+        const currentStatus = String((item.request as any)?.status || "CLOSED");
+        if (!leadId) throw new Error("Lead id is missing");
+        await reviewLeadPaymentRequest(leadId, {
+          status: currentStatus,
+          approvalStatus: "APPROVED",
+        });
       } else {
         await approveInventoryRequest(item.id);
       }
@@ -203,6 +249,15 @@ export const NotificationsScreen = () => {
       setError("");
       if (item.kind === "LEAD") {
         await rejectLeadStatusRequest(item.id, reason);
+      } else if (item.kind === "PAYMENT") {
+        const leadId = String(item.request?._id || "").trim();
+        const currentStatus = String((item.request as any)?.status || "CLOSED");
+        if (!leadId) throw new Error("Lead id is missing");
+        await reviewLeadPaymentRequest(leadId, {
+          status: currentStatus,
+          approvalStatus: "REJECTED",
+          approvalNote: reason,
+        });
       } else {
         await rejectInventoryRequest(item.id, reason);
       }
@@ -238,6 +293,10 @@ export const NotificationsScreen = () => {
             <Text style={styles.summaryValue}>{inventoryRequests.length}</Text>
           </View>
           <View style={styles.summaryBox}>
+            <Text style={styles.summaryLabel}>Payment Requests</Text>
+            <Text style={styles.summaryValue}>{paymentRequests.length}</Text>
+          </View>
+          <View style={styles.summaryBox}>
             <Text style={styles.summaryLabel}>Total</Text>
             <Text style={styles.summaryValue}>{items.length}</Text>
           </View>
@@ -259,13 +318,23 @@ export const NotificationsScreen = () => {
             <Text style={styles.meta}>No pending approval requests.</Text>
           </AppCard>
         ) : (
-          items.map((item) => (
+          items.map((item) => {
+            const requestedByName = item.kind === "PAYMENT"
+              ? String(item.request?.dealPayment?.approvalRequestedBy?.name || "User")
+              : String(item.request?.requestedBy?.name || "User");
+            const requestedByRole = item.kind === "PAYMENT"
+              ? String(item.request?.dealPayment?.approvalRequestedBy?.role || "-")
+              : String(item.request?.requestedBy?.role || "-");
+
+            return (
             <AppCard key={`${item.kind}-${item.id}`} style={styles.requestCard as object}>
               <View style={styles.rowBetween}>
-                <Text style={styles.requestType}>{item.kind === "LEAD" ? "Lead Status Request" : "Inventory Request"}</Text>
+                <Text style={styles.requestType}>
+                  {item.kind === "LEAD" ? "Lead Status Request" : item.kind === "PAYMENT" ? "Lead Payment Approval" : "Inventory Request"}
+                </Text>
                 <Text style={styles.badge}>Pending</Text>
               </View>
-              <Text style={styles.meta}>Requested by: {item.request.requestedBy?.name || "User"} ({item.request.requestedBy?.role || "-"})</Text>
+              <Text style={styles.meta}>Requested by: {requestedByName} ({requestedByRole})</Text>
               <Text style={styles.meta}>Created: {formatDate(item.createdAt)}</Text>
 
                 {item.kind === "LEAD" ? (
@@ -273,6 +342,13 @@ export const NotificationsScreen = () => {
                   <Text style={styles.meta}>Lead: {item.request.lead?.name || "-"} | Current: {item.request.lead?.status || "-"}</Text>
                   <Text style={styles.meta}>Proposed Status: {item.request.proposedStatus || "-"}</Text>
                   <Text style={styles.meta}>Note: {item.request.requestNote || "-"}</Text>
+                </>
+              ) : item.kind === "PAYMENT" ? (
+                <>
+                  <Text style={styles.meta}>Lead: {String(item.request.name || "-")} | Current: {String((item.request as any)?.status || "-")}</Text>
+                  <Text style={styles.meta}>Payment: {String(item.request?.dealPayment?.mode || "-")} | {String(item.request?.dealPayment?.paymentType || "-")}</Text>
+                  <Text style={styles.meta}>Reference: {String(item.request?.dealPayment?.paymentReference || "-")}</Text>
+                  <Text style={styles.meta}>Note: {String(item.request?.dealPayment?.note || "-")}</Text>
                 </>
               ) : (
                 <>
@@ -298,7 +374,8 @@ export const NotificationsScreen = () => {
                 ) : null}
               </View>
             </AppCard>
-          ))
+            );
+          })
         )}
         {isAdmin ? (
           <AppCard style={styles.historyCard as object}>
@@ -355,6 +432,32 @@ export const NotificationsScreen = () => {
             )}
           </AppCard>
         ) : null}
+        {isAdmin ? (
+          <AppCard style={styles.historyCard as object}>
+            <Text style={styles.summaryTitle}>Payment Approval History</Text>
+            {paymentRequestHistory.length === 0 ? (
+              <Text style={styles.meta}>No approved/rejected payment approvals yet.</Text>
+            ) : (
+              paymentRequestHistory.map((row) => {
+                const status = String(row?.dealPayment?.approvalStatus || "-").toUpperCase();
+                return (
+                  <View key={`payment-history-${row._id}`} style={styles.historyRow}>
+                    <View style={styles.rowBetween}>
+                      <Text style={styles.requestType}>{String(row?.name || "Lead")}</Text>
+                      <Text style={status === "APPROVED" ? styles.historyApproved : styles.historyRejected}>{status}</Text>
+                    </View>
+                    <Text style={styles.meta}>Mode: {String(row?.dealPayment?.mode || "-")} | Type: {String(row?.dealPayment?.paymentType || "-")}</Text>
+                    <Text style={styles.meta}>Requested By: {row?.dealPayment?.approvalRequestedBy?.name || "-"}</Text>
+                    <Text style={styles.meta}>Reviewed By: {row?.dealPayment?.approvalReviewedBy?.name || "-"}</Text>
+                    <Text style={styles.meta}>Requested At: {formatDate(row?.dealPayment?.approvalRequestedAt || row?.updatedAt || row?.createdAt)}</Text>
+                    <Text style={styles.meta}>Reviewed At: {formatDate(row?.dealPayment?.approvalReviewedAt || row?.updatedAt || row?.createdAt)}</Text>
+                    <Text style={styles.meta}>Review Note: {String(row?.dealPayment?.approvalNote || "-")}</Text>
+                  </View>
+                );
+              })
+            )}
+          </AppCard>
+        ) : null}
       </ScrollView>
 
       <Modal visible={Boolean(previewItem)} transparent animationType="slide" onRequestClose={() => setPreviewItem(null)}>
@@ -364,7 +467,10 @@ export const NotificationsScreen = () => {
             {previewItem ? (
               <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
                 <Text style={styles.previewText}>Type: {previewItem.kind}</Text>
-                <Text style={styles.previewText}>Requested By: {previewItem.request.requestedBy?.name || "-"} ({previewItem.request.requestedBy?.role || "-"})</Text>
+                <Text style={styles.previewText}>
+                  Requested By: {previewItem.kind === "PAYMENT" ? String(previewItem.request?.dealPayment?.approvalRequestedBy?.name || "-") : String(previewItem.request?.requestedBy?.name || "-")} (
+                  {previewItem.kind === "PAYMENT" ? String(previewItem.request?.dealPayment?.approvalRequestedBy?.role || "-") : String(previewItem.request?.requestedBy?.role || "-")})
+                </Text>
                 <Text style={styles.previewText}>Created: {formatDate(previewItem.createdAt)}</Text>
                 {previewItem.kind === "LEAD" ? (
                   <>
@@ -437,6 +543,17 @@ export const NotificationsScreen = () => {
                         ))}
                       </>
                     ) : null}
+                  </>
+                ) : previewItem.kind === "PAYMENT" ? (
+                  <>
+                    <Text style={styles.previewText}>Lead: {String(previewItem.request.name || "-")}</Text>
+                    <Text style={styles.previewText}>Current Status: {String((previewItem.request as any)?.status || "-")}</Text>
+                    <Text style={styles.previewText}>Payment Mode: {String(previewItem.request?.dealPayment?.mode || "-")}</Text>
+                    <Text style={styles.previewText}>Payment Type: {String(previewItem.request?.dealPayment?.paymentType || "-")}</Text>
+                    <Text style={styles.previewText}>Remaining Amount: {String(previewItem.request?.dealPayment?.remainingAmount ?? "-")}</Text>
+                    <Text style={styles.previewText}>Payment Reference: {String(previewItem.request?.dealPayment?.paymentReference || "-")}</Text>
+                    <Text style={styles.previewText}>Request Note: {String(previewItem.request?.dealPayment?.note || "-")}</Text>
+                    <Text style={styles.previewText}>Requested By: {previewItem.request?.dealPayment?.approvalRequestedBy?.name || "-"}</Text>
                   </>
                 ) : (
                   <>
@@ -523,10 +640,11 @@ const styles = StyleSheet.create({
   },
   summaryRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   summaryBox: {
-    flex: 1,
+    width: "31%",
     borderWidth: 1,
     borderColor: "#e2e8f0",
     borderRadius: 10,

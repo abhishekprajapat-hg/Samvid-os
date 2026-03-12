@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ActivityIndicator, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { Screen } from "../../components/common/Screen";
 import { useAuth } from "../../context/AuthContext";
 import { addLeadDiaryEntry, clearLeadFollowUp, getAllLeads, getLeadDiary, updateLeadStatus, type LeadDiaryEntry } from "../../services/leadService";
@@ -20,6 +21,18 @@ const roleText = (r?: string | null) => String(r || "USER").replaceAll("_", " ")
 const toIsoDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const to24Time = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 const toLocalDateTimeValue = (d: Date) => `${toIsoDate(d)}T${to24Time(d)}`;
+const toDigits = (value?: string) => String(value || "").replace(/\D/g, "");
+const toLocalTenDigitPhone = (value?: string) => {
+  const digits = toDigits(value);
+  if (!digits) return "";
+  if (digits.length >= 10) return digits.slice(-10);
+  return "";
+};
+const toWhatsAppPhone = (value?: string) => {
+  const local = toLocalTenDigitPhone(value);
+  if (!local) return "";
+  return `91${local}`;
+};
 
 export const MasterScheduleScreen = () => {
   const { width } = useWindowDimensions();
@@ -47,7 +60,13 @@ export const MasterScheduleScreen = () => {
   const [diarySavingLead, setDiarySavingLead] = useState("");
   const [webCalendarPickerVisible, setWebCalendarPickerVisible] = useState(false);
   const [webCalendarValue, setWebCalendarValue] = useState("");
+  const [isScheduleMicSupported, setIsScheduleMicSupported] = useState(true);
+  const [scheduleSpeechPermissionGranted, setScheduleSpeechPermissionGranted] = useState(Platform.OS === "web");
+  const [isScheduleListening, setIsScheduleListening] = useState(false);
+  const [scheduleNoteSaving, setScheduleNoteSaving] = useState(false);
   const webCalendarInputRef = useRef<any>(null);
+  const scheduleRecognitionRef = useRef<any>(null);
+  const lastScheduleTranscriptRef = useRef("");
 
   const load = useCallback(async (silent = false) => {
     try {
@@ -110,6 +129,144 @@ export const MasterScheduleScreen = () => {
     return () => clearTimeout(timer);
   }, [webCalendarPickerVisible]);
 
+  useEffect(() => {
+    let active = true;
+
+    const setupNativeSpeech = async () => {
+      try {
+        const available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+        if (!active) return;
+        if (!available) {
+          setIsScheduleMicSupported(false);
+          setScheduleSpeechPermissionGranted(false);
+          return;
+        }
+        const permission = await ExpoSpeechRecognitionModule.getPermissionsAsync();
+        if (!active) return;
+        setScheduleSpeechPermissionGranted(Boolean(permission?.granted));
+        setIsScheduleMicSupported(true);
+      } catch {
+        if (!active) return;
+        setIsScheduleMicSupported(false);
+        setScheduleSpeechPermissionGranted(false);
+      }
+    };
+
+    if (Platform.OS !== "web") {
+      scheduleRecognitionRef.current = null;
+      void setupNativeSpeech();
+      return () => {
+        active = false;
+        try {
+          ExpoSpeechRecognitionModule.abort();
+        } catch {}
+      };
+    }
+
+    const win = globalThis as any;
+    const SpeechRecognition = win?.SpeechRecognition || win?.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setIsScheduleMicSupported(false);
+      setScheduleSpeechPermissionGranted(false);
+      scheduleRecognitionRef.current = null;
+      return () => {
+        active = false;
+      };
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-IN";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => {
+        lastScheduleTranscriptRef.current = "";
+        setIsScheduleListening(true);
+      };
+      recognition.onend = () => {
+        setIsScheduleListening(false);
+      };
+      recognition.onerror = () => {
+        setIsScheduleListening(false);
+      };
+      recognition.onresult = (event: any) => {
+        const chunks = [];
+        for (let index = event?.resultIndex || 0; index < (event?.results?.length || 0); index += 1) {
+          if (!event.results[index]?.isFinal) continue;
+          const transcript = String(event.results[index]?.[0]?.transcript || "").trim();
+          if (transcript) chunks.push(transcript);
+        }
+
+        const incomingText = chunks.join(" ").replace(/\s+/g, " ").trim();
+        if (!incomingText) return;
+
+        setScheduleNote((prev) => {
+          const normalizedPrev = String(prev || "").trimEnd();
+          if (!normalizedPrev) {
+            lastScheduleTranscriptRef.current = incomingText;
+            return incomingText;
+          }
+
+          const lastIncoming = lastScheduleTranscriptRef.current;
+          if (incomingText === lastIncoming || normalizedPrev.endsWith(incomingText)) {
+            return normalizedPrev;
+          }
+
+          lastScheduleTranscriptRef.current = incomingText;
+          return `${normalizedPrev} ${incomingText}`;
+        });
+      };
+
+      scheduleRecognitionRef.current = recognition;
+      setIsScheduleMicSupported(true);
+      setScheduleSpeechPermissionGranted(true);
+    } catch {
+      setIsScheduleMicSupported(false);
+      setScheduleSpeechPermissionGranted(false);
+      scheduleRecognitionRef.current = null;
+    }
+
+    return () => {
+      active = false;
+      if (!scheduleRecognitionRef.current) return;
+      try {
+        scheduleRecognitionRef.current.stop();
+      } catch {}
+    };
+  }, []);
+
+  useSpeechRecognitionEvent("start", () => {
+    if (Platform.OS === "web") return;
+    lastScheduleTranscriptRef.current = "";
+    setIsScheduleListening(true);
+  });
+
+  useSpeechRecognitionEvent("end", () => {
+    if (Platform.OS === "web") return;
+    setIsScheduleListening(false);
+    lastScheduleTranscriptRef.current = "";
+  });
+
+  useSpeechRecognitionEvent("error", (event) => {
+    if (Platform.OS === "web") return;
+    setIsScheduleListening(false);
+    const message = String((event as any)?.message || "").trim() || "Unable to start voice input. Try again.";
+    setError(message);
+  });
+
+  useSpeechRecognitionEvent("result", (event) => {
+    if (Platform.OS === "web") return;
+    const results = Array.isArray((event as any)?.results) ? (event as any).results : [];
+    const first = results[0] || null;
+    const transcript = String(first?.transcript || "").replace(/\s+/g, " ").trim();
+    if (!transcript) return;
+    if (!(event as any)?.isFinal && transcript === lastScheduleTranscriptRef.current) return;
+    lastScheduleTranscriptRef.current = transcript;
+    if (!(event as any)?.isFinal) return;
+    setScheduleNote((prev) => `${String(prev || "").trim()} ${transcript}`.trim());
+  });
+
   const openDatePicker = () => {
     if (Platform.OS === "web") {
       setWebCalendarValue(toLocalDateTimeValue(scheduleAt || new Date()));
@@ -161,7 +318,10 @@ export const MasterScheduleScreen = () => {
 
   const saveDiary = async (lead: Lead) => {
     const note = String(diaryDraft[lead._id] || "").trim();
-    if (!note) return;
+    if (!note) {
+      setError("Diary note cannot be empty");
+      return;
+    }
     try {
       setDiarySavingLead(lead._id);
       const entry = await addLeadDiaryEntry(lead._id, { note });
@@ -173,10 +333,108 @@ export const MasterScheduleScreen = () => {
     } finally { setDiarySavingLead(""); }
   };
 
-  const doCall = async (phone?: string) => { const p = String(phone || "").trim(); if (!p) return setError("Phone not available"); Linking.openURL(`tel:${p}`).catch(() => setError("Call failed")); };
-  const doWhatsApp = async (phone?: string) => { const p = String(phone || "").replace(/[^\d+]/g, ""); if (!p) return setError("Phone not available"); const app = `whatsapp://send?phone=${p}`; const web = `https://wa.me/${p.replace("+", "")}`; const okApp = await Linking.canOpenURL(app).catch(() => false); Linking.openURL(okApp ? app : web).catch(() => setError("WhatsApp failed")); };
-  const doEmail = async (email?: string) => { const e = String(email || "").trim(); if (!e) return setError("Email not available"); Linking.openURL(`mailto:${e}`).catch(() => setError("Email failed")); };
-  const doMap = async (lead: Lead) => { const q = encodeURIComponent(`${lead.projectInterested || ""} ${lead.city || ""}`.trim() || lead.name || "location"); Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${q}`).catch(() => setError("Map failed")); };
+  const doCall = async (phone?: string) => {
+    const dialNumber = toLocalTenDigitPhone(phone);
+    if (!dialNumber) return setError("Phone number must have at least 10 digits.");
+    const url = `tel:${dialNumber}`;
+    const supported = await Linking.canOpenURL(url).catch(() => false);
+    if (!supported) return setError("Dialer unavailable on this device.");
+    Linking.openURL(url).catch(() => setError("Call failed"));
+  };
+
+  const saveScheduleDiaryNote = async () => {
+    if (!selectedLeadId) {
+      setError("Please select lead first");
+      return;
+    }
+    const note = String(scheduleNote || "").trim();
+    if (!note) {
+      setError("Diary note cannot be empty");
+      return;
+    }
+
+    try {
+      setScheduleNoteSaving(true);
+      setError("");
+      const entry = await addLeadDiaryEntry(selectedLeadId, { note });
+      if (entry?._id) {
+        setDiary((p) => ({ ...p, [selectedLeadId]: [entry, ...(p[selectedLeadId] || [])] }));
+      }
+      setScheduleNote("");
+      setOk("Lead diary updated");
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to save lead diary"));
+    } finally {
+      setScheduleNoteSaving(false);
+    }
+  };
+
+  const handleScheduleVoiceToggle = async () => {
+    if (!isScheduleMicSupported) {
+      setError("Voice input is not supported on this device.");
+      return;
+    }
+    try {
+      if (Platform.OS !== "web") {
+        if (isScheduleListening) {
+          ExpoSpeechRecognitionModule.stop();
+          return;
+        }
+        if (!scheduleSpeechPermissionGranted) {
+          const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+          if (!permission?.granted) {
+            setError("Microphone permission is required for voice input.");
+            return;
+          }
+          setScheduleSpeechPermissionGranted(true);
+        }
+        ExpoSpeechRecognitionModule.start({
+          lang: "en-IN",
+          interimResults: true,
+          maxAlternatives: 1,
+          continuous: false,
+        });
+        return;
+      }
+
+      if (!scheduleRecognitionRef.current) {
+        setError("Voice input is not supported in this browser.");
+        return;
+      }
+      if (isScheduleListening) {
+        scheduleRecognitionRef.current.stop();
+        return;
+      }
+      scheduleRecognitionRef.current.start();
+    } catch {
+      setError("Unable to start voice input. Try again.");
+      setIsScheduleListening(false);
+    }
+  };
+  const doWhatsApp = async (phone?: string) => {
+    const whatsappPhone = toWhatsAppPhone(phone);
+    if (!whatsappPhone) return setError("WhatsApp needs at least 10 digits.");
+    const appUrl = `whatsapp://send?phone=${whatsappPhone}`;
+    const webUrl = `https://wa.me/${whatsappPhone}`;
+    if (Platform.OS === "web") {
+      Linking.openURL(webUrl).catch(() => setError("WhatsApp failed"));
+      return;
+    }
+    const appSupported = await Linking.canOpenURL(appUrl).catch(() => false);
+    Linking.openURL(appSupported ? appUrl : webUrl).catch(() => setError("WhatsApp failed"));
+  };
+  const doEmail = async (email?: string) => {
+    const safeEmail = String(email || "").trim();
+    if (!safeEmail) return setError("Email not available");
+    const url = `mailto:${safeEmail}`;
+    const supported = await Linking.canOpenURL(url).catch(() => false);
+    if (!supported) return setError("Mail app unavailable on this device.");
+    Linking.openURL(url).catch(() => setError("Email failed"));
+  };
+  const doMap = async (lead: Lead) => {
+    const q = encodeURIComponent(`${lead.projectInterested || ""} ${lead.city || ""}`.trim() || lead.name || "location");
+    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${q}`).catch(() => setError("Map failed"));
+  };
 
   return (
     <Screen title="Master Schedule" subtitle="Follow-up Calendar" loading={loading} error={error}>
@@ -231,7 +489,20 @@ export const MasterScheduleScreen = () => {
                 <Text style={styles.inputBtnText}>{fmtFollowUpInput(scheduleAt)}</Text>
                 <Ionicons name="calendar-outline" size={14} color="#334155" />
               </Pressable>
-              <TextInput style={styles.textarea} placeholder="Lead diary note while scheduling (optional)" value={scheduleNote} onChangeText={setScheduleNote} multiline />
+              <TextInput style={styles.textarea} placeholder="Lead diary note while scheduling (optional)" placeholderTextColor="#94a3b8" value={scheduleNote} onChangeText={setScheduleNote} multiline />
+              <View style={styles.scheduleDiaryActionRow}>
+                <Pressable
+                  style={[styles.voiceBtn, (!isScheduleMicSupported || (!scheduleSpeechPermissionGranted && Platform.OS !== "web")) && styles.disabled]}
+                  onPress={() => { void handleScheduleVoiceToggle(); }}
+                  disabled={!isScheduleMicSupported}
+                >
+                  <Ionicons name={isScheduleListening ? "mic" : "mic-outline"} size={14} color={isScheduleListening ? "#2563eb" : "#334155"} />
+                  <Text style={styles.voiceBtnText}>{isScheduleListening ? "Listening..." : "Voice"}</Text>
+                </Pressable>
+                <Pressable style={[styles.addDiary, scheduleNoteSaving && styles.disabled]} onPress={() => { void saveScheduleDiaryNote(); }} disabled={scheduleNoteSaving}>
+                  {scheduleNoteSaving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.addDiaryText}>Add Note</Text>}
+                </Pressable>
+              </View>
               <Pressable style={[styles.save, saving && styles.disabled]} onPress={saveFollowUp} disabled={saving}>
                 {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveText}>Save Follow-up</Text>}
               </Pressable>
@@ -255,8 +526,8 @@ export const MasterScheduleScreen = () => {
                   <Text style={styles.meta}>• {lead.status || "NEW"}</Text>
                   <View style={styles.diaryBox}>
                     <Text style={styles.diaryTitle}>Lead Diary</Text>
-                    <TextInput style={styles.diaryInput} placeholder={`Add diary note for ${lead.name}`} value={diaryDraft[lead._id] || ""} onChangeText={(v) => setDiaryDraft((p) => ({ ...p, [lead._id]: v }))} multiline />
-                    <Pressable style={[styles.addDiary, (!String(diaryDraft[lead._id] || "").trim() || diarySavingLead === lead._id) && styles.disabled]} onPress={() => saveDiary(lead)} disabled={!String(diaryDraft[lead._id] || "").trim() || diarySavingLead === lead._id}>
+                    <TextInput style={styles.diaryInput} placeholder={`Add diary note for ${lead.name}`} placeholderTextColor="#94a3b8" value={diaryDraft[lead._id] || ""} onChangeText={(v) => setDiaryDraft((p) => ({ ...p, [lead._id]: v }))} multiline />
+                    <Pressable style={[styles.addDiary, diarySavingLead === lead._id && styles.disabled]} onPress={() => saveDiary(lead)} disabled={diarySavingLead === lead._id}>
                       {diarySavingLead === lead._id ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.addDiaryText}>Add Note</Text>}
                     </Pressable>
                     {diaryLoading[lead._id] ? <ActivityIndicator size="small" color="#334155" /> : (diary[lead._id] || []).length === 0 ? <Text style={styles.emptyInline}>No diary notes yet</Text> : (
@@ -300,7 +571,7 @@ export const MasterScheduleScreen = () => {
         </View>
       </Modal>
       <Modal visible={leadPicker} transparent animationType="fade" onRequestClose={() => setLeadPicker(false)}>
-        <View style={styles.modal}><View style={styles.modalCard}><Text style={styles.h2}>Select Lead</Text><TextInput style={styles.modalInput} value={leadSearch} onChangeText={setLeadSearch} placeholder="Search lead" /><ScrollView style={{ maxHeight: 340, marginTop: 8 }}>{leadRows.map((lead) => <Pressable key={lead._id} style={[styles.leadRow, String(selectedLeadId) === String(lead._id) && styles.leadRowA]} onPress={() => { setSelectedLeadId(lead._id); setLeadPicker(false); }}><Text style={styles.leadName}>{lead.name}</Text><Text style={styles.leadMeta}>{lead.phone || "-"} | {lead.city || "-"}</Text></Pressable>)}{leadRows.length === 0 ? <Text style={styles.empty}>No lead found</Text> : null}</ScrollView><Pressable style={styles.modalBtn} onPress={() => setLeadPicker(false)}><Text style={styles.modalBtnText}>Close</Text></Pressable></View></View>
+        <View style={styles.modal}><View style={styles.modalCard}><Text style={styles.h2}>Select Lead</Text><TextInput style={styles.modalInput} value={leadSearch} onChangeText={setLeadSearch} placeholder="Search lead" placeholderTextColor="#94a3b8" /><ScrollView style={{ maxHeight: 340, marginTop: 8 }}>{leadRows.map((lead) => <Pressable key={lead._id} style={[styles.leadRow, String(selectedLeadId) === String(lead._id) && styles.leadRowA]} onPress={() => { setSelectedLeadId(lead._id); setLeadPicker(false); }}><Text style={styles.leadName}>{lead.name}</Text><Text style={styles.leadMeta}>{lead.phone || "-"} | {lead.city || "-"}</Text></Pressable>)}{leadRows.length === 0 ? <Text style={styles.empty}>No lead found</Text> : null}</ScrollView><Pressable style={styles.modalBtn} onPress={() => setLeadPicker(false)}><Text style={styles.modalBtnText}>Close</Text></Pressable></View></View>
       </Modal>
       <Modal visible={Boolean(detailsLead)} transparent animationType="slide" onRequestClose={() => setDetailsLead(null)}>
         <View style={styles.modal}><View style={styles.modalCard}><View style={styles.headRow}><Text style={styles.h2}>Follow-up Details</Text><Pressable style={styles.icon} onPress={() => setDetailsLead(null)}><Ionicons name="close" size={14} color="#334155" /></Pressable></View>
@@ -331,14 +602,17 @@ const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap" }, day: { width: "14.285%", minHeight: 68, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#e2e8f0", padding: 6, backgroundColor: "#fff" }, dayMuted: { backgroundColor: "#f8fafc" }, daySel: { backgroundColor: "#e0f2fe" }, dayText: { color: "#0f172a", fontSize: 12, fontWeight: "700" }, dayTextMuted: { color: "#94a3b8" }, badge: { marginTop: 4, alignSelf: "flex-end", color: "#0284c7", fontSize: 11, fontWeight: "800" },
   headRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, tools: { flexDirection: "row", gap: 8 }, tool: { borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, paddingHorizontal: 10, minHeight: 30, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, toolText: { color: "#334155", fontSize: 12, fontWeight: "700" },
   inputBtn: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }, inputBtnText: { color: "#0f172a", fontSize: 13, fontWeight: "600", flex: 1 },
-  textarea: { marginTop: 8, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, minHeight: 62, textAlignVertical: "top" },
+  textarea: { marginTop: 8, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, minHeight: 62, textAlignVertical: "top", color: "#0f172a" },
+  scheduleDiaryActionRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  voiceBtn: { minWidth: 96, height: 32, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, paddingHorizontal: 10 },
+  voiceBtnText: { color: "#334155", fontSize: 12, fontWeight: "700" },
   save: { marginTop: 8, minHeight: 38, borderRadius: 10, backgroundColor: "#0284c7", alignItems: "center", justifyContent: "center" }, saveText: { color: "#fff", fontSize: 13, fontWeight: "800" }, disabled: { opacity: 0.6 },
   meta: { marginTop: 3, color: "#64748b", fontSize: 12 }, empty: { textAlign: "center", color: "#64748b", marginTop: 10, fontSize: 12 },
   fu: { marginTop: 8, borderWidth: 1, borderColor: "#7dd3fc", borderRadius: 10, backgroundColor: "#f0f9ff", padding: 8 }, fuHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, fuName: { flex: 1, color: "#0f172a", fontSize: 15, fontWeight: "700" }, act: { flexDirection: "row", gap: 6 }, icon: { width: 26, height: 26, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  diaryBox: { marginTop: 8, borderWidth: 1, borderColor: "#bfdbfe", borderRadius: 10, backgroundColor: "#fff", padding: 8 }, diaryTitle: { color: "#0f172a", fontSize: 13, fontWeight: "700" }, diaryInput: { marginTop: 6, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, minHeight: 52, paddingHorizontal: 8, paddingVertical: 6, textAlignVertical: "top" },
+  diaryBox: { marginTop: 8, borderWidth: 1, borderColor: "#bfdbfe", borderRadius: 10, backgroundColor: "#fff", padding: 8 }, diaryTitle: { color: "#0f172a", fontSize: 13, fontWeight: "700" }, diaryInput: { marginTop: 6, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 8, minHeight: 52, paddingHorizontal: 8, paddingVertical: 6, textAlignVertical: "top", color: "#0f172a" },
   addDiary: { marginTop: 6, alignSelf: "flex-end", minWidth: 90, height: 30, borderRadius: 8, backgroundColor: "#38bdf8", alignItems: "center", justifyContent: "center" }, addDiaryText: { color: "#fff", fontSize: 12, fontWeight: "700" }, emptyInline: { color: "#64748b", fontSize: 12, marginTop: 8 },
   diaryList: { marginTop: 8, gap: 6 }, diaryItem: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 8, backgroundColor: "#f8fafc", padding: 8 }, diaryItemText: { color: "#334155", fontSize: 12 }, diaryItemMeta: { marginTop: 3, color: "#64748b", fontSize: 10 },
-  modal: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 12 }, modalCard: { borderWidth: 1, borderColor: "#dbe3ee", borderRadius: 12, backgroundColor: "#fff", padding: 12, maxHeight: "88%" }, modalInput: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, paddingHorizontal: 10, backgroundColor: "#fff" }, detailsScroll: { marginTop: 8, maxHeight: "88%" }, detailsContent: { paddingBottom: 6 },
+  modal: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 12 }, modalCard: { borderWidth: 1, borderColor: "#dbe3ee", borderRadius: 12, backgroundColor: "#fff", padding: 12, maxHeight: "88%" }, modalInput: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, paddingHorizontal: 10, backgroundColor: "#fff", color: "#0f172a" }, detailsScroll: { marginTop: 8, maxHeight: "88%" }, detailsContent: { paddingBottom: 6 },
   webNativeDateTimeInput: { marginTop: 10, width: "100%", minHeight: 40, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14, color: "#0f172a", backgroundColor: "#fff" },
   modalRow: { marginTop: 10, flexDirection: "row", justifyContent: "flex-end", gap: 8 }, modalBtn: { minWidth: 88, height: 34, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, modalBtnText: { color: "#334155", fontSize: 12, fontWeight: "700" },
   leadRow: { borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 10, backgroundColor: "#fff", padding: 10, marginBottom: 6 }, leadRowA: { borderColor: "#38bdf8", backgroundColor: "#f0f9ff" }, leadName: { color: "#0f172a", fontSize: 14, fontWeight: "700" }, leadMeta: { marginTop: 3, color: "#64748b", fontSize: 11 },

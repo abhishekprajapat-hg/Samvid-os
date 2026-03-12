@@ -769,12 +769,6 @@ const getInventoryScopeQueryForUser = (user) => {
   }
 
   if (user.role === USER_ROLES.CHANNEL_PARTNER) {
-    if (!user.canViewInventory) {
-      throw createHttpError(
-        403,
-        "Inventory access is disabled for this channel partner",
-      );
-    }
     return { companyId: getCompanyIdForUser(user) };
   }
 

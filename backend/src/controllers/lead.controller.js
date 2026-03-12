@@ -3088,9 +3088,26 @@ exports.rejectLeadStatusRequest = async (req, res) => {
     request.reviewNote = String(req.body?.reviewNote || "").trim().slice(0, 500);
     await request.save();
 
+    const proposedStatusLabel = String(request.proposedStatus || "-").trim();
+    const reviewNote = String(request.reviewNote || "").trim();
+    const diaryParts = [
+      `Status request rejected by admin.`,
+      `Requested status: ${proposedStatusLabel}.`,
+      `Reason: ${rejectionReason}.`,
+    ];
+    if (reviewNote) {
+      diaryParts.push(`Review note: ${reviewNote}.`);
+    }
+    const diaryNote = diaryParts.join(" ").slice(0, MAX_LEAD_DIARY_NOTE_LENGTH);
+    await LeadDiary.create({
+      lead: request.lead,
+      note: diaryNote,
+      createdBy: req.user._id,
+    });
+
     await LeadActivity.create({
       lead: request.lead,
-      action: `Status request rejected: ${request.proposedStatus}`,
+      action: `Status request rejected: ${request.proposedStatus} | Reason: ${rejectionReason}`.slice(0, 500),
       performedBy: req.user._id,
     });
 

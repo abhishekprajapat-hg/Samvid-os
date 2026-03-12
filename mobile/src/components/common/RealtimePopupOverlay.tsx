@@ -35,7 +35,11 @@ export const RealtimePopupOverlay = () => {
               </View>
             ) : null}
           </View>
-          <Pressable style={styles.closeBtn} onPress={() => dismissPopup(item.id)} hitSlop={8}>
+          <Pressable
+            style={styles.closeBtn}
+            onPress={() => (item.kind === "CALL" ? rejectCallPopup(item.id) : dismissPopup(item.id))}
+            hitSlop={8}
+          >
             <Ionicons name="close" size={14} color="#475569" />
           </Pressable>
         </View>

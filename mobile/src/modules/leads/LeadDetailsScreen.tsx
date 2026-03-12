@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Linking,
   Modal,
   Platform,
@@ -18,9 +19,11 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system/legacy";
 import * as MailComposer from "expo-mail-composer";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import {
   addLeadDiaryEntry,
   addLeadRelatedProperty,
@@ -61,6 +64,7 @@ const DEAL_PAYMENT_TYPES = [
 ] as const;
 const PAYMENT_MODE_OPTIONS = ["Cash", "Cheque", "Bank Transfer", "UPI"] as const;
 const TRANSFER_TYPE_OPTIONS = ["RTGS", "IMPS", "NEFT"] as const;
+const LINK_PROPERTY_TYPE_OPTIONS = ["ALL", "SALE", "RENT"] as const;
 const EMPTY_CLOSED_FORM = {
   saleLeadId: "",
   paymentMode: "Cash" as (typeof PAYMENT_MODE_OPTIONS)[number],
@@ -199,6 +203,15 @@ const escapeHtml = (value: string) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
+const resolveMediaUrl = (rawUrl?: string) => {
+  const safe = String(rawUrl || "").trim();
+  if (!safe) return "";
+  if (/^https?:\/\//i.test(safe)) return safe;
+  const base = String(process.env.EXPO_PUBLIC_API_ORIGIN || process.env.EXPO_PUBLIC_SOCKET_URL || "").trim().replace(/\/$/, "");
+  if (!base) return safe;
+  return `${base}${safe.startsWith("/") ? "" : "/"}${safe}`;
+};
+
 export const LeadDetailsScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -247,6 +260,7 @@ export const LeadDetailsScreen = () => {
   const [assignDraft, setAssignDraft] = useState("");
   const [siteLatDraft, setSiteLatDraft] = useState("");
   const [siteLngDraft, setSiteLngDraft] = useState("");
+  const [relatedInventoryTypeFilter, setRelatedInventoryTypeFilter] = useState<(typeof LINK_PROPERTY_TYPE_OPTIONS)[number]>("ALL");
   const [relatedInventoryDraft, setRelatedInventoryDraft] = useState("");
   const [linkDropdownOpen, setLinkDropdownOpen] = useState(false);
   const [assignDropdownOpen, setAssignDropdownOpen] = useState(false);
@@ -289,6 +303,7 @@ export const LeadDetailsScreen = () => {
   const [diaryNoteDraft, setDiaryNoteDraft] = useState("");
   const [isDiaryListening, setIsDiaryListening] = useState(false);
   const [isDiaryMicSupported, setIsDiaryMicSupported] = useState(false);
+  const [speechPermissionGranted, setSpeechPermissionGranted] = useState(false);
   const [editingDiaryEntryId, setEditingDiaryEntryId] = useState("");
   const [diaryEditDraft, setDiaryEditDraft] = useState("");
   const [updatingDiaryEntry, setUpdatingDiaryEntry] = useState(false);
@@ -333,10 +348,15 @@ export const LeadDetailsScreen = () => {
         const id = toObjectIdString(item);
         if (!id || linkedIds.has(id)) return false;
         const status = String(item?.status || "").trim().toLowerCase();
-        return status === "available";
+        if (status !== "available") return false;
+
+        if (relatedInventoryTypeFilter === "ALL") return true;
+        const itemType = String(item?.type || "").trim().toLowerCase();
+        const normalizedType = itemType === "rent" || itemType === "rental" ? "RENT" : "SALE";
+        return normalizedType === relatedInventoryTypeFilter;
       });
     },
-    [inventoryOptions, selectedLeadRelatedInventories],
+    [inventoryOptions, selectedLeadRelatedInventories, relatedInventoryTypeFilter],
   );
   const selectedProposalPropertySet = useMemo(
     () => new Set(proposalSelectedPropertyIds),
@@ -492,12 +512,48 @@ export const LeadDetailsScreen = () => {
   }, [lead, selectedLeadRelatedInventories]);
 
   useEffect(() => {
+    let active = true;
+
+    const setupNativeSpeech = async () => {
+      try {
+        const available = ExpoSpeechRecognitionModule.isRecognitionAvailable();
+        if (!active) return;
+        if (!available) {
+          setIsDiaryMicSupported(false);
+          setSpeechPermissionGranted(false);
+          return;
+        }
+        const permission = await ExpoSpeechRecognitionModule.getPermissionsAsync();
+        if (!active) return;
+        setSpeechPermissionGranted(Boolean(permission?.granted));
+        setIsDiaryMicSupported(true);
+      } catch {
+        if (!active) return;
+        setIsDiaryMicSupported(false);
+        setSpeechPermissionGranted(false);
+      }
+    };
+
+    if (Platform.OS !== "web") {
+      diaryRecognitionRef.current = null;
+      void setupNativeSpeech();
+      return () => {
+        active = false;
+        try {
+          ExpoSpeechRecognitionModule.abort();
+        } catch {}
+      };
+    }
+
     const win = globalThis as any;
     const SpeechRecognition = win?.SpeechRecognition || win?.webkitSpeechRecognition;
     if (!SpeechRecognition) {
       setIsDiaryMicSupported(false);
+      setSpeechPermissionGranted(false);
       diaryRecognitionRef.current = null;
-      return;
+      return () => {
+        active = false;
+      };
     }
 
     try {
@@ -546,18 +602,52 @@ export const LeadDetailsScreen = () => {
 
       diaryRecognitionRef.current = recognition;
       setIsDiaryMicSupported(true);
+      setSpeechPermissionGranted(true);
     } catch {
       setIsDiaryMicSupported(false);
+      setSpeechPermissionGranted(false);
       diaryRecognitionRef.current = null;
     }
 
     return () => {
+      active = false;
       if (!diaryRecognitionRef.current) return;
       try {
         diaryRecognitionRef.current.stop();
       } catch {}
     };
   }, []);
+
+  useSpeechRecognitionEvent("start", () => {
+    if (Platform.OS === "web") return;
+    lastDiaryTranscriptRef.current = "";
+    setIsDiaryListening(true);
+  });
+
+  useSpeechRecognitionEvent("end", () => {
+    if (Platform.OS === "web") return;
+    setIsDiaryListening(false);
+    lastDiaryTranscriptRef.current = "";
+  });
+
+  useSpeechRecognitionEvent("error", (event) => {
+    if (Platform.OS === "web") return;
+    setIsDiaryListening(false);
+    const message = String((event as any)?.message || "").trim() || "Unable to start voice input. Try again.";
+    setError(message);
+  });
+
+  useSpeechRecognitionEvent("result", (event) => {
+    if (Platform.OS === "web") return;
+    const results = Array.isArray((event as any)?.results) ? (event as any).results : [];
+    const first = results[0] || null;
+    const transcript = String(first?.transcript || "").replace(/\s+/g, " ").trim();
+    if (!transcript) return;
+    if (!(event as any)?.isFinal && transcript === lastDiaryTranscriptRef.current) return;
+    lastDiaryTranscriptRef.current = transcript;
+    if (!(event as any)?.isFinal) return;
+    setDiaryNoteDraft((prev) => `${String(prev || "").trim()} ${transcript}`.trim());
+  });
 
   const assigneeName = useMemo(() => {
     if (!lead?.assignedTo?._id) return "Unassigned";
@@ -896,11 +986,24 @@ export const LeadDetailsScreen = () => {
     return `Rs ${Math.round(value).toLocaleString("en-IN")}`;
   };
 
+  const selectedProposalRows = useMemo(
+    () => (selectedProposalProperties.length > 0 ? selectedProposalProperties : selectedLeadRelatedInventories),
+    [selectedLeadRelatedInventories, selectedProposalProperties],
+  );
+
+  const proposalImageUrls = useMemo(
+    () =>
+      selectedProposalRows
+        .flatMap((row: any) => (Array.isArray(row?.images) ? row.images : []))
+        .map((url: string) => resolveMediaUrl(String(url || "").trim()))
+        .filter(Boolean)
+        .slice(0, 12),
+    [selectedProposalRows],
+  );
+
   const buildProposalText = useCallback(() => {
     if (!lead) return "";
-    const selectedRows = selectedProposalProperties.length > 0
-      ? selectedProposalProperties
-      : selectedLeadRelatedInventories;
+    const selectedRows = selectedProposalRows;
     const today = formatProposalDate(new Date());
     const validity = Number.parseInt(proposalValidityDays, 10);
     const lines = [
@@ -931,10 +1034,13 @@ export const LeadDetailsScreen = () => {
     lines.push("", "Regards,", "Samvid Realty");
 
     return lines.join("\n");
-  }, [lead, proposalSpecialNote, proposalValidityDays, selectedLeadRelatedInventories, selectedProposalProperties]);
+  }, [lead, proposalSpecialNote, proposalValidityDays, selectedProposalRows]);
 
   const buildProposalHtml = useCallback(() => {
     const proposalText = buildProposalText();
+    const imageGrid = proposalImageUrls
+      .map((url) => `<img src="${escapeHtml(url)}" alt="Property image" />`)
+      .join("");
     return `
       <html>
         <head>
@@ -943,18 +1049,21 @@ export const LeadDetailsScreen = () => {
             body { font-family: Arial, sans-serif; color: #0f172a; padding: 24px; line-height: 1.5; }
             pre { white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 12px; }
             h1 { margin: 0 0 12px; font-size: 20px; }
+            .imageGrid { margin-top: 16px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+            .imageGrid img { width: 100%; max-height: 220px; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 6px; }
           </style>
         </head>
         <body>
           <pre>${escapeHtml(proposalText)}</pre>
+          ${imageGrid ? `<div class="imageGrid">${imageGrid}</div>` : ""}
         </body>
       </html>
     `;
-  }, [buildProposalText]);
+  }, [buildProposalText, proposalImageUrls]);
 
   const copyProposalText = async () => {
     const message = buildProposalText();
-    if (!selectedLeadRelatedInventories.length) {
+    if (!selectedProposalRows.length) {
       Alert.alert("Select property", "Please select at least one property for proposal.");
       return;
     }
@@ -989,16 +1098,14 @@ export const LeadDetailsScreen = () => {
       }
     }
     if (Platform.OS !== "web") {
-      await Share.share({ title: "Proposal Text", message }).catch(() => {
-        setError("Unable to share/copy proposal text");
-      });
+      setError("Copy unavailable on this device. Please use a clipboard-enabled build.");
       return;
     }
     Alert.alert("Copy unavailable", "Clipboard copy is not supported on this device/browser.");
   };
 
   const generateProposalPdf = async () => {
-    if (!selectedLeadRelatedInventories.length) {
+    if (!selectedProposalRows.length) {
       Alert.alert("Select property", "Please select at least one property for proposal.");
       return "";
     }
@@ -1054,6 +1161,56 @@ export const LeadDetailsScreen = () => {
       .split("\n")
       .forEach((line) => addLine(line));
 
+    const loadImageForPdf = async (url: string): Promise<{ dataUrl: string; width: number; height: number } | null> =>
+      new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          try {
+            const canvas = document.createElement("canvas");
+            canvas.width = img.naturalWidth || img.width;
+            canvas.height = img.naturalHeight || img.height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              resolve(null);
+              return;
+            }
+            ctx.drawImage(img, 0, 0);
+            resolve({
+              dataUrl: canvas.toDataURL("image/jpeg", 0.9),
+              width: img.naturalWidth || img.width || 1,
+              height: img.naturalHeight || img.height || 1,
+            });
+          } catch {
+            resolve(null);
+          }
+        };
+        img.onerror = () => resolve(null);
+        img.src = url;
+      });
+
+    if (proposalImageUrls.length > 0) {
+      ensureSpace(24);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(15, 23, 42);
+      doc.text("Property Images", margin, cursorY);
+      cursorY += 14;
+
+      for (let index = 0; index < proposalImageUrls.length; index += 1) {
+        const loaded = await loadImageForPdf(proposalImageUrls[index]);
+        if (!loaded) continue;
+        const maxWidth = contentWidth;
+        const maxHeight = 240;
+        const ratio = Math.min(maxWidth / loaded.width, maxHeight / loaded.height);
+        const drawWidth = Math.max(1, Math.round(loaded.width * ratio));
+        const drawHeight = Math.max(1, Math.round(loaded.height * ratio));
+        ensureSpace(drawHeight + 12);
+        doc.addImage(loaded.dataUrl, "JPEG", margin, cursorY, drawWidth, drawHeight);
+        cursorY += drawHeight + 10;
+      }
+    }
+
     return doc.output("blob");
   };
 
@@ -1107,8 +1264,18 @@ export const LeadDetailsScreen = () => {
       return false;
     }
 
-    const pdfUri = await generateProposalPdf();
-    if (!pdfUri) return false;
+    const tempPdfUri = await generateProposalPdf();
+    if (!tempPdfUri) return false;
+    const localPdfUri = await (async () => {
+      try {
+        const localUri = `${FileSystem.documentDirectory || ""}${fileName}`;
+        if (!localUri) return tempPdfUri;
+        await FileSystem.copyAsync({ from: tempPdfUri, to: localUri });
+        return localUri;
+      } catch {
+        return tempPdfUri;
+      }
+    })();
 
     if (!IS_WEB && options.preferNativeShareOnWeb && nav?.navigator?.share) {
       try {
@@ -1125,7 +1292,7 @@ export const LeadDetailsScreen = () => {
     }
 
     if (!IS_WEB && await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(pdfUri, {
+      await Sharing.shareAsync(localPdfUri, {
         mimeType: "application/pdf",
         dialogTitle: options.title,
         UTI: "com.adobe.pdf",
@@ -1136,7 +1303,7 @@ export const LeadDetailsScreen = () => {
     await Share.share({
       title: options.title,
       message: options.message,
-      url: pdfUri,
+      url: localPdfUri,
     });
     return true;
   };
@@ -1156,22 +1323,10 @@ export const LeadDetailsScreen = () => {
 
       const pdfUri = await generateProposalPdf();
       if (!pdfUri) return;
-
-      if (!IS_WEB && await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(pdfUri, {
-          mimeType: "application/pdf",
-          dialogTitle: "Save/Download Proposal PDF",
-          UTI: "com.adobe.pdf",
-        });
-        setSuccess("PDF ready to save/share");
-        return;
-      }
-
-      await Share.share({
-        title: "Property Proposal PDF",
-        message: "Property proposal PDF generated",
-        url: pdfUri,
-      });
+      const localUri = `${FileSystem.documentDirectory || ""}${fileName}`;
+      if (!localUri) throw new Error("Local storage unavailable");
+      await FileSystem.copyAsync({ from: pdfUri, to: localUri });
+      setSuccess("PDF downloaded in local storage");
     } catch {
       Alert.alert("PDF failed", "Unable to generate or download proposal PDF.");
     } finally {
@@ -1194,47 +1349,37 @@ export const LeadDetailsScreen = () => {
   };
 
   const shareProposalWhatsApp = async () => {
-    if (!selectedLeadRelatedInventories.length) {
+    if (!selectedProposalRows.length) {
       Alert.alert("Select property", "Please select at least one property for proposal.");
       return;
     }
-    const phone = toWhatsAppPhone((lead as any)?.phone) || "";
-    if (!phone) {
-      Alert.alert("Invalid number", "Lead phone number is invalid. Last 10 digits are required.");
-      return;
-    }
+    try {
+      if (Platform.OS === "web") {
+        await openSystemPdfShare({
+          title: "Share Proposal PDF",
+          message: "Share on WhatsApp",
+          preferNativeShareOnWeb: true,
+        });
+        return;
+      }
 
-    const text = encodeURIComponent(buildProposalText());
-    const appUrlWithPhone = `whatsapp://send?phone=${phone}&text=${text}`;
-    const appUrlGeneric = `whatsapp://send?text=${text}`;
-    const webUrl = `https://wa.me/${phone}?text=${text}`;
-    if (Platform.OS === "web") {
-      await Linking.openURL(webUrl).catch(() => {
-        Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp Web.");
+      const canOpenWhatsApp = await Linking.canOpenURL("whatsapp://send").catch(() => false);
+      if (!canOpenWhatsApp) {
+        Alert.alert("WhatsApp unavailable", "WhatsApp is not installed on this device.");
+        return;
+      }
+      const ok = await openSystemPdfShare({
+        title: "Share Proposal PDF",
+        message: "Share on WhatsApp",
       });
-      return;
+      if (!ok) throw new Error("Share not available");
+    } catch {
+      Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp share for PDF.");
     }
-    const canAppWithPhone = await Linking.canOpenURL(appUrlWithPhone).catch(() => false);
-    if (canAppWithPhone) {
-      await Linking.openURL(appUrlWithPhone).catch(() => {
-        Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp.");
-      });
-      return;
-    }
-    const canAppGeneric = await Linking.canOpenURL(appUrlGeneric).catch(() => false);
-    if (canAppGeneric) {
-      await Linking.openURL(appUrlGeneric).catch(() => {
-        Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp.");
-      });
-      return;
-    }
-    await Linking.openURL(webUrl).catch(() => {
-      Alert.alert("WhatsApp unavailable", "Unable to open WhatsApp.");
-    });
   };
 
   const shareProposalEmail = async () => {
-    if (!selectedLeadRelatedInventories.length) {
+    if (!selectedProposalRows.length) {
       Alert.alert("Select property", "Please select at least one property for proposal.");
       return;
     }
@@ -1244,10 +1389,23 @@ export const LeadDetailsScreen = () => {
     const body = buildProposalText();
 
     if (Platform.OS !== "web" && (await MailComposer.isAvailableAsync())) {
+      const pdfUri = await generateProposalPdf();
+      const fileName = buildProposalPdfName();
+      let localUri = pdfUri;
+      if (pdfUri) {
+        try {
+          const preferredUri = `${FileSystem.documentDirectory || ""}${fileName}`;
+          if (preferredUri) {
+            await FileSystem.copyAsync({ from: pdfUri, to: preferredUri });
+            localUri = preferredUri;
+          }
+        } catch {}
+      }
       await MailComposer.composeAsync({
         recipients: email ? [email] : [],
         subject,
         body,
+        attachments: localUri ? [localUri] : [],
       });
       return;
     }
@@ -1750,12 +1908,49 @@ export const LeadDetailsScreen = () => {
   };
 
   const handleDiaryVoiceToggle = () => {
-    if (!isDiaryMicSupported || !diaryRecognitionRef.current) {
+    if (!isDiaryMicSupported) {
       setError("Speech to text is not supported on this device/browser.");
       return;
     }
 
     setError("");
+    if (Platform.OS !== "web") {
+      const startNative = async () => {
+        try {
+          if (!speechPermissionGranted) {
+            const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+            const granted = Boolean(permission?.granted);
+            setSpeechPermissionGranted(granted);
+            if (!granted) {
+              setError("Microphone permission is required for voice input.");
+              return;
+            }
+          }
+          if (isDiaryListening) {
+            ExpoSpeechRecognitionModule.stop();
+            return;
+          }
+          ExpoSpeechRecognitionModule.start({
+            lang: "en-IN",
+            interimResults: true,
+            maxAlternatives: 1,
+            addsPunctuation: true,
+            continuous: false,
+          });
+        } catch {
+          setError("Unable to start voice input. Try again.");
+          setIsDiaryListening(false);
+        }
+      };
+      void startNative();
+      return;
+    }
+
+    if (!diaryRecognitionRef.current) {
+      setError("Speech to text is not supported on this device/browser.");
+      return;
+    }
+
     try {
       if (isDiaryListening) {
         diaryRecognitionRef.current.stop();
@@ -2024,6 +2219,16 @@ export const LeadDetailsScreen = () => {
         {canLinkProperties ? (
           <>
             <Text style={styles.section}>Select property to link</Text>
+            <View style={styles.linkFilterRow}>
+              {LINK_PROPERTY_TYPE_OPTIONS.map((typeOption) => (
+                <AppChip
+                  key={`link-filter-${typeOption}`}
+                  label={typeOption}
+                  active={relatedInventoryTypeFilter === typeOption}
+                  onPress={() => setRelatedInventoryTypeFilter(typeOption)}
+                />
+              ))}
+            </View>
             <View style={styles.linkRow}>
             <Pressable style={[styles.selectInput, styles.linkSelect]} onPress={() => setLinkDropdownOpen((previous) => !previous)}>
               <Text style={styles.selectInputText}>
@@ -2268,6 +2473,7 @@ export const LeadDetailsScreen = () => {
         <TextInput
           style={[styles.diaryInput, { height: 84 }]}
           placeholder="Add conversation notes, visit details, objections, or next steps..."
+          placeholderTextColor="#94a3b8"
           value={diaryNoteDraft}
           onChangeText={setDiaryNoteDraft}
           multiline
@@ -2284,7 +2490,7 @@ export const LeadDetailsScreen = () => {
                 {isDiaryListening ? "Stop" : "Voice"}
               </Text>
             </Pressable>
-            <Pressable style={[styles.addNoteBtn, (!diaryNoteDraft.trim() || saving) && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving || !diaryNoteDraft.trim()}>
+            <Pressable style={[styles.addNoteBtn, saving && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving}>
               <Ionicons name="document-text-outline" size={14} color="#fff" />
               <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
             </Pressable>
@@ -2400,6 +2606,7 @@ export const LeadDetailsScreen = () => {
         <TextInput
           style={[styles.diaryInput, { height: 84 }]}
           placeholder="Add conversation notes, visit details, objections, or next step context..."
+          placeholderTextColor="#94a3b8"
           value={diaryNoteDraft}
           onChangeText={setDiaryNoteDraft}
           multiline
@@ -2416,7 +2623,7 @@ export const LeadDetailsScreen = () => {
                 {isDiaryListening ? "Stop" : "Voice"}
               </Text>
             </Pressable>
-            <Pressable style={[styles.addNoteBtn, (!diaryNoteDraft.trim() || saving) && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving || !diaryNoteDraft.trim()}>
+            <Pressable style={[styles.addNoteBtn, saving && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving}>
               <Ionicons name="document-text-outline" size={14} color="#fff" />
               <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
             </Pressable>
@@ -2595,8 +2802,13 @@ export const LeadDetailsScreen = () => {
 
       <Modal visible={statusRequestOpen} animationType="fade" transparent onRequestClose={closeStatusRequestModal}>
         <Pressable style={styles.modalWrap} onPress={closeStatusRequestModal}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboardWrap}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={Platform.OS === "ios" ? 84 : 18}
+          >
           <Pressable style={[styles.modalCard, styles.modalCardWide]} onPress={(event) => event.stopPropagation()}>
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.statusRequestModalContent}>
             <Text style={styles.modalTitle}>Request Status Change</Text>
             <Text style={styles.meta}>Requested status: {statusDraft}</Text>
             <Text style={styles.section}>Payment Mode</Text>
@@ -2838,6 +3050,7 @@ export const LeadDetailsScreen = () => {
             ) : null}
             </ScrollView>
           </Pressable>
+          </KeyboardAvoidingView>
         </Pressable>
       </Modal>
 
@@ -3014,7 +3227,7 @@ const styles = StyleSheet.create({
   statusWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", alignContent: "flex-start" },
   assignRow: { flexDirection: "row", gap: 8, alignItems: "center", paddingBottom: 2 },
   chip: {},
-  input: { marginBottom: 10 },
+  input: { marginBottom: 12 },
   followUpInputRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -3036,8 +3249,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   dateFieldActionRow: {
-    marginTop: -2,
-    marginBottom: 8,
+    marginTop: 0,
+    marginBottom: 12,
     alignItems: "flex-start",
   },
   dateFieldBtn: {
@@ -3064,7 +3277,7 @@ const styles = StyleSheet.create({
     height: 42,
     paddingHorizontal: 12,
     justifyContent: "center",
-    marginBottom: 8,
+    marginBottom: 12,
   },
   selectInputText: {
     color: "#334155",
@@ -3188,6 +3401,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  linkFilterRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+    flexWrap: "wrap",
   },
   linkSelect: {
     flex: 1,
@@ -3605,6 +3825,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     padding: 16,
   },
+  modalKeyboardWrap: {
+    width: "100%",
+    justifyContent: "center",
+  },
   modalCard: {
     backgroundColor: "#fff",
     borderRadius: 14,
@@ -3612,6 +3836,9 @@ const styles = StyleSheet.create({
   },
   modalCardWide: {
     maxHeight: "88%",
+  },
+  statusRequestModalContent: {
+    paddingBottom: 12,
   },
   modalChipWrap: {
     flexDirection: "row",
