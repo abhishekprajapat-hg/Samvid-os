@@ -650,6 +650,7 @@ const LeadDetailsRebuiltContent = ({
   const sortedLinkableInventoryOptions = React.useMemo(
     () =>
       [...(Array.isArray(availableRelatedInventoryOptions) ? availableRelatedInventoryOptions : [])]
+        .filter((inventory) => toInventoryApiStatus(inventory?.status) === "Available")
         .sort((a, b) => {
           const aLabel = String(getInventoryLeadLabel(a) || a?.title || a?._id || "").toLowerCase();
           const bLabel = String(getInventoryLeadLabel(b) || b?.title || b?._id || "").toLowerCase();
@@ -657,7 +658,7 @@ const LeadDetailsRebuiltContent = ({
           const bText = `${bLabel} ${String(b?.location || "").toLowerCase()}`;
           return aText.localeCompare(bText);
         }),
-    [availableRelatedInventoryOptions, getInventoryLeadLabel],
+    [availableRelatedInventoryOptions, getInventoryLeadLabel, toInventoryApiStatus],
   );
 
   const selectedPropertyCount = selectedProposalProperties.length;
@@ -1370,6 +1371,7 @@ const LeadDetailsRebuiltContent = ({
                   const inventoryLabel = inventoryRow.label;
                   const inventoryLocation = inventoryRow.location;
                   const inventoryStatusLabel = inventoryRow.statusLabel;
+                  const inventoryPriceLabel = formatCurrencyInr(inventoryRow?.inventory?.price);
                   const isActiveProperty = normalizedActiveInventoryId === inventoryId;
                   const isSelectingThisProperty = propertyActionType === "select" && String(propertyActionInventoryId || "") === String(inventoryId || "");
                   const isRemovingThisProperty = propertyActionType === "remove" && String(propertyActionInventoryId || "") === String(inventoryId || "");
@@ -1392,6 +1394,7 @@ const LeadDetailsRebuiltContent = ({
                             {inventoryLabel || "Inventory"}{inventoryLocation ? ` (${inventoryLocation})` : ""}
                           </div>
                           <div className={`mt-0.5 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Status: {inventoryStatusLabel || "-"}</div>
+                          <div className={`mt-0.5 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Price: {inventoryPriceLabel}</div>
                         </div>
                         {canManageLeadProperties && inventoryId ? (
                           <div className="flex items-center gap-1">
@@ -1437,10 +1440,11 @@ const LeadDetailsRebuiltContent = ({
                         || String(inventory?.title || "").trim()
                         || inventoryId;
                       const inventoryLocation = String(inventory?.location || "").trim();
+                      const inventoryPriceLabel = formatCurrencyInr(inventory?.price);
 
                       return (
                         <option key={inventoryId} value={inventoryId}>
-                          {[inventoryLabel, inventoryLocation ? `(${inventoryLocation})` : ""]
+                          {[inventoryLabel, inventoryLocation ? `(${inventoryLocation})` : "", `Price: ${inventoryPriceLabel}`]
                             .filter(Boolean)
                             .join(" ")}
                         </option>

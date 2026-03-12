@@ -570,7 +570,9 @@ const LeadsMatrix = () => {
       getLeadRelatedInventories(selectedLead).map((row) => toObjectIdString(row)),
     );
     const available = inventoryOptions.filter(
-      (inventory) => !linkedIds.has(String(inventory?._id || "")),
+      (inventory) =>
+        toInventoryApiStatus(inventory?.status) === "Available"
+        && !linkedIds.has(String(inventory?._id || "")),
     );
 
     const draftExists = available.some(
@@ -1387,6 +1389,14 @@ const LeadsMatrix = () => {
     const inventoryId = String(inventoryIdOverride || relatedInventoryDraft || "").trim();
     if (!selectedLead || !inventoryId) return;
 
+    const selectedInventory = inventoryOptions.find(
+      (inventory) => String(inventory?._id || "") === inventoryId,
+    );
+    if (!selectedInventory || toInventoryApiStatus(selectedInventory?.status) !== "Available") {
+      setError("Only available properties can be linked");
+      return;
+    }
+
     try {
       setLinkingProperty(true);
       setError("");
@@ -1564,7 +1574,9 @@ const LeadsMatrix = () => {
   const selectedLeadSiteLng = toCoordinateNumber(selectedLead?.siteLocation?.lng);
   const selectedLeadRelatedInventories = getLeadRelatedInventories(selectedLead);
   const selectedLeadActiveInventoryId = toObjectIdString(selectedLead?.inventoryId);
-  const availableRelatedInventoryOptions = inventoryOptions;
+  const availableRelatedInventoryOptions = inventoryOptions.filter(
+    (inventory) => toInventoryApiStatus(inventory?.status) === "Available",
+  );
 
   return (
     <div

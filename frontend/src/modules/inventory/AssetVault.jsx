@@ -225,6 +225,12 @@ const getInventoryUnitLabel = (inventoryLike = {}) =>
     .filter(Boolean)
     .join(" - ") || "Inventory Unit";
 
+const getAssetTitle = (asset = {}) => {
+  const explicitTitle = String(asset?.title || "").trim();
+  if (explicitTitle) return explicitTitle;
+  return getInventoryUnitLabel(asset);
+};
+
 const REQUEST_FIELD_LABELS = {
   projectName: "Project",
   towerName: "Tower",
@@ -478,7 +484,7 @@ const AssetVault = () => {
 
       const searchMatch =
         !normalizedSearch ||
-        [asset.title, asset.location, asset.category].some((value) =>
+        [getAssetTitle(asset), asset.location, asset.category].some((value) =>
           String(value || "")
             .toLowerCase()
             .includes(normalizedSearch),
@@ -1451,7 +1457,7 @@ const AssetVault = () => {
                   <img
                     src={asset.images[0]}
                     className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-                    alt={asset.title}
+                    alt={getAssetTitle(asset)}
                   />
                 ) : (
                   <div className="text-slate-300 flex flex-col items-center">
@@ -1524,7 +1530,7 @@ const AssetVault = () => {
               <div className="p-5 flex-1 flex flex-col justify-between gap-3">
                 <div>
                   <h3 className="font-display text-lg tracking-wide text-slate-800 truncate">
-                    {asset.title}
+                    {getAssetTitle(asset)}
                   </h3>
                   <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">
                     <MapPin size={12} /> {asset.location || "-"}

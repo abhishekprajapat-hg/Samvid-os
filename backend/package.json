@@ -11,6 +11,7 @@
     "seed:leads:backfill-company": "node src/seeder/backfillLeadCompany.cjs",
     "seed:leads": "node src/seeder/seedLeads.cjs",
     "seed:inventory": "node src/seeder/seedInventory.cjs",
+    "seed:inventory:titles": "node src/seeder/seedInventoryTitles.cjs",
     "migrate:company": "node src/seeder/backfillCompany.cjs"
   },
   "type": "commonjs",

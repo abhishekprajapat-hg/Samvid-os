@@ -1,18 +1,40 @@
 import api from "./api";
 
+const toInventoryTitle = (row = {}) => {
+  const explicitTitle = String(row?.title || "").trim();
+  if (explicitTitle) return explicitTitle;
+
+  const parts = [row?.projectName, row?.towerName, row?.unitNumber]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  return parts.join(" - ") || "Inventory Unit";
+};
+
+const normalizeInventoryAsset = (row = {}) => ({
+  ...row,
+  title: toInventoryTitle(row),
+});
+
 export const getInventoryAssets = async (params = {}) => {
   const res = await api.get("/inventory", { params });
-  if (Array.isArray(res.data?.inventory) && res.data.inventory.length) {
-    return res.data.inventory;
-  }
-  return res.data?.assets || [];
+  const sourceRows = Array.isArray(res.data?.assets)
+    ? res.data.assets
+    : Array.isArray(res.data?.inventory)
+      ? res.data.inventory
+      : [];
+
+  return sourceRows.map((row) => normalizeInventoryAsset(row));
 };
 
 export const getInventoryAssetsWithMeta = async (params = {}) => {
   const res = await api.get("/inventory", { params });
+  const rawAssets = Array.isArray(res.data?.assets) ? res.data.assets : [];
+  const rawInventory = Array.isArray(res.data?.inventory) ? res.data.inventory : [];
+
   return {
-    assets: res.data?.assets || [],
-    inventory: res.data?.inventory || [],
+    assets: rawAssets.map((row) => normalizeInventoryAsset(row)),
+    inventory: rawInventory.map((row) => normalizeInventoryAsset(row)),
     pagination: res.data?.pagination || null,
   };
 };
