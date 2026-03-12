@@ -4,6 +4,7 @@ import { Hexagon, ChevronRight, Lock, ScanFace } from "lucide-react";
 import { Link } from "react-router-dom";
 import api from "../../services/api";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { persistTenantSlug } from "../../utils/tenantRouting";
 
 const Login = ({ onLogin, portal = "GENERAL" }) => {
   const [email, setEmail] = useState("");
@@ -24,6 +25,7 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
       });
 
       const { token, refreshToken, user } = res.data;
+      const tenantSlug = String(res.data?.tenant?.subdomain || "").trim().toLowerCase();
 
       localStorage.setItem("token", token);
       if (refreshToken) {
@@ -33,6 +35,7 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
       }
       localStorage.setItem("role", user.role);
       localStorage.setItem("user", JSON.stringify(user));
+      persistTenantSlug(tenantSlug);
 
       onLogin(user.role);
     } catch (err) {

@@ -20,6 +20,11 @@ export const createLead = async (payload) => {
   return res.data?.lead;
 };
 
+export const bulkUploadLeads = async (rows = []) => {
+  const res = await api.post("/leads/bulk", { rows });
+  return res.data || {};
+};
+
 export const updateLeadStatus = async (leadId, payload) => {
   const res = await api.patch(`/leads/${leadId}/status`, payload);
   return res.data?.lead;

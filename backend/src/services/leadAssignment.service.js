@@ -401,18 +401,26 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
   };
 };
 
-const redistributePipelineLeads = async ({ executiveIds = null } = {}) => {
+const redistributePipelineLeads = async ({
+  executiveIds = null,
+  companyId = null,
+  includeUnassigned = false,
+} = {}) => {
   const query = {
     role: { $in: EXECUTIVE_ROLES },
     isActive: true,
   };
+
+  if (companyId) {
+    query.companyId = companyId;
+  }
 
   if (Array.isArray(executiveIds) && executiveIds.length) {
     query._id = { $in: executiveIds };
   }
 
   const executives = await User.find(query)
-    .select("_id createdAt lastAssignedAt")
+    .select("_id role parentId createdAt lastAssignedAt")
     .sort({ createdAt: 1 })
     .lean();
 
@@ -427,11 +435,19 @@ const redistributePipelineLeads = async ({ executiveIds = null } = {}) => {
   const executiveObjectIds = executives.map((executive) => executive._id);
   const pipelineLeadQuery = {
     status: { $in: PIPELINE_STATUSES },
-    assignedTo: { $in: executiveObjectIds },
   };
+  if (companyId) {
+    pipelineLeadQuery.companyId = companyId;
+  }
+
+  if (!includeUnassigned) {
+    pipelineLeadQuery.assignedTo = { $in: executiveObjectIds };
+  }
 
   const pipelineLeads = await Lead.find(pipelineLeadQuery)
-    .select("_id assignedTo createdAt")
+    .select(
+      "_id assignedTo assignedManager assignedExecutive assignedFieldExecutive createdAt",
+    )
     .sort({ createdAt: 1 })
     .lean();
 
@@ -450,6 +466,7 @@ const redistributePipelineLeads = async ({ executiveIds = null } = {}) => {
       $match: {
         assignedTo: { $in: executiveObjectIds },
         status: { $nin: PIPELINE_STATUSES },
+        ...(companyId ? { companyId } : {}),
       },
     },
     {
@@ -486,20 +503,99 @@ const redistributePipelineLeads = async ({ executiveIds = null } = {}) => {
   };
 
   const orderedExecutives = [...executives].sort(compareByCurrentLoad);
+  const executiveById = new Map(
+    executives.map((executive) => [toId(executive._id), executive]),
+  );
+  const parentUserIds = [
+    ...new Set(
+      executives
+        .map((executive) => toId(executive.parentId))
+        .filter(Boolean),
+    ),
+  ];
+
+  const parentUsers = parentUserIds.length
+    ? await User.find({
+      _id: { $in: parentUserIds },
+      isActive: true,
+      ...(companyId ? { companyId } : {}),
+    })
+      .select("_id role parentId")
+      .lean()
+    : [];
+
+  const parentById = new Map(parentUsers.map((user) => [toId(user._id), user]));
+  const managerIdByExecutiveId = new Map();
+
+  const resolveManagerId = (executive) => {
+    const executiveId = toId(executive?._id);
+    if (!executiveId) return null;
+    if (managerIdByExecutiveId.has(executiveId)) {
+      return managerIdByExecutiveId.get(executiveId);
+    }
+
+    const visited = new Set();
+    let cursor = executive;
+    let managerId = null;
+
+    while (cursor?.parentId) {
+      const parentId = toId(cursor.parentId);
+      if (!parentId || visited.has(parentId)) break;
+      visited.add(parentId);
+
+      const parent = parentById.get(parentId) || executiveById.get(parentId) || null;
+      if (!parent) break;
+      if (parent.role === USER_ROLES.MANAGER) {
+        managerId = parent._id;
+        break;
+      }
+      cursor = parent;
+    }
+
+    if (!managerId) {
+      managerId = executive.parentId || null;
+    }
+
+    managerIdByExecutiveId.set(executiveId, managerId);
+    return managerId;
+  };
+
   const leadUpdates = [];
+  const now = new Date();
+  const touchedExecutiveIds = new Set();
 
   pipelineLeads.forEach((lead) => {
     const selectedExecutive = orderedExecutives[0];
     const selectedExecutiveId = toId(selectedExecutive._id);
     const currentAssignee = toId(lead.assignedTo);
+    const managerId = resolveManagerId(selectedExecutive);
+    const managerIdStr = toId(managerId);
+    const isExecutive = selectedExecutive.role === USER_ROLES.EXECUTIVE;
+    const isFieldExecutive = selectedExecutive.role === USER_ROLES.FIELD_EXECUTIVE;
+    const assignedExecutiveId = isExecutive ? selectedExecutiveId : "";
+    const assignedFieldExecutiveId = isFieldExecutive ? selectedExecutiveId : "";
 
-    if (currentAssignee !== selectedExecutiveId) {
+    const shouldUpdate =
+      currentAssignee !== selectedExecutiveId
+      || toId(lead.assignedManager) !== managerIdStr
+      || toId(lead.assignedExecutive) !== assignedExecutiveId
+      || toId(lead.assignedFieldExecutive) !== assignedFieldExecutiveId;
+
+    if (shouldUpdate) {
       leadUpdates.push({
         updateOne: {
           filter: { _id: lead._id },
-          update: { $set: { assignedTo: selectedExecutive._id } },
+          update: {
+            $set: {
+              assignedTo: selectedExecutive._id,
+              assignedManager: managerId,
+              assignedExecutive: isExecutive ? selectedExecutive._id : null,
+              assignedFieldExecutive: isFieldExecutive ? selectedExecutive._id : null,
+            },
+          },
         },
       });
+      touchedExecutiveIds.add(selectedExecutiveId);
     }
 
     totalLoadMap.set(
@@ -512,6 +608,12 @@ const redistributePipelineLeads = async ({ executiveIds = null } = {}) => {
 
   if (leadUpdates.length) {
     await Lead.bulkWrite(leadUpdates);
+    if (touchedExecutiveIds.size) {
+      await User.updateMany(
+        { _id: { $in: [...touchedExecutiveIds] } },
+        { $set: { lastAssignedAt: now } },
+      );
+    }
   }
 
   return {

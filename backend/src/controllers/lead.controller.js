@@ -145,6 +145,7 @@ const MAX_CLOSURE_DOCUMENT_NAME_LENGTH = 180;
 const MAX_CLOSURE_DOCUMENT_MIME_LENGTH = 120;
 const MAX_CLOSURE_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024;
 const MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH = 500;
+const MAX_BULK_LEAD_UPLOAD_ROWS = 500;
 
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -1028,6 +1029,226 @@ exports.createLead = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "createLead failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.bulkUploadLeads = async (req, res) => {
+  try {
+    if (req.user?.role !== USER_ROLES.ADMIN) {
+      return res.status(403).json({ message: "Only ADMIN can bulk upload leads" });
+    }
+
+    const companyId = toObjectIdString(req.user?.companyId);
+    if (!isValidObjectId(companyId)) {
+      return res.status(403).json({ message: "Company context is required" });
+    }
+
+    const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+    if (!rows.length) {
+      return res.status(400).json({ message: "rows array is required" });
+    }
+
+    if (rows.length > MAX_BULK_LEAD_UPLOAD_ROWS) {
+      return res.status(400).json({
+        message: `Bulk upload limit exceeded (max ${MAX_BULK_LEAD_UPLOAD_ROWS} rows)`,
+      });
+    }
+
+    const payloadPhones = [
+      ...new Set(
+        rows
+          .map((row) => String(row?.phone || "").trim())
+          .filter(Boolean),
+      ),
+    ];
+
+    const payloadInventoryIds = [
+      ...new Set(
+        rows
+          .map((row) =>
+            String(
+              row?.inventoryId
+              || row?.inventory_id
+              || row?.propertyId
+              || row?.property_id
+              || "",
+            ).trim(),
+          )
+          .filter(Boolean)
+          .filter((value) => isValidObjectId(value)),
+      ),
+    ];
+
+    const [existingRows, inventoryRows] = await Promise.all([
+      payloadPhones.length
+        ? Lead.find({
+          companyId,
+          phone: { $in: payloadPhones },
+        })
+          .select("phone")
+          .lean()
+        : [],
+      payloadInventoryIds.length
+        ? Inventory.find({
+          _id: { $in: payloadInventoryIds },
+          companyId,
+        })
+          .select("_id projectName towerName unitNumber location siteLocation")
+          .lean()
+        : [],
+    ]);
+
+    const seenPhones = new Set(
+      existingRows.map((row) => String(row?.phone || "").trim()).filter(Boolean),
+    );
+    const inventoryById = new Map(
+      inventoryRows.map((row) => [String(row._id), row]),
+    );
+
+    const createdIds = [];
+    const failures = [];
+
+    for (let index = 0; index < rows.length; index += 1) {
+      const rowNumber = index + 1;
+      const row = rows[index];
+
+      try {
+        if (!row || typeof row !== "object" || Array.isArray(row)) {
+          throw new Error("Row must be an object");
+        }
+
+        const name = String(row.name || "").trim();
+        const phone = String(row.phone || "").trim();
+        const email = String(row.email || "").trim().toLowerCase();
+        const city = String(row.city || "").trim();
+        const projectInterested = String(
+          row.projectInterested || row.project || row.project_name || "",
+        ).trim();
+        const inventoryId = String(
+          row.inventoryId
+          || row.inventory_id
+          || row.propertyId
+          || row.property_id
+          || "",
+        ).trim();
+
+        if (!name) {
+          throw new Error("name is required");
+        }
+        if (!phone) {
+          throw new Error("phone is required");
+        }
+        if (seenPhones.has(phone)) {
+          throw new Error("Lead already exists for this phone");
+        }
+
+        let inventory = null;
+        if (inventoryId) {
+          if (!isValidObjectId(inventoryId)) {
+            throw new Error("Invalid inventory id");
+          }
+
+          inventory = inventoryById.get(inventoryId) || null;
+          if (!inventory) {
+            throw new Error("Inventory not found in your company");
+          }
+        }
+
+        let parsedSiteLocation = { provided: false };
+        if (Object.prototype.hasOwnProperty.call(row, "siteLocation")) {
+          parsedSiteLocation = parseSiteLocationPayload(row.siteLocation);
+          if (parsedSiteLocation.error) {
+            throw new Error(parsedSiteLocation.error);
+          }
+        } else {
+          const siteLatValue = row.siteLat ?? row.site_lat ?? row.latitude ?? row.lat;
+          const siteLngValue = row.siteLng ?? row.site_lng ?? row.longitude ?? row.lng;
+          const siteRadiusValue =
+            row.siteRadiusMeters
+            ?? row.site_radius_meters
+            ?? row.radiusMeters
+            ?? row.radius_meters
+            ?? row.radius;
+
+          const hasSiteHint =
+            siteLatValue !== undefined
+            || siteLngValue !== undefined
+            || siteRadiusValue !== undefined;
+
+          if (hasSiteHint) {
+            parsedSiteLocation = parseSiteLocationPayload({
+              lat: siteLatValue,
+              lng: siteLngValue,
+              radiusMeters: siteRadiusValue,
+            });
+            if (parsedSiteLocation.error) {
+              throw new Error(parsedSiteLocation.error);
+            }
+          }
+        }
+
+        const createPayload = {
+          name,
+          phone,
+          email,
+          city: city || String(inventory?.location || "").trim(),
+          projectInterested:
+            projectInterested || buildInventoryLeadProjectLabel(inventory),
+          companyId,
+          source: "MANUAL",
+          createdBy: req.user._id,
+        };
+
+        if (inventory) {
+          createPayload.inventoryId = inventory._id;
+          createPayload.relatedInventoryIds = [inventory._id];
+        }
+
+        if (parsedSiteLocation.provided) {
+          createPayload.siteLocation = parsedSiteLocation.value;
+        } else {
+          const inventorySiteLat = normalizeLatitude(inventory?.siteLocation?.lat);
+          const inventorySiteLng = normalizeLongitude(inventory?.siteLocation?.lng);
+          if (inventorySiteLat !== null && inventorySiteLng !== null) {
+            createPayload.siteLocation = {
+              lat: inventorySiteLat,
+              lng: inventorySiteLng,
+              radiusMeters: DEFAULT_SITE_VISIT_RADIUS_METERS,
+            };
+          }
+        }
+
+        const lead = await Lead.create(createPayload);
+        await autoAssignLead({
+          lead,
+          requester: req.user,
+          performedBy: req.user._id,
+        });
+
+        seenPhones.add(phone);
+        createdIds.push(lead._id);
+      } catch (rowError) {
+        failures.push({
+          row: rowNumber,
+          message: rowError.message || "Failed to process row",
+        });
+      }
+    }
+
+    return res.status(201).json({
+      message: "Bulk lead upload processed",
+      createdCount: createdIds.length,
+      failedCount: failures.length,
+      createdIds,
+      failures,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "bulkUploadLeads failed",
     });
     return res.status(500).json({ message: "Server error" });
   }

@@ -23,6 +23,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Trash2,
+  UploadCloud,
   Users2,
   X,
 } from "lucide-react";
@@ -31,8 +32,10 @@ export const LeadsMatrixToolbar = ({
   isDark,
   refreshing,
   canAddLead,
+  canBulkUploadLeads,
   onRefresh,
   onOpenAddModal,
+  onOpenBulkUploadModal,
   totalLeads,
   filteredLeads,
   dueFollowUps,
@@ -91,6 +94,21 @@ export const LeadsMatrixToolbar = ({
           >
             <Plus size={15} />
             Add Lead
+          </button>
+        )}
+
+        {canBulkUploadLeads && (
+          <button
+            type="button"
+            onClick={onOpenBulkUploadModal}
+            className={`h-10 rounded-xl border px-4 text-xs font-bold uppercase tracking-wide transition-colors ${
+              isDark
+                ? "border-cyan-400/40 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20"
+                : "border-cyan-300 bg-cyan-50 text-cyan-700 hover:bg-cyan-100"
+            } inline-flex items-center gap-2`}
+          >
+            <UploadCloud size={14} />
+            Bulk Upload
           </button>
         )}
       </div>
@@ -595,6 +613,110 @@ export const AddLeadModal = ({
           }`}
         >
           {savingLead ? "Saving..." : "Save Lead"}
+        </button>
+      </div>
+    </Motion.div>
+  </Motion.div>
+);
+
+export const BulkLeadUploadModal = ({
+  isDark,
+  csvText,
+  onCsvTextChange,
+  selectedFileName,
+  onFileSelect,
+  onClose,
+  onUpload,
+  uploading,
+}) => (
+  <Motion.div
+    initial={{ opacity: 0 }}
+    animate={{ opacity: 1 }}
+    exit={{ opacity: 0 }}
+    className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${
+      isDark ? "bg-slate-950/70" : "bg-slate-900/40"
+    }`}
+  >
+    <Motion.div
+      initial={{ scale: 0.96, y: 10 }}
+      animate={{ scale: 1, y: 0 }}
+      exit={{ scale: 0.96, y: 10 }}
+      className={`w-full max-w-2xl rounded-2xl border p-5 shadow-2xl ${
+        isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-white"
+      }`}
+    >
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className={`text-lg font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
+          Bulk Lead Upload
+        </h3>
+        <button
+          onClick={onClose}
+          className={`rounded p-1 ${isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}
+        >
+          <X size={16} />
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-5 text-sm ${
+          isDark
+            ? "border-slate-600 bg-slate-950 text-slate-300 hover:border-cyan-400/45"
+            : "border-slate-300 bg-slate-50 text-slate-700 hover:border-cyan-400"
+        }`}
+        >
+          <UploadCloud size={16} />
+          <span>{selectedFileName ? `Selected: ${selectedFileName}` : "Choose CSV File"}</span>
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(event) => onFileSelect(event.target.files?.[0] || null)}
+          />
+        </label>
+
+        <div>
+          <p className={`mb-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${
+            isDark ? "text-slate-400" : "text-slate-500"
+          }`}>
+            CSV Template
+          </p>
+          <p className={`rounded-lg border px-3 py-2 text-xs font-mono ${
+            isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
+          }`}>
+            name,phone,email,city,projectInterested,inventoryId,siteLat,siteLng
+          </p>
+        </div>
+
+        <textarea
+          value={csvText}
+          onChange={(event) => onCsvTextChange(event.target.value)}
+          placeholder="Paste CSV content here (with header row)"
+          rows={10}
+          className={`w-full resize-y rounded-xl border px-3 py-2 text-sm ${
+            isDark
+              ? "border-slate-700 bg-slate-950 text-slate-200 placeholder:text-slate-500"
+              : "border-slate-300 bg-white text-slate-700 placeholder:text-slate-400"
+          }`}
+        />
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <button
+          onClick={onClose}
+          className={`h-10 flex-1 rounded-lg text-sm font-semibold ${
+            isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-slate-100 text-slate-600"
+          }`}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onUpload}
+          disabled={uploading}
+          className={`h-10 flex-1 rounded-lg text-sm font-semibold text-white disabled:opacity-60 ${
+            isDark ? "bg-cyan-600 hover:bg-cyan-500" : "bg-slate-900 hover:bg-cyan-600"
+          }`}
+        >
+          {uploading ? "Uploading..." : "Upload Leads"}
         </button>
       </div>
     </Motion.div>

@@ -14,6 +14,13 @@ router.post(
   authMiddleware.protect,
   leadController.createLead
 );
+router.post(
+  "/bulk",
+  writeLimiter,
+  authMiddleware.protect,
+  authMiddleware.checkRole(["ADMIN"]),
+  leadController.bulkUploadLeads,
+);
 
 // ======================================
 // GET ALL LEADS (ROLE BASED inside controller)

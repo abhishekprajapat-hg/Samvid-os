@@ -1,5 +1,5 @@
 import axios from "axios";
-import { buildTenantAwarePath, resolveTenantSlugFromWindow } from "../utils/tenantRouting";
+import { buildTenantAwarePath, resolveTenantSlug } from "../utils/tenantRouting";
 
 const configuredBaseUrl = String(import.meta.env.VITE_API_BASE_URL || "").trim();
 const defaultBaseUrl = import.meta.env.DEV
@@ -24,10 +24,11 @@ const clearSession = () => {
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("role");
   localStorage.removeItem("user");
+  localStorage.removeItem("tenantSlug");
 };
 
 const applyTenantHeader = (config = {}) => {
-  const tenantSlug = resolveTenantSlugFromWindow();
+  const tenantSlug = resolveTenantSlug();
   const headers = { ...(config.headers || {}) };
 
   if (tenantSlug) {
@@ -147,4 +148,3 @@ api.interceptors.response.use(
 );
 
 export default api;
-

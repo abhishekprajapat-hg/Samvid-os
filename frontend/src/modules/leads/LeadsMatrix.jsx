@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   getAllLeads,
   createLead,
+  bulkUploadLeads,
   updateLeadStatus,
   assignLead,
   addLeadRelatedProperty,
@@ -20,6 +21,7 @@ import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import {
   AddLeadModal,
+  BulkLeadUploadModal,
   LeadsMatrixAlerts,
   LeadsMatrixFilters,
   LeadsMatrixMetrics,
@@ -271,6 +273,117 @@ const getMapsHref = (city) => {
     : "";
 };
 
+const normalizeCsvHeader = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+
+const resolveLeadCsvHeaderKey = (rawHeader) => {
+  const normalized = normalizeCsvHeader(rawHeader);
+  if (!normalized) return "";
+
+  if (["name", "leadname", "fullname"].includes(normalized)) return "name";
+  if (["phone", "mobile", "mobileno", "phonenumber"].includes(normalized)) return "phone";
+  if (["email", "emailid"].includes(normalized)) return "email";
+  if (["city", "location"].includes(normalized)) return "city";
+  if (["project", "projectinterested", "projectname", "interestedproject"].includes(normalized)) {
+    return "projectInterested";
+  }
+  if (["inventoryid", "propertyid", "unitid", "assetid"].includes(normalized)) {
+    return "inventoryId";
+  }
+  if (["sitelat", "latitude", "lat"].includes(normalized)) return "siteLat";
+  if (["sitelng", "longitude", "long", "lng"].includes(normalized)) return "siteLng";
+  if (["siteradiusmeters", "radiusmeters", "radius", "siteradius"].includes(normalized)) {
+    return "siteRadiusMeters";
+  }
+
+  return "";
+};
+
+const parseCsvLine = (line) => {
+  const values = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+
+    if (char === "\"") {
+      if (inQuotes && line[index + 1] === "\"") {
+        current += "\"";
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      values.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  values.push(current.trim());
+  return values;
+};
+
+const parseBulkLeadCsvRows = (csvText) => {
+  const normalizedText = String(csvText || "")
+    .replace(/^\uFEFF/, "")
+    .trim();
+
+  if (!normalizedText) {
+    throw new Error("CSV data is required");
+  }
+
+  const rawLines = normalizedText.split(/\r?\n/);
+  const lines = rawLines.map((line) => String(line || "").trim()).filter(Boolean);
+
+  if (lines.length < 2) {
+    throw new Error("CSV must include header and at least one data row");
+  }
+
+  const headerCells = parseCsvLine(lines[0]);
+  const mappedHeaders = headerCells.map((header) => resolveLeadCsvHeaderKey(header));
+
+  if (!mappedHeaders.includes("name") || !mappedHeaders.includes("phone")) {
+    throw new Error("CSV header must include at least name and phone columns");
+  }
+
+  const rows = [];
+
+  for (let lineIndex = 1; lineIndex < lines.length; lineIndex += 1) {
+    const cells = parseCsvLine(lines[lineIndex]);
+    const row = {};
+
+    mappedHeaders.forEach((key, cellIndex) => {
+      if (!key) return;
+      const value = String(cells[cellIndex] || "").trim();
+      if (value) {
+        row[key] = value;
+      }
+    });
+
+    if (Object.keys(row).length === 0) {
+      continue;
+    }
+
+    rows.push(row);
+  }
+
+  if (!rows.length) {
+    throw new Error("No valid lead rows found in CSV");
+  }
+
+  return rows;
+};
+
 const WhatsAppIcon = ({ size = 13, className = "" }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -302,6 +415,10 @@ const LeadsMatrix = () => {
   const [savingLead, setSavingLead] = useState(false);
   const [formData, setFormData] = useState(defaultFormData);
   const [inventoryOptions, setInventoryOptions] = useState([]);
+  const [isBulkUploadModalOpen, setIsBulkUploadModalOpen] = useState(false);
+  const [bulkUploadText, setBulkUploadText] = useState("");
+  const [bulkUploadFileName, setBulkUploadFileName] = useState("");
+  const [bulkUploading, setBulkUploading] = useState(false);
 
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -360,6 +477,7 @@ const LeadsMatrix = () => {
     userRole === "ADMIN"
     || MANAGEMENT_ROLES.includes(userRole)
     || userRole === "CHANNEL_PARTNER";
+  const canBulkUploadLeads = userRole === "ADMIN";
   const canAssignLead = userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
   const canManageLeadProperties = userRole !== "CHANNEL_PARTNER";
   const canConfigureSiteLocation =
@@ -953,6 +1071,59 @@ const LeadsMatrix = () => {
     }
   };
 
+  const handleBulkUploadFileSelect = async (file) => {
+    if (!file) return;
+
+    try {
+      const csvText = await file.text();
+      setBulkUploadText(String(csvText || ""));
+      setBulkUploadFileName(String(file.name || ""));
+      setError("");
+    } catch {
+      setError("Unable to read selected CSV file");
+    }
+  };
+
+  const handleBulkUploadLeads = async () => {
+    if (!canBulkUploadLeads) return;
+
+    try {
+      setBulkUploading(true);
+      setError("");
+
+      const rows = parseBulkLeadCsvRows(bulkUploadText);
+      const result = await bulkUploadLeads(rows);
+      await fetchLeads(true);
+
+      const createdCount = Number(result?.createdCount || 0);
+      const failedCount = Number(result?.failedCount || 0);
+      setSuccess(`Bulk upload complete: ${createdCount} created, ${failedCount} failed`);
+
+      const failures = Array.isArray(result?.failures) ? result.failures : [];
+      if (failedCount > 0 && failures.length) {
+        const preview = failures
+          .slice(0, 5)
+          .map((failure) => `Row ${failure.row}: ${failure.message}`)
+          .join(" | ");
+        setError(
+          failures.length > 5
+            ? `Some rows failed. ${preview} | ...`
+            : `Some rows failed. ${preview}`,
+        );
+      } else {
+        setIsBulkUploadModalOpen(false);
+        setBulkUploadText("");
+        setBulkUploadFileName("");
+      }
+    } catch (uploadError) {
+      const message = toErrorMessage(uploadError, "Failed to bulk upload leads");
+      console.error(`Bulk upload leads failed: ${message}`);
+      setError(message);
+    } finally {
+      setBulkUploading(false);
+    }
+  };
+
   const handleUpdateLead = async () => {
     if (!selectedLead) return;
 
@@ -1437,8 +1608,10 @@ const LeadsMatrix = () => {
               isDark={isDark}
               refreshing={refreshing}
               canAddLead={canAddLead}
+              canBulkUploadLeads={canBulkUploadLeads}
               onRefresh={() => fetchLeads(true)}
               onOpenAddModal={() => setIsAddModalOpen(true)}
+              onOpenBulkUploadModal={() => setIsBulkUploadModalOpen(true)}
               totalLeads={metrics.total}
               filteredLeads={filteredLeads.length}
               dueFollowUps={metrics.dueFollowUps}
@@ -1494,6 +1667,21 @@ const LeadsMatrix = () => {
             onClose={() => setIsAddModalOpen(false)}
             onSave={handleSaveLead}
             savingLead={savingLead}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isBulkUploadModalOpen && canBulkUploadLeads && (
+          <BulkLeadUploadModal
+            isDark={isDark}
+            csvText={bulkUploadText}
+            onCsvTextChange={setBulkUploadText}
+            selectedFileName={bulkUploadFileName}
+            onFileSelect={handleBulkUploadFileSelect}
+            onClose={() => setIsBulkUploadModalOpen(false)}
+            onUpload={handleBulkUploadLeads}
+            uploading={bulkUploading}
           />
         )}
       </AnimatePresence>

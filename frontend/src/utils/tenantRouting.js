@@ -32,6 +32,13 @@ const normalizePathname = (pathname) => String(pathname || "").trim();
 const normalizeSegment = (segment) =>
   String(segment || "").trim().toLowerCase();
 
+const sanitizeTenantSlug = (value) => {
+  const normalized = normalizeSegment(value);
+  if (!normalized) return "";
+  if (!TENANT_SLUG_PATTERN.test(normalized)) return "";
+  return normalized;
+};
+
 export const resolveTenantSlugFromPath = (pathname) => {
   const normalizedPath = normalizePathname(pathname);
   if (!normalizedPath.startsWith("/")) return "";
@@ -46,8 +53,7 @@ export const resolveTenantSlugFromPath = (pathname) => {
 
   if (!firstSegment) return "";
   if (RESERVED_ROOT_SEGMENTS.has(firstSegment)) return "";
-  if (!TENANT_SLUG_PATTERN.test(firstSegment)) return "";
-  return firstSegment;
+  return sanitizeTenantSlug(firstSegment);
 };
 
 export const resolveTenantSlugFromWindow = () => {
@@ -55,12 +61,30 @@ export const resolveTenantSlugFromWindow = () => {
   return resolveTenantSlugFromPath(window.location?.pathname || "");
 };
 
+export const resolveTenantSlugFromStorage = () => {
+  if (typeof window === "undefined") return "";
+  return sanitizeTenantSlug(window.localStorage?.getItem("tenantSlug") || "");
+};
+
+export const persistTenantSlug = (tenantSlug = "") => {
+  if (typeof window === "undefined") return "";
+  const sanitized = sanitizeTenantSlug(tenantSlug);
+  if (sanitized) {
+    window.localStorage.setItem("tenantSlug", sanitized);
+  } else {
+    window.localStorage.removeItem("tenantSlug");
+  }
+  return sanitized;
+};
+
+export const resolveTenantSlug = () =>
+  resolveTenantSlugFromWindow() || resolveTenantSlugFromStorage();
+
 export const buildTenantAwarePath = (path = "/") => {
   const targetPath = String(path || "/").startsWith("/")
     ? String(path || "/")
     : `/${String(path || "/")}`;
-  const tenantSlug = resolveTenantSlugFromWindow();
+  const tenantSlug = resolveTenantSlug();
   if (!tenantSlug) return targetPath;
   return `/${tenantSlug}${targetPath}`;
 };
-

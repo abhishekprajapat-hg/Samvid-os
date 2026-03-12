@@ -133,6 +133,7 @@ exports.login = async (req, res) => {
 
     const isSuperAdmin = user.role === USER_ROLES.SUPER_ADMIN;
     const requireTenantContext = toBoolean(process.env.SAAS_REQUIRE_TENANT_HOST, false);
+    let resolvedTenant = req.tenant || null;
 
     if (!isSuperAdmin) {
       const companyId = user.companyId || (await resolveCompanyContextForLogin(user));
@@ -162,6 +163,7 @@ exports.login = async (req, res) => {
           message: "Tenant is inactive. Please contact platform support.",
         });
       }
+      resolvedTenant = company;
     }
 
     const tokenBundle = await issueAuthTokens({
@@ -170,7 +172,7 @@ exports.login = async (req, res) => {
       userAgent: req.headers["user-agent"] || "",
     });
 
-    return res.json(toAuthResponse({ user, tokenBundle, tenant: req.tenant || null }));
+    return res.json(toAuthResponse({ user, tokenBundle, tenant: resolvedTenant }));
   } catch (error) {
     logger.error({
       requestId: req.requestId || null,
@@ -261,6 +263,21 @@ exports.logout = async (req, res) => {
 
 exports.getMe = async (req, res) => {
   try {
+    let resolvedTenant = req.tenant || null;
+
+    if (
+      !resolvedTenant
+      && req.user?.role !== USER_ROLES.SUPER_ADMIN
+      && req.user?.companyId
+    ) {
+      const company = await Company.findById(req.user.companyId)
+        .select("_id name subdomain customDomain status")
+        .lean();
+      if (company && company.status === "ACTIVE") {
+        resolvedTenant = company;
+      }
+    }
+
     return res.json({
       user: {
         id: req.user._id,
@@ -272,12 +289,12 @@ exports.getMe = async (req, res) => {
         partnerCode: req.user.partnerCode || null,
         canViewInventory: Boolean(req.user.canViewInventory),
       },
-      tenant: req.tenant
+      tenant: resolvedTenant
         ? {
-          id: req.tenant._id,
-          name: req.tenant.name,
-          subdomain: req.tenant.subdomain,
-          customDomain: req.tenant.customDomain || "",
+          id: resolvedTenant._id,
+          name: resolvedTenant.name,
+          subdomain: resolvedTenant.subdomain,
+          customDomain: resolvedTenant.customDomain || "",
         }
         : null,
     });

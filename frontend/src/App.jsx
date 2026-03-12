@@ -13,6 +13,11 @@ import {
   readSystemSettings,
   SYSTEM_SETTINGS_UPDATED_EVENT,
 } from "./utils/systemSettings";
+import {
+  persistTenantSlug,
+  resolveTenantSlugFromPath,
+  resolveTenantSlugFromStorage,
+} from "./utils/tenantRouting";
 
 /* =======================
    LAZY IMPORTS
@@ -362,6 +367,7 @@ export default function App() {
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("role");
     localStorage.removeItem("user");
+    localStorage.removeItem("tenantSlug");
     delete api.defaults.headers.common.Authorization;
     setIsLoggedIn(false);
     setUserRole(null);
@@ -537,6 +543,93 @@ export default function App() {
     };
   }, [isLoggedIn, userRole]);
 
+  useEffect(() => {
+    if (!sessionReady || !isLoggedIn) return undefined;
+
+    const browserPathname =
+      typeof window !== "undefined"
+        ? String(window.location?.pathname || "")
+        : String(location.pathname || "");
+
+    if (resolveTenantSlugFromPath(browserPathname)) return undefined;
+    if (resolveTenantSlugFromStorage()) return undefined;
+    if (userRole === "SUPER_ADMIN") return undefined;
+
+    let cancelled = false;
+
+    const hydrateTenantSlug = async () => {
+      try {
+        const response = await api.get("/auth/me");
+        if (cancelled) return;
+
+        const tenantSlug = persistTenantSlug(response?.data?.tenant?.subdomain || "");
+        if (!tenantSlug) return;
+
+        const normalizedPath = location.pathname.startsWith("/")
+          ? location.pathname
+          : `/${location.pathname}`;
+        const nextPath = `/${tenantSlug}${normalizedPath}`;
+        const nextUrl = `${nextPath}${location.search || ""}${location.hash || ""}`;
+
+        if (typeof window !== "undefined") {
+          const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+          if (currentUrl !== nextUrl) {
+            window.location.replace(nextUrl);
+          }
+        }
+      } catch {
+        // Keep UI usable even if tenant bootstrap request fails.
+      }
+    };
+
+    hydrateTenantSlug();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isLoggedIn,
+    location.hash,
+    location.pathname,
+    location.search,
+    sessionReady,
+    userRole,
+  ]);
+
+  useEffect(() => {
+    if (!sessionReady || !isLoggedIn) return;
+
+    const browserPathname =
+      typeof window !== "undefined"
+        ? String(window.location?.pathname || "")
+        : String(location.pathname || "");
+
+    const tenantSlugInPath = resolveTenantSlugFromPath(browserPathname);
+    if (tenantSlugInPath) return;
+
+    const storedTenantSlug = resolveTenantSlugFromStorage();
+    if (!storedTenantSlug) return;
+
+    const normalizedPath = location.pathname.startsWith("/")
+      ? location.pathname
+      : `/${location.pathname}`;
+    const nextPath = `/${storedTenantSlug}${normalizedPath}`;
+    const nextUrl = `${nextPath}${location.search || ""}${location.hash || ""}`;
+
+    if (typeof window !== "undefined") {
+      const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (currentUrl !== nextUrl) {
+        window.location.replace(nextUrl);
+      }
+    }
+  }, [
+    isLoggedIn,
+    location.hash,
+    location.pathname,
+    location.search,
+    sessionReady,
+  ]);
+
   /* 🔥 Dashboard by role */
   const DashboardByRole = useMemo(() => {
     switch (userRole) {
@@ -575,6 +668,7 @@ export default function App() {
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("role");
     localStorage.removeItem("user");
+    localStorage.removeItem("tenantSlug");
     delete api.defaults.headers.common["Authorization"];
     setIsLoggedIn(false);
     setUserRole(null);

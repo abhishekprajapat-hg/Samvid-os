@@ -1796,10 +1796,12 @@ exports.rebalanceExecutives = async (req, res) => {
       await User.bulkWrite(bulkOps);
     }
 
-    // Rebalance active pipeline leads with the same load-aware strategy
-    // used during auto-assignment so new executives start receiving leads.
+    // Rebalance active pipeline leads (including currently unassigned leads)
+    // with the same load-aware strategy used during auto-assignment.
     const leadRebalance = await redistributePipelineLeads({
       executiveIds: executives.map((executive) => executive._id),
+      companyId: req.user.companyId,
+      includeUnassigned: true,
     });
 
     const distribution = await User.aggregate([
