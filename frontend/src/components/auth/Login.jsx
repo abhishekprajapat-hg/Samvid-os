@@ -1,10 +1,11 @@
 import React, { useState } from "react";
-import { motion } from "framer-motion";
-import { Hexagon, ChevronRight, Lock, ScanFace } from "lucide-react";
+import { motion as Motion } from "framer-motion";
+import { ChevronRight, Lock, ScanFace } from "lucide-react";
 import { Link } from "react-router-dom";
 import api from "../../services/api";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { persistTenantSlug } from "../../utils/tenantRouting";
+import BrandLogo from "../common/BrandLogo";
 
 const Login = ({ onLogin, portal = "GENERAL" }) => {
   const [email, setEmail] = useState("");
@@ -47,13 +48,13 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
 
   return (
     <div className="relative w-full min-h-screen px-4 flex items-center justify-center bg-slate-50">
-      <motion.div
+      <Motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         className="w-full max-w-sm bg-white border shadow-xl rounded-3xl p-6 sm:p-8"
       >
         <div className="text-center mb-6">
-          <Hexagon size={32} className="mx-auto mb-3" />
+          <BrandLogo className="mx-auto mb-4 h-20 w-20" />
           <h1 className="text-xl font-bold">{portal} LOGIN</h1>
         </div>
 
@@ -119,7 +120,7 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
           </Link>
           .
         </div>
-      </motion.div>
+      </Motion.div>
     </div>
   );
 };

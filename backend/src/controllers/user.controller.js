@@ -59,7 +59,9 @@ const USER_SELECTABLE_FIELDS = [
   "role",
   "companyId",
   "parentId",
+  "partnerCode",
   "canViewInventory",
+  "brokerageConfig",
   "isActive",
   "lastAssignedAt",
   "liveLocation",
@@ -67,6 +69,10 @@ const USER_SELECTABLE_FIELDS = [
   "updatedAt",
 ];
 const USER_ROLE_VALUES = Object.values(USER_ROLES);
+const BROKERAGE_MODES = Object.freeze(["FLAT", "PERCENTAGE"]);
+const DEFAULT_BROKERAGE_VALUE = 50000;
+const DEFAULT_BROKERAGE_PERCENTAGE = 2;
+const MAX_BROKERAGE_NOTES_LENGTH = 240;
 const BILLABLE_SUBSCRIPTION_STATUSES = ["TRIAL", "ACTIVE", "PAST_DUE"];
 const LEADERBOARD_ROLE_OPTIONS_BY_ACTOR = Object.freeze({
   [USER_ROLES.ADMIN]: [
@@ -128,11 +134,81 @@ const sanitizeName = (value) => String(value || "").trim();
 const sanitizePhone = (value) => String(value || "").trim();
 const sanitizeProfileImageUrl = (value) => String(value || "").trim();
 const sanitizeEmail = (value) => String(value || "").trim().toLowerCase();
+const sanitizeBrokerageNotes = (value) => String(value || "").trim();
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
 const toRoleExpectationLabel = (roles = []) =>
   roles.map((parentRole) => ROLE_LABELS[parentRole] || parentRole).join(" / ");
+
+const toBrokerageConfigView = (config) => {
+  const normalizedMode = String(config?.mode || "").trim().toUpperCase();
+  const mode = BROKERAGE_MODES.includes(normalizedMode) ? normalizedMode : "FLAT";
+  const fallbackValue =
+    mode === "PERCENTAGE" ? DEFAULT_BROKERAGE_PERCENTAGE : DEFAULT_BROKERAGE_VALUE;
+  const parsedValue = toFiniteNumber(config?.value);
+  const value = parsedValue === null ? fallbackValue : Math.max(0, parsedValue);
+
+  return {
+    mode,
+    value: mode === "PERCENTAGE" ? Math.min(value, 100) : value,
+    notes: sanitizeBrokerageNotes(config?.notes),
+  };
+};
+
+const normalizeBrokerageConfigInput = (input, fallbackConfig = null) => {
+  if (input === null || input === undefined) {
+    return { value: toBrokerageConfigView(fallbackConfig) };
+  }
+
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { error: "brokerageConfig must be an object" };
+  }
+
+  const fallback = toBrokerageConfigView(fallbackConfig);
+  const requestedMode = Object.prototype.hasOwnProperty.call(input, "mode")
+    ? String(input.mode || "").trim().toUpperCase()
+    : fallback.mode;
+
+  if (!BROKERAGE_MODES.includes(requestedMode)) {
+    return {
+      error: `brokerageConfig.mode must be one of: ${BROKERAGE_MODES.join(", ")}`,
+    };
+  }
+
+  const requestedValue = Object.prototype.hasOwnProperty.call(input, "value")
+    ? input.value
+    : fallback.value;
+  const value = toFiniteNumber(requestedValue);
+  if (value === null || value < 0) {
+    return {
+      error: "brokerageConfig.value must be a valid number greater than or equal to 0",
+    };
+  }
+
+  if (requestedMode === "PERCENTAGE" && value > 100) {
+    return {
+      error: "brokerageConfig.value cannot exceed 100 for percentage brokerage",
+    };
+  }
+
+  const notes = Object.prototype.hasOwnProperty.call(input, "notes")
+    ? sanitizeBrokerageNotes(input.notes)
+    : fallback.notes;
+  if (notes.length > MAX_BROKERAGE_NOTES_LENGTH) {
+    return {
+      error: `brokerageConfig.notes cannot exceed ${MAX_BROKERAGE_NOTES_LENGTH} characters`,
+    };
+  }
+
+  return {
+    value: {
+      mode: requestedMode,
+      value,
+      notes,
+    },
+  };
+};
 
 const getCompanySeatSnapshot = async (companyId) => {
   if (!isValidObjectId(companyId)) return null;
@@ -463,6 +539,7 @@ const toProfileView = (user) => ({
   parentId: user.parentId || null,
   partnerCode: user.partnerCode || null,
   canViewInventory: Boolean(user.canViewInventory),
+  brokerageConfig: toBrokerageConfigView(user.brokerageConfig),
   isActive: Boolean(user.isActive),
   lastAssignedAt: user.lastAssignedAt || null,
   liveLocation: user.liveLocation || null,
@@ -1168,6 +1245,16 @@ exports.createUserByRole = async (req, res) => {
       resolvedParentId = reportingParent._id;
     }
 
+    const shouldParseBrokerageConfig =
+      role === USER_ROLES.CHANNEL_PARTNER
+      || Object.prototype.hasOwnProperty.call(req.body || {}, "brokerageConfig");
+    const parsedBrokerageConfig = shouldParseBrokerageConfig
+      ? normalizeBrokerageConfigInput(req.body?.brokerageConfig, null)
+      : { value: toBrokerageConfigView(null) };
+    if (parsedBrokerageConfig.error) {
+      return res.status(400).json({ message: parsedBrokerageConfig.error });
+    }
+
     const newUser = await User.create({
       name,
       email,
@@ -1180,6 +1267,7 @@ exports.createUserByRole = async (req, res) => {
         role === USER_ROLES.CHANNEL_PARTNER
           ? Boolean(req.body?.canViewInventory)
           : false,
+      brokerageConfig: parsedBrokerageConfig.value,
     });
 
     res.status(201).json({
@@ -1192,6 +1280,7 @@ exports.createUserByRole = async (req, res) => {
         companyId: newUser.companyId,
         parentId: newUser.parentId,
         canViewInventory: Boolean(newUser.canViewInventory),
+        brokerageConfig: toBrokerageConfigView(newUser.brokerageConfig),
       },
     });
   } catch (error) {
@@ -1237,6 +1326,7 @@ exports.updateUserByAdmin = async (req, res) => {
       "managerId",
       "isActive",
       "canViewInventory",
+      "brokerageConfig",
       "password",
     ].some((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
 
@@ -1346,6 +1436,17 @@ exports.updateUserByAdmin = async (req, res) => {
       if (rawPassword) {
         user.password = rawPassword;
       }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "brokerageConfig")) {
+      const parsedBrokerageConfig = normalizeBrokerageConfigInput(
+        req.body?.brokerageConfig,
+        user.brokerageConfig,
+      );
+      if (parsedBrokerageConfig.error) {
+        return res.status(400).json({ message: parsedBrokerageConfig.error });
+      }
+      patch.brokerageConfig = parsedBrokerageConfig.value;
     }
 
     if (EXECUTIVE_ROLES.includes(previousRole) && !EXECUTIVE_ROLES.includes(nextRole)) {

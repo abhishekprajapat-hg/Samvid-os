@@ -3,9 +3,10 @@ import { NavLink } from 'react-router-dom';
 import {
     LayoutGrid, Users, Building2, Map, LogOut,
     PieChart, Settings, ClipboardList, Calendar,
-    Navigation, ShieldCheck, Briefcase, Hexagon, Moon, Sun, MessageSquare, UserCircle2, Trophy
+    Navigation, ShieldCheck, Briefcase, Moon, Sun, MessageSquare, UserCircle2, Trophy
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
+import BrandLogo from '../common/BrandLogo';
 
 // --- MENU CONFIGURATION ---
 const MENU_CONFIG = {
@@ -83,7 +84,7 @@ const Sidebar = ({ userRole = 'manager', onLogout, theme = "light", onToggleThem
     const currentMenu = MENU_CONFIG[normalizedRole] || MENU_CONFIG.manager;
 
     return (
-        <motion.aside
+        <Motion.aside
             initial={{ x: -140, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             transition={{ duration: 0.9, ease: "circOut" }}
@@ -100,10 +101,10 @@ const Sidebar = ({ userRole = 'manager', onLogout, theme = "light", onToggleThem
 
             {/* 1. TOP: SYSTEM CORE */}
             <div className="relative group cursor-pointer mt-2">
-                <div className={`absolute inset-[-10px] rounded-2xl border border-dashed animate-[spin_14s_linear_infinite] transition-colors ${isDark ? "border-cyan-300/25 group-hover:border-cyan-200/70" : "border-slate-300/70 group-hover:border-sky-400/70"}`}></div>
+                <div className={`absolute inset-[-12px] rounded-3xl border border-dashed animate-[spin_14s_linear_infinite] transition-colors ${isDark ? "border-cyan-300/25 group-hover:border-cyan-200/70" : "border-slate-300/70 group-hover:border-sky-400/70"}`}></div>
                 <div className={`absolute inset-0 rounded-2xl blur-xl transition-all duration-500 ${isDark ? "bg-cyan-300/20 group-hover:bg-cyan-300/35" : "bg-sky-300/20 group-hover:bg-sky-300/35"}`} />
-                <div className={`relative w-16 h-16 rounded-2xl border flex items-center justify-center transition-all duration-500 ${isDark ? "bg-slate-900/80 border-cyan-200/40 shadow-[0_0_30px_rgba(34,211,238,0.25)]" : "bg-white/90 border-slate-300/80 shadow-[0_6px_18px_rgba(15,23,42,0.12)]"}`}>
-                    <Hexagon size={30} className={isDark ? "text-cyan-300" : "text-sky-500"} strokeWidth={1.8} />
+                <div className={`relative w-20 h-20 rounded-3xl border flex items-center justify-center transition-all duration-500 ${isDark ? "bg-slate-900/80 border-cyan-200/40 shadow-[0_0_30px_rgba(34,211,238,0.25)]" : "bg-white/90 border-slate-300/80 shadow-[0_6px_18px_rgba(15,23,42,0.12)]"}`}>
+                    <BrandLogo className="h-14 w-14" />
                 </div>
             </div>
 
@@ -114,7 +115,7 @@ const Sidebar = ({ userRole = 'manager', onLogout, theme = "light", onToggleThem
                         {({ isActive }) => (
                             <div className="relative flex items-center justify-center w-16 h-16">
                                 {isActive && (
-                                    <motion.div
+                                    <Motion.div
                                         layoutId="activeRail"
                                         className={`absolute inset-0 rounded-2xl border ${isDark ? "bg-cyan-300/15 border-cyan-200/40 shadow-[0_0_24px_rgba(34,211,238,0.35)]" : "bg-sky-100 border-sky-300/70 shadow-[0_0_18px_rgba(56,189,248,0.35)]"}`}
                                         transition={{ type: "spring", stiffness: 300, damping: 30 }}
@@ -157,7 +158,7 @@ const Sidebar = ({ userRole = 'manager', onLogout, theme = "light", onToggleThem
                 </button>
             </div>
 
-        </motion.aside>
+        </Motion.aside>
     );
 };
 

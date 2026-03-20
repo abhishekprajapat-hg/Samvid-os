@@ -12,12 +12,30 @@ const {
 } = require("../services/authToken.service");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+const BROKERAGE_MODES = new Set(["FLAT", "PERCENTAGE"]);
+const DEFAULT_BROKERAGE_VALUE = 50000;
+const DEFAULT_BROKERAGE_PERCENTAGE = 2;
 const toBoolean = (value, fallback = false) => {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return fallback;
   if (raw === "true" || raw === "1" || raw === "yes") return true;
   if (raw === "false" || raw === "0" || raw === "no") return false;
   return fallback;
+};
+
+const toBrokerageConfigView = (config) => {
+  const normalizedMode = String(config?.mode || "").trim().toUpperCase();
+  const mode = BROKERAGE_MODES.has(normalizedMode) ? normalizedMode : "FLAT";
+  const fallbackValue =
+    mode === "PERCENTAGE" ? DEFAULT_BROKERAGE_PERCENTAGE : DEFAULT_BROKERAGE_VALUE;
+  const parsedValue = Number(config?.value);
+  const value = Number.isFinite(parsedValue) ? Math.max(0, parsedValue) : fallbackValue;
+
+  return {
+    mode,
+    value: mode === "PERCENTAGE" ? Math.min(value, 100) : value,
+    notes: String(config?.notes || "").trim(),
+  };
 };
 
 const resolveClientIp = (req) =>
@@ -84,6 +102,7 @@ const toAuthResponse = ({ user, tokenBundle, tenant = null }) => ({
     parentId: user.parentId || null,
     partnerCode: user.partnerCode || null,
     canViewInventory: Boolean(user.canViewInventory),
+    brokerageConfig: toBrokerageConfigView(user.brokerageConfig),
   },
   tenant: tenant
     ? {
@@ -201,7 +220,7 @@ exports.refresh = async (req, res) => {
     }
 
     const user = await User.findById(rotated.userId).select(
-      "_id name email role companyId parentId partnerCode canViewInventory isActive",
+      "_id name email role companyId parentId partnerCode canViewInventory brokerageConfig isActive",
     );
 
     if (!user || !user.isActive) {
@@ -222,6 +241,7 @@ exports.refresh = async (req, res) => {
         parentId: user.parentId || null,
         partnerCode: user.partnerCode || null,
         canViewInventory: Boolean(user.canViewInventory),
+        brokerageConfig: toBrokerageConfigView(user.brokerageConfig),
       },
     });
   } catch (error) {
@@ -288,6 +308,7 @@ exports.getMe = async (req, res) => {
         parentId: req.user.parentId || null,
         partnerCode: req.user.partnerCode || null,
         canViewInventory: Boolean(req.user.canViewInventory),
+        brokerageConfig: toBrokerageConfigView(req.user.brokerageConfig),
       },
       tenant: resolvedTenant
         ? {

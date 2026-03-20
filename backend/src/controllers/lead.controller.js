@@ -5,6 +5,7 @@ const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
 const LeadStatusRequest = require("../models/LeadStatusRequest");
 const logger = require("../config/logger");
+const { isDeepStrictEqual } = require("util");
 const {
   autoAssignLead,
 } = require("../services/leadAssignment.service");
@@ -24,22 +25,57 @@ const {
   parseFieldSelection,
 } = require("../utils/queryOptions");
 
+const LEAD_INVENTORY_SELECT_FIELDS = [
+  "_id",
+  "projectName",
+  "towerName",
+  "unitNumber",
+  "propertyId",
+  "inventoryType",
+  "location",
+  "city",
+  "area",
+  "pincode",
+  "buildingName",
+  "floorNumber",
+  "totalFloors",
+  "totalArea",
+  "carpetArea",
+  "builtUpArea",
+  "areaUnit",
+  "price",
+  "deposit",
+  "type",
+  "category",
+  "furnishingStatus",
+  "maintenanceCharges",
+  "status",
+  "siteLocation",
+  "images",
+  "documents",
+  "floorPlans",
+  "videoTours",
+  "commercialDetails",
+  "residentialDetails",
+  "saleDetails",
+].join(" ");
+
 const LEAD_POPULATE_FIELDS = [
   { path: "assignedTo", select: "name role" },
   { path: "assignedManager", select: "name role" },
   { path: "assignedExecutive", select: "name role" },
   { path: "assignedFieldExecutive", select: "name role" },
-  { path: "createdBy", select: "name role" },
+  { path: "createdBy", select: "name role partnerCode brokerageConfig" },
   { path: "dealPayment.approvalRequestedBy", select: "name role" },
   { path: "dealPayment.approvalReviewedBy", select: "name role" },
   { path: "closureDocuments.uploadedBy", select: "name role" },
   {
     path: "inventoryId",
-    select: "projectName towerName unitNumber location siteLocation status price type category images saleDetails",
+    select: LEAD_INVENTORY_SELECT_FIELDS,
   },
   {
     path: "relatedInventoryIds",
-    select: "projectName towerName unitNumber location siteLocation status price type category images saleDetails",
+    select: LEAD_INVENTORY_SELECT_FIELDS,
   },
 ];
 
@@ -48,17 +84,17 @@ const LEAD_PAYMENT_REQUEST_POPULATE_FIELDS = [
   { path: "assignedManager", select: "name role phone email" },
   { path: "assignedExecutive", select: "name role phone email" },
   { path: "assignedFieldExecutive", select: "name role phone email" },
-  { path: "createdBy", select: "name role phone email" },
+  { path: "createdBy", select: "name role phone email partnerCode brokerageConfig" },
   { path: "dealPayment.approvalRequestedBy", select: "name role phone email" },
   { path: "dealPayment.approvalReviewedBy", select: "name role phone email" },
   { path: "closureDocuments.uploadedBy", select: "name role phone email" },
   {
     path: "inventoryId",
-    select: "projectName towerName unitNumber location siteLocation status price type category images documents saleDetails",
+    select: LEAD_INVENTORY_SELECT_FIELDS,
   },
   {
     path: "relatedInventoryIds",
-    select: "projectName towerName unitNumber location siteLocation status price type category images documents saleDetails",
+    select: LEAD_INVENTORY_SELECT_FIELDS,
   },
 ];
 
@@ -72,6 +108,7 @@ const LEAD_SELECTABLE_FIELDS = [
   "inventoryId",
   "relatedInventoryIds",
   "siteLocation",
+  "requirements",
   "source",
   "status",
   "dealPayment",
@@ -146,15 +183,39 @@ const MAX_CLOSURE_DOCUMENT_MIME_LENGTH = 120;
 const MAX_CLOSURE_DOCUMENT_SIZE_BYTES = 25 * 1024 * 1024;
 const MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH = 500;
 const MAX_BULK_LEAD_UPLOAD_ROWS = 500;
+const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTIAL"]);
+const LEAD_REQUIREMENT_TRANSACTION_TYPES = Object.freeze(["SALE", "RENT"]);
+const LEAD_REQUIREMENT_AREA_UNITS = Object.freeze(["SQ_FT", "SQ_M"]);
 
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
 
-const buildInventoryLeadProjectLabel = (inventory) =>
-  [inventory?.projectName, inventory?.towerName, inventory?.unitNumber]
+const buildInventoryLeadProjectLabel = (inventory) => {
+  const preferredParts = [
+    inventory?.propertyId,
+    inventory?.projectName,
+    inventory?.towerName,
+    inventory?.unitNumber,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (preferredParts.length) {
+    return preferredParts.join(" - ");
+  }
+
+  return [
+    inventory?.city,
+    inventory?.area,
+    inventory?.location,
+  ]
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(" - ");
+};
+
+const resolveInventoryLeadCity = (inventory) =>
+  String(inventory?.city || inventory?.location || "").trim();
 
 const toObjectIdString = (value) => {
   if (!value) return "";
@@ -220,9 +281,9 @@ const applyLeadSelectionFromInventory = ({ lead, inventory }) => {
     lead.projectInterested = projectLabel;
   }
 
-  const inventoryLocation = String(inventory.location || "").trim();
-  if (inventoryLocation) {
-    lead.city = inventoryLocation;
+  const inventoryCity = resolveInventoryLeadCity(inventory);
+  if (inventoryCity) {
+    lead.city = inventoryCity;
   }
 
   const inventoryLat = normalizeLatitude(inventory?.siteLocation?.lat);
@@ -272,6 +333,206 @@ const normalizeRadiusMeters = (value) => {
   const parsed = toFiniteNumber(value);
   if (parsed === null || parsed < 50 || parsed > 2000) return null;
   return Math.round(parsed);
+};
+
+const normalizeLeadRequirementEnum = (value, allowedValues = []) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return "";
+  return allowedValues.includes(normalized) ? normalized : "";
+};
+
+const normalizeLeadRequirementBoolean = (value, fallback = false) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value > 0;
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["true", "yes", "1"].includes(normalized)) return true;
+  if (["false", "no", "0"].includes(normalized)) return false;
+  return fallback;
+};
+
+const normalizeLeadRequirementNumber = (value, fallback = null, { round = false } = {}) => {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null || parsed < 0) return fallback;
+  return round ? Math.round(parsed) : parsed;
+};
+
+const buildLeadRequirementsFromInventory = (inventory) => {
+  if (!inventory || typeof inventory !== "object") return {};
+
+  const commercialLayout = inventory?.commercialDetails?.officeLayout || {};
+  const commercialAmenities = inventory?.commercialDetails?.amenities || {};
+  const commercialBuilding = inventory?.commercialDetails?.buildingDetails || {};
+  const residentialDetails = inventory?.residentialDetails || {};
+  const residentialAmenities = residentialDetails?.amenities || {};
+  const parkingType = String(commercialBuilding?.parkingType || "").trim().toUpperCase();
+  const hasCommercialParkingType = Boolean(parkingType && parkingType !== "NONE");
+  const hasCommercialParkingSlots = normalizeLeadRequirementNumber(
+    commercialBuilding?.parkingSlots,
+    null,
+  ) > 0;
+
+  return {
+    inventoryType: normalizeLeadRequirementEnum(
+      inventory?.inventoryType,
+      LEAD_REQUIREMENT_INVENTORY_TYPES,
+    ),
+    transactionType: normalizeLeadRequirementEnum(
+      inventory?.type,
+      LEAD_REQUIREMENT_TRANSACTION_TYPES,
+    ),
+    furnishingStatus: String(inventory?.furnishingStatus || "").trim().toUpperCase(),
+    budgetMin: normalizeLeadRequirementNumber(inventory?.price, null),
+    budgetMax: normalizeLeadRequirementNumber(inventory?.price, null),
+    areaMin: normalizeLeadRequirementNumber(inventory?.totalArea, null),
+    areaMax: normalizeLeadRequirementNumber(inventory?.totalArea, null),
+    areaUnit: normalizeLeadRequirementEnum(
+      inventory?.areaUnit,
+      LEAD_REQUIREMENT_AREA_UNITS,
+    ) || "SQ_FT",
+    commercial: {
+      seats: normalizeLeadRequirementNumber(commercialLayout?.seats, null, { round: true }),
+      cabins: normalizeLeadRequirementNumber(commercialLayout?.totalCabins, null, { round: true }),
+      parkingAvailable: normalizeLeadRequirementBoolean(
+        hasCommercialParkingSlots || hasCommercialParkingType,
+        false,
+      ),
+      pantry: normalizeLeadRequirementBoolean(commercialAmenities?.pantry, false),
+    },
+    residential: {
+      bhkType: String(residentialDetails?.bhkType || "").trim().toUpperCase(),
+      floor: normalizeLeadRequirementNumber(inventory?.floorNumber, null, { round: true }),
+      amenities: {
+        lift: normalizeLeadRequirementBoolean(residentialAmenities?.lift, false),
+        security: normalizeLeadRequirementBoolean(residentialAmenities?.security, false),
+        gym: normalizeLeadRequirementBoolean(residentialAmenities?.gym, false),
+        swimmingPool: normalizeLeadRequirementBoolean(residentialAmenities?.swimmingPool, false),
+        clubhouse: normalizeLeadRequirementBoolean(residentialAmenities?.clubhouse, false),
+        powerBackup: normalizeLeadRequirementBoolean(residentialAmenities?.powerBackup, false),
+        parking: normalizeLeadRequirementNumber(residentialDetails?.parking, null) > 0,
+      },
+    },
+  };
+};
+
+const normalizeLeadRequirements = ({ rawRequirements, inventory }) => {
+  const base = buildLeadRequirementsFromInventory(inventory);
+
+  if (rawRequirements === undefined) {
+    return Object.keys(base).length ? base : undefined;
+  }
+
+  if (!rawRequirements || typeof rawRequirements !== "object" || Array.isArray(rawRequirements)) {
+    return Object.keys(base).length ? base : undefined;
+  }
+
+  const commercialInput = rawRequirements?.commercial || {};
+  const residentialInput = rawRequirements?.residential || {};
+  const residentialAmenitiesInput = residentialInput?.amenities || {};
+
+  return {
+    inventoryType:
+      normalizeLeadRequirementEnum(
+        rawRequirements?.inventoryType,
+        LEAD_REQUIREMENT_INVENTORY_TYPES,
+      )
+      || base.inventoryType
+      || "",
+    transactionType:
+      normalizeLeadRequirementEnum(
+        rawRequirements?.transactionType,
+        LEAD_REQUIREMENT_TRANSACTION_TYPES,
+      )
+      || base.transactionType
+      || "",
+    furnishingStatus:
+      String(rawRequirements?.furnishingStatus || base?.furnishingStatus || "")
+        .trim()
+        .toUpperCase(),
+    budgetMin: normalizeLeadRequirementNumber(
+      rawRequirements?.budgetMin,
+      base?.budgetMin ?? null,
+    ),
+    budgetMax: normalizeLeadRequirementNumber(
+      rawRequirements?.budgetMax,
+      base?.budgetMax ?? null,
+    ),
+    areaMin: normalizeLeadRequirementNumber(
+      rawRequirements?.areaMin,
+      base?.areaMin ?? null,
+    ),
+    areaMax: normalizeLeadRequirementNumber(
+      rawRequirements?.areaMax,
+      base?.areaMax ?? null,
+    ),
+    areaUnit:
+      normalizeLeadRequirementEnum(
+        rawRequirements?.areaUnit,
+        LEAD_REQUIREMENT_AREA_UNITS,
+      )
+      || base.areaUnit
+      || "SQ_FT",
+    commercial: {
+      seats: normalizeLeadRequirementNumber(
+        commercialInput?.seats,
+        base?.commercial?.seats ?? null,
+        { round: true },
+      ),
+      cabins: normalizeLeadRequirementNumber(
+        commercialInput?.cabins,
+        base?.commercial?.cabins ?? null,
+        { round: true },
+      ),
+      parkingAvailable: normalizeLeadRequirementBoolean(
+        commercialInput?.parkingAvailable,
+        base?.commercial?.parkingAvailable || false,
+      ),
+      pantry: normalizeLeadRequirementBoolean(
+        commercialInput?.pantry,
+        base?.commercial?.pantry || false,
+      ),
+    },
+    residential: {
+      bhkType:
+        String(residentialInput?.bhkType || base?.residential?.bhkType || "")
+          .trim()
+          .toUpperCase(),
+      floor: normalizeLeadRequirementNumber(
+        residentialInput?.floor,
+        base?.residential?.floor ?? null,
+        { round: true },
+      ),
+      amenities: {
+        lift: normalizeLeadRequirementBoolean(
+          residentialAmenitiesInput?.lift,
+          base?.residential?.amenities?.lift || false,
+        ),
+        security: normalizeLeadRequirementBoolean(
+          residentialAmenitiesInput?.security,
+          base?.residential?.amenities?.security || false,
+        ),
+        gym: normalizeLeadRequirementBoolean(
+          residentialAmenitiesInput?.gym,
+          base?.residential?.amenities?.gym || false,
+        ),
+        swimmingPool: normalizeLeadRequirementBoolean(
+          residentialAmenitiesInput?.swimmingPool,
+          base?.residential?.amenities?.swimmingPool || false,
+        ),
+        clubhouse: normalizeLeadRequirementBoolean(
+          residentialAmenitiesInput?.clubhouse,
+          base?.residential?.amenities?.clubhouse || false,
+        ),
+        powerBackup: normalizeLeadRequirementBoolean(
+          residentialAmenitiesInput?.powerBackup,
+          base?.residential?.amenities?.powerBackup || false,
+        ),
+        parking: normalizeLeadRequirementBoolean(
+          residentialAmenitiesInput?.parking,
+          base?.residential?.amenities?.parking || false,
+        ),
+      },
+    },
+  };
 };
 
 const parseSiteLocationPayload = (rawSiteLocation) => {
@@ -1030,6 +1291,7 @@ exports.createLead = async (req, res) => {
       projectInterested,
       inventoryId: rawInventoryId,
       siteLocation: rawSiteLocation,
+      requirements: rawRequirements,
     } = req.body;
 
     const companyId = toObjectIdString(req.user?.companyId);
@@ -1061,7 +1323,7 @@ exports.createLead = async (req, res) => {
       }
 
       inventory = await Inventory.findOne(inventoryQuery)
-        .select("_id projectName towerName unitNumber location siteLocation")
+        .select(LEAD_INVENTORY_SELECT_FIELDS)
         .lean();
 
       if (!inventory) {
@@ -1075,7 +1337,7 @@ exports.createLead = async (req, res) => {
 
     const resolvedCity =
       String(city || "").trim()
-      || String(inventory?.location || "").trim();
+      || resolveInventoryLeadCity(inventory);
 
     const createPayload = {
       name,
@@ -1083,6 +1345,10 @@ exports.createLead = async (req, res) => {
       email,
       city: resolvedCity,
       projectInterested: resolvedProjectInterested,
+      requirements: normalizeLeadRequirements({
+        rawRequirements,
+        inventory,
+      }),
       companyId,
       source: "MANUAL",
       createdBy: req.user._id,
@@ -1399,7 +1665,7 @@ exports.bulkUploadLeads = async (req, res) => {
           _id: { $in: payloadInventoryIds },
           companyId,
         })
-          .select("_id projectName towerName unitNumber location siteLocation")
+          .select(LEAD_INVENTORY_SELECT_FIELDS)
           .lean()
         : [],
     ]);
@@ -1497,9 +1763,13 @@ exports.bulkUploadLeads = async (req, res) => {
           name,
           phone,
           email,
-          city: city || String(inventory?.location || "").trim(),
+          city: city || resolveInventoryLeadCity(inventory),
           projectInterested:
             projectInterested || buildInventoryLeadProjectLabel(inventory),
+          requirements: normalizeLeadRequirements({
+            rawRequirements: row?.requirements,
+            inventory,
+          }),
           companyId,
           source: "MANUAL",
           createdBy: req.user._id,
@@ -1804,7 +2074,7 @@ exports.addRelatedPropertyToLead = async (req, res) => {
         companyId: req.user.companyId,
       }),
     )
-      .select("_id projectName towerName unitNumber location siteLocation status")
+      .select(LEAD_INVENTORY_SELECT_FIELDS)
       .lean();
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -1890,7 +2160,7 @@ exports.selectRelatedPropertyForLead = async (req, res) => {
         companyId: req.user.companyId,
       }),
     )
-      .select("_id projectName towerName unitNumber location siteLocation")
+      .select(LEAD_INVENTORY_SELECT_FIELDS)
       .lean();
     if (!inventory) {
       return res.status(404).json({ message: "Inventory not found" });
@@ -1995,7 +2265,7 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
             companyId: req.user.companyId,
           }),
         )
-          .select("_id projectName towerName unitNumber location siteLocation")
+          .select(LEAD_INVENTORY_SELECT_FIELDS)
           .lean();
 
         if (fallbackInventory) {
@@ -2194,6 +2464,7 @@ exports.updateLeadStatus = async (req, res) => {
       siteLocation: rawSiteLocation,
       dealPayment: rawDealPayment,
       closureDocuments: rawClosureDocuments,
+      requirements: rawRequirements,
     } = req.body;
     const requestedStatus = normalizeEnumValue(rawStatus);
 
@@ -2206,6 +2477,7 @@ exports.updateLeadStatus = async (req, res) => {
     const hasEmailField = Object.prototype.hasOwnProperty.call(req.body || {}, "email");
     const hasCityField = Object.prototype.hasOwnProperty.call(req.body || {}, "city");
     const hasProjectInterestedField = Object.prototype.hasOwnProperty.call(req.body || {}, "projectInterested");
+    const hasRequirementsField = Object.prototype.hasOwnProperty.call(req.body || {}, "requirements");
     const normalizedName = hasNameField ? String(name || "").trim() : "";
     const normalizedPhone = hasPhoneField ? String(phone || "").trim() : "";
     const normalizedEmail = hasEmailField ? String(email || "").trim() : "";
@@ -2308,6 +2580,35 @@ exports.updateLeadStatus = async (req, res) => {
       if (normalizedProjectInterested !== existingProjectInterested) {
         lead.projectInterested = normalizedProjectInterested;
         updatedProfileFields.push("projectInterested");
+      }
+    }
+
+    if (hasRequirementsField) {
+      const selectedInventoryId = toObjectIdString(lead?.inventoryId);
+      let selectedInventory = null;
+
+      if (isValidObjectId(selectedInventoryId)) {
+        selectedInventory = await Inventory.findOne(
+          buildCompanyInventoryQuery({
+            inventoryId: selectedInventoryId,
+            companyId: req.user.companyId,
+          }),
+        )
+          .select(LEAD_INVENTORY_SELECT_FIELDS)
+          .lean();
+      }
+
+      const normalizedRequirements = normalizeLeadRequirements({
+        rawRequirements,
+        inventory: selectedInventory,
+      }) || {};
+      const existingRequirements = lead?.requirements?.toObject
+        ? lead.requirements.toObject()
+        : (lead?.requirements || {});
+
+      if (!isDeepStrictEqual(existingRequirements, normalizedRequirements)) {
+        lead.requirements = normalizedRequirements;
+        updatedProfileFields.push("requirements");
       }
     }
 
@@ -2775,6 +3076,7 @@ exports.updateLeadStatus = async (req, res) => {
         email: "Email",
         city: "City",
         projectInterested: "Project",
+        requirements: "Requirements",
       };
       const profileFieldLabels = updatedProfileFields
         .map((field) => labelMap[field] || field)

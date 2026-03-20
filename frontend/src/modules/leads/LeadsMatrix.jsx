@@ -76,13 +76,215 @@ const defaultFormData = {
   projectInterested: "",
   siteLat: "",
   siteLng: "",
+  requirementsInventoryType: "",
+  requirementsTransactionType: "",
+  requirementsFurnishingStatus: "",
+  requirementsBudgetMin: "",
+  requirementsBudgetMax: "",
+  requirementsAreaMin: "",
+  requirementsAreaMax: "",
+  requirementsAreaUnit: "SQ_FT",
+  requirementsCommercialSeats: "",
+  requirementsCommercialCabins: "",
+  requirementsCommercialParkingAvailable: false,
+  requirementsCommercialPantry: false,
+  requirementsResidentialBhkType: "",
+  requirementsResidentialFloor: "",
+  requirementsResidentialAmenityLift: false,
+  requirementsResidentialAmenitySecurity: false,
+  requirementsResidentialAmenityGym: false,
+  requirementsResidentialAmenitySwimmingPool: false,
+  requirementsResidentialAmenityClubhouse: false,
+  requirementsResidentialAmenityPowerBackup: false,
+  requirementsResidentialAmenityParking: false,
 };
 
-const getInventoryLeadLabel = (inventoryLike = {}) =>
-  [inventoryLike.projectName, inventoryLike.towerName, inventoryLike.unitNumber]
+const createDefaultLeadRequirementsDraft = () => ({
+  inventoryType: "",
+  transactionType: "",
+  furnishingStatus: "",
+  budgetMin: "",
+  budgetMax: "",
+  areaMin: "",
+  areaMax: "",
+  areaUnit: "SQ_FT",
+  commercial: {
+    seats: "",
+    cabins: "",
+    parkingAvailable: false,
+    pantry: false,
+  },
+  residential: {
+    bhkType: "",
+    floor: "",
+    amenities: {
+      lift: false,
+      security: false,
+      gym: false,
+      swimmingPool: false,
+      clubhouse: false,
+      powerBackup: false,
+      parking: false,
+    },
+  },
+});
+
+const toRequirementDraftText = (value) => {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+};
+
+const mapLeadRequirementsToDraft = (requirements = {}) => {
+  const base = createDefaultLeadRequirementsDraft();
+  const commercial = requirements?.commercial || {};
+  const residential = requirements?.residential || {};
+  const amenities = residential?.amenities || {};
+
+  return {
+    inventoryType: toRequirementDraftText(requirements?.inventoryType).toUpperCase(),
+    transactionType: toRequirementDraftText(requirements?.transactionType).toUpperCase(),
+    furnishingStatus: toRequirementDraftText(requirements?.furnishingStatus).toUpperCase(),
+    budgetMin: toRequirementDraftText(requirements?.budgetMin),
+    budgetMax: toRequirementDraftText(requirements?.budgetMax),
+    areaMin: toRequirementDraftText(requirements?.areaMin),
+    areaMax: toRequirementDraftText(requirements?.areaMax),
+    areaUnit: toRequirementAreaUnit(requirements?.areaUnit || base.areaUnit),
+    commercial: {
+      seats: toRequirementDraftText(commercial?.seats),
+      cabins: toRequirementDraftText(commercial?.cabins),
+      parkingAvailable: Boolean(commercial?.parkingAvailable),
+      pantry: Boolean(commercial?.pantry),
+    },
+    residential: {
+      bhkType: toRequirementDraftText(residential?.bhkType).toUpperCase(),
+      floor: toRequirementDraftText(residential?.floor),
+      amenities: {
+        lift: Boolean(amenities?.lift),
+        security: Boolean(amenities?.security),
+        gym: Boolean(amenities?.gym),
+        swimmingPool: Boolean(amenities?.swimmingPool),
+        clubhouse: Boolean(amenities?.clubhouse),
+        powerBackup: Boolean(amenities?.powerBackup),
+        parking: Boolean(amenities?.parking),
+      },
+    },
+  };
+};
+
+const buildLeadRequirementsPayloadFromDraft = (draft = {}) => ({
+  inventoryType: String(draft?.inventoryType || "").trim().toUpperCase(),
+  transactionType: toRequirementTransactionType(draft?.transactionType),
+  furnishingStatus: String(draft?.furnishingStatus || "").trim().toUpperCase(),
+  budgetMin: toAmountNumber(draft?.budgetMin),
+  budgetMax: toAmountNumber(draft?.budgetMax),
+  areaMin: toAmountNumber(draft?.areaMin),
+  areaMax: toAmountNumber(draft?.areaMax),
+  areaUnit: toRequirementAreaUnit(draft?.areaUnit),
+  commercial: {
+    seats: toAmountNumber(draft?.commercial?.seats),
+    cabins: toAmountNumber(draft?.commercial?.cabins),
+    parkingAvailable: Boolean(draft?.commercial?.parkingAvailable),
+    pantry: Boolean(draft?.commercial?.pantry),
+  },
+  residential: {
+    bhkType: String(draft?.residential?.bhkType || "").trim().toUpperCase(),
+    floor: toAmountNumber(draft?.residential?.floor),
+    amenities: {
+      lift: Boolean(draft?.residential?.amenities?.lift),
+      security: Boolean(draft?.residential?.amenities?.security),
+      gym: Boolean(draft?.residential?.amenities?.gym),
+      swimmingPool: Boolean(draft?.residential?.amenities?.swimmingPool),
+      clubhouse: Boolean(draft?.residential?.amenities?.clubhouse),
+      powerBackup: Boolean(draft?.residential?.amenities?.powerBackup),
+      parking: Boolean(draft?.residential?.amenities?.parking),
+    },
+  },
+});
+
+const getInventoryLeadLabel = (inventoryLike = {}) => {
+  const propertyId = String(inventoryLike?.propertyId || "").trim();
+  const title = [inventoryLike?.projectName, inventoryLike?.towerName, inventoryLike?.unitNumber]
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(" - ");
+
+  if (propertyId && title) return `${propertyId} - ${title}`;
+  if (propertyId) return propertyId;
+  return title;
+};
+
+const getInventoryLeadCity = (inventoryLike = {}) =>
+  String(inventoryLike?.city || inventoryLike?.location || "").trim();
+
+const getInventoryLeadSearchText = (inventoryLike = {}) => {
+  const commercialLayout = inventoryLike?.commercialDetails?.officeLayout || {};
+  const residentialDetails = inventoryLike?.residentialDetails || {};
+  return [
+    getInventoryLeadLabel(inventoryLike),
+    inventoryLike?.location,
+    inventoryLike?.city,
+    inventoryLike?.area,
+    inventoryLike?.pincode,
+    inventoryLike?.inventoryType,
+    inventoryLike?.furnishingStatus,
+    inventoryLike?.type,
+    inventoryLike?.category,
+    residentialDetails?.propertyType,
+    residentialDetails?.bhkType,
+    inventoryLike?.commercialDetails?.officeType,
+    commercialLayout?.totalCabins,
+    commercialLayout?.workstations,
+    commercialLayout?.seats,
+    inventoryLike?.totalArea,
+    inventoryLike?.carpetArea,
+    inventoryLike?.builtUpArea,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+};
+
+const toRequirementAreaUnit = (value) =>
+  String(value || "").trim().toUpperCase() === "SQ_M" ? "SQ_M" : "SQ_FT";
+
+const toRequirementTransactionType = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "RENT") return "RENT";
+  if (normalized === "SALE") return "SALE";
+  return "";
+};
+
+const hasLeadRequirements = (formData = {}) => {
+  const textFields = [
+    formData.requirementsInventoryType,
+    formData.requirementsTransactionType,
+    formData.requirementsFurnishingStatus,
+    formData.requirementsBudgetMin,
+    formData.requirementsBudgetMax,
+    formData.requirementsAreaMin,
+    formData.requirementsAreaMax,
+    formData.requirementsCommercialSeats,
+    formData.requirementsCommercialCabins,
+    formData.requirementsResidentialBhkType,
+    formData.requirementsResidentialFloor,
+  ];
+
+  if (textFields.some((value) => String(value || "").trim() !== "")) {
+    return true;
+  }
+
+  return [
+    formData.requirementsCommercialParkingAvailable,
+    formData.requirementsCommercialPantry,
+    formData.requirementsResidentialAmenityLift,
+    formData.requirementsResidentialAmenitySecurity,
+    formData.requirementsResidentialAmenityGym,
+    formData.requirementsResidentialAmenitySwimmingPool,
+    formData.requirementsResidentialAmenityClubhouse,
+    formData.requirementsResidentialAmenityPowerBackup,
+    formData.requirementsResidentialAmenityParking,
+  ].some(Boolean);
+};
 
 const toObjectIdString = (value) => {
   if (!value) return "";
@@ -461,6 +663,9 @@ const LeadsMatrix = () => {
   const [paymentApprovalStatusDraft, setPaymentApprovalStatusDraft] = useState("");
   const [paymentApprovalNoteDraft, setPaymentApprovalNoteDraft] = useState("");
   const [closureDocumentsDraft, setClosureDocumentsDraft] = useState([]);
+  const [requirementsDraft, setRequirementsDraft] = useState(
+    createDefaultLeadRequirementsDraft(),
+  );
 
   const [executives, setExecutives] = useState([]);
   const diaryRecognitionRef = useRef(null);
@@ -697,11 +902,7 @@ const LeadsMatrix = () => {
     const filtered = leads.filter((lead) => {
       const statusMatch = statusFilter === "ALL" || lead.status === statusFilter;
       const relatedInventorySearchValue = getLeadRelatedInventories(lead)
-        .map((inventory) => {
-          const inventoryLabel = getInventoryLeadLabel(inventory);
-          const inventoryLocation = String(inventory?.location || "").trim();
-          return `${inventoryLabel} ${inventoryLocation}`.trim();
-        })
+        .map((inventory) => getInventoryLeadSearchText(inventory))
         .join(" ");
 
       const searchMatch =
@@ -713,6 +914,8 @@ const LeadsMatrix = () => {
           lead.city,
           lead.projectInterested,
           lead.assignedTo?.name,
+          lead.createdBy?.name,
+          lead.createdBy?.partnerCode,
           relatedInventorySearchValue,
         ]
           .map((value) => String(value || "").toLowerCase())
@@ -839,6 +1042,7 @@ const LeadsMatrix = () => {
     setPaymentApprovalStatusDraft("");
     setPaymentApprovalNoteDraft(String(lead?.dealPayment?.approvalNote || ""));
     setClosureDocumentsDraft(sanitizeClosureDocumentList(lead?.closureDocuments));
+    setRequirementsDraft(mapLeadRequirementsToDraft(lead?.requirements));
     setDiaryDraft("");
     setIsDetailsOpen(true);
 
@@ -898,6 +1102,7 @@ const LeadsMatrix = () => {
     setPaymentApprovalStatusDraft("");
     setPaymentApprovalNoteDraft("");
     setClosureDocumentsDraft([]);
+    setRequirementsDraft(createDefaultLeadRequirementsDraft());
     if (normalizedRouteLeadId) {
       navigate(currentLeadRouteBase);
     }
@@ -981,6 +1186,7 @@ const LeadsMatrix = () => {
     setPaymentApprovalStatusDraft("");
     setPaymentApprovalNoteDraft(String(updatedLead?.dealPayment?.approvalNote || ""));
     setClosureDocumentsDraft(sanitizeClosureDocumentList(updatedLead?.closureDocuments));
+    setRequirementsDraft(mapLeadRequirementsToDraft(updatedLead?.requirements));
   };
 
   const handleInventorySelection = (inventoryId) => {
@@ -996,14 +1202,74 @@ const LeadsMatrix = () => {
       const inventoryProjectLabel = getInventoryLeadLabel(selectedInventory);
       const inventorySiteLat = toCoordinateNumber(selectedInventory?.siteLocation?.lat);
       const inventorySiteLng = toCoordinateNumber(selectedInventory?.siteLocation?.lng);
+      const inventoryType = String(selectedInventory?.inventoryType || "").trim().toUpperCase();
+      const transactionType = toRequirementTransactionType(selectedInventory?.type);
+      const price = toAmountNumber(selectedInventory?.price);
+      const totalArea = toAmountNumber(selectedInventory?.totalArea);
+      const areaUnit = toRequirementAreaUnit(selectedInventory?.areaUnit);
+      const commercialLayout = selectedInventory?.commercialDetails?.officeLayout || {};
+      const commercialAmenities = selectedInventory?.commercialDetails?.amenities || {};
+      const commercialBuilding = selectedInventory?.commercialDetails?.buildingDetails || {};
+      const residentialDetails = selectedInventory?.residentialDetails || {};
+      const residentialAmenities = residentialDetails?.amenities || {};
+      const commercialSeats = toAmountNumber(commercialLayout?.seats);
+      const commercialCabins = toAmountNumber(commercialLayout?.totalCabins);
+      const commercialParkingSlots = toAmountNumber(commercialBuilding?.parkingSlots);
+      const commercialParkingType = String(commercialBuilding?.parkingType || "").trim().toUpperCase();
+      const residentialFloor = toAmountNumber(selectedInventory?.floorNumber);
+      const residentialParking = toAmountNumber(residentialDetails?.parking);
 
       return {
         ...prev,
         inventoryId,
         projectInterested: inventoryProjectLabel || prev.projectInterested,
-        city: String(selectedInventory.location || "").trim() || prev.city,
+        city: getInventoryLeadCity(selectedInventory) || prev.city,
         siteLat: inventorySiteLat === null ? "" : String(inventorySiteLat),
         siteLng: inventorySiteLng === null ? "" : String(inventorySiteLng),
+        requirementsInventoryType:
+          inventoryType === "COMMERCIAL" || inventoryType === "RESIDENTIAL"
+            ? inventoryType
+            : prev.requirementsInventoryType,
+        requirementsTransactionType: transactionType,
+        requirementsFurnishingStatus:
+          String(selectedInventory?.furnishingStatus || "").trim().toUpperCase()
+          || prev.requirementsFurnishingStatus,
+        requirementsBudgetMin:
+          price === null ? prev.requirementsBudgetMin : String(price),
+        requirementsBudgetMax:
+          price === null ? prev.requirementsBudgetMax : String(price),
+        requirementsAreaMin:
+          totalArea === null ? prev.requirementsAreaMin : String(totalArea),
+        requirementsAreaMax:
+          totalArea === null ? prev.requirementsAreaMax : String(totalArea),
+        requirementsAreaUnit: areaUnit,
+        requirementsCommercialSeats:
+          commercialSeats === null
+            ? prev.requirementsCommercialSeats
+            : String(commercialSeats),
+        requirementsCommercialCabins:
+          commercialCabins === null
+            ? prev.requirementsCommercialCabins
+            : String(commercialCabins),
+        requirementsCommercialParkingAvailable:
+          (commercialParkingSlots !== null && commercialParkingSlots > 0)
+          || (Boolean(commercialParkingType) && commercialParkingType !== "NONE"),
+        requirementsCommercialPantry: Boolean(commercialAmenities?.pantry),
+        requirementsResidentialBhkType:
+          String(residentialDetails?.bhkType || "").trim().toUpperCase()
+          || prev.requirementsResidentialBhkType,
+        requirementsResidentialFloor:
+          residentialFloor === null
+            ? prev.requirementsResidentialFloor
+            : String(residentialFloor),
+        requirementsResidentialAmenityLift: Boolean(residentialAmenities?.lift),
+        requirementsResidentialAmenitySecurity: Boolean(residentialAmenities?.security),
+        requirementsResidentialAmenityGym: Boolean(residentialAmenities?.gym),
+        requirementsResidentialAmenitySwimmingPool: Boolean(residentialAmenities?.swimmingPool),
+        requirementsResidentialAmenityClubhouse: Boolean(residentialAmenities?.clubhouse),
+        requirementsResidentialAmenityPowerBackup: Boolean(residentialAmenities?.powerBackup),
+        requirementsResidentialAmenityParking:
+          residentialParking !== null && residentialParking > 0,
       };
     });
   };
@@ -1050,6 +1316,38 @@ const LeadsMatrix = () => {
           lat: parsedSiteLat,
           lng: parsedSiteLng,
           radiusMeters: SITE_VISIT_RADIUS_METERS,
+        };
+      }
+
+      if (hasLeadRequirements(formData)) {
+        payload.requirements = {
+          inventoryType: String(formData.requirementsInventoryType || "").trim().toUpperCase(),
+          transactionType: toRequirementTransactionType(formData.requirementsTransactionType),
+          furnishingStatus: String(formData.requirementsFurnishingStatus || "").trim().toUpperCase(),
+          budgetMin: toAmountNumber(formData.requirementsBudgetMin),
+          budgetMax: toAmountNumber(formData.requirementsBudgetMax),
+          areaMin: toAmountNumber(formData.requirementsAreaMin),
+          areaMax: toAmountNumber(formData.requirementsAreaMax),
+          areaUnit: toRequirementAreaUnit(formData.requirementsAreaUnit),
+          commercial: {
+            seats: toAmountNumber(formData.requirementsCommercialSeats),
+            cabins: toAmountNumber(formData.requirementsCommercialCabins),
+            parkingAvailable: Boolean(formData.requirementsCommercialParkingAvailable),
+            pantry: Boolean(formData.requirementsCommercialPantry),
+          },
+          residential: {
+            bhkType: String(formData.requirementsResidentialBhkType || "").trim().toUpperCase(),
+            floor: toAmountNumber(formData.requirementsResidentialFloor),
+            amenities: {
+              lift: Boolean(formData.requirementsResidentialAmenityLift),
+              security: Boolean(formData.requirementsResidentialAmenitySecurity),
+              gym: Boolean(formData.requirementsResidentialAmenityGym),
+              swimmingPool: Boolean(formData.requirementsResidentialAmenitySwimmingPool),
+              clubhouse: Boolean(formData.requirementsResidentialAmenityClubhouse),
+              powerBackup: Boolean(formData.requirementsResidentialAmenityPowerBackup),
+              parking: Boolean(formData.requirementsResidentialAmenityParking),
+            },
+          },
         };
       }
 
@@ -1278,6 +1576,7 @@ const LeadsMatrix = () => {
         city: normalizedCityDraft,
         projectInterested: normalizedProjectInterestedDraft,
         status: statusDraft,
+        requirements: buildLeadRequirementsPayloadFromDraft(requirementsDraft),
       };
 
       if (hasFollowUpDraft) {
@@ -1736,6 +2035,8 @@ const LeadsMatrix = () => {
             setProjectInterestedDraft={setProjectInterestedDraft}
             statusDraft={statusDraft}
             setStatusDraft={setStatusDraft}
+            requirementsDraft={requirementsDraft}
+            setRequirementsDraft={setRequirementsDraft}
             followUpDraft={followUpDraft}
             setFollowUpDraft={setFollowUpDraft}
             dealPaymentModes={DEAL_PAYMENT_MODES}

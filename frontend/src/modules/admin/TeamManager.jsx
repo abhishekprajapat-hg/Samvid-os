@@ -46,6 +46,10 @@ const ROLE_LABELS = {
   FIELD_EXECUTIVE: "Field Executive",
   CHANNEL_PARTNER: "Channel Partner",
 };
+const DEFAULT_BROKERAGE_VALUE = 50000;
+
+const normalizeBrokerageMode = (value) =>
+  String(value || "").trim().toUpperCase() === "PERCENTAGE" ? "PERCENTAGE" : "FLAT";
 
 const getEntityId = (value) => {
   if (!value) return "";
@@ -75,6 +79,10 @@ const TeamManager = ({ theme = "light" }) => {
     password: "",
     role: "MANAGER",
     reportingToId: "",
+    canViewInventory: false,
+    brokerageMode: "FLAT",
+    brokerageValue: String(DEFAULT_BROKERAGE_VALUE),
+    brokerageNotes: "",
   });
 
   const currentRole = localStorage.getItem("role");
@@ -158,6 +166,7 @@ const TeamManager = ({ theme = "light" }) => {
         user?.email,
         user?.phone,
         user?.parentId?.name,
+        user?.partnerCode,
         ROLE_LABELS[user?.role] || user?.role,
       ]
         .map((value) => String(value || "").toLowerCase())
@@ -297,6 +306,10 @@ const TeamManager = ({ theme = "light" }) => {
       password: "",
       role: "MANAGER",
       reportingToId: "",
+      canViewInventory: false,
+      brokerageMode: "FLAT",
+      brokerageValue: String(DEFAULT_BROKERAGE_VALUE),
+      brokerageNotes: "",
     });
     setFormError("");
   };
@@ -326,6 +339,26 @@ const TeamManager = ({ theme = "light" }) => {
         password: formData.password,
         role: formData.role,
       };
+
+      if (formData.role === "CHANNEL_PARTNER") {
+        const brokerageMode = normalizeBrokerageMode(formData.brokerageMode);
+        const brokerageValue = Number(formData.brokerageValue);
+        if (!Number.isFinite(brokerageValue) || brokerageValue < 0) {
+          setFormError("Brokerage value must be 0 or more.");
+          return;
+        }
+        if (brokerageMode === "PERCENTAGE" && brokerageValue > 100) {
+          setFormError("Brokerage percentage cannot be more than 100.");
+          return;
+        }
+
+        payload.canViewInventory = Boolean(formData.canViewInventory);
+        payload.brokerageConfig = {
+          mode: brokerageMode,
+          value: brokerageValue,
+          notes: String(formData.brokerageNotes || "").trim(),
+        };
+      }
 
       if (formData.reportingToId) {
         payload.reportingToId = formData.reportingToId;
@@ -525,7 +558,7 @@ const TeamManager = ({ theme = "light" }) => {
               type="text"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by name, email, phone, manager or role..."
+              placeholder="Search by name, email, phone, partner code, manager or role..."
               className={`h-11 w-full rounded-xl border pl-9 pr-3 text-sm ${
                 isDarkTheme
                   ? "border-slate-700 bg-slate-950 text-slate-200"

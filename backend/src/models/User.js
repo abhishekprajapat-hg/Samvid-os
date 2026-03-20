@@ -2,6 +2,27 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const { USER_ROLES, EXECUTIVE_ROLES } = require("../constants/role.constants");
 
+const brokerageConfigSchema = new mongoose.Schema(
+  {
+    mode: {
+      type: String,
+      enum: ["FLAT", "PERCENTAGE"],
+      default: "FLAT",
+    },
+    value: {
+      type: Number,
+      min: 0,
+      default: 50000,
+    },
+    notes: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -65,6 +86,15 @@ const userSchema = new mongoose.Schema(
     canViewInventory: {
       type: Boolean,
       default: false,
+    },
+
+    brokerageConfig: {
+      type: brokerageConfigSchema,
+      default: () => ({
+        mode: "FLAT",
+        value: 50000,
+        notes: "",
+      }),
     },
 
     isActive: {

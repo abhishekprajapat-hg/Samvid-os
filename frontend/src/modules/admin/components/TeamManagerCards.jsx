@@ -13,6 +13,9 @@ import {
   Users2,
 } from "lucide-react";
 
+const DEFAULT_BROKERAGE_VALUE = 50000;
+const DEFAULT_BROKERAGE_PERCENTAGE = 2;
+
 const getUserInitials = (name = "") =>
   String(name || "")
     .trim()
@@ -21,6 +24,37 @@ const getUserInitials = (name = "") =>
     .map((part) => part[0]?.toUpperCase() || "")
     .join("")
     || "U";
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number(value) || 0);
+
+const normalizeBrokerageMode = (value) =>
+  String(value || "").trim().toUpperCase() === "PERCENTAGE" ? "PERCENTAGE" : "FLAT";
+
+const normalizeBrokerageConfig = (config = null) => {
+  const mode = normalizeBrokerageMode(config?.mode);
+  const fallbackValue = mode === "PERCENTAGE"
+    ? DEFAULT_BROKERAGE_PERCENTAGE
+    : DEFAULT_BROKERAGE_VALUE;
+  const parsedValue = Number(config?.value);
+
+  return {
+    mode,
+    value: Number.isFinite(parsedValue) ? parsedValue : fallbackValue,
+    notes: String(config?.notes || "").trim(),
+  };
+};
+
+const formatBrokerageSummary = (config = null) => {
+  const normalized = normalizeBrokerageConfig(config);
+  return normalized.mode === "PERCENTAGE"
+    ? `${normalized.value}% of sell value`
+    : `${formatCurrency(normalized.value)} per closed deal`;
+};
 
 const roleBadgeTone = (role, isDarkTheme) => {
   if (role === "MANAGER") {
@@ -254,6 +288,8 @@ const TeamUserCard = ({
   const isUpdatingInventoryAccess =
     String(inventoryAccessUpdatingUserId || "") === String(user._id);
   const initials = getUserInitials(user.name);
+  const brokerageSummary = isChannelPartner ? formatBrokerageSummary(user.brokerageConfig) : "";
+  const brokerageNotes = String(user?.brokerageConfig?.notes || "").trim();
 
   return (
     <Motion.div
@@ -354,6 +390,40 @@ const TeamUserCard = ({
           <span className="truncate">{user.email || "-"}</span>
         </div>
       </div>
+
+      {isChannelPartner ? (
+        <div className={`mt-3 rounded-xl border p-2.5 ${
+          isDarkTheme ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
+        }`}>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className={`text-[10px] font-bold uppercase tracking-[0.12em] ${
+                isDarkTheme ? "text-slate-400" : "text-slate-500"
+              }`}>
+                Brokerage Rule
+              </div>
+              <div className={`mt-1 text-sm font-semibold ${
+                isDarkTheme ? "text-slate-100" : "text-slate-900"
+              }`}>
+                {brokerageSummary}
+              </div>
+            </div>
+            <div className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+              isDarkTheme ? "border-amber-400/30 bg-amber-500/10 text-amber-100" : "border-amber-200 bg-amber-50 text-amber-700"
+            }`}>
+              {user.partnerCode || "No code"}
+            </div>
+          </div>
+
+          {brokerageNotes ? (
+            <div className={`mt-2 text-[11px] ${
+              isDarkTheme ? "text-slate-400" : "text-slate-500"
+            }`}>
+              {brokerageNotes}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {isChannelPartner && canManageUsers ? (
         <div className={`mt-3 flex items-center justify-between gap-2 rounded-xl border px-2.5 py-2 ${

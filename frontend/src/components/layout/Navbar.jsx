@@ -13,7 +13,6 @@ import {
   Navigation,
   ShieldCheck,
   Briefcase,
-  Hexagon,
   Moon,
   Sun,
   Menu,
@@ -27,6 +26,7 @@ import {
 } from "lucide-react";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import { useChatNotifications } from "../../context/useChatNotifications";
+import BrandLogo from "../common/BrandLogo";
 
 const MENU_CONFIG = {
   super_admin: [
@@ -147,21 +147,8 @@ const Navbar = ({ userRole = "manager", onLogout, theme = "light", onToggleTheme
         }`}
       >
         <div className="h-full flex items-center gap-2 sm:gap-3 px-2 sm:px-4">
-          <div className="relative flex-none flex items-center justify-center w-10 h-10">
-            <div
-              className={`absolute inset-[-6px] rounded-xl border border-dashed animate-[spin_10s_linear_infinite] ${
-                isDark ? "border-cyan-200/35" : "border-sky-400/45"
-              }`}
-            />
-            <div
-              className={`w-10 h-10 rounded-xl border flex items-center justify-center ${
-                isDark
-                  ? "bg-slate-900/90 border-cyan-200/30 text-cyan-300"
-                  : "bg-white border-slate-300/80 text-sky-600"
-              }`}
-            >
-              <Hexagon size={20} />
-            </div>
+          <div className="relative flex-none flex items-center justify-center w-16 h-16">
+            <BrandLogo className="h-16 w-16" />
           </div>
 
           <nav className="hidden md:flex flex-1 items-center justify-center gap-4 lg:gap-5 py-1">

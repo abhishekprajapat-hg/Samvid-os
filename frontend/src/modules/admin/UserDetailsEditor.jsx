@@ -35,6 +35,12 @@ const ROLE_LABELS = {
   FIELD_EXECUTIVE: "Field Executive",
   CHANNEL_PARTNER: "Channel Partner",
 };
+const BROKERAGE_MODE_OPTIONS = [
+  { label: "Flat per closed deal", value: "FLAT" },
+  { label: "Percentage of sell value", value: "PERCENTAGE" },
+];
+const DEFAULT_BROKERAGE_VALUE = 50000;
+const DEFAULT_BROKERAGE_PERCENTAGE = 2;
 
 const getEntityId = (value) => {
   if (!value) return "";
@@ -64,6 +70,44 @@ const safeReadCurrentUserId = () => {
   }
 };
 
+const normalizeBrokerageMode = (value) =>
+  String(value || "").trim().toUpperCase() === "PERCENTAGE" ? "PERCENTAGE" : "FLAT";
+
+const normalizeBrokerageFormState = (config = null) => {
+  const mode = normalizeBrokerageMode(config?.mode);
+  const fallbackValue = mode === "PERCENTAGE"
+    ? DEFAULT_BROKERAGE_PERCENTAGE
+    : DEFAULT_BROKERAGE_VALUE;
+  const parsedValue = Number(config?.value);
+
+  return {
+    brokerageMode: mode,
+    brokerageValue: Number.isFinite(parsedValue) ? String(parsedValue) : String(fallbackValue),
+    brokerageNotes: String(config?.notes || ""),
+  };
+};
+
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number(value) || 0);
+
+const formatBrokerageSummary = (config = null) => {
+  const normalized = normalizeBrokerageFormState(config);
+  const rawValue = Number(normalized.brokerageValue);
+  const value = Number.isFinite(rawValue)
+    ? rawValue
+    : normalized.brokerageMode === "PERCENTAGE"
+      ? DEFAULT_BROKERAGE_PERCENTAGE
+      : DEFAULT_BROKERAGE_VALUE;
+
+  return normalized.brokerageMode === "PERCENTAGE"
+    ? `${value}% of sell value`
+    : `${formatCurrency(value)} per closed deal`;
+};
+
 const UserDetailsEditor = ({ theme = "light" }) => {
   const { userId } = useParams();
   const navigate = useNavigate();
@@ -84,6 +128,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
     reportingToId: "",
     isActive: true,
     canViewInventory: false,
+    ...normalizeBrokerageFormState(null),
     password: "",
   });
 
@@ -118,6 +163,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
         reportingToId: getEntityId(resolvedProfile.parentId),
         isActive: Boolean(resolvedProfile.isActive),
         canViewInventory: Boolean(resolvedProfile.canViewInventory),
+        ...normalizeBrokerageFormState(resolvedProfile.brokerageConfig),
         password: "",
       });
     } catch (loadError) {
@@ -208,6 +254,25 @@ const UserDetailsEditor = ({ theme = "light" }) => {
           : false,
     };
 
+    if (formData.role === "CHANNEL_PARTNER") {
+      const brokerageMode = normalizeBrokerageMode(formData.brokerageMode);
+      const brokerageValue = Number(formData.brokerageValue);
+      if (!Number.isFinite(brokerageValue) || brokerageValue < 0) {
+        setError("Brokerage value must be 0 or more.");
+        return;
+      }
+      if (brokerageMode === "PERCENTAGE" && brokerageValue > 100) {
+        setError("Brokerage percentage cannot be more than 100.");
+        return;
+      }
+
+      payload.brokerageConfig = {
+        mode: brokerageMode,
+        value: brokerageValue,
+        notes: String(formData.brokerageNotes || "").trim(),
+      };
+    }
+
     const password = String(formData.password || "");
     if (password.trim()) {
       payload.password = password;
@@ -234,6 +299,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
         reportingToId: getEntityId(updated.parentId),
         isActive: Boolean(updated.isActive),
         canViewInventory: Boolean(updated.canViewInventory),
+        ...normalizeBrokerageFormState(updated.brokerageConfig),
         password: "",
       }));
       setSuccess("User updated");
@@ -420,15 +486,83 @@ const UserDetailsEditor = ({ theme = "light" }) => {
           </label>
 
           {formData.role === "CHANNEL_PARTNER" ? (
-            <label className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${isDarkTheme ? "border-slate-700 bg-slate-950 text-slate-100" : "border-slate-300 bg-white text-slate-800"}`}>
-              <input
-                type="checkbox"
-                checked={formData.canViewInventory}
-                onChange={(event) => handleChange("canViewInventory", event.target.checked)}
-                disabled={isEditingSelf}
-              />
-              <span className="text-sm">Can View Inventory</span>
-            </label>
+            <div className={`md:col-span-2 rounded-xl border p-3 ${isDarkTheme ? "border-slate-700 bg-slate-950 text-slate-100" : "border-slate-300 bg-white text-slate-800"}`}>
+              <div className="flex flex-col gap-3">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.canViewInventory}
+                    onChange={(event) => handleChange("canViewInventory", event.target.checked)}
+                    disabled={isEditingSelf}
+                  />
+                  <span className="text-sm">Can View Inventory</span>
+                </label>
+
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <label className="space-y-1">
+                    <span className={`text-xs font-semibold ${isDarkTheme ? "text-slate-300" : "text-slate-600"}`}>
+                      Brokerage Model
+                    </span>
+                    <select
+                      value={formData.brokerageMode}
+                      onChange={(event) => {
+                        const nextMode = event.target.value;
+                        setFormData((prev) => ({
+                          ...prev,
+                          brokerageMode: nextMode,
+                          brokerageValue:
+                            nextMode === "PERCENTAGE"
+                              ? String(DEFAULT_BROKERAGE_PERCENTAGE)
+                              : String(DEFAULT_BROKERAGE_VALUE),
+                        }));
+                      }}
+                      disabled={isEditingSelf}
+                      className={`w-full rounded-lg border px-3 py-2 text-sm ${isDarkTheme ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-300 bg-white text-slate-800"} disabled:opacity-60`}
+                    >
+                      {BROKERAGE_MODE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="space-y-1">
+                    <span className={`text-xs font-semibold ${isDarkTheme ? "text-slate-300" : "text-slate-600"}`}>
+                      {formData.brokerageMode === "PERCENTAGE" ? "Brokerage %" : "Flat Brokerage"}
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      max={formData.brokerageMode === "PERCENTAGE" ? "100" : undefined}
+                      step={formData.brokerageMode === "PERCENTAGE" ? "0.01" : "1000"}
+                      value={formData.brokerageValue}
+                      onChange={(event) => handleChange("brokerageValue", event.target.value)}
+                      disabled={isEditingSelf}
+                      className={`w-full rounded-lg border px-3 py-2 text-sm ${isDarkTheme ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-300 bg-white text-slate-800"} disabled:opacity-60`}
+                    />
+                  </label>
+
+                  <label className="space-y-1 md:col-span-2">
+                    <span className={`text-xs font-semibold ${isDarkTheme ? "text-slate-300" : "text-slate-600"}`}>
+                      Brokerage Notes
+                    </span>
+                    <textarea
+                      rows={3}
+                      value={formData.brokerageNotes}
+                      onChange={(event) => handleChange("brokerageNotes", event.target.value)}
+                      disabled={isEditingSelf}
+                      placeholder="Example: payable after full collection"
+                      className={`w-full rounded-lg border px-3 py-2 text-sm ${isDarkTheme ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-300 bg-white text-slate-800"} disabled:opacity-60`}
+                    />
+                  </label>
+                </div>
+
+                <p className={`text-xs ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
+                  Finance dashboard will calculate realized and pending brokerage using this rule.
+                </p>
+              </div>
+            </div>
           ) : null}
         </div>
 
@@ -453,11 +587,13 @@ const UserDetailsEditor = ({ theme = "light" }) => {
           <div>User ID: {String(profile._id || "-")}</div>
           <div>Company ID: {String(profile.companyId || "-")}</div>
           <div>Partner Code: {profile.partnerCode || "-"}</div>
+          <div>Brokerage Rule: {formatBrokerageSummary(profile.brokerageConfig)}</div>
           <div>Manager: {profile.manager?.name || "-"}</div>
           <div>Created: {formatDate(profile.createdAt)}</div>
           <div>Updated: {formatDate(profile.updatedAt)}</div>
           <div>Last Assigned: {formatDate(profile.lastAssignedAt)}</div>
           <div>Location Updated: {formatDate(profile.liveLocation?.updatedAt)}</div>
+          <div className="md:col-span-2">Brokerage Note: {profile.brokerageConfig?.notes || "-"}</div>
         </div>
       </section>
     </div>

@@ -25,6 +25,7 @@ export const UserFormPanel = ({
   reportingParentRoles,
 }) => {
   const needsReporting = Boolean(reportingParentRoles[formData.role]?.length);
+  const isChannelPartner = formData.role === "CHANNEL_PARTNER";
 
   return (
     <AnimatePresence>
@@ -89,9 +90,16 @@ export const UserFormPanel = ({
 
               <select
                 value={formData.role}
-                onChange={(event) =>
-                  setFormData({ ...formData, role: event.target.value, reportingToId: "" })
-                }
+                onChange={(event) => {
+                  const nextRole = event.target.value;
+                  setFormData({
+                    ...formData,
+                    role: nextRole,
+                    reportingToId: "",
+                    canViewInventory:
+                      nextRole === "CHANNEL_PARTNER" ? formData.canViewInventory : false,
+                  });
+                }}
                 className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
               >
                 {roleOptions.map((roleOption) => (
@@ -117,6 +125,72 @@ export const UserFormPanel = ({
                   ))}
                 </select>
               )}
+
+              {isChannelPartner ? (
+                <div className={`space-y-3 rounded-xl border p-3 ${isDarkTheme ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"}`}>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.canViewInventory)}
+                      onChange={(event) =>
+                        setFormData({ ...formData, canViewInventory: event.target.checked })
+                      }
+                    />
+                    <span>Can view inventory</span>
+                  </label>
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold">Brokerage Model</span>
+                      <select
+                        value={formData.brokerageMode}
+                        onChange={(event) => {
+                          const nextMode = event.target.value;
+                          setFormData({
+                            ...formData,
+                            brokerageMode: nextMode,
+                            brokerageValue: nextMode === "PERCENTAGE" ? "2" : "50000",
+                          });
+                        }}
+                        className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
+                      >
+                        <option value="FLAT">Flat per closed deal</option>
+                        <option value="PERCENTAGE">Percentage of sell value</option>
+                      </select>
+                    </label>
+
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold">
+                        {formData.brokerageMode === "PERCENTAGE" ? "Brokerage %" : "Flat Brokerage"}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={formData.brokerageMode === "PERCENTAGE" ? "100" : undefined}
+                        step={formData.brokerageMode === "PERCENTAGE" ? "0.01" : "1000"}
+                        value={formData.brokerageValue}
+                        onChange={(event) =>
+                          setFormData({ ...formData, brokerageValue: event.target.value })
+                        }
+                        className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
+                      />
+                    </label>
+                  </div>
+
+                  <label className="space-y-1">
+                    <span className="text-xs font-semibold">Brokerage Notes</span>
+                    <textarea
+                      rows={3}
+                      value={formData.brokerageNotes}
+                      onChange={(event) =>
+                        setFormData({ ...formData, brokerageNotes: event.target.value })
+                      }
+                      placeholder="Example: release after full collection"
+                      className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
+                    />
+                  </label>
+                </div>
+              ) : null}
             </div>
 
             {error && <div className="text-sm text-red-500">{error}</div>}
