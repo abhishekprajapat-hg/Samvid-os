@@ -49,6 +49,93 @@ const getLeadPendingAmount = (lead) => {
   return amount;
 };
 
+const toTitleCaseLabel = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getInventoryLocationLabel = (inventory = {}) => {
+  const parts = [inventory?.city, inventory?.area, inventory?.pincode]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (parts.length) {
+    return parts.join(", ");
+  }
+
+  return String(inventory?.location || "").trim();
+};
+
+const getInventorySubtypeLabel = (inventory = {}) => {
+  const inventoryType = String(inventory?.inventoryType || "").trim().toUpperCase();
+  if (inventoryType === "COMMERCIAL") {
+    return toTitleCaseLabel(inventory?.commercialDetails?.officeType);
+  }
+
+  if (inventoryType === "RESIDENTIAL") {
+    return toTitleCaseLabel(
+      inventory?.residentialDetails?.bhkType
+      || inventory?.residentialDetails?.propertyType,
+    );
+  }
+
+  return "";
+};
+
+const getInventoryAreaLabel = (inventory = {}) => {
+  const totalArea = Number(inventory?.totalArea);
+  if (!Number.isFinite(totalArea) || totalArea <= 0) return "";
+  const areaUnit =
+    String(inventory?.areaUnit || "SQ_FT").trim().toUpperCase() === "SQ_M"
+      ? "sq m"
+      : "sq ft";
+  return `${totalArea.toLocaleString("en-IN")} ${areaUnit}`;
+};
+
+const getInventoryQuickInfo = (inventory = {}) =>
+  [
+    toTitleCaseLabel(inventory?.inventoryType),
+    getInventorySubtypeLabel(inventory),
+    toTitleCaseLabel(inventory?.furnishingStatus),
+    getInventoryAreaLabel(inventory),
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
+const LEAD_REQUIREMENT_FURNISHING_OPTIONS = [
+  { value: "", label: "Any Furnishing" },
+  { value: "UNFURNISHED", label: "Unfurnished" },
+  { value: "SEMI_FURNISHED", label: "Semi Furnished" },
+  { value: "FULLY_FURNISHED", label: "Fully Furnished" },
+  { value: "BARE_SHELL", label: "Bare Shell" },
+  { value: "WARM_SHELL", label: "Warm Shell" },
+  { value: "MANAGED_OFFICE", label: "Managed Office" },
+  { value: "COWORKING", label: "Coworking" },
+];
+
+const LEAD_REQUIREMENT_BHK_OPTIONS = [
+  { value: "", label: "Any BHK" },
+  { value: "1BHK", label: "1 BHK" },
+  { value: "2BHK", label: "2 BHK" },
+  { value: "3BHK", label: "3 BHK" },
+  { value: "4BHK", label: "4 BHK" },
+  { value: "5BHK", label: "5 BHK" },
+  { value: "STUDIO", label: "Studio" },
+  { value: "OTHER", label: "Other" },
+];
+
+const LEAD_REQUIREMENT_RESIDENTIAL_AMENITY_FIELDS = [
+  { key: "requirementsResidentialAmenityLift", label: "Lift" },
+  { key: "requirementsResidentialAmenitySecurity", label: "Security" },
+  { key: "requirementsResidentialAmenityGym", label: "Gym" },
+  { key: "requirementsResidentialAmenitySwimmingPool", label: "Swimming Pool" },
+  { key: "requirementsResidentialAmenityClubhouse", label: "Clubhouse" },
+  { key: "requirementsResidentialAmenityPowerBackup", label: "Power Backup" },
+  { key: "requirementsResidentialAmenityParking", label: "Parking" },
+];
+
 export const LeadsMatrixToolbar = ({
   isDark,
   refreshing,
@@ -538,119 +625,197 @@ export const AddLeadModal = ({
   onClose,
   onSave,
   savingLead,
-}) => (
-  <Motion.div
-    initial={{ opacity: 0 }}
-    animate={{ opacity: 1 }}
-    exit={{ opacity: 0 }}
-    className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${
-      isDark ? "bg-slate-950/70" : "bg-slate-900/40"
-    }`}
-  >
+}) => {
+  const inputClass = `h-10 w-full rounded-lg border px-3 text-sm ${
+    isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-300 bg-white text-slate-700"
+  }`;
+  const sectionCardClass = `rounded-xl border p-3 ${
+    isDark ? "border-slate-700 bg-slate-950/55" : "border-slate-200 bg-slate-50/60"
+  }`;
+  const sectionHeadingClass = `mb-2 text-[11px] font-bold uppercase tracking-[0.14em] ${
+    isDark ? "text-slate-400" : "text-slate-500"
+  }`;
+  const checkboxLabelClass = `inline-flex items-center gap-1.5 rounded border px-2 py-1 text-[11px] ${
+    isDark ? "border-slate-700 bg-slate-900 text-slate-200" : "border-slate-300 bg-white text-slate-700"
+  }`;
+
+  const requirementInventoryType = String(formData.requirementsInventoryType || "").trim().toUpperCase();
+  const isCommercialRequirement = requirementInventoryType === "COMMERCIAL";
+  const isResidentialRequirement = requirementInventoryType === "RESIDENTIAL";
+
+  const updateField = (field, value) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  return (
     <Motion.div
-      initial={{ scale: 0.96, y: 10 }}
-      animate={{ scale: 1, y: 0 }}
-      exit={{ scale: 0.96, y: 10 }}
-      className={`w-full max-w-md rounded-2xl border p-5 shadow-2xl ${
-        isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-white"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${
+        isDark ? "bg-slate-950/70" : "bg-slate-900/40"
       }`}
     >
-      <div className="flex items-center justify-between mb-3">
-        <h3 className={`text-lg font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>Add New Lead</h3>
-        <button
-          onClick={onClose}
-          className={`rounded p-1 ${isDark ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-100 text-slate-600"}`}
-        >
-          <X size={16} />
-        </button>
-      </div>
-
-      <div className="space-y-3">
-        <select
-          value={formData.inventoryId}
-          onChange={(event) => onInventorySelection(event.target.value)}
-          className={`h-10 w-full rounded-lg border px-3 text-sm ${
-            isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-300 bg-white text-slate-700"
-          }`}
-        >
-          <option value="">Select Inventory (optional)</option>
-          {inventoryOptions.map((inventory) => {
-            const inventoryLabel = getInventoryLeadLabel(inventory) || "Inventory Unit";
-            const inventoryLocation = String(inventory.location || "").trim();
-            return (
-              <option key={inventory._id} value={inventory._id}>
-                {inventoryLocation ? `${inventoryLabel} - ${inventoryLocation}` : inventoryLabel}
-              </option>
-            );
-          })}
-        </select>
-
-        {[
-          ["name", "Name"],
-          ["phone", "Phone"],
-          ["email", "Email"],
-          ["city", "City"],
-          ["projectInterested", "Project Interested"],
-        ].map(([field, label]) => (
-          <input
-            key={field}
-            placeholder={label}
-            value={formData[field]}
-            onChange={(event) =>
-              setFormData((prev) => ({ ...prev, [field]: event.target.value }))
-            }
-            className={`h-10 w-full rounded-lg border px-3 text-sm ${
-              isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-300 bg-white text-slate-700"
-            }`}
-          />
-        ))}
-
-        <div className="grid grid-cols-2 gap-2">
-          <input
-            placeholder="Site Latitude (optional)"
-            value={formData.siteLat}
-            onChange={(event) =>
-              setFormData((prev) => ({ ...prev, siteLat: event.target.value }))
-            }
-            className={`h-10 w-full rounded-lg border px-3 text-sm ${
-              isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-300 bg-white text-slate-700"
-            }`}
-          />
-          <input
-            placeholder="Site Longitude (optional)"
-            value={formData.siteLng}
-            onChange={(event) =>
-              setFormData((prev) => ({ ...prev, siteLng: event.target.value }))
-            }
-            className={`h-10 w-full rounded-lg border px-3 text-sm ${
-              isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-300 bg-white text-slate-700"
-            }`}
-          />
+      <Motion.div
+        initial={{ scale: 0.96, y: 10 }}
+        animate={{ scale: 1, y: 0 }}
+        exit={{ scale: 0.96, y: 10 }}
+        className={`w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl border p-5 shadow-2xl ${
+          isDark ? "border-slate-700 bg-slate-900" : "border-slate-200 bg-white"
+        }`}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className={`text-lg font-bold ${isDark ? "text-slate-100" : "text-slate-900"}`}>Add New Lead</h3>
+          <button
+            onClick={onClose}
+            className={`rounded p-1 ${isDark ? "text-slate-300 hover:bg-slate-800" : "text-slate-600 hover:bg-slate-100"}`}
+          >
+            <X size={16} />
+          </button>
         </div>
-      </div>
 
-      <div className="mt-4 flex gap-2">
-        <button
-          onClick={onClose}
-          className={`h-10 flex-1 rounded-lg text-sm font-semibold ${
-            isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-slate-100 text-slate-600"
-          }`}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onSave}
-          disabled={savingLead}
-          className={`h-10 flex-1 rounded-lg text-sm font-semibold text-white disabled:opacity-60 ${
-            isDark ? "bg-emerald-600 hover:bg-emerald-500" : "bg-slate-900 hover:bg-emerald-600"
-          }`}
-        >
-          {savingLead ? "Saving..." : "Save Lead"}
-        </button>
-      </div>
+        <div className="space-y-3">
+          <select
+            value={formData.inventoryId}
+            onChange={(event) => onInventorySelection(event.target.value)}
+            className={inputClass}
+          >
+            <option value="">Select Inventory (optional)</option>
+            {inventoryOptions.map((inventory) => {
+              const inventoryLabel = getInventoryLeadLabel(inventory) || "Inventory Unit";
+              const inventoryLocation = getInventoryLocationLabel(inventory);
+              const inventoryQuickInfo = getInventoryQuickInfo(inventory);
+              const optionText = [
+                inventoryLabel,
+                inventoryLocation,
+                inventoryQuickInfo,
+              ]
+                .filter(Boolean)
+                .join(" | ");
+              return (
+                <option key={inventory._id} value={inventory._id}>
+                  {optionText || inventoryLabel}
+                </option>
+              );
+            })}
+          </select>
+
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <input placeholder="Name" value={formData.name} onChange={(event) => updateField("name", event.target.value)} className={inputClass} />
+            <input placeholder="Phone" value={formData.phone} onChange={(event) => updateField("phone", event.target.value)} className={inputClass} />
+            <input placeholder="Email" value={formData.email} onChange={(event) => updateField("email", event.target.value)} className={inputClass} />
+            <input placeholder="City" value={formData.city} onChange={(event) => updateField("city", event.target.value)} className={inputClass} />
+            <input placeholder="Project Interested" value={formData.projectInterested} onChange={(event) => updateField("projectInterested", event.target.value)} className={`md:col-span-2 ${inputClass}`} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            <input placeholder="Site Latitude (optional)" value={formData.siteLat} onChange={(event) => updateField("siteLat", event.target.value)} className={inputClass} />
+            <input placeholder="Site Longitude (optional)" value={formData.siteLng} onChange={(event) => updateField("siteLng", event.target.value)} className={inputClass} />
+          </div>
+
+          <div className={sectionCardClass}>
+            <div className={sectionHeadingClass}>Lead Requirement (Inventory Filters)</div>
+
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              <select value={formData.requirementsInventoryType} onChange={(event) => updateField("requirementsInventoryType", event.target.value)} className={inputClass}>
+                <option value="">Inventory Type (Any)</option>
+                <option value="COMMERCIAL">Commercial</option>
+                <option value="RESIDENTIAL">Residential</option>
+              </select>
+              <select value={formData.requirementsTransactionType} onChange={(event) => updateField("requirementsTransactionType", event.target.value)} className={inputClass}>
+                <option value="">Deal Type (Any)</option>
+                <option value="SALE">Sale</option>
+                <option value="RENT">Rent</option>
+              </select>
+              <select value={formData.requirementsFurnishingStatus} onChange={(event) => updateField("requirementsFurnishingStatus", event.target.value)} className={inputClass}>
+                {LEAD_REQUIREMENT_FURNISHING_OPTIONS.map((option) => (
+                  <option key={option.value || "any-furnishing"} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <select value={formData.requirementsAreaUnit} onChange={(event) => updateField("requirementsAreaUnit", event.target.value)} className={inputClass}>
+                <option value="SQ_FT">Area Unit: sq ft</option>
+                <option value="SQ_M">Area Unit: sq m</option>
+              </select>
+            </div>
+
+            <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
+              <input placeholder="Budget Min" value={formData.requirementsBudgetMin} onChange={(event) => updateField("requirementsBudgetMin", event.target.value)} className={inputClass} />
+              <input placeholder="Budget Max" value={formData.requirementsBudgetMax} onChange={(event) => updateField("requirementsBudgetMax", event.target.value)} className={inputClass} />
+              <input placeholder="Area Min" value={formData.requirementsAreaMin} onChange={(event) => updateField("requirementsAreaMin", event.target.value)} className={inputClass} />
+              <input placeholder="Area Max" value={formData.requirementsAreaMax} onChange={(event) => updateField("requirementsAreaMax", event.target.value)} className={inputClass} />
+            </div>
+
+            {isCommercialRequirement ? (
+              <div className="mt-2">
+                <div className={sectionHeadingClass}>Commercial Preferences</div>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <input placeholder="Seats / Workstations" value={formData.requirementsCommercialSeats} onChange={(event) => updateField("requirementsCommercialSeats", event.target.value)} className={inputClass} />
+                  <input placeholder="Cabins" value={formData.requirementsCommercialCabins} onChange={(event) => updateField("requirementsCommercialCabins", event.target.value)} className={inputClass} />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <label className={checkboxLabelClass}>
+                    <input type="checkbox" checked={Boolean(formData.requirementsCommercialPantry)} onChange={(event) => updateField("requirementsCommercialPantry", event.target.checked)} />
+                    Pantry Required
+                  </label>
+                  <label className={checkboxLabelClass}>
+                    <input type="checkbox" checked={Boolean(formData.requirementsCommercialParkingAvailable)} onChange={(event) => updateField("requirementsCommercialParkingAvailable", event.target.checked)} />
+                    Parking Required
+                  </label>
+                </div>
+              </div>
+            ) : null}
+
+            {isResidentialRequirement ? (
+              <div className="mt-2">
+                <div className={sectionHeadingClass}>Residential Preferences</div>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <select value={formData.requirementsResidentialBhkType} onChange={(event) => updateField("requirementsResidentialBhkType", event.target.value)} className={inputClass}>
+                    {LEAD_REQUIREMENT_BHK_OPTIONS.map((option) => (
+                      <option key={option.value || "any-bhk"} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <input placeholder="Preferred Floor" value={formData.requirementsResidentialFloor} onChange={(event) => updateField("requirementsResidentialFloor", event.target.value)} className={inputClass} />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {LEAD_REQUIREMENT_RESIDENTIAL_AMENITY_FIELDS.map((field) => (
+                    <label key={field.key} className={checkboxLabelClass}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(formData[field.key])}
+                        onChange={(event) => updateField(field.key, event.target.checked)}
+                      />
+                      {field.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <button
+            onClick={onClose}
+            className={`h-10 flex-1 rounded-lg text-sm font-semibold ${
+              isDark ? "bg-slate-800 text-slate-200 hover:bg-slate-700" : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onSave}
+            disabled={savingLead}
+            className={`h-10 flex-1 rounded-lg text-sm font-semibold text-white disabled:opacity-60 ${
+              isDark ? "bg-emerald-600 hover:bg-emerald-500" : "bg-slate-900 hover:bg-emerald-600"
+            }`}
+          >
+            {savingLead ? "Saving..." : "Save Lead"}
+          </button>
+        </div>
+      </Motion.div>
     </Motion.div>
-  </Motion.div>
-);
+  );
+};
 
 export const BulkLeadUploadModal = ({
   isDark,
@@ -1162,9 +1327,10 @@ export const LeadDetailsDrawer = ({
                   {selectedLeadRelatedInventories.map((inventory) => {
                     const inventoryId = toObjectIdString(inventory);
                     const inventoryLabel = getInventoryLeadLabel(inventory);
-                    const inventoryLocation = String(inventory?.location || "").trim();
+                    const inventoryLocation = getInventoryLocationLabel(inventory);
                     const inventoryStatus = toInventoryApiStatus(inventory?.status);
                     const inventoryStatusLabel = toInventoryStatusLabel(inventory?.status);
+                    const inventoryQuickInfo = getInventoryQuickInfo(inventory);
                     const fallbackLabel = inventoryId
                       ? `Inventory ${inventoryId.slice(-6)}`
                       : "Inventory";
@@ -1216,6 +1382,11 @@ export const LeadDetailsDrawer = ({
                             <div className={`text-[10px] mt-0.5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                               Status: {inventoryStatusLabel || "-"}
                             </div>
+                            {inventoryQuickInfo ? (
+                              <div className={`text-[10px] mt-0.5 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                                {inventoryQuickInfo}
+                              </div>
+                            ) : null}
                           </div>
 
                           {canManageLeadProperties && inventoryId && (
@@ -1356,7 +1527,8 @@ export const LeadDetailsDrawer = ({
                           })
                           .map((inventory) => {
                             const inventoryLabel = getInventoryLeadLabel(inventory) || "Inventory Unit";
-                            const inventoryLocation = String(inventory.location || "").trim();
+                            const inventoryLocation = getInventoryLocationLabel(inventory);
+                            const inventoryQuickInfo = getInventoryQuickInfo(inventory);
                             const inventoryStatus = String(inventory.status || "").trim();
                             const price = Number(inventory?.price);
                             const priceLabel = Number.isFinite(price) && price > 0
@@ -1365,6 +1537,7 @@ export const LeadDetailsDrawer = ({
                             const optionText = [
                               inventoryLabel,
                               inventoryLocation,
+                              inventoryQuickInfo,
                               priceLabel,
                               inventoryStatus,
                             ]

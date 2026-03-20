@@ -122,14 +122,72 @@ const isNonCashPaymentMode = (value) => {
 };
 
 const DEFAULT_FORM = {
+  propertyId: "",
   title: "",
+  inventoryType: "COMMERCIAL",
   location: "",
+  city: "",
+  area: "",
+  pincode: "",
+  buildingName: "",
+  floorNumber: "",
+  totalFloors: "",
+  totalArea: "",
+  carpetArea: "",
+  builtUpArea: "",
+  areaUnit: "SQ_FT",
+  maintenanceCharges: "",
+  deposit: "",
+  furnishingStatus: "",
   locationLat: "",
   locationLng: "",
   price: "",
   type: "Sale",
-  category: "Apartment",
+  category: "Office",
   status: "Available",
+  officeType: "",
+  commercialTotalCabins: "",
+  commercialWorkstations: "",
+  commercialSeats: "",
+  commercialConferenceRooms: "",
+  commercialMeetingRooms: "",
+  commercialReceptionArea: false,
+  commercialWaitingArea: false,
+  commercialPantry: false,
+  commercialCafeteria: false,
+  commercialWashroomType: "",
+  commercialServerRoom: false,
+  commercialStorageRoom: false,
+  commercialBreakoutArea: false,
+  commercialLiftAvailable: false,
+  commercialPowerBackup: false,
+  commercialCentralAC: false,
+  commercialBuildingTotalFloors: "",
+  commercialParkingType: "",
+  commercialParkingSlots: "",
+  commercialSecurityType: "",
+  commercialFireSafety: false,
+  commercialReadyToMove: false,
+  commercialUnderConstruction: false,
+  commercialAvailableFrom: "",
+  residentialPropertyType: "",
+  residentialBhkType: "",
+  residentialBedrooms: "",
+  residentialBathrooms: "",
+  residentialBalcony: "",
+  residentialStudyRoom: false,
+  residentialServantRoom: false,
+  residentialParking: "",
+  residentialModularKitchen: false,
+  residentialLift: false,
+  residentialSecurity: false,
+  residentialPowerBackup: false,
+  residentialGym: false,
+  residentialSwimmingPool: false,
+  residentialClubhouse: false,
+  residentialWaterSupply: "",
+  residentialElectricityBackup: false,
+  residentialGasPipeline: false,
   reservationReason: "",
   saleLeadId: "",
   salePaymentMode: "",
@@ -139,6 +197,81 @@ const DEFAULT_FORM = {
   salePaymentReference: "",
   saleNote: "",
   images: [],
+  floorPlans: [],
+  videoTours: [],
+};
+
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parseRangeInput = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const [minRaw, maxRaw] = raw.split("-").map((part) => part.trim());
+  const min = Number(minRaw);
+  const max = Number(maxRaw);
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  return { min, max };
+};
+
+const parseBooleanInput = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (["true", "1", "yes", "y"].includes(normalized)) return true;
+  if (["false", "0", "no", "n"].includes(normalized)) return false;
+  return null;
+};
+
+const listToTextareaValue = (value) =>
+  Array.isArray(value) ? value.join("\n") : "";
+
+const parseTextareaList = (value) => {
+  const tokens = String(value || "")
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return [...new Set(tokens)];
+};
+
+const normalizeToken = (value) =>
+  String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+
+const hasAmenity = (asset, amenityToken) => {
+  const c = asset?.commercialDetails || {};
+  const r = asset?.residentialDetails || {};
+  const cAmenities = c.amenities || {};
+  const cBuilding = c.buildingDetails || {};
+  const rAmenities = r.amenities || {};
+  const rUtilities = r.utilities || {};
+
+  if (amenityToken === "PANTRY") return Boolean(cAmenities.pantry);
+  if (amenityToken === "LIFT") return Boolean(cAmenities.liftAvailable || rAmenities.lift);
+  if (amenityToken === "SECURITY") {
+    return Boolean(
+      rAmenities.security
+      || ["SECURITY_24X7", "CCTV", "BOTH"].includes(String(cBuilding.securityType || "").toUpperCase()),
+    );
+  }
+  if (amenityToken === "POWER_BACKUP" || amenityToken === "POWERBACKUP") {
+    return Boolean(cAmenities.powerBackup || rAmenities.powerBackup);
+  }
+  if (amenityToken === "GYM") return Boolean(rAmenities.gym);
+  if (amenityToken === "SWIMMING_POOL" || amenityToken === "SWIMMINGPOOL") return Boolean(rAmenities.swimmingPool);
+  if (amenityToken === "CLUBHOUSE") return Boolean(rAmenities.clubhouse);
+  if (amenityToken === "MODULAR_KITCHEN" || amenityToken === "MODULARKITCHEN") {
+    return Boolean(rAmenities.modularKitchen);
+  }
+  if (amenityToken === "GAS_PIPELINE" || amenityToken === "GASPIPELINE") {
+    return Boolean(rUtilities.gasPipeline);
+  }
+  return false;
 };
 
 const statusPillClass = (status) => {
@@ -232,17 +365,38 @@ const getAssetTitle = (asset = {}) => {
 };
 
 const REQUEST_FIELD_LABELS = {
+  propertyId: "Property ID",
+  inventoryType: "Inventory Type",
   projectName: "Project",
   towerName: "Tower",
   unitNumber: "Unit",
   price: "Price",
+  type: "Transaction Type",
+  category: "Category",
+  furnishingStatus: "Furnishing",
   status: "Status",
   reservationReason: "Reservation Reason",
   saleDetails: "Sold Details",
   location: "Location",
+  city: "City",
+  area: "Area",
+  pincode: "Pincode",
+  buildingName: "Building",
+  floorNumber: "Floor",
+  totalFloors: "Total Floors",
+  totalArea: "Total Area",
+  carpetArea: "Carpet Area",
+  builtUpArea: "Built-up Area",
+  areaUnit: "Area Unit",
+  maintenanceCharges: "Maintenance",
+  deposit: "Deposit",
+  commercialDetails: "Commercial Details",
+  residentialDetails: "Residential Details",
   siteLocation: "Coordinates",
   images: "Images",
   documents: "Documents",
+  floorPlans: "Floor Plans",
+  videoTours: "Video Tours",
 };
 
 const CREATE_REQUEST_ROLES = new Set([
@@ -298,7 +452,9 @@ const toSiteLocationPayload = ({ lat, lng }) => {
 };
 
 const formatRequestValue = (key, value) => {
-  if (key === "price") return formatCurrency(value);
+  if (key === "price" || key === "maintenanceCharges" || key === "deposit") {
+    return formatCurrency(value);
+  }
   if (key === "siteLocation") {
     const lat = toCoordinateNumber(value?.lat);
     const lng = toCoordinateNumber(value?.lng);
@@ -354,6 +510,17 @@ const AssetVault = () => {
   const [loadingLeadOptions, setLoadingLeadOptions] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [inventoryTypeFilter, setInventoryTypeFilter] = useState("all");
+  const [furnishingFilter, setFurnishingFilter] = useState("");
+  const [bhkFilter, setBhkFilter] = useState("");
+  const [cabinsFilter, setCabinsFilter] = useState("");
+  const [seatsFilter, setSeatsFilter] = useState("");
+  const [areaRangeFilter, setAreaRangeFilter] = useState("");
+  const [budgetRangeFilter, setBudgetRangeFilter] = useState("");
+  const [floorFilter, setFloorFilter] = useState("");
+  const [parkingFilter, setParkingFilter] = useState("");
+  const [pantryFilter, setPantryFilter] = useState("");
+  const [amenitiesFilter, setAmenitiesFilter] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -521,22 +688,127 @@ const AssetVault = () => {
 
   const filteredAssets = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
+    const areaRange = parseRangeInput(areaRangeFilter);
+    const budgetRange = parseRangeInput(budgetRangeFilter);
+    const minCabins = toNumberOrNull(cabinsFilter);
+    const minSeats = toNumberOrNull(seatsFilter);
+    const minFloor = toNumberOrNull(floorFilter);
+    const parkingAvailable = parseBooleanInput(parkingFilter);
+    const pantryAvailable = parseBooleanInput(pantryFilter);
+    const amenityTokens = String(amenitiesFilter || "")
+      .split(",")
+      .map((item) => normalizeToken(item))
+      .filter(Boolean);
 
     return assets.filter((asset) => {
       const typeMatch = modeType === "sale" ? asset.type === "Sale" : asset.type === "Rent";
       const statusMatch = statusFilter === "all" ? true : asset.status === statusFilter;
+      const inventoryTypeMatch = inventoryTypeFilter === "all"
+        ? true
+        : String(asset.inventoryType || "").toUpperCase() === inventoryTypeFilter;
 
       const searchMatch =
         !normalizedSearch ||
-        [getAssetTitle(asset), asset.location, asset.category].some((value) =>
+        [
+          getAssetTitle(asset),
+          asset.location,
+          asset.category,
+          asset.propertyId,
+          asset.city,
+          asset.area,
+          asset.pincode,
+        ].some((value) =>
           String(value || "")
             .toLowerCase()
             .includes(normalizedSearch),
         );
 
-      return typeMatch && statusMatch && searchMatch;
+      const furnishingMatch = furnishingFilter
+        ? normalizeToken(asset.furnishingStatus) === normalizeToken(furnishingFilter)
+        : true;
+
+      const bhkMatch = bhkFilter
+        ? normalizeToken(asset?.residentialDetails?.bhkType) === normalizeToken(bhkFilter)
+        : true;
+
+      const cabinsValue = toNumberOrNull(asset?.commercialDetails?.officeLayout?.totalCabins);
+      const cabinsMatch = minCabins === null
+        ? true
+        : (cabinsValue !== null && cabinsValue >= minCabins);
+
+      const seatsValue = toNumberOrNull(
+        asset?.commercialDetails?.officeLayout?.seats
+          ?? asset?.commercialDetails?.officeLayout?.workstations,
+      );
+      const seatsMatch = minSeats === null
+        ? true
+        : (seatsValue !== null && seatsValue >= minSeats);
+
+      const totalAreaValue = toNumberOrNull(asset.totalArea);
+      const areaMatch = areaRange
+        ? (totalAreaValue !== null && totalAreaValue >= areaRange.min && totalAreaValue <= areaRange.max)
+        : true;
+
+      const priceValue = toNumberOrNull(asset.price);
+      const budgetMatch = budgetRange
+        ? (priceValue !== null && priceValue >= budgetRange.min && priceValue <= budgetRange.max)
+        : true;
+
+      const floorNumberValue = toNumberOrNull(asset.floorNumber);
+      const floorMatch = minFloor === null
+        ? true
+        : (floorNumberValue !== null && floorNumberValue >= minFloor);
+
+      const parkingSlotsValue = toNumberOrNull(
+        asset?.commercialDetails?.buildingDetails?.parkingSlots
+          ?? asset?.residentialDetails?.parking,
+      );
+      const parkingMatch = parkingAvailable === null
+        ? true
+        : parkingAvailable
+          ? (parkingSlotsValue !== null && parkingSlotsValue >= 1)
+          : (parkingSlotsValue === null || parkingSlotsValue <= 0);
+
+      const pantryMatch = pantryAvailable === null
+        ? true
+        : Boolean(asset?.commercialDetails?.amenities?.pantry) === pantryAvailable;
+
+      const amenitiesMatch = amenityTokens.every((token) => hasAmenity(asset, token));
+
+      return (
+        typeMatch
+        && statusMatch
+        && inventoryTypeMatch
+        && searchMatch
+        && furnishingMatch
+        && bhkMatch
+        && cabinsMatch
+        && seatsMatch
+        && areaMatch
+        && budgetMatch
+        && floorMatch
+        && parkingMatch
+        && pantryMatch
+        && amenitiesMatch
+      );
     });
-  }, [assets, modeType, searchTerm, statusFilter]);
+  }, [
+    amenitiesFilter,
+    areaRangeFilter,
+    assets,
+    bhkFilter,
+    budgetRangeFilter,
+    cabinsFilter,
+    floorFilter,
+    furnishingFilter,
+    inventoryTypeFilter,
+    modeType,
+    pantryFilter,
+    parkingFilter,
+    searchTerm,
+    seatsFilter,
+    statusFilter,
+  ]);
 
   const handleImageUpload = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -1016,11 +1288,131 @@ const AssetVault = () => {
     };
   }, [formData]);
 
+  const buildInventoryPayloadFromForm = useCallback(({
+    finalLocation,
+    trimmedReservationReason,
+    saleDetails,
+    parsedSiteLocation,
+  }) => {
+    const inventoryType = String(formData.inventoryType || "COMMERCIAL").toUpperCase();
+
+    const payload = {
+      title: formData.title.trim(),
+      projectName: formData.title.trim(),
+      towerName: String(formData.buildingName || "Main").trim() || "Main",
+      unitNumber: formData.propertyId.trim(),
+      propertyId: formData.propertyId.trim(),
+      inventoryType,
+      location: finalLocation,
+      city: String(formData.city || "").trim(),
+      area: String(formData.area || "").trim(),
+      pincode: String(formData.pincode || "").trim(),
+      buildingName: String(formData.buildingName || "").trim(),
+      floorNumber: toNumberOrNull(formData.floorNumber),
+      totalFloors: toNumberOrNull(formData.totalFloors),
+      totalArea: toNumberOrNull(formData.totalArea),
+      carpetArea: toNumberOrNull(formData.carpetArea),
+      builtUpArea: toNumberOrNull(formData.builtUpArea),
+      areaUnit: String(formData.areaUnit || "SQ_FT").toUpperCase(),
+      price: Number(formData.price),
+      maintenanceCharges: toNumberOrNull(formData.maintenanceCharges),
+      deposit: toNumberOrNull(formData.deposit),
+      type: formData.type,
+      category: formData.category,
+      furnishingStatus: String(formData.furnishingStatus || "").toUpperCase(),
+      status: formData.status,
+      reservationReason: isReservedStatusValue(formData.status)
+        ? trimmedReservationReason
+        : "",
+      saleDetails: saleDetails,
+      images: Array.isArray(formData.images) ? formData.images : [],
+      floorPlans: Array.isArray(formData.floorPlans) ? formData.floorPlans : [],
+      videoTours: Array.isArray(formData.videoTours) ? formData.videoTours : [],
+    };
+
+    if (inventoryType === "COMMERCIAL") {
+      payload.commercialDetails = {
+        officeType: String(formData.officeType || "").toUpperCase(),
+        officeLayout: {
+          totalCabins: toNumberOrNull(formData.commercialTotalCabins),
+          workstations: toNumberOrNull(formData.commercialWorkstations),
+          seats: toNumberOrNull(formData.commercialSeats),
+          conferenceRooms: toNumberOrNull(formData.commercialConferenceRooms),
+          meetingRooms: toNumberOrNull(formData.commercialMeetingRooms),
+          receptionArea: Boolean(formData.commercialReceptionArea),
+          waitingArea: Boolean(formData.commercialWaitingArea),
+        },
+        amenities: {
+          pantry: Boolean(formData.commercialPantry),
+          cafeteria: Boolean(formData.commercialCafeteria),
+          washroomType: String(formData.commercialWashroomType || "").toUpperCase(),
+          serverRoom: Boolean(formData.commercialServerRoom),
+          storageRoom: Boolean(formData.commercialStorageRoom),
+          breakoutArea: Boolean(formData.commercialBreakoutArea),
+          liftAvailable: Boolean(formData.commercialLiftAvailable),
+          powerBackup: Boolean(formData.commercialPowerBackup),
+          centralAC: Boolean(formData.commercialCentralAC),
+        },
+        buildingDetails: {
+          totalFloors: toNumberOrNull(formData.commercialBuildingTotalFloors),
+          parkingType: String(formData.commercialParkingType || "").toUpperCase(),
+          parkingSlots: toNumberOrNull(formData.commercialParkingSlots),
+          securityType: String(formData.commercialSecurityType || "").toUpperCase(),
+          fireSafety: Boolean(formData.commercialFireSafety),
+        },
+        availability: {
+          readyToMove: Boolean(formData.commercialReadyToMove),
+          underConstruction: Boolean(formData.commercialUnderConstruction),
+          availableFrom: formData.commercialAvailableFrom || null,
+        },
+      };
+    }
+
+    if (inventoryType === "RESIDENTIAL") {
+      payload.residentialDetails = {
+        propertyType: String(formData.residentialPropertyType || "").toUpperCase(),
+        bhkType: String(formData.residentialBhkType || "").toUpperCase(),
+        bedrooms: toNumberOrNull(formData.residentialBedrooms),
+        bathrooms: toNumberOrNull(formData.residentialBathrooms),
+        balcony: toNumberOrNull(formData.residentialBalcony),
+        studyRoom: Boolean(formData.residentialStudyRoom),
+        servantRoom: Boolean(formData.residentialServantRoom),
+        parking: toNumberOrNull(formData.residentialParking),
+        amenities: {
+          modularKitchen: Boolean(formData.residentialModularKitchen),
+          lift: Boolean(formData.residentialLift),
+          security: Boolean(formData.residentialSecurity),
+          powerBackup: Boolean(formData.residentialPowerBackup),
+          gym: Boolean(formData.residentialGym),
+          swimmingPool: Boolean(formData.residentialSwimmingPool),
+          clubhouse: Boolean(formData.residentialClubhouse),
+        },
+        utilities: {
+          waterSupply: String(formData.residentialWaterSupply || "").toUpperCase(),
+          electricityBackup: Boolean(formData.residentialElectricityBackup),
+          gasPipeline: Boolean(formData.residentialGasPipeline),
+        },
+      };
+    }
+
+    if (parsedSiteLocation.value) {
+      payload.siteLocation = parsedSiteLocation.value;
+    }
+
+    return payload;
+  }, [formData]);
+
   const handleSaveAsset = async () => {
     if (!canOpenCreateModal) return;
 
-    if (!formData.title.trim() || formData.price === "" || !formData.location.trim()) {
-      setError("Title, location and price are required");
+    const derivedLocation = [formData.city, formData.area, formData.pincode]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    const finalLocation = String(formData.location || "").trim() || derivedLocation;
+
+    if (!formData.propertyId.trim() || !formData.title.trim() || formData.price === "" || !finalLocation) {
+      setError("Property ID, property name, location and price are required");
       return;
     }
 
@@ -1051,23 +1443,12 @@ const AssetVault = () => {
       setError("");
       setSuccess("");
 
-      const payload = {
-        title: formData.title.trim(),
-        location: formData.location.trim(),
-        price: Number(formData.price),
-        type: formData.type,
-        category: formData.category,
-        status: formData.status,
-        reservationReason: isReservedStatusValue(formData.status)
-          ? trimmedReservationReason
-          : "",
+      const payload = buildInventoryPayloadFromForm({
+        finalLocation,
+        trimmedReservationReason,
         saleDetails: saleDetailsPayload.value,
-        images: Array.isArray(formData.images) ? formData.images : [],
-      };
-
-      if (parsedSiteLocation.value) {
-        payload.siteLocation = parsedSiteLocation.value;
-      }
+        parsedSiteLocation,
+      });
 
       if (canManage) {
         const createdAsset = await createInventoryAsset(payload);
@@ -1101,9 +1482,34 @@ const AssetVault = () => {
     clearLocationSuggestionState();
     setIsAddModalOpen(false);
     setEditingAssetId(asset._id);
+    const existingCommercial = asset.commercialDetails || {};
+    const existingCommercialLayout = existingCommercial.officeLayout || {};
+    const existingCommercialAmenities = existingCommercial.amenities || {};
+    const existingCommercialBuilding = existingCommercial.buildingDetails || {};
+    const existingCommercialAvailability = existingCommercial.availability || {};
+    const existingResidential = asset.residentialDetails || {};
+    const existingResidentialAmenities = existingResidential.amenities || {};
+    const existingResidentialUtilities = existingResidential.utilities || {};
+
     setFormData({
-      title: asset.title || "",
+      ...DEFAULT_FORM,
+      propertyId: String(asset.propertyId || asset.unitNumber || "").trim(),
+      title: asset.projectName || asset.title || "",
+      inventoryType: String(asset.inventoryType || "COMMERCIAL").toUpperCase(),
       location: asset.location || "",
+      city: asset.city || "",
+      area: asset.area || "",
+      pincode: asset.pincode || "",
+      buildingName: asset.buildingName || asset.towerName || "",
+      floorNumber: asset.floorNumber ?? "",
+      totalFloors: asset.totalFloors ?? "",
+      totalArea: asset.totalArea ?? "",
+      carpetArea: asset.carpetArea ?? "",
+      builtUpArea: asset.builtUpArea ?? "",
+      areaUnit: asset.areaUnit || "SQ_FT",
+      maintenanceCharges: asset.maintenanceCharges ?? "",
+      deposit: asset.deposit ?? "",
+      furnishingStatus: asset.furnishingStatus || "",
       locationLat: existingSiteLat === null ? "" : String(existingSiteLat),
       locationLng: existingSiteLng === null ? "" : String(existingSiteLng),
       price:
@@ -1113,6 +1519,51 @@ const AssetVault = () => {
       type: asset.type || "Sale",
       category: asset.category || "Apartment",
       status: resolvedStatus,
+      officeType: existingCommercial.officeType || "",
+      commercialTotalCabins: existingCommercialLayout.totalCabins ?? "",
+      commercialWorkstations: existingCommercialLayout.workstations ?? "",
+      commercialSeats: existingCommercialLayout.seats ?? "",
+      commercialConferenceRooms: existingCommercialLayout.conferenceRooms ?? "",
+      commercialMeetingRooms: existingCommercialLayout.meetingRooms ?? "",
+      commercialReceptionArea: Boolean(existingCommercialLayout.receptionArea),
+      commercialWaitingArea: Boolean(existingCommercialLayout.waitingArea),
+      commercialPantry: Boolean(existingCommercialAmenities.pantry),
+      commercialCafeteria: Boolean(existingCommercialAmenities.cafeteria),
+      commercialWashroomType: existingCommercialAmenities.washroomType || "",
+      commercialServerRoom: Boolean(existingCommercialAmenities.serverRoom),
+      commercialStorageRoom: Boolean(existingCommercialAmenities.storageRoom),
+      commercialBreakoutArea: Boolean(existingCommercialAmenities.breakoutArea),
+      commercialLiftAvailable: Boolean(existingCommercialAmenities.liftAvailable),
+      commercialPowerBackup: Boolean(existingCommercialAmenities.powerBackup),
+      commercialCentralAC: Boolean(existingCommercialAmenities.centralAC),
+      commercialBuildingTotalFloors: existingCommercialBuilding.totalFloors ?? "",
+      commercialParkingType: existingCommercialBuilding.parkingType || "",
+      commercialParkingSlots: existingCommercialBuilding.parkingSlots ?? "",
+      commercialSecurityType: existingCommercialBuilding.securityType || "",
+      commercialFireSafety: Boolean(existingCommercialBuilding.fireSafety),
+      commercialReadyToMove: Boolean(existingCommercialAvailability.readyToMove),
+      commercialUnderConstruction: Boolean(existingCommercialAvailability.underConstruction),
+      commercialAvailableFrom: existingCommercialAvailability.availableFrom
+        ? new Date(existingCommercialAvailability.availableFrom).toISOString().slice(0, 10)
+        : "",
+      residentialPropertyType: existingResidential.propertyType || "",
+      residentialBhkType: existingResidential.bhkType || "",
+      residentialBedrooms: existingResidential.bedrooms ?? "",
+      residentialBathrooms: existingResidential.bathrooms ?? "",
+      residentialBalcony: existingResidential.balcony ?? "",
+      residentialStudyRoom: Boolean(existingResidential.studyRoom),
+      residentialServantRoom: Boolean(existingResidential.servantRoom),
+      residentialParking: existingResidential.parking ?? "",
+      residentialModularKitchen: Boolean(existingResidentialAmenities.modularKitchen),
+      residentialLift: Boolean(existingResidentialAmenities.lift),
+      residentialSecurity: Boolean(existingResidentialAmenities.security),
+      residentialPowerBackup: Boolean(existingResidentialAmenities.powerBackup),
+      residentialGym: Boolean(existingResidentialAmenities.gym),
+      residentialSwimmingPool: Boolean(existingResidentialAmenities.swimmingPool),
+      residentialClubhouse: Boolean(existingResidentialAmenities.clubhouse),
+      residentialWaterSupply: existingResidentialUtilities.waterSupply || "",
+      residentialElectricityBackup: Boolean(existingResidentialUtilities.electricityBackup),
+      residentialGasPipeline: Boolean(existingResidentialUtilities.gasPipeline),
       reservationReason: asset.reservationReason || "",
       saleLeadId: String(existingSaleDetails?.leadId?._id || existingSaleDetails?.leadId || "").trim(),
       salePaymentMode: String(existingSaleDetails?.paymentMode || "").trim().toUpperCase(),
@@ -1132,6 +1583,8 @@ const AssetVault = () => {
       salePaymentReference: String(existingSaleDetails?.paymentReference || "").trim(),
       saleNote: String(existingSaleDetails?.note || "").trim(),
       images: Array.isArray(asset.images) ? asset.images : [],
+      floorPlans: Array.isArray(asset.floorPlans) ? asset.floorPlans : [],
+      videoTours: Array.isArray(asset.videoTours) ? asset.videoTours : [],
     });
     setLocationBaseline({
       location: asset.location || "",
@@ -1144,8 +1597,14 @@ const AssetVault = () => {
   const handleUpdateAsset = async () => {
     if (!canOpenEditModal || !editingAssetId) return;
 
-    if (!formData.title.trim() || formData.price === "" || !formData.location.trim()) {
-      setError("Title, location and price are required");
+    const derivedLocation = [formData.city, formData.area, formData.pincode]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    const finalLocation = String(formData.location || "").trim() || derivedLocation;
+
+    if (!formData.propertyId.trim() || !formData.title.trim() || formData.price === "" || !finalLocation) {
+      setError("Property ID, property name, location and price are required");
       return;
     }
 
@@ -1212,23 +1671,12 @@ const AssetVault = () => {
         return;
       }
 
-      const payload = {
-        title: formData.title.trim(),
-        location: formData.location.trim(),
-        price: Number(formData.price),
-        type: formData.type,
-        category: formData.category,
-        status: formData.status,
-        reservationReason: isReservedStatusValue(formData.status)
-          ? trimmedReservationReason
-          : "",
+      const payload = buildInventoryPayloadFromForm({
+        finalLocation,
+        trimmedReservationReason,
         saleDetails: saleDetailsPayload.value,
-        images: Array.isArray(formData.images) ? formData.images : [],
-      };
-
-      if (parsedSiteLocation.value) {
-        payload.siteLocation = parsedSiteLocation.value;
-      }
+        parsedSiteLocation,
+      });
 
       if (canManage) {
         const updatedAsset = await updateInventoryAsset(editingAssetId, payload);
@@ -1480,6 +1928,28 @@ const AssetVault = () => {
         statusFilter={statusFilter}
         onStatusFilterChange={setStatusFilter}
         statusOptions={STATUS_OPTIONS}
+        inventoryTypeFilter={inventoryTypeFilter}
+        onInventoryTypeFilterChange={setInventoryTypeFilter}
+        furnishingFilter={furnishingFilter}
+        onFurnishingFilterChange={setFurnishingFilter}
+        bhkFilter={bhkFilter}
+        onBhkFilterChange={setBhkFilter}
+        cabinsFilter={cabinsFilter}
+        onCabinsFilterChange={setCabinsFilter}
+        seatsFilter={seatsFilter}
+        onSeatsFilterChange={setSeatsFilter}
+        areaRangeFilter={areaRangeFilter}
+        onAreaRangeFilterChange={setAreaRangeFilter}
+        budgetRangeFilter={budgetRangeFilter}
+        onBudgetRangeFilterChange={setBudgetRangeFilter}
+        floorFilter={floorFilter}
+        onFloorFilterChange={setFloorFilter}
+        parkingFilter={parkingFilter}
+        onParkingFilterChange={setParkingFilter}
+        pantryFilter={pantryFilter}
+        onPantryFilterChange={setPantryFilter}
+        amenitiesFilter={amenitiesFilter}
+        onAmenitiesFilterChange={setAmenitiesFilter}
       />
 
       {error && (
@@ -1636,6 +2106,12 @@ const AssetVault = () => {
                       {formatPrice(asset)}
                     </span>
                   </div>
+                  {String(asset?.type || "").trim().toUpperCase() === "RENT"
+                    && toNumberOrNull(asset?.deposit) !== null ? (
+                    <div className="mt-1 text-[11px] font-semibold text-slate-600">
+                      Deposit: {formatCurrency(asset.deposit)}
+                    </div>
+                    ) : null}
 
                   {canManage ? (
                     <>
@@ -1773,8 +2249,36 @@ const AssetVault = () => {
                 </div>
 
                 <div>
+                  <div className="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Property ID *
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="PROP-1001"
+                        value={formData.propertyId}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, propertyId: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Inventory Type
+                      </label>
+                      <select
+                        value={formData.inventoryType}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, inventoryType: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      >
+                        <option value="COMMERCIAL">Commercial</option>
+                        <option value="RESIDENTIAL">Residential</option>
+                      </select>
+                    </div>
+                  </div>
+
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Asset Title
+                    Property / Project Name
                   </label>
                   <input
                     type="text"
@@ -1799,7 +2303,23 @@ const AssetVault = () => {
                     />
                   </div>
 
-                  <div>
+                  {formData.type === "Rent" ? (
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Security Deposit (Rs)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="250000"
+                        value={formData.deposit}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, deposit: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                  ) : null}
+
+                  <div className="col-span-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                       Location
                     </label>
@@ -1910,13 +2430,155 @@ const AssetVault = () => {
                     </div>
                   </div>
 
+                  <div className="col-span-2 grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        City
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Gurugram"
+                        value={formData.city}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, city: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Area
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Golf Course Road"
+                        value={formData.area}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, area: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Pincode
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="122002"
+                        value={formData.pincode}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, pincode: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="col-span-2 grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Building Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="DLF One Horizon"
+                        value={formData.buildingName}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, buildingName: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Floor Number
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="7"
+                        value={formData.floorNumber}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, floorNumber: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Total Floors
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="20"
+                        value={formData.totalFloors}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, totalFloors: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Maintenance Charges
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="25000"
+                        value={formData.maintenanceCharges}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, maintenanceCharges: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="col-span-2 grid grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Total Area
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="2800"
+                        value={formData.totalArea}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, totalArea: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Carpet Area
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="2200"
+                        value={formData.carpetArea}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, carpetArea: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Built-up Area
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="2500"
+                        value={formData.builtUpArea}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, builtUpArea: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                  </div>
+
                   <div>
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                       Type
                     </label>
                     <select
                       value={formData.type}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, type: e.target.value }))}
+                      onChange={(e) => {
+                        const nextType = e.target.value;
+                        setFormData((prev) => ({
+                          ...prev,
+                          type: nextType,
+                          deposit: nextType === "Rent" ? prev.deposit : "",
+                        }));
+                      }}
                       className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
                     >
                       <option value="Sale">For Sale</option>
@@ -1940,6 +2602,40 @@ const AssetVault = () => {
                     </select>
                   </div>
 
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      Furnishing Status
+                    </label>
+                    <select
+                      value={formData.furnishingStatus}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, furnishingStatus: e.target.value }))}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                    >
+                      <option value="">Select furnishing</option>
+                      <option value="UNFURNISHED">Unfurnished</option>
+                      <option value="SEMI_FURNISHED">Semi Furnished</option>
+                      <option value="FULLY_FURNISHED">Fully Furnished</option>
+                      <option value="BARE_SHELL">Bare Shell</option>
+                      <option value="WARM_SHELL">Warm Shell</option>
+                      <option value="MANAGED_OFFICE">Managed Office</option>
+                      <option value="COWORKING">Coworking</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      Area Unit
+                    </label>
+                    <select
+                      value={formData.areaUnit}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, areaUnit: e.target.value }))}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                    >
+                      <option value="SQ_FT">Sq Ft</option>
+                      <option value="SQ_M">Sq M</option>
+                    </select>
+                  </div>
+
                   <div className="col-span-2">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                       Status
@@ -1955,6 +2651,426 @@ const AssetVault = () => {
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  {formData.inventoryType === "COMMERCIAL" ? (
+                    <div className="col-span-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                        Commercial Office Details
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Office Type
+                          </label>
+                          <select
+                            value={formData.officeType}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, officeType: e.target.value }))}
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          >
+                            <option value="">Select office type</option>
+                            <option value="BARE_SHELL">Bare Shell</option>
+                            <option value="WARM_SHELL">Warm Shell</option>
+                            <option value="SEMI_FURNISHED">Semi Furnished</option>
+                            <option value="FULLY_FURNISHED">Fully Furnished</option>
+                            <option value="MANAGED_OFFICE">Managed Office</option>
+                            <option value="COWORKING">Coworking</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Washroom Type
+                          </label>
+                          <select
+                            value={formData.commercialWashroomType}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialWashroomType: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          >
+                            <option value="">Select washroom type</option>
+                            <option value="ATTACHED">Attached</option>
+                            <option value="COMMON">Common</option>
+                            <option value="BOTH">Both</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Total Cabins
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.commercialTotalCabins}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialTotalCabins: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Workstations
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.commercialWorkstations}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialWorkstations: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Seats
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.commercialSeats}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, commercialSeats: e.target.value }))}
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Conference Rooms
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.commercialConferenceRooms}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialConferenceRooms: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Meeting Rooms
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.commercialMeetingRooms}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialMeetingRooms: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Building Total Floors
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.commercialBuildingTotalFloors}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialBuildingTotalFloors: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Parking Type
+                          </label>
+                          <select
+                            value={formData.commercialParkingType}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialParkingType: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          >
+                            <option value="">Select parking</option>
+                            <option value="COVERED">Covered</option>
+                            <option value="OPEN">Open</option>
+                            <option value="BOTH">Both</option>
+                            <option value="NONE">None</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Parking Slots
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.commercialParkingSlots}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialParkingSlots: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Security
+                          </label>
+                          <select
+                            value={formData.commercialSecurityType}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, commercialSecurityType: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          >
+                            <option value="">Select security</option>
+                            <option value="SECURITY_24X7">24x7 Security</option>
+                            <option value="CCTV">CCTV</option>
+                            <option value="BOTH">Both</option>
+                            <option value="NONE">None</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {[
+                          ["commercialReceptionArea", "Reception Area"],
+                          ["commercialWaitingArea", "Waiting Area"],
+                          ["commercialPantry", "Pantry"],
+                          ["commercialCafeteria", "Cafeteria"],
+                          ["commercialServerRoom", "Server / IT Room"],
+                          ["commercialStorageRoom", "Storage Room"],
+                          ["commercialBreakoutArea", "Breakout Area"],
+                          ["commercialLiftAvailable", "Lift Available"],
+                          ["commercialPowerBackup", "Power Backup"],
+                          ["commercialCentralAC", "Central AC"],
+                          ["commercialFireSafety", "Fire Safety"],
+                          ["commercialReadyToMove", "Ready to Move"],
+                          ["commercialUnderConstruction", "Under Construction"],
+                        ].map(([field, label]) => (
+                          <label
+                            key={field}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(formData[field])}
+                              onChange={(e) =>
+                                setFormData((prev) => ({ ...prev, [field]: e.target.checked }))
+                              }
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          Available From
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.commercialAvailableFrom}
+                          onChange={(e) =>
+                            setFormData((prev) => ({ ...prev, commercialAvailableFrom: e.target.value }))
+                          }
+                          className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {formData.inventoryType === "RESIDENTIAL" ? (
+                    <div className="col-span-2 rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                        Residential Details
+                      </p>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Property Type
+                          </label>
+                          <select
+                            value={formData.residentialPropertyType}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, residentialPropertyType: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          >
+                            <option value="">Select property type</option>
+                            <option value="FLAT">Flat</option>
+                            <option value="VILLA">Villa</option>
+                            <option value="BUILDER_FLOOR">Builder Floor</option>
+                            <option value="PLOT">Plot</option>
+                            <option value="OTHER">Other</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            BHK Type
+                          </label>
+                          <select
+                            value={formData.residentialBhkType}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, residentialBhkType: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          >
+                            <option value="">Select BHK</option>
+                            <option value="1BHK">1 BHK</option>
+                            <option value="2BHK">2 BHK</option>
+                            <option value="3BHK">3 BHK</option>
+                            <option value="4BHK">4 BHK</option>
+                            <option value="5BHK">5 BHK</option>
+                            <option value="STUDIO">Studio</option>
+                            <option value="OTHER">Other</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Parking Slots
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.residentialParking}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, residentialParking: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Bedrooms
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.residentialBedrooms}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, residentialBedrooms: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Bathrooms
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.residentialBathrooms}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, residentialBathrooms: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Balcony
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.residentialBalcony}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, residentialBalcony: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          />
+                        </div>
+                        <div className="col-span-3">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                            Water Supply
+                          </label>
+                          <select
+                            value={formData.residentialWaterSupply}
+                            onChange={(e) =>
+                              setFormData((prev) => ({ ...prev, residentialWaterSupply: e.target.value }))
+                            }
+                            className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                          >
+                            <option value="">Select water source</option>
+                            <option value="MUNICIPAL">Municipal</option>
+                            <option value="BOREWELL">Borewell</option>
+                            <option value="TANKER">Tanker</option>
+                            <option value="BOTH">Both</option>
+                            <option value="OTHER">Other</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {[
+                          ["residentialStudyRoom", "Study Room"],
+                          ["residentialServantRoom", "Servant Room"],
+                          ["residentialModularKitchen", "Modular Kitchen"],
+                          ["residentialLift", "Lift"],
+                          ["residentialSecurity", "Security"],
+                          ["residentialPowerBackup", "Power Backup"],
+                          ["residentialGym", "Gym"],
+                          ["residentialSwimmingPool", "Swimming Pool"],
+                          ["residentialClubhouse", "Clubhouse"],
+                          ["residentialElectricityBackup", "Electricity Backup"],
+                          ["residentialGasPipeline", "Gas Pipeline"],
+                        ].map(([field, label]) => (
+                          <label
+                            key={field}
+                            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(formData[field])}
+                              onChange={(e) =>
+                                setFormData((prev) => ({ ...prev, [field]: e.target.checked }))
+                              }
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                            {label}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="col-span-2 grid grid-cols-1 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Floor Plans (one URL per line)
+                      </label>
+                      <textarea
+                        rows={3}
+                        placeholder="https://.../floor-plan-1.pdf"
+                        value={listToTextareaValue(formData.floorPlans)}
+                        onChange={(e) =>
+                          setFormData((prev) => ({ ...prev, floorPlans: parseTextareaList(e.target.value) }))
+                        }
+                        className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 resize-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Video Tours (one URL per line)
+                      </label>
+                      <textarea
+                        rows={3}
+                        placeholder="https://.../property-video"
+                        value={listToTextareaValue(formData.videoTours)}
+                        onChange={(e) =>
+                          setFormData((prev) => ({ ...prev, videoTours: parseTextareaList(e.target.value) }))
+                        }
+                        className="mt-1 w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 resize-none"
+                      />
+                    </div>
                   </div>
 
                   {isReservedStatusValue(formData.status) ? (

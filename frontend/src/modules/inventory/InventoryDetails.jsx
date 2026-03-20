@@ -53,6 +53,25 @@ const formatUserRef = (value) => {
   return name || role || "-";
 };
 
+const formatYesNo = (value) => (value ? "Yes" : "No");
+
+const formatEnumLabel = (value) => {
+  const clean = String(value || "").trim();
+  if (!clean) return "-";
+
+  return clean
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const formatArea = (value, unit) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "-";
+  const unitLabel = String(unit || "").toUpperCase() === "SQ_M" ? "sq m" : "sq ft";
+  return `${parsed.toLocaleString("en-IN")} ${unitLabel}`;
+};
+
 const formatSoldPaymentMode = (value) => {
   const normalized = String(value || "").trim().toUpperCase();
   if (!normalized) return "-";
@@ -151,6 +170,7 @@ const InventoryDetails = () => {
   }, [asset?.title, inventory]);
 
   const statusValue = inventory?.status || asset?.status || "Unknown";
+  const transactionType = asset?.type || inventory?.type || "Sale";
   const saleDetails = inventory?.saleDetails || asset?.saleDetails || null;
   const soldLeadLabel = (() => {
     const lead = saleDetails?.leadId;
@@ -162,6 +182,17 @@ const InventoryDetails = () => {
     const fallbackId = String(lead?._id || "").trim();
     return [name, phone].filter(Boolean).join(" | ") || fallbackId || "-";
   })();
+  const inventoryType = String(inventory?.inventoryType || asset?.inventoryType || "").toUpperCase();
+  const commercialDetails = inventory?.commercialDetails || asset?.commercialDetails || null;
+  const commercialLayout = commercialDetails?.officeLayout || {};
+  const commercialAmenities = commercialDetails?.amenities || {};
+  const commercialBuilding = commercialDetails?.buildingDetails || {};
+  const commercialAvailability = commercialDetails?.availability || {};
+  const residentialDetails = inventory?.residentialDetails || asset?.residentialDetails || null;
+  const residentialAmenities = residentialDetails?.amenities || {};
+  const residentialUtilities = residentialDetails?.utilities || {};
+  const isCommercial = inventoryType === "COMMERCIAL" || (!inventoryType && Boolean(commercialDetails));
+  const isResidential = inventoryType === "RESIDENTIAL" || (!inventoryType && Boolean(residentialDetails));
   const images = useMemo(
     () => (Array.isArray(inventory?.images) && inventory.images.length ? inventory.images : asset?.images || []),
     [asset?.images, inventory?.images],
@@ -172,6 +203,20 @@ const InventoryDetails = () => {
         ? inventory.documents
         : asset?.documents || [],
     [asset?.documents, inventory?.documents],
+  );
+  const floorPlans = useMemo(
+    () =>
+      Array.isArray(inventory?.floorPlans) && inventory.floorPlans.length
+        ? inventory.floorPlans
+        : asset?.floorPlans || [],
+    [asset?.floorPlans, inventory?.floorPlans],
+  );
+  const videoTours = useMemo(
+    () =>
+      Array.isArray(inventory?.videoTours) && inventory.videoTours.length
+        ? inventory.videoTours
+        : asset?.videoTours || [],
+    [asset?.videoTours, inventory?.videoTours],
   );
 
   const safeImageIndex = Math.min(activeImageIndex, Math.max(images.length - 1, 0));
@@ -332,10 +377,26 @@ const InventoryDetails = () => {
           <FieldRow label="Project" value={inventory?.projectName} />
           <FieldRow label="Tower" value={inventory?.towerName} />
           <FieldRow label="Unit" value={inventory?.unitNumber} />
+          <FieldRow label="Property ID" value={inventory?.propertyId || asset?.propertyId} />
+          <FieldRow label="Inventory Type" value={formatEnumLabel(inventoryType)} />
           <FieldRow label="Price" value={formatPrice(inventory?.price ?? asset?.price)} />
+          <FieldRow label="Furnishing" value={formatEnumLabel(inventory?.furnishingStatus || asset?.furnishingStatus)} />
           <FieldRow label="Location" value={inventory?.location || asset?.location} />
+          <FieldRow label="City" value={inventory?.city || asset?.city} />
+          <FieldRow label="Area" value={inventory?.area || asset?.area} />
+          <FieldRow label="Pincode" value={inventory?.pincode || asset?.pincode} />
+          <FieldRow label="Building" value={inventory?.buildingName || asset?.buildingName} />
+          <FieldRow label="Floor Number" value={inventory?.floorNumber ?? asset?.floorNumber} />
+          <FieldRow label="Total Floors" value={inventory?.totalFloors ?? asset?.totalFloors} />
+          <FieldRow label="Total Area" value={formatArea(inventory?.totalArea ?? asset?.totalArea, inventory?.areaUnit || asset?.areaUnit)} />
+          <FieldRow label="Carpet Area" value={formatArea(inventory?.carpetArea ?? asset?.carpetArea, inventory?.areaUnit || asset?.areaUnit)} />
+          <FieldRow label="Built-up Area" value={formatArea(inventory?.builtUpArea ?? asset?.builtUpArea, inventory?.areaUnit || asset?.areaUnit)} />
+          <FieldRow label="Maintenance" value={formatPrice(inventory?.maintenanceCharges ?? asset?.maintenanceCharges)} />
+          {String(transactionType || "").trim().toUpperCase() === "RENT" && (
+            <FieldRow label="Security Deposit" value={formatPrice(inventory?.deposit ?? asset?.deposit)} />
+          )}
           <FieldRow label="Coordinates" value={inventoryCoordinates} />
-          <FieldRow label="Type" value={asset?.type || "Sale"} />
+          <FieldRow label="Type" value={transactionType} />
           <FieldRow label="Category" value={asset?.category || "Apartment"} />
           {(statusValue === "Blocked" || statusValue === "Reserved") && (
             <FieldRow
@@ -361,6 +422,74 @@ const InventoryDetails = () => {
         </div>
       </div>
 
+      {(commercialDetails || residentialDetails) && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {isCommercial && commercialDetails && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500 mb-2">
+                Commercial Office Details
+              </h2>
+              <FieldRow label="Office Type" value={formatEnumLabel(commercialDetails?.officeType)} />
+              <FieldRow label="Total Cabins" value={commercialLayout?.totalCabins} />
+              <FieldRow label="Workstations" value={commercialLayout?.workstations} />
+              <FieldRow label="Seats" value={commercialLayout?.seats} />
+              <FieldRow label="Conference Rooms" value={commercialLayout?.conferenceRooms} />
+              <FieldRow label="Meeting Rooms" value={commercialLayout?.meetingRooms} />
+              <FieldRow label="Reception Area" value={formatYesNo(commercialLayout?.receptionArea)} />
+              <FieldRow label="Waiting Area" value={formatYesNo(commercialLayout?.waitingArea)} />
+              <FieldRow label="Pantry" value={formatYesNo(commercialAmenities?.pantry)} />
+              <FieldRow label="Cafeteria" value={formatYesNo(commercialAmenities?.cafeteria)} />
+              <FieldRow label="Washroom Type" value={formatEnumLabel(commercialAmenities?.washroomType)} />
+              <FieldRow label="Server / IT Room" value={formatYesNo(commercialAmenities?.serverRoom)} />
+              <FieldRow label="Storage Room" value={formatYesNo(commercialAmenities?.storageRoom)} />
+              <FieldRow label="Breakout Area" value={formatYesNo(commercialAmenities?.breakoutArea)} />
+              <FieldRow label="Lift Available" value={formatYesNo(commercialAmenities?.liftAvailable)} />
+              <FieldRow label="Power Backup" value={formatYesNo(commercialAmenities?.powerBackup)} />
+              <FieldRow label="Central AC" value={formatYesNo(commercialAmenities?.centralAC)} />
+              <FieldRow label="Parking Type" value={formatEnumLabel(commercialBuilding?.parkingType)} />
+              <FieldRow label="Parking Slots" value={commercialBuilding?.parkingSlots} />
+              <FieldRow label="Security" value={formatEnumLabel(commercialBuilding?.securityType)} />
+              <FieldRow label="Fire Safety" value={formatYesNo(commercialBuilding?.fireSafety)} />
+              <FieldRow label="Ready To Move" value={formatYesNo(commercialAvailability?.readyToMove)} />
+              <FieldRow
+                label="Under Construction"
+                value={formatYesNo(commercialAvailability?.underConstruction)}
+              />
+              <FieldRow label="Available From" value={formatDate(commercialAvailability?.availableFrom)} />
+            </div>
+          )}
+
+          {isResidential && residentialDetails && (
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500 mb-2">
+                Residential Details
+              </h2>
+              <FieldRow label="Property Type" value={formatEnumLabel(residentialDetails?.propertyType)} />
+              <FieldRow label="BHK Type" value={formatEnumLabel(residentialDetails?.bhkType)} />
+              <FieldRow label="Bedrooms" value={residentialDetails?.bedrooms} />
+              <FieldRow label="Bathrooms" value={residentialDetails?.bathrooms} />
+              <FieldRow label="Balcony" value={residentialDetails?.balcony} />
+              <FieldRow label="Study Room" value={formatYesNo(residentialDetails?.studyRoom)} />
+              <FieldRow label="Servant Room" value={formatYesNo(residentialDetails?.servantRoom)} />
+              <FieldRow label="Parking Slots" value={residentialDetails?.parking} />
+              <FieldRow label="Modular Kitchen" value={formatYesNo(residentialAmenities?.modularKitchen)} />
+              <FieldRow label="Lift" value={formatYesNo(residentialAmenities?.lift)} />
+              <FieldRow label="Security" value={formatYesNo(residentialAmenities?.security)} />
+              <FieldRow label="Power Backup" value={formatYesNo(residentialAmenities?.powerBackup)} />
+              <FieldRow label="Gym" value={formatYesNo(residentialAmenities?.gym)} />
+              <FieldRow label="Swimming Pool" value={formatYesNo(residentialAmenities?.swimmingPool)} />
+              <FieldRow label="Clubhouse" value={formatYesNo(residentialAmenities?.clubhouse)} />
+              <FieldRow label="Water Supply" value={formatEnumLabel(residentialUtilities?.waterSupply)} />
+              <FieldRow
+                label="Electricity Backup"
+                value={formatYesNo(residentialUtilities?.electricityBackup)}
+              />
+              <FieldRow label="Gas Pipeline" value={formatYesNo(residentialUtilities?.gasPipeline)} />
+            </div>
+          )}
+        </div>
+      )}
+
       <div className={`grid grid-cols-1 gap-6 ${isFieldExecutive ? "xl:grid-cols-1" : "xl:grid-cols-2"}`}>
         {!isFieldExecutive && (
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -381,26 +510,79 @@ const InventoryDetails = () => {
         <div className="rounded-2xl border border-slate-200 bg-white p-4">
           <h2 className="text-sm font-bold uppercase tracking-widest text-slate-500 mb-3 flex items-center gap-2">
             <FileText size={15} />
-            Documents
+            Files & Links
           </h2>
 
-          {documents.length === 0 ? (
-            <p className="text-sm text-slate-400">No documents attached.</p>
-          ) : (
-            <div className="space-y-2">
-              {documents.map((doc, index) => (
-                <a
-                  key={`${doc}-${index}`}
-                  href={doc}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block text-sm text-emerald-700 hover:text-emerald-900 break-all underline"
-                >
-                  Document {index + 1}
-                </a>
-              ))}
+          <div className="space-y-4">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                Documents
+              </p>
+              {documents.length === 0 ? (
+                <p className="text-sm text-slate-400">No documents attached.</p>
+              ) : (
+                <div className="space-y-2">
+                  {documents.map((doc, index) => (
+                    <a
+                      key={`${doc}-${index}`}
+                      href={doc}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-sm text-emerald-700 hover:text-emerald-900 break-all underline"
+                    >
+                      Document {index + 1}
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                Floor Plans
+              </p>
+              {floorPlans.length === 0 ? (
+                <p className="text-sm text-slate-400">No floor plans attached.</p>
+              ) : (
+                <div className="space-y-2">
+                  {floorPlans.map((url, index) => (
+                    <a
+                      key={`${url}-${index}`}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-sm text-cyan-700 hover:text-cyan-900 break-all underline"
+                    >
+                      Floor Plan {index + 1}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
+                Video Tours
+              </p>
+              {videoTours.length === 0 ? (
+                <p className="text-sm text-slate-400">No video tours attached.</p>
+              ) : (
+                <div className="space-y-2">
+                  {videoTours.map((url, index) => (
+                    <a
+                      key={`${url}-${index}`}
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block text-sm text-indigo-700 hover:text-indigo-900 break-all underline"
+                    >
+                      Video Tour {index + 1}
+                    </a>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 

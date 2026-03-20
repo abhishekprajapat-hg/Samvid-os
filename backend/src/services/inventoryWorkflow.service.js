@@ -47,6 +47,56 @@ const INVENTORY_UPDATE_REQUEST_ROLES = Object.freeze([
   USER_ROLES.EXECUTIVE,
   USER_ROLES.FIELD_EXECUTIVE,
 ]);
+const INVENTORY_TYPE_OPTIONS = Object.freeze(["COMMERCIAL", "RESIDENTIAL"]);
+const FURNISHING_STATUS_OPTIONS = Object.freeze([
+  "",
+  "UNFURNISHED",
+  "SEMI_FURNISHED",
+  "FULLY_FURNISHED",
+  "BARE_SHELL",
+  "WARM_SHELL",
+  "MANAGED_OFFICE",
+  "COWORKING",
+]);
+const AREA_UNIT_OPTIONS = Object.freeze(["SQ_FT", "SQ_M"]);
+const COMMERCIAL_OFFICE_TYPES = Object.freeze([
+  "",
+  "BARE_SHELL",
+  "WARM_SHELL",
+  "SEMI_FURNISHED",
+  "FULLY_FURNISHED",
+  "MANAGED_OFFICE",
+  "COWORKING",
+]);
+const COMMERCIAL_WASHROOM_TYPES = Object.freeze(["", "ATTACHED", "COMMON", "BOTH"]);
+const COMMERCIAL_PARKING_TYPES = Object.freeze(["", "NONE", "COVERED", "OPEN", "BOTH"]);
+const COMMERCIAL_SECURITY_TYPES = Object.freeze(["", "NONE", "SECURITY_24X7", "CCTV", "BOTH"]);
+const RESIDENTIAL_PROPERTY_TYPES = Object.freeze([
+  "",
+  "FLAT",
+  "VILLA",
+  "BUILDER_FLOOR",
+  "PLOT",
+  "OTHER",
+]);
+const RESIDENTIAL_BHK_TYPES = Object.freeze([
+  "",
+  "1BHK",
+  "2BHK",
+  "3BHK",
+  "4BHK",
+  "5BHK",
+  "STUDIO",
+  "OTHER",
+]);
+const RESIDENTIAL_WATER_SUPPLY_TYPES = Object.freeze([
+  "",
+  "MUNICIPAL",
+  "BOREWELL",
+  "TANKER",
+  "BOTH",
+  "OTHER",
+]);
 
 const createHttpError = (statusCode, message) => {
   const error = new Error(message);
@@ -65,6 +115,41 @@ const isSafeKey = (key) =>
 const sanitizeString = (value) => {
   if (typeof value !== "string") return "";
   return value.trim();
+};
+
+const sanitizeCappedString = (value, maxLength = 200) =>
+  sanitizeString(value).slice(0, Math.max(1, maxLength));
+
+const toBoolean = (value, fallback = false) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+
+  const normalized = sanitizeString(value).toLowerCase();
+  if (!normalized) return fallback;
+  if (["true", "1", "yes", "y"].includes(normalized)) return true;
+  if (["false", "0", "no", "n"].includes(normalized)) return false;
+  return fallback;
+};
+
+const parseBooleanQuery = (value) => {
+  const normalized = sanitizeString(value).toLowerCase();
+  if (!normalized) return null;
+  if (["true", "1", "yes", "y"].includes(normalized)) return true;
+  if (["false", "0", "no", "n"].includes(normalized)) return false;
+  return null;
+};
+
+const toUpperSnake = (value) =>
+  sanitizeString(value)
+    .replace(/[\s-]+/g, "_")
+    .toUpperCase();
+
+const sanitizeEnum = (value, allowed, label) => {
+  const normalized = toUpperSnake(value);
+  if (!allowed.includes(normalized)) {
+    throw createHttpError(400, `${label} is invalid`);
+  }
+  return normalized;
 };
 
 const sanitizeReservationReason = (value) => sanitizeString(value).slice(0, 300);
@@ -171,6 +256,27 @@ const toFiniteNumber = (value) => {
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+const sanitizeNonNegativeNumber = (value, label) => {
+  const parsed = toFiniteNumber(value);
+  if (parsed === null) return null;
+  if (parsed < 0) {
+    throw createHttpError(400, `${label} must be a non-negative number`);
+  }
+  return parsed;
+};
+
+const parseNumericRange = (value) => {
+  const raw = sanitizeString(value);
+  if (!raw) return null;
+
+  const [minRaw, maxRaw] = raw.split("-").map((part) => part.trim());
+  const min = toFiniteNumber(minRaw);
+  const max = toFiniteNumber(maxRaw);
+
+  if (min === null || max === null) return null;
+  return { min, max };
 };
 
 const normalizeLatitude = (value) => {
@@ -282,6 +388,155 @@ const normalizeLegacyCategory = (category) => {
   return cleanCategory;
 };
 
+const resolveInventoryTypeFromCategory = (category) => {
+  const normalized = sanitizeString(category).toLowerCase();
+  if (!normalized) return "COMMERCIAL";
+  if (["office", "commercial", "coworking", "managed office", "managed_office"].includes(normalized)) {
+    return "COMMERCIAL";
+  }
+  return "RESIDENTIAL";
+};
+
+const buildLocationFromParts = ({ city, area, pincode, fallbackLocation }) => {
+  const parts = [sanitizeString(city), sanitizeString(area), sanitizeString(pincode)].filter(Boolean);
+  if (parts.length) return parts.join(", ");
+  return sanitizeString(fallbackLocation);
+};
+
+const sanitizeCommercialDetailsPayload = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw createHttpError(400, "commercialDetails must be an object");
+  }
+
+  const officeLayout = value.officeLayout || {};
+  const amenities = value.amenities || {};
+  const buildingDetails = value.buildingDetails || {};
+  const availability = value.availability || {};
+
+  const workstations = sanitizeNonNegativeNumber(
+    officeLayout.workstations ?? officeLayout.seats,
+    "commercialDetails.officeLayout.workstations",
+  );
+  const seats = sanitizeNonNegativeNumber(
+    officeLayout.seats ?? officeLayout.workstations,
+    "commercialDetails.officeLayout.seats",
+  );
+  const parkingSlots = sanitizeNonNegativeNumber(
+    buildingDetails.parkingSlots ?? amenities.parkingSlots,
+    "commercialDetails.buildingDetails.parkingSlots",
+  );
+
+  const availableFromRaw = availability.availableFrom;
+  const availableFromDate = availableFromRaw ? new Date(availableFromRaw) : null;
+
+  return {
+    officeType: sanitizeEnum(
+      value.officeType || "",
+      COMMERCIAL_OFFICE_TYPES,
+      "commercialDetails.officeType",
+    ),
+    officeLayout: {
+      totalCabins: sanitizeNonNegativeNumber(
+        officeLayout.totalCabins,
+        "commercialDetails.officeLayout.totalCabins",
+      ),
+      workstations,
+      seats,
+      conferenceRooms: sanitizeNonNegativeNumber(
+        officeLayout.conferenceRooms,
+        "commercialDetails.officeLayout.conferenceRooms",
+      ),
+      meetingRooms: sanitizeNonNegativeNumber(
+        officeLayout.meetingRooms,
+        "commercialDetails.officeLayout.meetingRooms",
+      ),
+      receptionArea: toBoolean(officeLayout.receptionArea, false),
+      waitingArea: toBoolean(officeLayout.waitingArea, false),
+    },
+    amenities: {
+      pantry: toBoolean(amenities.pantry, false),
+      cafeteria: toBoolean(amenities.cafeteria, false),
+      washroomType: sanitizeEnum(
+        amenities.washroomType || "",
+        COMMERCIAL_WASHROOM_TYPES,
+        "commercialDetails.amenities.washroomType",
+      ),
+      serverRoom: toBoolean(amenities.serverRoom, false),
+      storageRoom: toBoolean(amenities.storageRoom, false),
+      breakoutArea: toBoolean(amenities.breakoutArea, false),
+      liftAvailable: toBoolean(amenities.liftAvailable ?? amenities.lift, false),
+      powerBackup: toBoolean(amenities.powerBackup, false),
+      centralAC: toBoolean(amenities.centralAC, false),
+    },
+    buildingDetails: {
+      totalFloors: sanitizeNonNegativeNumber(
+        buildingDetails.totalFloors,
+        "commercialDetails.buildingDetails.totalFloors",
+      ),
+      parkingType: sanitizeEnum(
+        buildingDetails.parkingType || "",
+        COMMERCIAL_PARKING_TYPES,
+        "commercialDetails.buildingDetails.parkingType",
+      ),
+      parkingSlots,
+      securityType: sanitizeEnum(
+        buildingDetails.securityType || "",
+        COMMERCIAL_SECURITY_TYPES,
+        "commercialDetails.buildingDetails.securityType",
+      ),
+      fireSafety: toBoolean(buildingDetails.fireSafety ?? amenities.fireSafety, false),
+    },
+    availability: {
+      readyToMove: toBoolean(availability.readyToMove, false),
+      underConstruction: toBoolean(availability.underConstruction, false),
+      availableFrom:
+        availableFromDate && !Number.isNaN(availableFromDate.getTime()) ? availableFromDate : null,
+    },
+  };
+};
+
+const sanitizeResidentialDetailsPayload = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw createHttpError(400, "residentialDetails must be an object");
+  }
+
+  const amenities = value.amenities || {};
+  const utilities = value.utilities || {};
+
+  return {
+    propertyType: sanitizeEnum(
+      value.propertyType || "",
+      RESIDENTIAL_PROPERTY_TYPES,
+      "residentialDetails.propertyType",
+    ),
+    bhkType: sanitizeEnum(value.bhkType || "", RESIDENTIAL_BHK_TYPES, "residentialDetails.bhkType"),
+    bedrooms: sanitizeNonNegativeNumber(value.bedrooms, "residentialDetails.bedrooms"),
+    bathrooms: sanitizeNonNegativeNumber(value.bathrooms, "residentialDetails.bathrooms"),
+    balcony: sanitizeNonNegativeNumber(value.balcony ?? value.balconies, "residentialDetails.balcony"),
+    studyRoom: toBoolean(value.studyRoom, false),
+    servantRoom: toBoolean(value.servantRoom, false),
+    parking: sanitizeNonNegativeNumber(value.parking, "residentialDetails.parking"),
+    amenities: {
+      modularKitchen: toBoolean(amenities.modularKitchen, false),
+      lift: toBoolean(amenities.lift, false),
+      security: toBoolean(amenities.security, false),
+      powerBackup: toBoolean(amenities.powerBackup, false),
+      gym: toBoolean(amenities.gym, false),
+      swimmingPool: toBoolean(amenities.swimmingPool, false),
+      clubhouse: toBoolean(amenities.clubhouse, false),
+    },
+    utilities: {
+      waterSupply: sanitizeEnum(
+        utilities.waterSupply || "",
+        RESIDENTIAL_WATER_SUPPLY_TYPES,
+        "residentialDetails.utilities.waterSupply",
+      ),
+      electricityBackup: toBoolean(utilities.electricityBackup, false),
+      gasPipeline: toBoolean(utilities.gasPipeline ?? amenities.gasPipeline, false),
+    },
+  };
+};
+
 const deriveStructuredFieldsFromTitle = (title) => {
   const cleanTitle = sanitizeString(title);
   if (!cleanTitle) return {};
@@ -361,6 +616,42 @@ const normalizeLegacyInventoryPayload = (payload = {}) => {
 
   if (Object.prototype.hasOwnProperty.call(normalized, "category")) {
     normalized.category = normalizeLegacyCategory(normalized.category);
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(normalized, "inventoryType")) {
+    normalized.inventoryType = resolveInventoryTypeFromCategory(normalized.category);
+  } else {
+    normalized.inventoryType = toUpperSnake(normalized.inventoryType);
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(normalized, "propertyId")) {
+    const fallbackPropertyId = normalized.unitNumber || normalized.code || normalized.id || "";
+    normalized.propertyId = sanitizeString(fallbackPropertyId);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(normalized, "furnishingStatus")) {
+    normalized.furnishingStatus = toUpperSnake(normalized.furnishingStatus);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(normalized, "areaUnit")) {
+    normalized.areaUnit = toUpperSnake(normalized.areaUnit);
+  }
+
+  const normalizedCity = sanitizeString(normalized.city);
+  const normalizedArea = sanitizeString(normalized.area);
+  const normalizedPincode = sanitizeString(normalized.pincode);
+  if (normalizedCity) normalized.city = normalizedCity;
+  if (normalizedArea) normalized.area = normalizedArea;
+  if (normalizedPincode) normalized.pincode = normalizedPincode;
+
+  const derivedLocation = buildLocationFromParts({
+    city: normalized.city,
+    area: normalized.area,
+    pincode: normalized.pincode,
+    fallbackLocation: normalized.location,
+  });
+  if (derivedLocation) {
+    normalized.location = derivedLocation;
   }
 
   return normalized;
@@ -535,6 +826,7 @@ const pickInventoryDiff = (inventoryDoc, patch) => {
 const sanitizeInventoryPayload = ({
   payload,
   mode = "create",
+  currentType = "",
   currentStatus = "",
   currentReservationReason = "",
   currentReservationLeadId = null,
@@ -573,6 +865,11 @@ const sanitizeInventoryPayload = ({
       return;
     }
 
+    if (field === "deposit" && value === null) {
+      safePayload[field] = null;
+      return;
+    }
+
     if (value === undefined || value === null) return;
 
     if (field === "projectName" || field === "towerName" || field === "unitNumber" || field === "location") {
@@ -581,6 +878,16 @@ const sanitizeInventoryPayload = ({
         throw createHttpError(400, `${field} must be a non-empty string`);
       }
       safePayload[field] = cleanValue;
+      return;
+    }
+
+    if (field === "propertyId") {
+      safePayload[field] = sanitizeCappedString(value, 80);
+      return;
+    }
+
+    if (field === "inventoryType") {
+      safePayload[field] = sanitizeEnum(value, INVENTORY_TYPE_OPTIONS, "inventoryType");
       return;
     }
 
@@ -611,6 +918,11 @@ const sanitizeInventoryPayload = ({
         throw createHttpError(400, "category must be at most 120 characters");
       }
       safePayload[field] = cleanCategory;
+      return;
+    }
+
+    if (field === "furnishingStatus") {
+      safePayload[field] = sanitizeEnum(value, FURNISHING_STATUS_OPTIONS, "furnishingStatus");
       return;
     }
 
@@ -651,10 +963,78 @@ const sanitizeInventoryPayload = ({
       return;
     }
 
-    if (field === "images" || field === "documents") {
+    if (field === "city" || field === "area" || field === "buildingName") {
+      safePayload[field] = sanitizeCappedString(value, 120);
+      return;
+    }
+
+    if (field === "pincode") {
+      safePayload[field] = sanitizeCappedString(value, 20);
+      return;
+    }
+
+    if (field === "floorNumber") {
+      safePayload[field] = toFiniteNumber(value);
+      return;
+    }
+
+    if (
+      field === "totalFloors"
+      || field === "totalArea"
+      || field === "carpetArea"
+      || field === "builtUpArea"
+      || field === "maintenanceCharges"
+      || field === "deposit"
+    ) {
+      safePayload[field] = sanitizeNonNegativeNumber(value, field);
+      return;
+    }
+
+    if (field === "areaUnit") {
+      safePayload[field] = sanitizeEnum(value, AREA_UNIT_OPTIONS, "areaUnit");
+      return;
+    }
+
+    if (field === "commercialDetails") {
+      safePayload[field] = sanitizeCommercialDetailsPayload(value);
+      return;
+    }
+
+    if (field === "residentialDetails") {
+      safePayload[field] = sanitizeResidentialDetailsPayload(value);
+      return;
+    }
+
+    if (field === "images" || field === "documents" || field === "floorPlans" || field === "videoTours") {
       safePayload[field] = sanitizeFileList(value);
+      return;
     }
   });
+
+  if (!safePayload.location) {
+    const computedLocation = buildLocationFromParts({
+      city: safePayload.city || payload.city,
+      area: safePayload.area || payload.area,
+      pincode: safePayload.pincode || payload.pincode,
+      fallbackLocation: payload.location,
+    });
+    if (computedLocation) {
+      safePayload.location = computedLocation;
+    }
+  }
+
+  const hasTypePatch = Object.prototype.hasOwnProperty.call(safePayload, "type");
+  const hasDepositPatch = Object.prototype.hasOwnProperty.call(safePayload, "deposit");
+  const effectiveTransactionType =
+    mode === "create"
+      ? (hasTypePatch ? safePayload.type : normalizeLegacyType(payload.type))
+      : (hasTypePatch ? safePayload.type : normalizeLegacyType(currentType));
+
+  if (hasDepositPatch && effectiveTransactionType !== "Rent") {
+    safePayload.deposit = null;
+  } else if (!hasDepositPatch && hasTypePatch && safePayload.type !== "Rent") {
+    safePayload.deposit = null;
+  }
 
   if (mode === "create") {
     INVENTORY_REQUIRED_CREATE_FIELDS.forEach((field) => {
@@ -829,15 +1209,194 @@ const getInventoryList = async ({
     query.status = filters.status;
   }
 
+  const normalizedInventoryType = toUpperSnake(filters.inventoryType);
+  if (INVENTORY_TYPE_OPTIONS.includes(normalizedInventoryType)) {
+    query.inventoryType = normalizedInventoryType;
+  }
+
+  const normalizedFurnishing = toUpperSnake(filters.furnishing || filters.furnishingStatus);
+  if (FURNISHING_STATUS_OPTIONS.includes(normalizedFurnishing) && normalizedFurnishing) {
+    query.furnishingStatus = normalizedFurnishing;
+  }
+
+  const normalizedBhk = toUpperSnake(filters.bhk);
+  if (normalizedBhk) {
+    query["residentialDetails.bhkType"] = normalizedBhk;
+  }
+
+  const normalizedCity = sanitizeString(filters.city);
+  if (normalizedCity) {
+    query.city = { $regex: normalizedCity, $options: "i" };
+  }
+
+  const normalizedArea = sanitizeString(filters.area);
+  if (normalizedArea) {
+    query.area = { $regex: normalizedArea, $options: "i" };
+  }
+
+  const normalizedPincode = sanitizeString(filters.pincode);
+  if (normalizedPincode) {
+    query.pincode = { $regex: normalizedPincode, $options: "i" };
+  }
+
+  const propertyType = sanitizeString(filters.propertyType);
+  if (propertyType) {
+    const normalizedPropertyType = toUpperSnake(propertyType);
+    query.$or = [
+      { "commercialDetails.officeType": normalizedPropertyType },
+      { "residentialDetails.propertyType": normalizedPropertyType },
+      { category: { $regex: propertyType, $options: "i" } },
+    ];
+  }
+
+  const areaRange = parseNumericRange(filters.areaRange);
+  if (areaRange) {
+    query.totalArea = { $gte: areaRange.min, $lte: areaRange.max };
+  }
+
+  const budgetRange = parseNumericRange(filters.budgetRange);
+  if (budgetRange) {
+    query.price = { $gte: budgetRange.min, $lte: budgetRange.max };
+  }
+
+  const minCabins = toFiniteNumber(filters.cabins);
+  if (minCabins !== null) {
+    query["commercialDetails.officeLayout.totalCabins"] = { $gte: minCabins };
+  }
+
+  const minSeats = toFiniteNumber(filters.seats);
+  if (minSeats !== null) {
+    query.$and = [
+      ...(Array.isArray(query.$and) ? query.$and : []),
+      {
+        $or: [
+          { "commercialDetails.officeLayout.seats": { $gte: minSeats } },
+          { "commercialDetails.officeLayout.workstations": { $gte: minSeats } },
+        ],
+      },
+    ];
+  }
+
+  const minFloor = toFiniteNumber(filters.floor);
+  if (minFloor !== null) {
+    query.floorNumber = { $gte: minFloor };
+  }
+
+  const pantryFilter = parseBooleanQuery(filters.pantry);
+  if (pantryFilter !== null) {
+    query["commercialDetails.amenities.pantry"] = pantryFilter;
+  }
+
+  const parkingFilter = parseBooleanQuery(filters.parkingAvailable);
+  if (parkingFilter !== null) {
+    const parkingCondition = parkingFilter
+      ? {
+        $or: [
+          { "commercialDetails.buildingDetails.parkingSlots": { $gte: 1 } },
+          { "residentialDetails.parking": { $gte: 1 } },
+        ],
+      }
+      : {
+        $and: [
+          {
+            $or: [
+              { "commercialDetails.buildingDetails.parkingSlots": { $in: [0, null] } },
+              { "commercialDetails.buildingDetails.parkingSlots": { $exists: false } },
+            ],
+          },
+          {
+            $or: [
+              { "residentialDetails.parking": { $in: [0, null] } },
+              { "residentialDetails.parking": { $exists: false } },
+            ],
+          },
+        ],
+      };
+
+    query.$and = [
+      ...(Array.isArray(query.$and) ? query.$and : []),
+      parkingCondition,
+    ];
+  }
+
+  const amenityTokens = sanitizeString(filters.amenities)
+    .split(",")
+    .map((item) => toUpperSnake(item))
+    .filter(Boolean);
+
+  if (amenityTokens.length) {
+    const amenityClauses = [];
+
+    amenityTokens.forEach((token) => {
+      if (token === "PANTRY") amenityClauses.push({ "commercialDetails.amenities.pantry": true });
+      if (token === "LIFT") {
+        amenityClauses.push({
+          $or: [
+            { "commercialDetails.amenities.liftAvailable": true },
+            { "residentialDetails.amenities.lift": true },
+          ],
+        });
+      }
+      if (token === "SECURITY") {
+        amenityClauses.push({
+          $or: [
+            { "commercialDetails.buildingDetails.securityType": { $in: ["SECURITY_24X7", "CCTV", "BOTH"] } },
+            { "residentialDetails.amenities.security": true },
+          ],
+        });
+      }
+      if (token === "POWER_BACKUP" || token === "POWERBACKUP") {
+        amenityClauses.push({
+          $or: [
+            { "commercialDetails.amenities.powerBackup": true },
+            { "residentialDetails.amenities.powerBackup": true },
+          ],
+        });
+      }
+      if (token === "GYM") amenityClauses.push({ "residentialDetails.amenities.gym": true });
+      if (token === "SWIMMING_POOL" || token === "SWIMMINGPOOL") {
+        amenityClauses.push({ "residentialDetails.amenities.swimmingPool": true });
+      }
+      if (token === "CLUBHOUSE") amenityClauses.push({ "residentialDetails.amenities.clubhouse": true });
+      if (token === "MODULAR_KITCHEN" || token === "MODULARKITCHEN") {
+        amenityClauses.push({ "residentialDetails.amenities.modularKitchen": true });
+      }
+      if (token === "GAS_PIPELINE" || token === "GASPIPELINE") {
+        amenityClauses.push({ "residentialDetails.utilities.gasPipeline": true });
+      }
+    });
+
+    if (amenityClauses.length) {
+      query.$and = [
+        ...(Array.isArray(query.$and) ? query.$and : []),
+        ...amenityClauses,
+      ];
+    }
+  }
+
   if (filters.search) {
     const safeSearch = sanitizeString(filters.search);
     if (safeSearch) {
-      query.$or = [
+      const searchClauses = [
         { projectName: { $regex: safeSearch, $options: "i" } },
         { towerName: { $regex: safeSearch, $options: "i" } },
         { unitNumber: { $regex: safeSearch, $options: "i" } },
         { location: { $regex: safeSearch, $options: "i" } },
+        { propertyId: { $regex: safeSearch, $options: "i" } },
+        { city: { $regex: safeSearch, $options: "i" } },
+        { area: { $regex: safeSearch, $options: "i" } },
+        { pincode: { $regex: safeSearch, $options: "i" } },
       ];
+      if (Array.isArray(query.$or) && query.$or.length) {
+        query.$and = [
+          ...(Array.isArray(query.$and) ? query.$and : []),
+          { $or: query.$or },
+          { $or: searchClauses },
+        ];
+        delete query.$or;
+      } else {
+        query.$or = searchClauses;
+      }
     }
   }
 
@@ -953,6 +1512,7 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
   const patch = sanitizeInventoryPayload({
     payload: normalizedPayload,
     mode: "update",
+    currentType: inventory.type,
     currentStatus: inventory.status,
     currentReservationReason: inventory.reservationReason,
     currentReservationLeadId: inventory.reservationLeadId,
@@ -1174,7 +1734,7 @@ const createInventoryUpdateRequest = async ({
     companyId,
   })
     .select(
-      "_id projectName towerName unitNumber price type category status reservationReason reservationLeadId saleDetails location siteLocation images documents",
+      "_id projectName towerName unitNumber propertyId inventoryType price deposit type category furnishingStatus status reservationReason reservationLeadId saleDetails location city area pincode buildingName floorNumber totalFloors totalArea carpetArea builtUpArea areaUnit maintenanceCharges commercialDetails residentialDetails siteLocation images documents floorPlans videoTours",
     )
     .lean();
 
@@ -1186,6 +1746,7 @@ const createInventoryUpdateRequest = async ({
   const proposed = sanitizeInventoryPayload({
     payload: normalizedPayload,
     mode: "update",
+    currentType: inventory.type,
     currentStatus: inventory.status,
     currentReservationReason: inventory.reservationReason,
     currentReservationLeadId: inventory.reservationLeadId,
@@ -1407,6 +1968,7 @@ const approveRequest = async ({ user, requestId, io }) => {
     const proposed = sanitizeInventoryPayload({
       payload: request.proposedData || request.proposedChanges || {},
       mode: "update",
+      currentType: inventory.type,
       currentStatus: inventory.status,
       currentReservationReason: inventory.reservationReason,
       currentReservationLeadId: inventory.reservationLeadId,

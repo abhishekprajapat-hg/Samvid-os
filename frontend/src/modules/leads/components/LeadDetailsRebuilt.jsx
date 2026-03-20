@@ -47,6 +47,55 @@ const formatCurrencyInr = (value) => {
   return INR_CURRENCY_FORMATTER.format(amount);
 };
 
+const toTitleCaseLabel = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const getInventoryLocationLabel = (inventory = {}) => {
+  const parts = [inventory?.city, inventory?.area, inventory?.pincode]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (parts.length) return parts.join(", ");
+  return String(inventory?.location || "").trim();
+};
+
+const getInventorySubtypeLabel = (inventory = {}) => {
+  const inventoryType = String(inventory?.inventoryType || "").trim().toUpperCase();
+  if (inventoryType === "COMMERCIAL") {
+    return toTitleCaseLabel(inventory?.commercialDetails?.officeType);
+  }
+  if (inventoryType === "RESIDENTIAL") {
+    return toTitleCaseLabel(
+      inventory?.residentialDetails?.bhkType
+      || inventory?.residentialDetails?.propertyType,
+    );
+  }
+  return "";
+};
+
+const getInventoryAreaLabel = (inventory = {}) => {
+  const totalArea = Number(inventory?.totalArea);
+  if (!Number.isFinite(totalArea) || totalArea <= 0) return "";
+  const areaUnit =
+    String(inventory?.areaUnit || "SQ_FT").trim().toUpperCase() === "SQ_M"
+      ? "sq m"
+      : "sq ft";
+  return `${totalArea.toLocaleString("en-IN")} ${areaUnit}`;
+};
+
+const getInventoryQuickInfo = (inventory = {}) =>
+  [
+    toTitleCaseLabel(inventory?.inventoryType),
+    getInventorySubtypeLabel(inventory),
+    toTitleCaseLabel(inventory?.furnishingStatus),
+    getInventoryAreaLabel(inventory),
+  ]
+    .filter(Boolean)
+    .join(" | ");
+
 const toDateTimeInputValue = (dateValue) => {
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return "";
@@ -99,6 +148,35 @@ const CLOUDINARY_UPLOAD_PRESET = "samvid_upload";
 const MAX_CLOSURE_DOCUMENTS = 20;
 const MAX_CLOSURE_FILE_SIZE_BYTES = 25 * 1024 * 1024;
 const CLOSURE_DOCUMENT_ACCEPT = "image/*,application/pdf";
+const LEAD_REQUIREMENT_FURNISHING_OPTIONS = [
+  { value: "", label: "Any Furnishing" },
+  { value: "UNFURNISHED", label: "Unfurnished" },
+  { value: "SEMI_FURNISHED", label: "Semi Furnished" },
+  { value: "FULLY_FURNISHED", label: "Fully Furnished" },
+  { value: "BARE_SHELL", label: "Bare Shell" },
+  { value: "WARM_SHELL", label: "Warm Shell" },
+  { value: "MANAGED_OFFICE", label: "Managed Office" },
+  { value: "COWORKING", label: "Coworking" },
+];
+const LEAD_REQUIREMENT_BHK_OPTIONS = [
+  { value: "", label: "Any BHK" },
+  { value: "1BHK", label: "1 BHK" },
+  { value: "2BHK", label: "2 BHK" },
+  { value: "3BHK", label: "3 BHK" },
+  { value: "4BHK", label: "4 BHK" },
+  { value: "5BHK", label: "5 BHK" },
+  { value: "STUDIO", label: "Studio" },
+  { value: "OTHER", label: "Other" },
+];
+const LEAD_REQUIREMENT_RESIDENTIAL_AMENITY_FIELDS = [
+  { key: "lift", label: "Lift" },
+  { key: "security", label: "Security" },
+  { key: "gym", label: "Gym" },
+  { key: "swimmingPool", label: "Swimming Pool" },
+  { key: "clubhouse", label: "Clubhouse" },
+  { key: "powerBackup", label: "Power Backup" },
+  { key: "parking", label: "Parking" },
+];
 
 const detectClosureDocumentKind = (mimeType = "") => {
   const normalizedMimeType = String(mimeType || "").trim().toLowerCase();
@@ -269,6 +347,8 @@ const LeadDetailsRebuiltContent = ({
   setProjectInterestedDraft,
   statusDraft,
   setStatusDraft,
+  requirementsDraft,
+  setRequirementsDraft,
   followUpDraft,
   setFollowUpDraft,
   dealPaymentModes,
@@ -380,6 +460,88 @@ const LeadDetailsRebuiltContent = ({
   const [visibleActivityCount, setVisibleActivityCount] = React.useState(INITIAL_ACTIVITY_RENDER_COUNT);
   const proposalMessageTimerRef = React.useRef(null);
   const pdfImageSourceCacheRef = React.useRef(new Map());
+  const normalizedRequirementInventoryType = String(
+    requirementsDraft?.inventoryType || "",
+  ).trim().toUpperCase();
+  const isCommercialRequirement = normalizedRequirementInventoryType === "COMMERCIAL";
+  const isResidentialRequirement = normalizedRequirementInventoryType === "RESIDENTIAL";
+
+  const updateRequirementRootField = React.useCallback(
+    (field, value) => {
+      setRequirementsDraft((prev) => ({
+        ...(prev || {}),
+        [field]: value,
+      }));
+    },
+    [setRequirementsDraft],
+  );
+
+  const updateRequirementCommercialField = React.useCallback(
+    (field, value) => {
+      setRequirementsDraft((prev) => ({
+        ...(prev || {}),
+        commercial: {
+          seats: "",
+          cabins: "",
+          parkingAvailable: false,
+          pantry: false,
+          ...(prev?.commercial || {}),
+          [field]: value,
+        },
+      }));
+    },
+    [setRequirementsDraft],
+  );
+
+  const updateRequirementResidentialField = React.useCallback(
+    (field, value) => {
+      setRequirementsDraft((prev) => ({
+        ...(prev || {}),
+        residential: {
+          bhkType: "",
+          floor: "",
+          amenities: {
+            lift: false,
+            security: false,
+            gym: false,
+            swimmingPool: false,
+            clubhouse: false,
+            powerBackup: false,
+            parking: false,
+            ...(prev?.residential?.amenities || {}),
+          },
+          ...(prev?.residential || {}),
+          [field]: value,
+        },
+      }));
+    },
+    [setRequirementsDraft],
+  );
+
+  const updateRequirementResidentialAmenity = React.useCallback(
+    (field, value) => {
+      setRequirementsDraft((prev) => ({
+        ...(prev || {}),
+        residential: {
+          bhkType: "",
+          floor: "",
+          ...(prev?.residential || {}),
+          amenities: {
+            lift: false,
+            security: false,
+            gym: false,
+            swimmingPool: false,
+            clubhouse: false,
+            powerBackup: false,
+            parking: false,
+            ...(prev?.residential?.amenities || {}),
+            [field]: value,
+          },
+        },
+      }));
+    },
+    [setRequirementsDraft],
+  );
 
   const relatedInventoryRows = React.useMemo(
     () =>
@@ -392,7 +554,8 @@ const LeadDetailsRebuiltContent = ({
           id: inventoryId,
           inventory,
           label: getInventoryLeadLabel(inventory),
-          location: String(inventory?.location || "").trim(),
+          location: getInventoryLocationLabel(inventory),
+          quickInfo: getInventoryQuickInfo(inventory),
           status: toInventoryApiStatus(inventory?.status),
           statusLabel: toInventoryStatusLabel(inventory?.status),
           imageUrls,
@@ -662,8 +825,8 @@ const LeadDetailsRebuiltContent = ({
         .sort((a, b) => {
           const aLabel = String(getInventoryLeadLabel(a) || a?.title || a?._id || "").toLowerCase();
           const bLabel = String(getInventoryLeadLabel(b) || b?.title || b?._id || "").toLowerCase();
-          const aText = `${aLabel} ${String(a?.location || "").toLowerCase()}`;
-          const bText = `${bLabel} ${String(b?.location || "").toLowerCase()}`;
+          const aText = `${aLabel} ${getInventoryLocationLabel(a).toLowerCase()}`;
+          const bText = `${bLabel} ${getInventoryLocationLabel(b).toLowerCase()}`;
           return aText.localeCompare(bText);
         }),
     [
@@ -762,8 +925,9 @@ const LeadDetailsRebuiltContent = ({
       lines.push("");
       lines.push(`Property ${index + 1}: ${property.label}`);
       lines.push(`Project: ${String(inventory?.projectName || selectedLead?.projectInterested || "-").trim() || "-"}`);
-      lines.push(`Location: ${String(inventory?.location || selectedLead?.city || "-").trim() || "-"}`);
+      lines.push(`Location: ${getInventoryLocationLabel(inventory) || String(selectedLead?.city || "-").trim() || "-"}`);
       lines.push(`Property Type: ${String(inventory?.type || "Sale").trim() || "-"}`);
+      lines.push(`Inventory Category: ${toTitleCaseLabel(inventory?.inventoryType) || "-"}`);
       lines.push(`Category: ${String(inventory?.category || "Apartment").trim() || "-"}`);
       lines.push(`Price: ${formatCurrencyInr(inventory?.price)}`);
     });
@@ -1442,6 +1606,211 @@ const LeadDetailsRebuiltContent = ({
           </section>
 
           <section className={`rounded-2xl border p-3 ${card}`}>
+            <div className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              Lead Requirements
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Inventory Type
+                </span>
+                <select
+                  value={requirementsDraft?.inventoryType || ""}
+                  onChange={(event) => updateRequirementRootField("inventoryType", event.target.value)}
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                >
+                  <option value="">Any</option>
+                  <option value="COMMERCIAL">Commercial</option>
+                  <option value="RESIDENTIAL">Residential</option>
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Deal Type
+                </span>
+                <select
+                  value={requirementsDraft?.transactionType || ""}
+                  onChange={(event) => updateRequirementRootField("transactionType", event.target.value)}
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                >
+                  <option value="">Any</option>
+                  <option value="SALE">Sale</option>
+                  <option value="RENT">Rent</option>
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Furnishing
+                </span>
+                <select
+                  value={requirementsDraft?.furnishingStatus || ""}
+                  onChange={(event) => updateRequirementRootField("furnishingStatus", event.target.value)}
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                >
+                  {LEAD_REQUIREMENT_FURNISHING_OPTIONS.map((option) => (
+                    <option key={option.value || "any-furnishing"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Area Unit
+                </span>
+                <select
+                  value={requirementsDraft?.areaUnit || "SQ_FT"}
+                  onChange={(event) => updateRequirementRootField("areaUnit", event.target.value)}
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                >
+                  <option value="SQ_FT">sq ft</option>
+                  <option value="SQ_M">sq m</option>
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Budget Min
+                </span>
+                <input
+                  type="number"
+                  step="any"
+                  value={requirementsDraft?.budgetMin || ""}
+                  onChange={(event) => updateRequirementRootField("budgetMin", event.target.value)}
+                  placeholder="Minimum budget"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Budget Max
+                </span>
+                <input
+                  type="number"
+                  step="any"
+                  value={requirementsDraft?.budgetMax || ""}
+                  onChange={(event) => updateRequirementRootField("budgetMax", event.target.value)}
+                  placeholder="Maximum budget"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Area Min
+                </span>
+                <input
+                  type="number"
+                  step="any"
+                  value={requirementsDraft?.areaMin || ""}
+                  onChange={(event) => updateRequirementRootField("areaMin", event.target.value)}
+                  placeholder="Minimum area"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Area Max
+                </span>
+                <input
+                  type="number"
+                  step="any"
+                  value={requirementsDraft?.areaMax || ""}
+                  onChange={(event) => updateRequirementRootField("areaMax", event.target.value)}
+                  placeholder="Maximum area"
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
+            </div>
+
+            {isCommercialRequirement ? (
+              <div className={`mt-3 rounded-xl border p-2.5 ${softCard}`}>
+                <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Commercial Preferences
+                </div>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={requirementsDraft?.commercial?.seats || ""}
+                    onChange={(event) => updateRequirementCommercialField("seats", event.target.value)}
+                    placeholder="Seats / Workstations"
+                    className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                  />
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={requirementsDraft?.commercial?.cabins || ""}
+                    onChange={(event) => updateRequirementCommercialField("cabins", event.target.value)}
+                    placeholder="Cabins"
+                    className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <label className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] ${button}`}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(requirementsDraft?.commercial?.parkingAvailable)}
+                      onChange={(event) => updateRequirementCommercialField("parkingAvailable", event.target.checked)}
+                    />
+                    Parking
+                  </label>
+                  <label className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] ${button}`}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(requirementsDraft?.commercial?.pantry)}
+                      onChange={(event) => updateRequirementCommercialField("pantry", event.target.checked)}
+                    />
+                    Pantry
+                  </label>
+                </div>
+              </div>
+            ) : null}
+
+            {isResidentialRequirement ? (
+              <div className={`mt-3 rounded-xl border p-2.5 ${softCard}`}>
+                <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Residential Preferences
+                </div>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <select
+                    value={requirementsDraft?.residential?.bhkType || ""}
+                    onChange={(event) => updateRequirementResidentialField("bhkType", event.target.value)}
+                    className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                  >
+                    {LEAD_REQUIREMENT_BHK_OPTIONS.map((option) => (
+                      <option key={option.value || "any-bhk"} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={requirementsDraft?.residential?.floor || ""}
+                    onChange={(event) => updateRequirementResidentialField("floor", event.target.value)}
+                    placeholder="Preferred floor"
+                    className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {LEAD_REQUIREMENT_RESIDENTIAL_AMENITY_FIELDS.map((field) => (
+                    <label key={field.key} className={`inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] ${button}`}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(requirementsDraft?.residential?.amenities?.[field.key])}
+                        onChange={(event) => updateRequirementResidentialAmenity(field.key, event.target.checked)}
+                      />
+                      {field.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className={`rounded-2xl border p-3 ${card}`}>
             <div className="flex items-center justify-between">
               <div className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>Properties</div>
               <span className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>{relatedInventoryRows.length} linked</span>
@@ -1454,6 +1823,7 @@ const LeadDetailsRebuiltContent = ({
                   const inventoryId = inventoryRow.id;
                   const inventoryLabel = inventoryRow.label;
                   const inventoryLocation = inventoryRow.location;
+                  const inventoryQuickInfo = inventoryRow.quickInfo;
                   const inventoryStatusLabel = inventoryRow.statusLabel;
                   const inventoryPriceLabel = formatCurrencyInr(inventoryRow?.inventory?.price);
                   const isActiveProperty = normalizedActiveInventoryId === inventoryId;
@@ -1478,6 +1848,11 @@ const LeadDetailsRebuiltContent = ({
                             {inventoryLabel || "Inventory"}{inventoryLocation ? ` (${inventoryLocation})` : ""}
                           </div>
                           <div className={`mt-0.5 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Status: {inventoryStatusLabel || "-"}</div>
+                          {inventoryQuickInfo ? (
+                            <div className={`mt-0.5 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              {inventoryQuickInfo}
+                            </div>
+                          ) : null}
                           <div className={`mt-0.5 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Price: {inventoryPriceLabel}</div>
                         </div>
                         {canManageLeadProperties && inventoryId ? (
@@ -1558,7 +1933,8 @@ const LeadDetailsRebuiltContent = ({
                       const inventoryLabel = getInventoryLeadLabel(inventory)
                         || String(inventory?.title || "").trim()
                         || inventoryId;
-                      const inventoryLocation = String(inventory?.location || "").trim();
+                      const inventoryLocation = getInventoryLocationLabel(inventory);
+                      const inventoryQuickInfo = getInventoryQuickInfo(inventory);
                       const inventoryPriceLabel = formatCurrencyInr(inventory?.price);
                       const inventoryTypeLabel =
                         String(inventory?.type || "").trim().toUpperCase() === "RENT"
@@ -1570,6 +1946,7 @@ const LeadDetailsRebuiltContent = ({
                           {[
                             inventoryLabel,
                             inventoryLocation ? `(${inventoryLocation})` : "",
+                            inventoryQuickInfo,
                             `Type: ${inventoryTypeLabel}`,
                             `Price: ${inventoryPriceLabel}`,
                           ]

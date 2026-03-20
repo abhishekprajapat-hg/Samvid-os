@@ -54,31 +54,166 @@ export const AssetVaultFilters = ({
   statusFilter,
   onStatusFilterChange,
   statusOptions,
+  inventoryTypeFilter,
+  onInventoryTypeFilterChange,
+  furnishingFilter,
+  onFurnishingFilterChange,
+  bhkFilter,
+  onBhkFilterChange,
+  cabinsFilter,
+  onCabinsFilterChange,
+  seatsFilter,
+  onSeatsFilterChange,
+  areaRangeFilter,
+  onAreaRangeFilterChange,
+  budgetRangeFilter,
+  onBudgetRangeFilterChange,
+  floorFilter,
+  onFloorFilterChange,
+  parkingFilter,
+  onParkingFilterChange,
+  pantryFilter,
+  onPantryFilterChange,
+  amenitiesFilter,
+  onAmenitiesFilterChange,
 }) => (
-  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 z-10">
-    <div className="md:col-span-2 relative">
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-      <input
-        type="text"
-        value={searchTerm}
-        onChange={(event) => onSearchChange(event.target.value)}
-        placeholder="Search title, location, category"
-        className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      />
+  <div className="space-y-3 z-10">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="md:col-span-2 relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder="Search property id/name, location, category"
+          className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+        />
+      </div>
+
+      <select
+        value={statusFilter}
+        onChange={(event) => onStatusFilterChange(event.target.value)}
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      >
+        <option value="all">All statuses</option>
+        {statusOptions.map((status) => (
+          <option key={status} value={status}>
+            {status}
+          </option>
+        ))}
+      </select>
     </div>
 
-    <select
-      value={statusFilter}
-      onChange={(event) => onStatusFilterChange(event.target.value)}
-      className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-    >
-      <option value="all">All statuses</option>
-      {statusOptions.map((status) => (
-        <option key={status} value={status}>
-          {status}
-        </option>
-      ))}
-    </select>
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <select
+        value={inventoryTypeFilter}
+        onChange={(event) => onInventoryTypeFilterChange(event.target.value)}
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      >
+        <option value="all">Inventory Type (All)</option>
+        <option value="COMMERCIAL">Commercial</option>
+        <option value="RESIDENTIAL">Residential</option>
+      </select>
+
+      <select
+        value={furnishingFilter}
+        onChange={(event) => onFurnishingFilterChange(event.target.value)}
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      >
+        <option value="">Furnishing (All)</option>
+        <option value="UNFURNISHED">Unfurnished</option>
+        <option value="SEMI_FURNISHED">Semi Furnished</option>
+        <option value="FULLY_FURNISHED">Fully Furnished</option>
+        <option value="BARE_SHELL">Bare Shell</option>
+        <option value="WARM_SHELL">Warm Shell</option>
+        <option value="MANAGED_OFFICE">Managed Office</option>
+        <option value="COWORKING">Coworking</option>
+      </select>
+
+      <select
+        value={bhkFilter}
+        onChange={(event) => onBhkFilterChange(event.target.value)}
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      >
+        <option value="">BHK (All)</option>
+        <option value="1BHK">1 BHK</option>
+        <option value="2BHK">2 BHK</option>
+        <option value="3BHK">3 BHK</option>
+        <option value="4BHK">4 BHK</option>
+        <option value="5BHK">5 BHK</option>
+      </select>
+
+      <input
+        type="text"
+        value={budgetRangeFilter}
+        onChange={(event) => onBudgetRangeFilterChange(event.target.value)}
+        placeholder="Budget Range (min-max)"
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      />
+
+      <input
+        type="text"
+        value={areaRangeFilter}
+        onChange={(event) => onAreaRangeFilterChange(event.target.value)}
+        placeholder="Area Range (min-max)"
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      />
+
+      <input
+        type="number"
+        min="0"
+        value={cabinsFilter}
+        onChange={(event) => onCabinsFilterChange(event.target.value)}
+        placeholder="Cabins (min)"
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      />
+
+      <input
+        type="number"
+        min="0"
+        value={seatsFilter}
+        onChange={(event) => onSeatsFilterChange(event.target.value)}
+        placeholder="Seats (min)"
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      />
+
+      <input
+        type="number"
+        min="0"
+        value={floorFilter}
+        onChange={(event) => onFloorFilterChange(event.target.value)}
+        placeholder="Floor (min)"
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      />
+
+      <select
+        value={parkingFilter}
+        onChange={(event) => onParkingFilterChange(event.target.value)}
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      >
+        <option value="">Parking (All)</option>
+        <option value="true">Parking Available</option>
+        <option value="false">No Parking</option>
+      </select>
+
+      <select
+        value={pantryFilter}
+        onChange={(event) => onPantryFilterChange(event.target.value)}
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      >
+        <option value="">Pantry (All)</option>
+        <option value="true">Pantry Yes</option>
+        <option value="false">Pantry No</option>
+      </select>
+
+      <input
+        type="text"
+        value={amenitiesFilter}
+        onChange={(event) => onAmenitiesFilterChange(event.target.value)}
+        placeholder="Amenities (comma separated)"
+        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
+      />
+    </div>
   </div>
 );
 
@@ -128,6 +263,10 @@ export const PendingInventoryRequestsPanel = ({
             const detailLocation = detailSource?.location || "-";
             const detailCoordinates = formatRequestValue("siteLocation", detailSource?.siteLocation);
             const detailPrice = formatCurrency(detailSource?.price);
+            const detailDeposit =
+              String(detailSource?.type || "").trim().toUpperCase() === "RENT"
+                ? formatCurrency(detailSource?.deposit)
+                : "-";
             const detailStatus = isCreateRequest
               ? proposedData?.status || "Available"
               : currentStatus;
@@ -176,6 +315,11 @@ export const PendingInventoryRequestsPanel = ({
                       <p>
                         <span className="font-semibold text-slate-700">Price:</span> {detailPrice}
                       </p>
+                      {String(detailSource?.type || "").trim().toUpperCase() === "RENT" ? (
+                        <p>
+                          <span className="font-semibold text-slate-700">Deposit:</span> {detailDeposit}
+                        </p>
+                      ) : null}
                       <p>
                         <span className="font-semibold text-slate-700">Status:</span> {detailStatus}
                       </p>

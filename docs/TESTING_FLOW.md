@@ -12,7 +12,7 @@ Validate these critical business paths end-to-end:
 - Role-based access and hierarchy behavior
 - Leads lifecycle (create, assign, rebalance, follow-up, close)
 - Deal payment approval flow (including partial payment)
-- Inventory request and property status workflow
+- Inventory request and property status workflow]\75d q FG?
 - Admin notifications for approval-required actions
 
 ## 2. Prerequisites

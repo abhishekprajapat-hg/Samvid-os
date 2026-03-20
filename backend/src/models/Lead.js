@@ -45,6 +45,92 @@ const leadSchema = new mongoose.Schema(
       lng: { type: Number, default: null },
       radiusMeters: { type: Number, default: 200 },
     },
+    requirements: {
+      inventoryType: {
+        type: String,
+        enum: ["COMMERCIAL", "RESIDENTIAL", ""],
+        default: "",
+        trim: true,
+      },
+      transactionType: {
+        type: String,
+        enum: ["SALE", "RENT", ""],
+        default: "",
+        trim: true,
+      },
+      furnishingStatus: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+      budgetMin: {
+        type: Number,
+        min: 0,
+        default: null,
+      },
+      budgetMax: {
+        type: Number,
+        min: 0,
+        default: null,
+      },
+      areaMin: {
+        type: Number,
+        min: 0,
+        default: null,
+      },
+      areaMax: {
+        type: Number,
+        min: 0,
+        default: null,
+      },
+      areaUnit: {
+        type: String,
+        enum: ["SQ_FT", "SQ_M", ""],
+        default: "SQ_FT",
+        trim: true,
+      },
+      commercial: {
+        seats: {
+          type: Number,
+          min: 0,
+          default: null,
+        },
+        cabins: {
+          type: Number,
+          min: 0,
+          default: null,
+        },
+        parkingAvailable: {
+          type: Boolean,
+          default: false,
+        },
+        pantry: {
+          type: Boolean,
+          default: false,
+        },
+      },
+      residential: {
+        bhkType: {
+          type: String,
+          default: "",
+          trim: true,
+        },
+        floor: {
+          type: Number,
+          min: 0,
+          default: null,
+        },
+        amenities: {
+          lift: { type: Boolean, default: false },
+          security: { type: Boolean, default: false },
+          gym: { type: Boolean, default: false },
+          swimmingPool: { type: Boolean, default: false },
+          clubhouse: { type: Boolean, default: false },
+          powerBackup: { type: Boolean, default: false },
+          parking: { type: Boolean, default: false },
+        },
+      },
+    },
 
     source: {
       type: String,
