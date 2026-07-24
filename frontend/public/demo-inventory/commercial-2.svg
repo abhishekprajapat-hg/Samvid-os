@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800">
+  <rect width="1200" height="800" fill="#f1f5f9"/>
+  <rect x="0" y="560" width="1200" height="240" fill="#dbe4ee"/>
+  <rect x="165" y="130" width="870" height="470" rx="28" fill="#334155"/>
+  <rect x="215" y="180" width="770" height="360" rx="18" fill="#e2e8f0"/>
+  <g fill="#0284c7">
+    <rect x="260" y="220" width="145" height="95" rx="10"/>
+    <rect x="440" y="220" width="145" height="95" rx="10"/>
+    <rect x="620" y="220" width="145" height="95" rx="10"/>
+    <rect x="800" y="220" width="145" height="95" rx="10"/>
+    <rect x="260" y="350" width="145" height="95" rx="10"/>
+    <rect x="440" y="350" width="145" height="95" rx="10"/>
+    <rect x="620" y="350" width="145" height="95" rx="10"/>
+    <rect x="800" y="350" width="145" height="95" rx="10"/>
+  </g>
+  <rect x="515" y="470" width="170" height="130" rx="10" fill="#0f172a"/>
+  <circle cx="190" cy="620" r="45" fill="#16a34a"/>
+  <circle cx="1010" cy="620" r="45" fill="#16a34a"/>
+  <text x="70" y="92" fill="#0f172a" font-family="Arial, sans-serif" font-size="44" font-weight="700">Demo Business Hub</text>
+</svg>

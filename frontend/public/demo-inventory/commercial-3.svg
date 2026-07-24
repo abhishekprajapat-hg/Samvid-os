@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800">
+  <rect width="1200" height="800" fill="#ecfeff"/>
+  <rect y="585" width="1200" height="215" fill="#94a3b8"/>
+  <rect x="135" y="250" width="930" height="340" rx="22" fill="#0f172a"/>
+  <rect x="185" y="300" width="260" height="210" rx="14" fill="#f59e0b"/>
+  <rect x="475" y="300" width="260" height="210" rx="14" fill="#22c55e"/>
+  <rect x="765" y="300" width="250" height="210" rx="14" fill="#38bdf8"/>
+  <rect x="165" y="190" width="870" height="80" rx="10" fill="#334155"/>
+  <rect x="250" y="520" width="700" height="70" rx="8" fill="#1e293b"/>
+  <text x="70" y="120" fill="#0f172a" font-family="Arial, sans-serif" font-size="48" font-weight="700">Demo Highstreet</text>
+</svg>
