@@ -31,8 +31,8 @@ const Row = ({
 export const MoreMenuScreen = ({ navigation }: any) => {
   const { role } = useAuth();
   const { chatUnreadTotal, markAllChatRead } = useRealtimeAlerts();
-  const isAdmin = role === "ADMIN";
-  const isManagement = role === "ADMIN" || role === "MANAGER";
+  const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
+  const isManagement = isAdmin || role === "MANAGER";
   const open = (screen: string) => {
     const parent = navigation?.getParent?.();
     if (parent?.navigate) {
@@ -46,7 +46,7 @@ export const MoreMenuScreen = ({ navigation }: any) => {
     <Screen title="More" subtitle="Quick Access">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
         <AppCard style={styles.card as object}>
-          <Row label="Office Assistant" onPress={() => open("Office Assistant")} />
+          <Row label="Samvid Assistant" onPress={() => open("Samvid Assistant")} />
           {isAdmin ? (
             <Row
               label="Chat"

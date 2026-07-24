@@ -12,7 +12,7 @@ const uniqueIds = (ids = []) =>
 
 const isExecutiveRole = (role) => EXECUTIVE_ROLES.includes(role);
 
-const isAdminRole = (role) => role === USER_ROLES.ADMIN;
+const isAdminRole = (role) => role === USER_ROLES.ADMIN || role === USER_ROLES.SUPER_ADMIN;
 
 const isManagerRole = (role) => MANAGEMENT_ROLES.includes(role);
 

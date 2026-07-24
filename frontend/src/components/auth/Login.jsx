@@ -7,7 +7,7 @@ import { toErrorMessage } from "../../utils/errorMessage";
 import BrandLogo from "../common/BrandLogo";
 import ToastNotice from "../ui/ToastNotice";
 
-const Login = ({ onLogin, portal = "GENERAL" }) => {
+const Login = ({ onLogin, portal = "GENERAL", portalLabel = portal }) => {
   const [email, setEmail] = useState("");
   const [passcode, setPasscode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -44,7 +44,7 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
         res = await submitLogin("ADMIN");
       }
 
-      const { token, refreshToken, user } = res.data;
+      const { token, refreshToken, user, tenant } = res.data;
 
       localStorage.setItem("token", token);
       if (refreshToken) {
@@ -54,8 +54,13 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
       }
       localStorage.setItem("role", user.role);
       localStorage.setItem("user", JSON.stringify(user));
+      if (tenant) {
+        localStorage.setItem("tenant", JSON.stringify(tenant));
+      } else {
+        localStorage.removeItem("tenant");
+      }
 
-      onLogin(user.role);
+      onLogin(user.role, { user, tenant });
     } catch (err) {
       setError(toErrorMessage(err, "Login failed"));
     } finally {
@@ -83,7 +88,7 @@ const Login = ({ onLogin, portal = "GENERAL" }) => {
             <BrandLogo className="h-full w-full" />
           </div>
           <div className="inline-flex items-center rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-700">
-            {portal}
+            {portalLabel}
           </div>
           <h1 className="mt-3 font-display text-2xl font-semibold text-slate-950">
             Secure Workspace Login

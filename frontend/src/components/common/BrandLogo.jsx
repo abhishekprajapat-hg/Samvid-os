@@ -1,8 +1,8 @@
 import React from "react";
 
-const BrandLogo = ({ className = "", alt = "The Office On Rent logo" }) => (
+const BrandLogo = ({ className = "", alt = "Samvid OS logo" }) => (
   <img
-    src="/theofficeonrentlogo.png"
+    src="/samvid-os-logo.png"
     alt={alt}
     className={`brand-logo bg-white object-contain ${className}`.trim()}
   />

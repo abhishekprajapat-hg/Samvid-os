@@ -7,6 +7,7 @@ const {
   EXECUTIVE_ROLES,
   MANAGEMENT_ROLES,
   isManagementRole,
+  isPlatformAdminRole,
 } = require("../constants/role.constants");
 const { getDescendantExecutiveIds } = require("../services/hierarchy.service");
 
@@ -132,6 +133,7 @@ const getInventoryScopeForUser = (user) => {
 
   if (
     [
+      USER_ROLES.SUPER_ADMIN,
       USER_ROLES.ADMIN,
       ...MANAGEMENT_ROLES,
       USER_ROLES.EXECUTIVE,
@@ -158,7 +160,7 @@ const getLeadScopeForUser = async (user) => {
     ],
   };
 
-  if (user.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(user.role)) {
     return baseCompanyScope;
   }
 
@@ -654,7 +656,7 @@ const queryOverview = async ({ user }) => {
   });
 
   return {
-    answer: "Hello, I am Office Assistant. Ask me anything about best performer, lead details, asset details, sold inventory, interested leads, or company overview.",
+    answer: "Hello, I am Samvid Assistant. Ask me anything about best performer, lead details, asset details, sold inventory, interested leads, or company overview.",
     data: {
       inventoryByStatus,
       leadByStatus,

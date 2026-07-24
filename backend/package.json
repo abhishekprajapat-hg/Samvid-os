@@ -10,6 +10,7 @@
     "db:test-connection": "node src/scripts/testDbConnection.cjs",
     "start": "node src/server.js",
     "seed:admin": "node src/seeder/createAdmin.cjs",
+    "seed:super-admin": "node src/seeder/createSuperAdmin.cjs",
     "seed:companies:backfill": "node src/seeder/backfillCompanies.cjs",
     "seed:leads:backfill-company": "node src/seeder/backfillLeadCompany.cjs",
     "seed:leads": "node src/seeder/seedLeads.cjs",

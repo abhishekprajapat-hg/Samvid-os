@@ -1,4 +1,5 @@
 const USER_ROLES = Object.freeze({
+  SUPER_ADMIN: "SUPER_ADMIN",
   ADMIN: "ADMIN",
   MANAGER: "MANAGER",
   INSIDE_EXECUTIVE: "INSIDE_EXECUTIVE",
@@ -10,6 +11,11 @@ const USER_ROLES = Object.freeze({
 
 const MANAGEMENT_ROLES = Object.freeze([
   USER_ROLES.MANAGER,
+]);
+
+const PLATFORM_ADMIN_ROLES = Object.freeze([
+  USER_ROLES.SUPER_ADMIN,
+  USER_ROLES.ADMIN,
 ]);
 
 const EXECUTIVE_ROLES = Object.freeze([
@@ -37,11 +43,12 @@ const PRODUCTION_ROLES = Object.freeze([
 ]);
 
 const LEAD_MANAGEMENT_ROLES = Object.freeze([
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   ...MANAGEMENT_ROLES,
 ]);
 
 const ROLE_LABELS = Object.freeze({
+  [USER_ROLES.SUPER_ADMIN]: "Super Admin",
   [USER_ROLES.ADMIN]: "Admin",
   [USER_ROLES.MANAGER]: "Manager",
   [USER_ROLES.INSIDE_EXECUTIVE]: "Inside Executive",
@@ -52,6 +59,7 @@ const ROLE_LABELS = Object.freeze({
 });
 
 const ROLE_PARENT_RULES = Object.freeze({
+  [USER_ROLES.SUPER_ADMIN]: [],
   [USER_ROLES.ADMIN]: [],
   [USER_ROLES.MANAGER]: [USER_ROLES.ADMIN],
   [USER_ROLES.INSIDE_EXECUTIVE]: [USER_ROLES.MANAGER],
@@ -62,6 +70,7 @@ const ROLE_PARENT_RULES = Object.freeze({
 });
 
 const AUTO_PARENT_POOL_BY_ROLE = Object.freeze({
+  [USER_ROLES.ADMIN]: [USER_ROLES.SUPER_ADMIN],
   [USER_ROLES.MANAGER]: [USER_ROLES.ADMIN],
   [USER_ROLES.INSIDE_EXECUTIVE]: [USER_ROLES.MANAGER],
   [USER_ROLES.EXECUTIVE]: [USER_ROLES.MANAGER],
@@ -73,6 +82,8 @@ const AUTO_PARENT_POOL_BY_ROLE = Object.freeze({
 const DEFAULT_DESCENDANT_DEPTH = 8;
 
 const isManagementRole = (role) => MANAGEMENT_ROLES.includes(role);
+const isPlatformAdminRole = (role) => PLATFORM_ADMIN_ROLES.includes(role);
+const isSuperAdminRole = (role) => role === USER_ROLES.SUPER_ADMIN;
 const isExecutiveRole = (role) => EXECUTIVE_ROLES.includes(role);
 const isProductionRole = (role) => PRODUCTION_ROLES.includes(role);
 const isLeadManagementRole = (role) => LEAD_MANAGEMENT_ROLES.includes(role);
@@ -82,6 +93,7 @@ const getAutoParentRoles = (role) => AUTO_PARENT_POOL_BY_ROLE[role] || [];
 
 module.exports = {
   USER_ROLES,
+  PLATFORM_ADMIN_ROLES,
   MANAGEMENT_ROLES,
   EXECUTIVE_ROLES,
   LEAD_OWNER_ROLES,
@@ -94,6 +106,8 @@ module.exports = {
   AUTO_PARENT_POOL_BY_ROLE,
   DEFAULT_DESCENDANT_DEPTH,
   isManagementRole,
+  isPlatformAdminRole,
+  isSuperAdminRole,
   isExecutiveRole,
   isProductionRole,
   isLeadManagementRole,

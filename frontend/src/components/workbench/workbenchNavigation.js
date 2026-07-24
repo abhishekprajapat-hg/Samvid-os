@@ -21,7 +21,10 @@ import {
   Users,
 } from "lucide-react";
 
-const MANAGEMENT_ROLES = ["ADMIN", "MANAGER"];
+const PLATFORM_ADMIN_ROLES = ["SUPER_ADMIN"];
+const ADMIN_ROLES = ["ADMIN"];
+const MANAGEMENT_ROLES = [...ADMIN_ROLES, "MANAGER"];
+const ADMIN_TOOL_ROLES = [...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES];
 const SALES_ROLES = [...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"];
 const PRODUCTION_ROLES = ["PRODUCTION_EXECUTIVE"];
 const PARTNER_ROLES = ["CHANNEL_PARTNER"];
@@ -73,7 +76,7 @@ export const ACTIVITY_SECTIONS = [
     id: "admin",
     label: "Admin",
     icon: ShieldCheck,
-    match: ["/admin"],
+    match: ["/admin", "/super-admin"],
   },
   {
     id: "settings",
@@ -99,7 +102,7 @@ export const WORKBENCH_MENU = {
     {
       group: "Workspace",
       items: [
-        { label: "Home", path: "/dashboard", icon: Home, roles: [...SALES_ROLES, ...PRODUCTION_ROLES, ...PARTNER_ROLES] },
+        { label: "Home", path: "/dashboard", icon: Home, roles: [...PLATFORM_ADMIN_ROLES, ...SALES_ROLES, ...PRODUCTION_ROLES, ...PARTNER_ROLES] },
         { label: "Tasks", path: "/tasks", icon: CheckSquare, roles: [...SALES_ROLES, ...PRODUCTION_ROLES] },
         { label: "Attendance", path: "/attendance", icon: UserCheck, roles: [...SALES_ROLES, ...PRODUCTION_ROLES, ...PARTNER_ROLES] },
       ],
@@ -109,7 +112,7 @@ export const WORKBENCH_MENU = {
     {
       group: "Pipeline",
       items: [
-        { label: "Pipeline", path: "/leads", icon: Users, roles: ["ADMIN", "MANAGER", "CHANNEL_PARTNER"] },
+        { label: "Pipeline", path: "/leads", icon: Users, roles: [...ADMIN_ROLES, "MANAGER", "CHANNEL_PARTNER"] },
         { label: "My Leads", path: "/my-leads", icon: Briefcase, roles: ["EXECUTIVE", "FIELD_EXECUTIVE"] },
       ],
     },
@@ -119,7 +122,7 @@ export const WORKBENCH_MENU = {
       group: "Assets",
       items: [
         { label: "Inventory", path: "/inventory", icon: Building2, roles: [...SALES_ROLES, ...PARTNER_ROLES], requiresInventoryAccessForPartner: true },
-        { label: "Field Ops", path: "/map", icon: Map, roles: ["ADMIN", "MANAGER", "FIELD_EXECUTIVE"] },
+        { label: "Field Ops", path: "/map", icon: Map, roles: [...ADMIN_ROLES, "MANAGER", "FIELD_EXECUTIVE"] },
       ],
     },
   ],
@@ -127,7 +130,7 @@ export const WORKBENCH_MENU = {
     {
       group: "Money",
       items: [
-        { label: "Finance", path: "/finance", icon: PieChart, roles: ["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"] },
+        { label: "Finance", path: "/finance", icon: PieChart, roles: [...ADMIN_ROLES, "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"] },
       ],
     },
   ],
@@ -162,10 +165,11 @@ export const WORKBENCH_MENU = {
     {
       group: "Admin",
       items: [
-        { label: "Alerts", path: "/admin/notifications", icon: Bell, roles: MANAGEMENT_ROLES },
-        { label: "Access", path: "/admin/users", icon: ShieldCheck, roles: MANAGEMENT_ROLES },
-        { label: "Console", path: "/admin/console", icon: TerminalSquare, roles: ["ADMIN", "MANAGER"] },
-        { label: "Meta Ads", path: "/admin/meta-ads", icon: Megaphone, roles: ["ADMIN", "MANAGER"] },
+        { label: "Tenants", path: "/super-admin", icon: Building2, roles: PLATFORM_ADMIN_ROLES },
+        { label: "Alerts", path: "/admin/notifications", icon: Bell, roles: ADMIN_TOOL_ROLES },
+        { label: "Access", path: "/admin/users", icon: ShieldCheck, roles: ADMIN_TOOL_ROLES },
+        { label: "Console", path: "/admin/console", icon: TerminalSquare, roles: ADMIN_TOOL_ROLES },
+        { label: "Meta Ads", path: "/admin/meta-ads", icon: Megaphone, roles: ADMIN_TOOL_ROLES },
       ],
     },
   ],
@@ -173,8 +177,8 @@ export const WORKBENCH_MENU = {
     {
       group: "Account",
       items: [
-        { label: "Settings", path: "/settings", icon: Settings, roles: MANAGEMENT_ROLES },
-        { label: "Profile", path: "/profile", icon: UserCircle2, roles: [...SALES_ROLES, ...PRODUCTION_ROLES, ...PARTNER_ROLES] },
+        { label: "Settings", path: "/settings", icon: Settings, roles: ADMIN_TOOL_ROLES },
+        { label: "Profile", path: "/profile", icon: UserCircle2, roles: [...PLATFORM_ADMIN_ROLES, ...SALES_ROLES, ...PRODUCTION_ROLES, ...PARTNER_ROLES] },
       ],
     },
   ],
@@ -241,12 +245,35 @@ export const getDrawerMenuGroups = (userRole, user = {}) => {
     .filter((group) => group.items.length > 0);
 };
 
+const normalizeWorkspacePath = (pathname = "") => {
+  const path = pathname || "/";
+  const segments = path.split("/").filter(Boolean);
+  const knownFirstSegments = new Set(
+    ACTIVITY_SECTIONS.flatMap((section) =>
+      section.match.map((matchPath) => matchPath.split("/").filter(Boolean)[0]).filter(Boolean),
+    ),
+  );
+
+  if (segments.length >= 2 && knownFirstSegments.has(segments[1])) {
+    return `/${segments.slice(1).join("/")}`;
+  }
+
+  return path;
+};
+
+export const isWorkspacePathActive = (pathname, targetPath) => {
+  const normalizedPathname = normalizeWorkspacePath(pathname);
+  if (targetPath === "/") return normalizedPathname === "/";
+  return normalizedPathname === targetPath || normalizedPathname.startsWith(`${targetPath}/`);
+};
+
 export const getActiveSectionId = (pathname, userRole, user = {}) => {
+  const normalizedPathname = normalizeWorkspacePath(pathname);
   const visibleSections = getVisibleSections(userRole, user);
   const activeSection = visibleSections.find((section) =>
     section.match.some((path) => {
-      if (path === "/") return pathname === "/";
-      return pathname === path || pathname.startsWith(`${path}/`);
+      if (path === "/") return normalizedPathname === "/";
+      return normalizedPathname === path || normalizedPathname.startsWith(`${path}/`);
     }),
   );
 

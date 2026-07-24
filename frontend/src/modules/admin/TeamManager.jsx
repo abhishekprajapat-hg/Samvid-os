@@ -31,6 +31,7 @@ const ROLE_OPTIONS = [
 const MANAGEMENT_ROLES = ["MANAGER"];
 const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
 const REPORTING_PARENT_ROLES = {
+  ADMIN: ["SUPER_ADMIN"],
   MANAGER: ["ADMIN"],
   EXECUTIVE: ["MANAGER"],
   FIELD_EXECUTIVE: ["MANAGER"],
@@ -38,6 +39,7 @@ const REPORTING_PARENT_ROLES = {
   CHANNEL_PARTNER: ["MANAGER"],
 };
 const ROLE_LABELS = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   MANAGER: "Manager",
   EXECUTIVE: "Executive",
@@ -47,7 +49,8 @@ const ROLE_LABELS = {
 };
 const DEFAULT_BROKERAGE_VALUE = 50000;
 const ROLE_HIERARCHY = [
-  { role: "ADMIN", reportsTo: "Platform Owner", scope: "Global controls" },
+  { role: "SUPER_ADMIN", reportsTo: "Platform Owner", scope: "Platform controls" },
+  { role: "ADMIN", reportsTo: "Super Admin", scope: "Tenant controls" },
   { role: "MANAGER", reportsTo: "Admin", scope: "Team and portfolio controls" },
   { role: "EXECUTIVE", reportsTo: "Manager", scope: "Assigned leads" },
   { role: "FIELD_EXECUTIVE", reportsTo: "Manager", scope: "Field visits" },
@@ -93,7 +96,7 @@ const TeamManager = ({ theme = "light" }) => {
   });
 
   const currentRole = localStorage.getItem("role");
-  const isAdmin = currentRole === "ADMIN";
+  const isAdmin = currentRole === "ADMIN" || currentRole === "SUPER_ADMIN";
   const canUseAdminTools = isAdmin || currentRole === "MANAGER";
   const canViewTeamAccess = canUseAdminTools || MANAGEMENT_ROLES.includes(currentRole);
   const isDarkTheme = theme === "dark";

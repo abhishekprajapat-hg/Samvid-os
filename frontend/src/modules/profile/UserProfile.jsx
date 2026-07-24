@@ -29,6 +29,7 @@ import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
 
 const ROLE_LABELS = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   MANAGER: "Manager",
   EXECUTIVE: "Executive",
@@ -146,7 +147,7 @@ const buildDateKeysInRange = (fromDate, toDate) => {
 };
 
 const toSummaryCards = (role, summary = {}) => {
-  if (role === "ADMIN") {
+  if (role === "ADMIN" || role === "SUPER_ADMIN") {
     return [
       { key: "users", label: "Active Users", value: summary.users ?? 0, icon: Users },
       { key: "managers", label: "Managers", value: summary.managers ?? 0, icon: Briefcase },

@@ -426,7 +426,7 @@ inventorySchema.index({ companyId: 1, status: 1, updatedAt: -1 });
 inventorySchema.index({ companyId: 1, teamId: 1, updatedAt: -1 });
 // Inventory workbench filters commonly combine tenant, inventory type/status, and newest-first sorting.
 inventorySchema.index({ companyId: 1, inventoryType: 1, status: 1, updatedAt: -1 });
-// Type/city/creator filters back the inventory dashboard and The Office on Rent snapshots.
+// Type/city/creator filters back the inventory dashboard and Samvid OS snapshots.
 inventorySchema.index({ companyId: 1, type: 1, status: 1, updatedAt: -1 });
 inventorySchema.index({ companyId: 1, city: 1, status: 1, updatedAt: -1 });
 inventorySchema.index({ companyId: 1, createdBy: 1, updatedAt: -1 });

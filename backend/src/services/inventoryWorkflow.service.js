@@ -8,9 +8,11 @@ const LeadActivity = require("../models/leadActivity.model");
 const User = require("../models/User");
 const {
   USER_ROLES,
+  PLATFORM_ADMIN_ROLES,
   EXECUTIVE_ROLES,
   MANAGEMENT_ROLES,
   isManagementRole,
+  isPlatformAdminRole,
 } = require("../constants/role.constants");
 const {
   INVENTORY_STATUSES,
@@ -37,20 +39,20 @@ const DEFAULT_SITE_VISIT_RADIUS_METERS =
 const INVENTORY_REQUEST_LIST_LIMIT =
   Number.parseInt(process.env.INVENTORY_REQUEST_LIST_LIMIT, 10) || 200;
 const INVENTORY_CREATE_REQUEST_ROLES = Object.freeze([
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   ...MANAGEMENT_ROLES,
   USER_ROLES.EXECUTIVE,
   USER_ROLES.FIELD_EXECUTIVE,
   USER_ROLES.CHANNEL_PARTNER,
 ]);
 const INVENTORY_UPDATE_REQUEST_ROLES = Object.freeze([
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   ...MANAGEMENT_ROLES,
   USER_ROLES.EXECUTIVE,
   USER_ROLES.FIELD_EXECUTIVE,
 ]);
 const INVENTORY_DIRECT_MANAGE_ROLES = Object.freeze([
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   USER_ROLES.MANAGER,
 ]);
 const INVENTORY_DIRECT_CREATE_ROLES = INVENTORY_CREATE_REQUEST_ROLES;
@@ -61,7 +63,7 @@ const INVENTORY_DELETE_REQUEST_ROLES = Object.freeze([
   USER_ROLES.CHANNEL_PARTNER,
 ]);
 const INVENTORY_REVIEW_ROLES = Object.freeze([
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   ...MANAGEMENT_ROLES,
 ]);
 const INVENTORY_TYPE_OPTIONS = Object.freeze(["COMMERCIAL", "RESIDENTIAL"]);
@@ -1258,9 +1260,13 @@ const sanitizeInventoryPayload = ({
 };
 
 const getInventoryScopeQueryForUser = (user) => {
+  if (user?.role === USER_ROLES.SUPER_ADMIN) {
+    return {};
+  }
+
   if (
     [
-      USER_ROLES.ADMIN,
+      ...PLATFORM_ADMIN_ROLES,
       ...MANAGEMENT_ROLES,
       USER_ROLES.EXECUTIVE,
       USER_ROLES.FIELD_EXECUTIVE,
@@ -1692,7 +1698,7 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
 };
 
 const deleteInventoryDirect = async ({ user, inventoryId }) => {
-  if (user.role !== USER_ROLES.ADMIN) {
+  if (!isPlatformAdminRole(user.role)) {
     throw createHttpError(403, "Only ADMIN can delete inventory directly");
   }
 
@@ -2333,7 +2339,7 @@ const getMyRequests = async ({ user }) => {
 };
 
 const getInventoryActivities = async ({ user, inventoryId, limit = 100 }) => {
-  if (![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES].includes(user.role)) {
+  if (![...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES].includes(user.role)) {
     throw createHttpError(403, "Only admin/leadership roles can view activity logs");
   }
 

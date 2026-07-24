@@ -3,7 +3,7 @@ const User = require("../models/User");
 const Company = require("../models/Company");
 const generateToken = require("../utils/generateToken");
 const logger = require("../config/logger");
-const { USER_ROLES } = require("../constants/role.constants");
+const { USER_ROLES, isPlatformAdminRole } = require("../constants/role.constants");
 const {
   issueAuthTokens,
   rotateRefreshToken,
@@ -74,7 +74,7 @@ const ensureCompanyContextForLogin = async (user, companyId) => {
     .select("_id status name subdomain customDomain")
     .lean();
 
-  if (company || user.role !== USER_ROLES.ADMIN) {
+  if (company || !isPlatformAdminRole(user.role)) {
     return company;
   }
 
@@ -96,7 +96,7 @@ const ensureCompanyContextForLogin = async (user, companyId) => {
 const resolveCompanyContextForLogin = async (user) => {
   if (user.companyId) return user.companyId;
 
-  if (user.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(user.role)) {
     user.companyId = user._id;
     await user.save();
     return user.companyId;
@@ -113,7 +113,7 @@ const resolveCompanyContextForLogin = async (user) => {
     );
     if (!parent || !parent.isActive) break;
 
-    if (!parent.companyId && parent.role === USER_ROLES.ADMIN) {
+    if (!parent.companyId && isPlatformAdminRole(parent.role)) {
       parent.companyId = parent._id;
       await parent.save();
     }
@@ -181,16 +181,44 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    if (portal === "ADMIN" && user.role !== USER_ROLES.ADMIN) {
+    if (portal === "SUPER_ADMIN" && user.role !== USER_ROLES.SUPER_ADMIN) {
+      return res.status(403).json({
+        message: "Access denied. Super admin only.",
+      });
+    }
+
+    if (portal === "ADMIN" && user.role === USER_ROLES.SUPER_ADMIN) {
+      return res.status(403).json({
+        message: "Super admin must login via super admin portal.",
+      });
+    }
+
+    if (portal === "ADMIN" && !isPlatformAdminRole(user.role)) {
       return res.status(403).json({
         message: "Access denied. Admin only.",
       });
     }
 
-    if (portal === "GENERAL" && user.role === USER_ROLES.ADMIN) {
+    if (portal !== "SUPER_ADMIN" && user.role === USER_ROLES.SUPER_ADMIN) {
+      return res.status(403).json({
+        message: "Super admin must login via super admin portal.",
+      });
+    }
+
+    if (portal === "GENERAL" && isPlatformAdminRole(user.role)) {
       return res.status(403).json({
         message: "Admin must login via admin portal.",
       });
+    }
+
+    if (user.role === USER_ROLES.SUPER_ADMIN) {
+      const tokenBundle = await issueAuthTokens({
+        user,
+        ip: resolveClientIp(req),
+        userAgent: req.headers["user-agent"] || "",
+      });
+
+      return res.json(toAuthResponse({ user, tokenBundle, tenant: null }));
     }
 
     let resolvedTenant = req.tenant || null;

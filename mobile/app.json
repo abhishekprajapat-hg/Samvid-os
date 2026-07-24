@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "the-office-on-rent",
-    "slug": "the-office-on-rent",
-    "scheme": "theofficeonrent",
+    "name": "samvid-os",
+    "slug": "samvid-os",
+    "scheme": "samvidos",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -34,7 +34,7 @@
       "edgeToEdgeEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
       "predictiveBackGestureEnabled": false,
-      "package": "com.theofficeonrent.crm"
+      "package": "com.samvidos.crm"
     },
     "plugins": [
       "@react-native-community/datetimepicker",

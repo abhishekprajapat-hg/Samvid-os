@@ -87,6 +87,7 @@ const NAV_ITEMS = [
 ];
 
 const ROLE_LABELS = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   MANAGER: "Manager",
   EXECUTIVE: "Executive",
@@ -175,7 +176,7 @@ const SUBSCRIPTION_METRICS = {
   PENDING_INVENTORY_APPROVALS: "PENDING_INVENTORY_APPROVALS",
 };
 
-const MUTATION_ALLOWED_ROLES = new Set(["ADMIN"]);
+const MUTATION_ALLOWED_ROLES = new Set(["SUPER_ADMIN", "ADMIN"]);
 const EXPORT_ALLOWED_ROLES = new Set(["ADMIN", "MANAGER"]);
 
 const PERFORMANCE_INTENT_TERMS = [

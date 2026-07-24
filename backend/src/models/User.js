@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const { USER_ROLES, EXECUTIVE_ROLES } = require("../constants/role.constants");
+const { USER_ROLES, EXECUTIVE_ROLES, isPlatformAdminRole } = require("../constants/role.constants");
 
 const brokerageConfigSchema = new mongoose.Schema(
   {
@@ -64,7 +64,9 @@ const userSchema = new mongoose.Schema(
 
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
-      required: true,
+      required() {
+        return this.role !== USER_ROLES.SUPER_ADMIN;
+      },
       default: null,
       index: true,
       ref: "Company",
@@ -142,7 +144,7 @@ userSchema.methods.matchPassword = async function (enteredPassword) {
 };
 
 userSchema.methods.isAdmin = function () {
-  return this.role === USER_ROLES.ADMIN;
+  return isPlatformAdminRole(this.role);
 };
 
 userSchema.methods.isManager = function () {

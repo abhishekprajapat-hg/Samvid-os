@@ -8,7 +8,7 @@ const sections = [
   {
     title: "Scope",
     body:
-      "This Privacy Policy explains how The Office on Rent collects, uses, stores, and protects your information when you use our platform, including authentication and integrations with Google services.",
+      "This Privacy Policy explains how Samvid OS collects, uses, stores, and protects your information when you use our platform, including authentication and integrations with Google services.",
   },
   {
     title: "Data We Collect",

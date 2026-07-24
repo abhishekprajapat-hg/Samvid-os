@@ -229,21 +229,6 @@ const getLeadBroker = (lead = {}) => {
   return creatorRole === "CHANNEL_PARTNER" ? lead.createdBy : null;
 };
 
-const getLeadBrokerLabel = (lead = {}) => {
-  const broker = getLeadBroker(lead);
-  if (!broker) {
-    return {
-      name: "Direct",
-      detail: "No broker mapped",
-    };
-  }
-
-  return {
-    name: broker.name || "Channel Partner",
-    detail: broker.partnerCode || formatBrokerageRule(broker.brokerageConfig),
-  };
-};
-
 const getBrokerageAmountsForSaleEntry = (entry, brokerageConfig) => {
   const totalAmount = Number(entry?.totalAmount || 0);
   const pendingAmount = Math.max(0, Number(entry?.remainingAmount || 0));

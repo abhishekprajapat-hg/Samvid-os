@@ -6,6 +6,7 @@ import {
   getActiveSectionId,
   getDrawerMenuGroups,
   getVisibleMenuGroups,
+  isWorkspacePathActive,
 } from "./workbenchNavigation";
 
 const PrimarySidebar = ({
@@ -50,6 +51,7 @@ const PrimarySidebar = ({
             {group.items.map((item) => {
               const Icon = item.icon;
               const showChatAlert = item.path === "/chat" && unreadChats > 0;
+              const isItemActive = isWorkspacePathActive(location.pathname, item.path);
               return (
                 <NavLink
                   key={item.path}
@@ -60,7 +62,7 @@ const PrimarySidebar = ({
                       "group flex h-10 items-center gap-2 rounded-xl border px-2 text-sm font-semibold outline-none transition",
                       "focus-visible:ring-2 focus-visible:ring-blue-500/40",
                       isCollapsed && "md:justify-center md:px-0",
-                      isActive
+                      isActive || isItemActive
                         ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200"
                         : "border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:bg-slate-900 dark:hover:text-slate-100",
                     )
@@ -83,7 +85,7 @@ const PrimarySidebar = ({
         </div>
       ))}
     </nav>
-  ), [onMobileClose]);
+  ), [location.pathname, onMobileClose, unreadChats]);
 
   const sidebar = useCallback((groups, { mobile = false } = {}) => (
     <aside
@@ -96,7 +98,7 @@ const PrimarySidebar = ({
       <div className="flex h-14 items-center justify-between gap-2 border-b border-slate-100 px-3 dark:border-slate-800">
         <div className={cn("min-w-0 flex-1", !mobile && collapsed && "md:hidden")}>
           <p className="truncate text-[11px] font-extrabold uppercase tracking-[0.08em] text-[#009FA8]">
-            The Office On Rent
+            Samvid OS
           </p>
           <p className="truncate text-xs font-semibold text-slate-500 dark:text-slate-400">
             CRM Workbench

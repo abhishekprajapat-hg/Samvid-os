@@ -265,7 +265,7 @@ const WebDateInput = ({
 export const PerformanceScreen = () => {
   const navigation = useNavigation<any>();
   const { role, user } = useAuth();
-  const isAdmin = role === "ADMIN";
+  const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
   const loggedInUserId = String(user?._id || user?.id || "");
 
   const [loading, setLoading] = useState(true);

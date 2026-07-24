@@ -224,7 +224,7 @@ const ClientListing = () => {
         </section>
 
         <footer className="ui-soft-panel mt-1 flex flex-col gap-3 rounded-2xl px-4 py-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <p>The Office on Rent Legal Center</p>
+          <p>Samvid OS Legal Center</p>
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate("/privacy-policy")}

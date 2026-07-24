@@ -79,7 +79,7 @@ export const SystemSettingsScreen = () => {
     );
   }
 
-  const canAccessSettings = role === "ADMIN" || role === "MANAGER";
+  const canAccessSettings = role === "SUPER_ADMIN" || role === "ADMIN" || role === "MANAGER";
 
   if (!canAccessSettings) {
     return (

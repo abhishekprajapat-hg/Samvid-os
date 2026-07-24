@@ -11,10 +11,12 @@ const {
 } = require("../services/leadAssignment.service");
 const {
   USER_ROLES,
+  PLATFORM_ADMIN_ROLES,
   EXECUTIVE_ROLES,
   MANUAL_LEAD_TRANSFER_TARGET_ROLES,
   MANAGEMENT_ROLES,
   isManagementRole,
+  isPlatformAdminRole,
 } = require("../constants/role.constants");
 const {
   FURNISHING_OPTIONS,
@@ -220,7 +222,7 @@ const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTI
 const LEAD_REQUIREMENT_TRANSACTION_TYPES = Object.freeze(["SALE", "LEASE", "RENT"]);
 const LEAD_REQUIREMENT_AREA_UNITS = Object.freeze(["SQ_FT", "SQ_M"]);
 const CRM_ASSIGNABLE_ROLES = Object.freeze([
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   ...MANAGEMENT_ROLES,
   USER_ROLES.INSIDE_EXECUTIVE,
   USER_ROLES.EXECUTIVE,
@@ -1330,7 +1332,7 @@ const emitAdminManagerRequestEvent = ({
   const resolvedCompanyId = String(companyId || "").trim();
   if (!io || !resolvedCompanyId || !eventName || !payload) return;
 
-  [USER_ROLES.ADMIN, USER_ROLES.MANAGER].forEach((role) => {
+  [...PLATFORM_ADMIN_ROLES, USER_ROLES.MANAGER].forEach((role) => {
     const roleRoom = `company:${resolvedCompanyId}:role:${role}`;
     io.to(roleRoom).emit(eventName, payload);
     io.to(roleRoom).emit("admin:request:new", payload);
@@ -1501,10 +1503,14 @@ const getLeadViewById = async (leadId, companyId = null) => {
 
 const getExecutiveIdsForLeader = async (user) => getDescendantExecutiveIds({
   rootUserId: user?._id,
-  companyId: user?.companyId || null,
+  companyId: user?.role === USER_ROLES.SUPER_ADMIN ? null : user?.companyId || null,
 });
 
 const resolveLeadCompanyScope = (user) => {
+  if (user?.role === USER_ROLES.SUPER_ADMIN) {
+    return {};
+  }
+
   const companyId = toObjectIdString(user?.companyId);
   if (!isValidObjectId(companyId)) {
     return null;
@@ -1519,7 +1525,7 @@ const buildLeadQueryForUser = async (user) => {
     return null;
   }
 
-  if (user.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(user.role)) {
     return companyScope;
   }
 
@@ -1696,7 +1702,7 @@ const buildCompanyPerformanceOverview = ({
   const leaderboardRows = new Map();
   users.forEach((user) => {
     const role = String(user?.role || "").toUpperCase();
-    if (role === USER_ROLES.ADMIN) return;
+    if (isPlatformAdminRole(role)) return;
     const id = String(user?._id || "");
     if (!id) return;
     leaderboardRows.set(id, {
@@ -2202,7 +2208,7 @@ const toLeadStatusRequestDealPayment = (saleMeta = {}) => {
 
 exports.bulkUploadLeads = async (req, res) => {
   try {
-    if (![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES, ...EXECUTIVE_ROLES].includes(req.user?.role)) {
+    if (![...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES, ...EXECUTIVE_ROLES].includes(req.user?.role)) {
       return res.status(403).json({ message: "Only ADMIN, MANAGER, or EXECUTIVE can bulk upload leads" });
     }
 
@@ -3125,7 +3131,7 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
 
 exports.getLeadPaymentRequests = async (req, res) => {
   try {
-    if (![USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(req.user.role)) {
+    if (![...PLATFORM_ADMIN_ROLES, USER_ROLES.MANAGER].includes(req.user.role)) {
       return res.status(403).json({
         message: "Only admin or manager users can view payment requests",
       });
@@ -3478,7 +3484,7 @@ exports.updateLeadStatus = async (req, res) => {
     }
 
     const dealPaymentPayload = parsedDealPayment.value || {};
-    const isAdminUser = [USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(req.user.role);
+    const isAdminUser = [...PLATFORM_ADMIN_ROLES, USER_ROLES.MANAGER].includes(req.user.role);
     const isExecutiveUser = EXECUTIVE_ROLES.includes(req.user.role);
     const isNonAdminCloseIntent =
       !isAdminUser && requestedStatus === CLOSED_STATUS;
@@ -3529,7 +3535,7 @@ exports.updateLeadStatus = async (req, res) => {
 
     if (
       parsedSiteLocation.provided
-      && ![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES].includes(req.user.role)
+      && ![...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES].includes(req.user.role)
     ) {
       return res.status(403).json({
         message: "Only admin or leadership roles can configure site coordinates",
@@ -4194,7 +4200,7 @@ exports.getLeadStatusRequests = async (req, res) => {
       query.status = requestedStatus;
     }
 
-    const isAdmin = req.user.role === USER_ROLES.ADMIN;
+    const isAdmin = req.isPlatformAdminRole(user.role);
     if (!isAdmin && !isManagementRole(req.user.role)) {
       query.requestedBy = req.user._id;
     }

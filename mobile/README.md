@@ -1,6 +1,6 @@
-# The Office on Rent Mobile (React Native)
+# Samvid OS Mobile (React Native)
 
-This folder contains the mobile app conversion of the The Office on Rent web frontend using the same backend APIs and business logic.
+This folder contains the mobile app conversion of the Samvid OS web frontend using the same backend APIs and business logic.
 
 ## What is reused from web app
 - Same API endpoints (`/auth`, `/leads`, `/inventory`, `/users`, `/chat`)

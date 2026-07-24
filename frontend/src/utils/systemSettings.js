@@ -1,5 +1,5 @@
 export const SYSTEM_SETTINGS_STORAGE_KEY = "officeOnRent.system.settings.v1";
-export const SYSTEM_SETTINGS_UPDATED_EVENT = "office-on-rent:system-settings-updated";
+export const SYSTEM_SETTINGS_UPDATED_EVENT = "samvid-os:system-settings-updated";
 
 export const DEFAULT_SYSTEM_SETTINGS = {
   appearance: {

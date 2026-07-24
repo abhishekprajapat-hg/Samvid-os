@@ -6,7 +6,9 @@ const User = require("../models/User");
 const logger = require("../config/logger");
 const {
   USER_ROLES,
+  PLATFORM_ADMIN_ROLES,
   MANAGEMENT_ROLES,
+  isPlatformAdminRole,
 } = require("../constants/role.constants");
 const { getDescendantUsers } = require("../services/hierarchy.service");
 const {
@@ -72,7 +74,7 @@ const DEFAULT_POLICY = Object.freeze({
 });
 
 const ADMIN_ATTENDANCE_VIEW_ROLES = new Set([
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   ...MANAGEMENT_ROLES,
 ]);
 
@@ -733,7 +735,7 @@ const toRegularizationView = (row) => ({
 const getScopedUsersForAttendanceViewer = async (viewer) => {
   if (!viewer?.companyId) return [];
 
-  if (viewer.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(viewer.role)) {
     return User.find({
       companyId: viewer.companyId,
       isActive: true,
@@ -824,7 +826,7 @@ const ensureManageAttendanceRole = (req, res) => {
 };
 
 const ensurePersonalAttendanceRole = (req, res) => {
-  if (req.user?.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(req.user?.role)) {
     res.status(403).json({
       message: "Admin users audit attendance and cannot mark personal attendance",
     });
@@ -835,7 +837,7 @@ const ensurePersonalAttendanceRole = (req, res) => {
 
 const ensureUserInScope = async ({ actor, targetUserId }) => {
   if (!actor?.companyId || !targetUserId) return false;
-  if (actor.role === USER_ROLES.ADMIN) return true;
+  if (isPlatformAdminRole(actor.role)) return true;
   if (!MANAGEMENT_ROLES.includes(actor.role)) return false;
   const descendants = await getDescendantUsers({
     rootUserId: actor._id,
@@ -1269,7 +1271,7 @@ exports.getMyLeaveBalance = async (req, res) => {
     if (!req.user?.companyId) {
       return res.status(403).json({ message: "Company context is required" });
     }
-    if (req.user?.role === USER_ROLES.ADMIN) {
+    if (isPlatformAdminRole(req.user?.role)) {
       return res.status(403).json({ message: "Admin users do not have employee leave balance" });
     }
 
@@ -1290,7 +1292,7 @@ exports.getMyLeaveBalance = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (user.role === USER_ROLES.ADMIN) {
+    if (isPlatformAdminRole(user.role)) {
       return res.status(403).json({ message: "Admin users do not have employee leave balance" });
     }
 
@@ -2123,7 +2125,7 @@ exports.updateUserAttendanceStatus = async (req, res) => {
     if (!targetUser) {
       return res.status(404).json({ message: "User not found" });
     }
-    if (targetUser.role === USER_ROLES.ADMIN) {
+    if (isPlatformAdminRole(targetUser.role)) {
       return res.status(403).json({ message: "Admin attendance cannot be marked manually" });
     }
 

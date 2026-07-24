@@ -105,8 +105,8 @@ export const InventoryDetailsScreen = () => {
   const assetId = derivedRouteAssetId;
   const { role } = useAuth();
   const normalizedRole = String(role || "").toUpperCase();
-  const isAdmin = normalizedRole === "ADMIN";
-  const canManage = ["ADMIN", "MANAGER", "CHANNEL_PARTNER"].includes(normalizedRole);
+  const isAdmin = normalizedRole === "ADMIN" || normalizedRole === "SUPER_ADMIN";
+  const canManage = ["SUPER_ADMIN", "ADMIN", "MANAGER", "CHANNEL_PARTNER"].includes(normalizedRole);
   const canRequestStatusChange = ["FIELD_EXECUTIVE", "EXECUTIVE"].includes(normalizedRole);
   const canEditAsset = canManage || canRequestStatusChange;
 

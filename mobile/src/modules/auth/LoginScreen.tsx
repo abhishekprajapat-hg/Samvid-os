@@ -11,7 +11,7 @@ type LegalDoc = "TERMS" | "PRIVACY" | null;
 const TERMS_SECTIONS = [
   {
     heading: "ACCEPTANCE OF TERMS",
-    body: "By accessing or using The Office on Rent, you agree to these Terms and Conditions. If you do not agree, do not use the platform.",
+    body: "By accessing or using Samvid OS, you agree to these Terms and Conditions. If you do not agree, do not use the platform.",
   },
   {
     heading: "ELIGIBILITY AND ACCOUNTS",
@@ -19,7 +19,7 @@ const TERMS_SECTIONS = [
   },
   {
     heading: "GOOGLE AUTHENTICATION AND INTEGRATION",
-    body: "When Google Sign-In or Google APIs are used, you authorize The Office on Rent to access approved Google account data and API scopes needed for product functions.",
+    body: "When Google Sign-In or Google APIs are used, you authorize Samvid OS to access approved Google account data and API scopes needed for product functions.",
   },
   {
     heading: "GOOGLE POLICY COMPLIANCE",
@@ -43,7 +43,7 @@ const TERMS_SECTIONS = [
   },
   {
     heading: "DISCLAIMER AND LIABILITY",
-    body: "The service is provided on an as-is available basis. To the maximum extent permitted by law, The Office on Rent disclaims implied warranties and limits liability for indirect or consequential damages.",
+    body: "The service is provided on an as-is available basis. To the maximum extent permitted by law, Samvid OS disclaims implied warranties and limits liability for indirect or consequential damages.",
   },
   {
     heading: "TERMINATION",
@@ -58,7 +58,7 @@ const TERMS_SECTIONS = [
 const PRIVACY_SECTIONS = [
   {
     heading: "SCOPE",
-    body: "This Privacy Policy explains how The Office on Rent collects, uses, stores, and protects your information when you use our platform, including authentication and integrations with Google services.",
+    body: "This Privacy Policy explains how Samvid OS collects, uses, stores, and protects your information when you use our platform, including authentication and integrations with Google services.",
   },
   {
     heading: "DATA WE COLLECT",

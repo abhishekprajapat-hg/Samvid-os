@@ -26,6 +26,7 @@ const clearSession = () => {
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("role");
   localStorage.removeItem("user");
+  localStorage.removeItem("tenant");
 };
 
 const buildGetCacheKey = (url, config = {}) => {
@@ -49,13 +50,37 @@ const clearGetCache = () => {
 };
 
 const redirectToLogin = () => {
-  window.location.href = "/login";
+  const path = window.location?.pathname || "";
+  const segments = path.split("/").filter(Boolean);
+  const tenantRouteSegments = new Set([
+    "dashboard",
+    "login",
+    "leads",
+    "my-leads",
+    "inventory",
+    "finance",
+    "map",
+    "reports",
+    "leaderboard",
+    "calendar",
+    "tasks",
+    "attendance",
+    "admin",
+    "settings",
+    "targets",
+    "chat",
+    "profile",
+  ]);
+  window.location.href = segments.length >= 2 && tenantRouteSegments.has(segments[1])
+    ? `/${segments[0]}/login`
+    : "/login";
 };
 
 const persistAuthPayload = (payload = {}) => {
   const accessToken = payload.token || payload.accessToken || "";
   const refreshToken = payload.refreshToken || "";
   const user = payload.user || null;
+  const tenant = payload.tenant || null;
 
   if (accessToken) {
     localStorage.setItem("token", accessToken);
@@ -71,6 +96,10 @@ const persistAuthPayload = (payload = {}) => {
 
   if (user) {
     localStorage.setItem("user", JSON.stringify(user));
+  }
+
+  if (tenant) {
+    localStorage.setItem("tenant", JSON.stringify(tenant));
   }
 
   return accessToken;

@@ -22,6 +22,7 @@ const ROLE_OPTIONS = [
 ];
 
 const REPORTING_PARENT_ROLES = {
+  ADMIN: ["SUPER_ADMIN"],
   MANAGER: ["ADMIN"],
   EXECUTIVE: ["MANAGER"],
   FIELD_EXECUTIVE: ["MANAGER"],
@@ -30,6 +31,7 @@ const REPORTING_PARENT_ROLES = {
 };
 
 const ROLE_LABELS = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   MANAGER: "Manager",
   EXECUTIVE: "Executive",
@@ -192,27 +194,6 @@ const normalizeBrokerageFormState = (config = null) => {
     brokerageValue: Number.isFinite(parsedValue) ? String(parsedValue) : String(fallbackValue),
     brokerageNotes: String(config?.notes || ""),
   };
-};
-
-const formatCurrency = (value) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(Number(value) || 0);
-
-const formatBrokerageSummary = (config = null) => {
-  const normalized = normalizeBrokerageFormState(config);
-  const rawValue = Number(normalized.brokerageValue);
-  const value = Number.isFinite(rawValue)
-    ? rawValue
-    : normalized.brokerageMode === "PERCENTAGE"
-      ? DEFAULT_BROKERAGE_PERCENTAGE
-      : DEFAULT_BROKERAGE_VALUE;
-
-  return normalized.brokerageMode === "PERCENTAGE"
-    ? `${value}% of sell value`
-    : `${formatCurrency(value)} per closed deal`;
 };
 
 const UserDetailsEditor = ({ theme = "light" }) => {

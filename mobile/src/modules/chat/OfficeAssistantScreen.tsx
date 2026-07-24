@@ -26,7 +26,7 @@ export const OfficeAssistantScreen = () => {
     {
       id: uid(),
       role: "bot",
-      text: "Hello, I am Office Assistant. How can I help you.",
+      text: "Hello, I am Samvid Assistant. How can I help you.",
     },
   ]);
 
@@ -122,7 +122,7 @@ export const OfficeAssistantScreen = () => {
         },
       ]);
     } catch (e) {
-      const message = toErrorMessage(e, "Office Assistant failed to respond");
+      const message = toErrorMessage(e, "Samvid Assistant failed to respond");
       setError(message);
       setMessages((prev) => [
         ...prev,
@@ -170,7 +170,7 @@ export const OfficeAssistantScreen = () => {
   };
 
   return (
-    <Screen title="Office Assistant" subtitle="Ask Inventory, Leads, Performance" error={error}>
+    <Screen title="Samvid Assistant" subtitle="Ask Inventory, Leads, Performance" error={error}>
       <AppCard style={styles.card as object}>
         <ScrollView
           ref={(instance) => {
@@ -197,7 +197,7 @@ export const OfficeAssistantScreen = () => {
               <AppInput
                 value={input}
                 onChangeText={setInput}
-                placeholder="Ask Office Assistant..."
+                placeholder="Ask Samvid Assistant..."
                 style={styles.chatInput as object}
               />
             </View>

@@ -2,7 +2,7 @@ const jwt = require("jsonwebtoken");
 const mongoose = require("mongoose");
 const User = require("../models/User");
 const Company = require("../models/Company");
-const { USER_ROLES } = require("../constants/role.constants");
+const { USER_ROLES, isPlatformAdminRole } = require("../constants/role.constants");
 const { createTtlCache } = require("../utils/ttlCache");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
@@ -25,7 +25,7 @@ const getCachedCompanyStatus = async (companyId) => {
 const resolveCompanyContext = async (user) => {
   if (user.companyId) return user.companyId;
 
-  if (user.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(user.role)) {
     user.companyId = user._id;
     await user.save();
     return user.companyId;
@@ -43,7 +43,7 @@ const resolveCompanyContext = async (user) => {
 
     if (!parent || !parent.isActive) break;
 
-    if (!parent.companyId && parent.role === USER_ROLES.ADMIN) {
+    if (!parent.companyId && isPlatformAdminRole(parent.role)) {
       parent.companyId = parent._id;
       await parent.save();
     }
@@ -85,6 +85,11 @@ exports.protect = async (req, res, next) => {
       });
     }
 
+    if (user.role === USER_ROLES.SUPER_ADMIN) {
+      req.user = user;
+      return next();
+    }
+
     const companyId = user.companyId || (await resolveCompanyContext(user));
     if (!companyId) {
       return res.status(403).json({
@@ -111,6 +116,10 @@ exports.protect = async (req, res, next) => {
 exports.checkRole = (roles) => (req, res, next) => {
   const userRole = String(req.user?.role || "").trim().toUpperCase();
   const allowedRoles = roles.map((role) => String(role || "").trim().toUpperCase());
+
+  if (userRole === USER_ROLES.SUPER_ADMIN) {
+    return next();
+  }
 
   if (!allowedRoles.includes(userRole)) {
     return res.status(403).json({ message: "Access denied" });

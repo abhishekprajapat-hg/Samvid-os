@@ -2,16 +2,16 @@ const mongoose = require("mongoose");
 const Task = require("../models/Task");
 const User = require("../models/User");
 const Lead = require("../models/Lead");
-const { USER_ROLES } = require("../constants/role.constants");
+const { USER_ROLES, isPlatformAdminRole } = require("../constants/role.constants");
 
 const isProductionExecutive = (user) => user?.role === USER_ROLES.PRODUCTION_EXECUTIVE;
 
 // Helper to check access permissions
 const checkTaskAccess = (task, user) => {
-  if (String(task.companyId) !== String(user.companyId)) return false;
+  if (user.role !== USER_ROLES.SUPER_ADMIN && String(task.companyId) !== String(user.companyId)) return false;
   
   // Admin and Managers can access all company tasks
-  if (user.role === USER_ROLES.ADMIN || 
+  if (isPlatformAdminRole(user.role) ||
       user.role === USER_ROLES.MANAGER) {
     return true;
   }
@@ -100,10 +100,10 @@ exports.getTasks = async (req, res) => {
     const companyId = req.user.companyId;
     const { status, priority, leadId, assignedTo, search, dueDateStart, dueDateEnd, tag } = req.query;
 
-    const query = { companyId };
+    const query = req.user.role === USER_ROLES.SUPER_ADMIN ? {} : { companyId };
 
     // Role-based restrictions
-    if (req.user.role !== USER_ROLES.ADMIN && 
+    if (!isPlatformAdminRole(req.user.role) && 
         req.user.role !== USER_ROLES.MANAGER) {
       // Executives can only see their own tasks (assigned to or created by)
       query.$or = [
@@ -307,7 +307,7 @@ exports.deleteTask = async (req, res) => {
 
     // Access check: Admin or creator can delete
     const isCreator = String(task.createdBy) === String(req.user._id);
-    const isAdmin = req.user.role === USER_ROLES.ADMIN;
+    const isAdmin = isPlatformAdminRole(req.user.role);
 
     if (!isAdmin && !isCreator) {
       return res.status(403).json({ message: "Access denied. Only the creator or an Admin can delete this task" });
@@ -343,7 +343,7 @@ exports.getTaskStats = async (req, res) => {
     const query = { companyId };
 
     // Apply role filter (Executives only see their tasks)
-    if (req.user.role !== USER_ROLES.ADMIN && 
+    if (!isPlatformAdminRole(req.user.role) && 
         req.user.role !== USER_ROLES.MANAGER) {
       query.$or = [
         { assignedTo: req.user._id },

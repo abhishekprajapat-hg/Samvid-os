@@ -1,11 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="The Office On Rent">
-  <rect width="128" height="128" rx="18" fill="#000000"/>
-  <rect x="17" y="27" width="94" height="62" rx="3" fill="#ffffff"/>
-  <path d="M30 43 L61 34 L62 64 L39 69 C31 81 30 93 38 111 C28 87 26 61 30 43Z" fill="#f5a900"/>
-  <path d="M38 51 L75 42 L71 68 L44 76 C36 87 35 99 38 111 C30 89 32 67 38 51Z" fill="#71bf25"/>
-  <path d="M45 59 L83 50 L78 73 L50 81 C41 91 39 102 38 111 C34 90 37 73 45 59Z" fill="#0498a8"/>
-  <path d="M78 51 L90 50 L84 73 L77 75 Z" fill="#4f2a81"/>
-  <path d="M89 53 L99 50 L92 68 L84 73 Z" fill="#b00691"/>
-  <rect x="48" y="80" width="64" height="20" fill="#000000"/>
-  <text x="58" y="97" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="22" font-weight="900" fill="#079aa8">R</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Samvid OS">
+  <defs>
+    <linearGradient id="mark" x1="16" y1="16" x2="112" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.52" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#d946ef"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#020617"/>
+  <circle cx="64" cy="64" r="38" fill="none" stroke="url(#mark)" stroke-width="10"/>
+  <path d="M38 66c15-25 42-28 54-5" fill="none" stroke="#67e8f9" stroke-width="8" stroke-linecap="round"/>
+  <path d="M90 62c-15 25-42 28-54 5" fill="none" stroke="#f0abfc" stroke-width="8" stroke-linecap="round"/>
+  <circle cx="38" cy="66" r="5.5" fill="#22d3ee"/>
+  <circle cx="90" cy="62" r="5.5" fill="#d946ef"/>
 </svg>

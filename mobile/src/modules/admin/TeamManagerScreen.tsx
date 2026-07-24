@@ -64,6 +64,7 @@ const EDIT_ROLE_OPTIONS = [
 const EXECUTIVE_ROLES = new Set(["EXECUTIVE", "FIELD_EXECUTIVE"]);
 const MANAGEMENT_ROLES = new Set(["MANAGER"]);
 const REPORTING_PARENT_ROLES: Record<string, string[]> = {
+  ADMIN: ["SUPER_ADMIN"],
   MANAGER: ["ADMIN"],
   EXECUTIVE: ["MANAGER"],
   FIELD_EXECUTIVE: ["MANAGER"],
@@ -79,7 +80,7 @@ export const TeamManagerScreen = () => {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { role, user } = useAuth();
-  const isAdmin = role === "ADMIN";
+  const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
   const canManageUsers = isAdmin || MANAGEMENT_ROLES.has(String(role || ""));
 
   const [loading, setLoading] = useState(true);

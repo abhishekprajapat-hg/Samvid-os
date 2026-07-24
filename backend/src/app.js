@@ -77,7 +77,7 @@ app.use(express.urlencoded({ extended: false, limit: urlencodedBodyLimit }));
 app.use(resolveTenantContext);
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "the-office-on-rent-backend", timestamp: new Date().toISOString() });
+  res.json({ ok: true, service: "samvid-os-backend", timestamp: new Date().toISOString() });
 });
 
 app.get("/api/metrics", async (req, res) => {

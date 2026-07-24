@@ -92,7 +92,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
     tabBarInactiveTintColor: "#64748b",
   };
 
-  if (role === "ADMIN") {
+  if (role === "SUPER_ADMIN" || role === "ADMIN") {
     return (
       <Tab.Navigator
         screenOptions={({ route }) => ({
@@ -250,9 +250,9 @@ export const RoleTabs = ({ role }: { role: UserRole }) => (
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="Office Assistant"
+        name="Samvid Assistant"
         component={OfficeAssistantScreen}
-        options={{ title: "Office Assistant" }}
+        options={{ title: "Samvid Assistant" }}
       />
       <Stack.Screen
         name="CallScreen"

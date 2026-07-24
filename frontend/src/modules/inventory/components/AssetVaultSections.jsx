@@ -1,7 +1,7 @@
 import React from "react";
 import { Filter, LayoutGrid, Plus, Search, Table2 } from "lucide-react";
 
-export const AssetVaultToolbar = ({ modeType, onModeChange, canOpenCreateModal, canManage, onOpenAddModal }) => (
+export const AssetVaultToolbar = ({ modeType, onModeChange, canOpenCreateModal, onOpenAddModal }) => (
   <div className="flex flex-col items-start gap-4 z-10 xl:flex-row xl:items-end xl:justify-end">
     <div className="flex flex-wrap gap-3 sm:gap-4 items-center">
       <div className="bg-slate-200 p-1 rounded-full flex gap-1">

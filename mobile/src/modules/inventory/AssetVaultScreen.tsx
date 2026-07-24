@@ -133,9 +133,9 @@ export const AssetVaultScreen = () => {
   const route = useRoute<any>();
   const { role } = useAuth();
   const normalizedRole = String(role || "").toUpperCase();
-  const isAdmin = normalizedRole === "ADMIN";
-  const canManage = ["ADMIN", "MANAGER", "CHANNEL_PARTNER"].includes(normalizedRole);
-  const canCreateInventory = ["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"].includes(normalizedRole);
+  const isAdmin = normalizedRole === "ADMIN" || normalizedRole === "SUPER_ADMIN";
+  const canManage = ["SUPER_ADMIN", "ADMIN", "MANAGER", "CHANNEL_PARTNER"].includes(normalizedRole);
+  const canCreateInventory = ["SUPER_ADMIN", "ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"].includes(normalizedRole);
   const canRequestStatusChange = ["FIELD_EXECUTIVE", "EXECUTIVE"].includes(normalizedRole);
   const canDirectInventoryEdit = canManage;
   const canEditInventory = canManage || canRequestStatusChange;

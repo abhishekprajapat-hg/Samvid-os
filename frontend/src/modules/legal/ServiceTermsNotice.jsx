@@ -8,7 +8,7 @@ const terms = [
   {
     title: "Acceptance Of Terms",
     body:
-      "By accessing or using The Office on Rent, you agree to these Terms and Conditions. If you do not agree, do not use the platform.",
+      "By accessing or using Samvid OS, you agree to these Terms and Conditions. If you do not agree, do not use the platform.",
   },
   {
     title: "Eligibility And Accounts",
@@ -18,7 +18,7 @@ const terms = [
   {
     title: "Google Authentication And Integrations",
     body:
-      "When Google Sign-In or Google APIs are used, you authorize The Office on Rent to access approved Google account data and API scopes needed for product functions.",
+      "When Google Sign-In or Google APIs are used, you authorize Samvid OS to access approved Google account data and API scopes needed for product functions.",
   },
   {
     title: "Google Policy Compliance",
@@ -48,7 +48,7 @@ const terms = [
   {
     title: "Disclaimer And Liability",
     body:
-      "The service is provided on an as-available basis. To the maximum extent permitted by law, The Office on Rent disclaims implied warranties and limits liability for indirect or consequential damages.",
+      "The service is provided on an as-available basis. To the maximum extent permitted by law, Samvid OS disclaims implied warranties and limits liability for indirect or consequential damages.",
   },
   {
     title: "Termination",

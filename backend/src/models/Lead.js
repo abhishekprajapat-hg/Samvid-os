@@ -458,7 +458,7 @@ leadSchema.index({ createdBy: 1, createdAt: -1 });
 leadSchema.index({ assignedTo: 1, createdAt: -1 });
 leadSchema.index({ companyId: 1, assignedTo: 1, createdAt: -1 });
 leadSchema.index({ companyId: 1, status: 1, createdAt: -1 });
-// Dashboard and The Office on Rent report cards sort fresh leads by updatedAt within tenant/status scopes.
+// Dashboard and Samvid OS report cards sort fresh leads by updatedAt within tenant/status scopes.
 leadSchema.index({ companyId: 1, status: 1, updatedAt: -1 });
 leadSchema.index({ companyId: 1, assignedTo: 1, updatedAt: -1 });
 leadSchema.index({ companyId: 1, createdBy: 1, updatedAt: -1 });

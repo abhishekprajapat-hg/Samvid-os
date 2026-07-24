@@ -15,6 +15,7 @@ const ROLE_OPTIONS = [
 ];
 
 const REPORTING_PARENT_ROLES: Record<string, string[]> = {
+  ADMIN: ["SUPER_ADMIN"],
   MANAGER: ["ADMIN"],
   EXECUTIVE: ["MANAGER"],
   FIELD_EXECUTIVE: ["MANAGER"],
@@ -22,6 +23,7 @@ const REPORTING_PARENT_ROLES: Record<string, string[]> = {
 };
 
 const ROLE_LABELS: Record<string, string> = {
+  SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   MANAGER: "Manager",
   EXECUTIVE: "Executive",

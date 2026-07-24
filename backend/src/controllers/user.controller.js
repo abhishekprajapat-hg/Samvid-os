@@ -11,6 +11,7 @@ const {
 } = require("../services/leadAssignment.service");
 const {
   USER_ROLES,
+  PLATFORM_ADMIN_ROLES,
   EXECUTIVE_ROLES,
   LEAD_OWNER_ROLES,
   MANUAL_LEAD_TRANSFER_TARGET_ROLES,
@@ -20,6 +21,7 @@ const {
   getAllowedParentRoles,
   getAutoParentRoles,
   isManagementRole,
+  isPlatformAdminRole,
 } = require("../constants/role.constants");
 const {
   getDescendantUsers,
@@ -35,7 +37,7 @@ const {
 
 const LOCATION_ALLOWED_ROLES = [...EXECUTIVE_ROLES];
 const LOCATION_VIEWER_ROLES = [
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   ...MANAGEMENT_ROLES,
   USER_ROLES.FIELD_EXECUTIVE,
 ];
@@ -62,6 +64,7 @@ const TEAM_HIERARCHY_CHILD_ROLES = {
     USER_ROLES.CHANNEL_PARTNER,
   ],
   [USER_ROLES.ADMIN]: [USER_ROLES.MANAGER],
+  [USER_ROLES.SUPER_ADMIN]: [USER_ROLES.ADMIN],
 };
 const USER_SELECTABLE_FIELDS = [
   "_id",
@@ -81,10 +84,10 @@ const USER_SELECTABLE_FIELDS = [
   "updatedAt",
 ];
 const USER_ROLE_VALUES = Object.values(USER_ROLES);
-const ADMIN_TOOL_ROLES = [USER_ROLES.ADMIN, USER_ROLES.MANAGER];
+const ADMIN_TOOL_ROLES = [...PLATFORM_ADMIN_ROLES, USER_ROLES.MANAGER];
 const canUseAdminTools = (role) => ADMIN_TOOL_ROLES.includes(role);
 const CRM_ASSIGNABLE_ROLES = [
-  USER_ROLES.ADMIN,
+  ...PLATFORM_ADMIN_ROLES,
   ...MANAGEMENT_ROLES,
   USER_ROLES.INSIDE_EXECUTIVE,
   USER_ROLES.EXECUTIVE,
@@ -95,6 +98,13 @@ const DEFAULT_BROKERAGE_PERCENTAGE = 2;
 const MAX_BROKERAGE_NOTES_LENGTH = 240;
 const LEADERBOARD_ROLE_OPTIONS_BY_ACTOR = Object.freeze({
   [USER_ROLES.ADMIN]: [
+    USER_ROLES.MANAGER,
+    USER_ROLES.EXECUTIVE,
+    USER_ROLES.FIELD_EXECUTIVE,
+    USER_ROLES.CHANNEL_PARTNER,
+  ],
+  [USER_ROLES.SUPER_ADMIN]: [
+    USER_ROLES.ADMIN,
     USER_ROLES.MANAGER,
     USER_ROLES.EXECUTIVE,
     USER_ROLES.FIELD_EXECUTIVE,
@@ -215,7 +225,7 @@ const normalizeBrokerageConfigInput = (input, fallbackConfig = null) => {
 };
 
 const getLeadScopeLabel = (role) => {
-  if (role === USER_ROLES.ADMIN) return "Global Leads";
+  if (isPlatformAdminRole(role)) return "Global Leads";
   if (isManagementRole(role)) return "Team Leads";
   if (EXECUTIVE_ROLES.includes(role)) return "Assigned Leads";
   if (role === USER_ROLES.CHANNEL_PARTNER) return "Created Leads";
@@ -229,7 +239,7 @@ const buildLeadScopeQuery = async (userDoc) => {
 
   const companyScope = { companyId: userDoc.companyId };
 
-  if (userDoc.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(userDoc.role)) {
     return companyScope;
   }
 
@@ -656,7 +666,7 @@ const buildProfileSummary = async (userDoc) => {
   const companyId = userDoc.companyId;
   const userId = userDoc._id;
 
-  if (role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(role)) {
     const [
       users,
       managers,
@@ -824,11 +834,11 @@ const findLeastLoadedParentForRole = async ({
 
 exports.getUsers = async (req, res) => {
   try {
-    if (!req.user.companyId) {
+    if (!req.user.companyId && req.user.role !== USER_ROLES.SUPER_ADMIN) {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const companyScope = { companyId: req.user.companyId };
+    const companyScope = req.user.role === USER_ROLES.SUPER_ADMIN ? {} : { companyId: req.user.companyId };
     const crmAssignableOnly = String(req.query?.crmAssignable || "").trim().toLowerCase() === "true";
     let query = {};
 
@@ -841,7 +851,7 @@ exports.getUsers = async (req, res) => {
         role: { $in: MANUAL_LEAD_TRANSFER_TARGET_ROLES },
         isActive: true,
       };
-    } else if (req.user.role === USER_ROLES.ADMIN) {
+    } else if (isPlatformAdminRole(req.user.role)) {
       query = companyScope;
     } else if (isManagementRole(req.user.role)) {
       const descendants = await getDescendantUsers({
@@ -916,7 +926,7 @@ exports.getUsers = async (req, res) => {
 
 exports.getRoleLeaderboard = async (req, res) => {
   try {
-    if (!req.user.companyId) {
+    if (!req.user.companyId && req.user.role !== USER_ROLES.SUPER_ADMIN) {
       return res.status(403).json({ message: "Company context is required" });
     }
 
@@ -1284,9 +1294,9 @@ exports.createUserByRole = async (req, res) => {
       });
     }
 
-    if (role === USER_ROLES.ADMIN) {
+    if (role === USER_ROLES.SUPER_ADMIN || role === USER_ROLES.ADMIN) {
       return res.status(400).json({
-        message: "Admin role cannot be created from this endpoint",
+        message: "This role cannot be created from this endpoint",
       });
     }
 
@@ -1391,7 +1401,7 @@ exports.updateUserByAdmin = async (req, res) => {
       });
     }
 
-    if (!req.user.companyId) {
+    if (!req.user.companyId && req.user.role !== USER_ROLES.SUPER_ADMIN) {
       return res.status(403).json({ message: "Company context is required" });
     }
 
@@ -1428,7 +1438,7 @@ exports.updateUserByAdmin = async (req, res) => {
 
     const user = await User.findOne({
       _id: userId,
-      companyId: req.user.companyId,
+      ...(req.user.role === USER_ROLES.SUPER_ADMIN ? {} : { companyId: req.user.companyId }),
     });
 
     if (!user) {
@@ -1486,9 +1496,9 @@ exports.updateUserByAdmin = async (req, res) => {
         return res.status(400).json({ message: "Invalid role" });
       }
 
-      if (requestedRole === USER_ROLES.ADMIN) {
+      if (requestedRole === USER_ROLES.SUPER_ADMIN || (requestedRole === USER_ROLES.ADMIN && req.user.role !== USER_ROLES.SUPER_ADMIN)) {
         return res.status(400).json({
-          message: "Role cannot be changed to ADMIN",
+          message: "Role cannot be changed to this admin level",
         });
       }
 
@@ -1735,9 +1745,9 @@ exports.updateUserDesignation = async (req, res) => {
       return res.status(400).json({ message: "Invalid role" });
     }
 
-    if (requestedRole === USER_ROLES.ADMIN) {
+    if (requestedRole === USER_ROLES.SUPER_ADMIN || requestedRole === USER_ROLES.ADMIN) {
       return res.status(400).json({
-        message: "Designation cannot be changed to ADMIN",
+        message: "Designation cannot be changed to this admin level",
       });
     }
 
@@ -2159,7 +2169,7 @@ exports.createUserDeleteRequest = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (targetUser.role === USER_ROLES.ADMIN) {
+    if (isPlatformAdminRole(targetUser.role)) {
       return res.status(403).json({ message: "Admin account cannot be deleted by request" });
     }
 
@@ -2230,12 +2240,12 @@ exports.createUserDeleteRequest = async (req, res) => {
 
 exports.getAdminUserDeleteRequests = async (req, res) => {
   try {
-    if (req.user.role !== USER_ROLES.ADMIN) {
+    if (!isPlatformAdminRole(req.user.role)) {
       return res.status(403).json({ message: "Only ADMIN can view user delete requests" });
     }
 
     const status = String(req.query?.status || "PENDING").trim().toUpperCase();
-    const query = { companyId: req.user.companyId };
+    const query = req.user.role === USER_ROLES.SUPER_ADMIN ? {} : { companyId: req.user.companyId };
     if (["PENDING", "APPROVED", "REJECTED"].includes(status)) {
       query.status = status;
     }
@@ -2264,7 +2274,7 @@ exports.getAdminUserDeleteRequests = async (req, res) => {
 
 exports.reviewUserDeleteRequest = async (req, res) => {
   try {
-    if (req.user.role !== USER_ROLES.ADMIN) {
+    if (!isPlatformAdminRole(req.user.role)) {
       return res.status(403).json({ message: "Only ADMIN can review user delete requests" });
     }
 
@@ -2280,7 +2290,7 @@ exports.reviewUserDeleteRequest = async (req, res) => {
 
     const request = await UserDeleteRequest.findOne({
       _id: requestId,
-      companyId: req.user.companyId,
+      ...(req.user.role === USER_ROLES.SUPER_ADMIN ? {} : { companyId: req.user.companyId }),
     });
 
     if (!request) {
@@ -2332,7 +2342,7 @@ exports.reviewUserDeleteRequest = async (req, res) => {
 
 exports.deleteUser = async (req, res) => {
   try {
-    if (req.user.role !== USER_ROLES.ADMIN) {
+    if (!isPlatformAdminRole(req.user.role)) {
       return res.status(403).json({ message: "Only ADMIN can delete users" });
     }
 
@@ -2360,7 +2370,7 @@ exports.updateUserByRole = async (req, res) => {
     }
 
     const actorRole = req.user.role;
-    const canEditAsAdmin = actorRole === USER_ROLES.ADMIN;
+    const canEditAsAdmin = isPlatformAdminRole(actorRole);
     const canEditAsManager = isManagementRole(actorRole);
     if (!canEditAsAdmin && !canEditAsManager) {
       return res.status(403).json({ message: "Access denied" });
@@ -2368,7 +2378,7 @@ exports.updateUserByRole = async (req, res) => {
 
     const targetUser = await User.findOne({
       _id: userId,
-      companyId: req.user.companyId,
+      ...(req.user.role === USER_ROLES.SUPER_ADMIN ? {} : { companyId: req.user.companyId }),
     })
       .select("_id role parentId companyId isActive")
       .lean();
@@ -2376,7 +2386,7 @@ exports.updateUserByRole = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    if (targetUser.role === USER_ROLES.ADMIN) {
+    if (isPlatformAdminRole(targetUser.role)) {
       return res.status(403).json({ message: "Admin account cannot be edited from this endpoint" });
     }
 
@@ -2440,8 +2450,8 @@ exports.updateUserByRole = async (req, res) => {
       if (nextRole && !Object.values(USER_ROLES).includes(nextRole)) {
         return res.status(400).json({ message: "Invalid role" });
       }
-      if (nextRole === USER_ROLES.ADMIN) {
-        return res.status(400).json({ message: "Cannot assign ADMIN role" });
+      if (nextRole === USER_ROLES.SUPER_ADMIN || nextRole === USER_ROLES.ADMIN) {
+        return res.status(400).json({ message: "Cannot assign admin role" });
       }
 
       if (nextRole && nextRole !== targetUser.role) {

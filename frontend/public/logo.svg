@@ -1,18 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 540" role="img" aria-labelledby="title desc">
-  <title id="title">The Office On Rent logo</title>
-  <desc id="desc">Colorful office mark with Office Rent wordmark.</desc>
-  <rect width="1150" height="540" fill="#000000"/>
-  <g transform="translate(130 112)">
-    <rect x="0" y="0" width="885" height="305" fill="#ffffff"/>
-    <path d="M88 78 L332 16 L338 162 L161 204 C101 255 91 318 138 416 C83 300 70 177 88 78Z" fill="#f5a900"/>
-    <path d="M139 119 L400 54 L390 184 L174 234 C124 285 107 348 138 416 C99 303 105 205 139 119Z" fill="#71bf25"/>
-    <path d="M183 150 L445 88 L430 202 L210 252 C154 307 142 365 138 416 C112 302 127 219 183 150Z" fill="#0498a8"/>
-    <path d="M430 98 L508 88 L488 202 L426 216 Z" fill="#4f2a81" opacity="0.92"/>
-    <path d="M502 105 L545 92 L520 172 L488 202 Z" fill="#b00691"/>
-    <rect x="232" y="205" width="308" height="96" fill="#000000"/>
-    <rect x="535" y="205" width="348" height="96" fill="#000000"/>
-    <path d="M540 301 L504 266 L504 205 L540 205 Z" fill="#000000"/>
-    <text x="66" y="292" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="118" font-weight="900" letter-spacing="-8" fill="#000000">OFFICE</text>
-    <text x="585" y="292" font-family="Arial Black, Arial, Helvetica, sans-serif" font-size="116" font-weight="900" letter-spacing="2" fill="#079aa8">RENT</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 220" role="img" aria-labelledby="title desc">
+  <title id="title">Samvid OS logo</title>
+  <desc id="desc">Samvid OS wordmark with a luminous connected system mark.</desc>
+  <defs>
+    <linearGradient id="mark" x1="22" y1="22" x2="178" y2="178" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.52" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#d946ef"/>
+    </linearGradient>
+    <linearGradient id="word" x1="210" y1="74" x2="672" y2="152" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#0e7490"/>
+    </linearGradient>
+  </defs>
+  <rect width="720" height="220" rx="36" fill="#ffffff"/>
+  <rect x="34" y="34" width="152" height="152" rx="36" fill="#020617"/>
+  <circle cx="110" cy="110" r="50" fill="none" stroke="url(#mark)" stroke-width="12"/>
+  <path d="M74 113c19-34 55-38 73-7" fill="none" stroke="#67e8f9" stroke-width="10" stroke-linecap="round"/>
+  <path d="M147 107c-19 34-55 38-73 7" fill="none" stroke="#f0abfc" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="74" cy="113" r="7" fill="#22d3ee"/>
+  <circle cx="147" cy="107" r="7" fill="#d946ef"/>
+  <text x="218" y="111" font-family="Inter, Arial, Helvetica, sans-serif" font-size="58" font-weight="800" letter-spacing="0" fill="url(#word)">Samvid</text>
+  <text x="219" y="157" font-family="Inter, Arial, Helvetica, sans-serif" font-size="38" font-weight="800" letter-spacing="8" fill="#0891b2">OS</text>
 </svg>

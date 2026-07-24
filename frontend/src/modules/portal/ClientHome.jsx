@@ -321,7 +321,7 @@ const ClientHome = () => {
         </section>
 
         <footer className="ui-soft-panel flex flex-col items-start justify-between gap-3 rounded-2xl px-4 py-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:px-6">
-          <p>The Office on Rent Legal Center</p>
+          <p>Samvid OS Legal Center</p>
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate("/privacy-policy")}

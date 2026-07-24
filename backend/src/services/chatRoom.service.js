@@ -947,7 +947,7 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
   const cleanTargetRole = sanitizeText(targetRole || "").toUpperCase() || null;
   const cleanTargetTeamId = targetTeamId || null;
 
-  if (creator.role === USER_ROLES.ADMIN) {
+  if (isAdminRole(creator.role)) {
     if (cleanTargetTeamId) {
       const recipients = await User.find({
         isActive: true,

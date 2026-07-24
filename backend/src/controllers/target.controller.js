@@ -6,8 +6,10 @@ const logger = require("../config/logger");
 const {
   USER_ROLES,
   ROLE_LABELS,
+  PLATFORM_ADMIN_ROLES,
   EXECUTIVE_ROLES,
   isManagementRole,
+  isPlatformAdminRole,
 } = require("../constants/role.constants");
 const { getDescendantExecutiveIds, getDescendantUsers } = require("../services/hierarchy.service");
 
@@ -16,6 +18,13 @@ const DEFAULT_REVENUE_PER_CLOSED =
   Number.parseInt(process.env.TARGET_REVENUE_PER_CLOSED, 10) || 50000;
 
 const TARGET_ASSIGNMENT_FLOW = Object.freeze({
+  [USER_ROLES.SUPER_ADMIN]: [
+    USER_ROLES.ADMIN,
+    USER_ROLES.MANAGER,
+    USER_ROLES.EXECUTIVE,
+    USER_ROLES.FIELD_EXECUTIVE,
+    USER_ROLES.CHANNEL_PARTNER,
+  ],
   [USER_ROLES.ADMIN]: [
     USER_ROLES.MANAGER,
     USER_ROLES.EXECUTIVE,
@@ -71,7 +80,7 @@ const getLeadScopeQueryForUser = async ({
 
   const companyScope = { companyId: userDoc.companyId };
 
-  if (userDoc.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(userDoc.role)) {
     if (!companyUserIds.length) {
       return { ...companyScope, _id: null };
     }
@@ -209,7 +218,7 @@ const buildPopulationQuery = (queryBuilder) =>
 const getAssignableUsersForActor = async ({ actor }) => {
   if (!actor?.companyId) return [];
 
-  if (actor.role === USER_ROLES.ADMIN) {
+  if (isPlatformAdminRole(actor.role)) {
     return User.find({
       companyId: actor.companyId,
       isActive: true,
@@ -228,7 +237,7 @@ const getAssignableUsersForActor = async ({ actor }) => {
       select: "_id name email role parentId companyId isActive",
     });
     return descendants
-      .filter((row) => row.role !== USER_ROLES.ADMIN)
+      .filter((row) => !isPlatformAdminRole(row.role))
       .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
   }
 

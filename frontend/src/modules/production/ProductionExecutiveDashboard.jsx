@@ -29,7 +29,8 @@ const formatDate = (value) => {
 const statusLabel = (value) =>
   String(value || "Not marked").replace(/_/g, " ").toLowerCase();
 
-const Metric = ({ label, value, icon: Icon, tone = "cyan" }) => {
+const Metric = ({ label, value, icon, tone = "cyan" }) => {
+  const Icon = icon;
   const toneClass = {
     cyan: "bg-cyan-50 text-cyan-700",
     emerald: "bg-emerald-50 text-emerald-700",
@@ -52,22 +53,26 @@ const Metric = ({ label, value, icon: Icon, tone = "cyan" }) => {
   );
 };
 
-const ActionCard = ({ to, icon: Icon, title, subtitle }) => (
-  <Link
-    to={to}
-    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-cyan-200 hover:shadow-md"
-  >
-    <div className="flex items-start gap-3">
-      <span className="rounded-lg bg-slate-100 p-2 text-slate-700">
-        <Icon size={16} />
-      </span>
-      <div>
-        <p className="text-sm font-semibold text-slate-950">{title}</p>
-        <p className="mt-1 text-xs leading-5 text-slate-500">{subtitle}</p>
+const ActionCard = ({ to, icon, title, subtitle }) => {
+  const Icon = icon;
+
+  return (
+    <Link
+      to={to}
+      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-cyan-200 hover:shadow-md"
+    >
+      <div className="flex items-start gap-3">
+        <span className="rounded-lg bg-slate-100 p-2 text-slate-700">
+          <Icon size={16} />
+        </span>
+        <div>
+          <p className="text-sm font-semibold text-slate-950">{title}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{subtitle}</p>
+        </div>
       </div>
-    </div>
-  </Link>
-);
+    </Link>
+  );
+};
 
 const ProductionExecutiveDashboard = ({ mode = "home" }) => {
   const [loading, setLoading] = useState(true);

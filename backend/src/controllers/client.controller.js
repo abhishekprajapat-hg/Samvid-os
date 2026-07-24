@@ -2,11 +2,13 @@ const {
   USER_ROLES,
   MANAGEMENT_ROLES,
   EXECUTIVE_ROLES,
+  PLATFORM_ADMIN_ROLES,
+  isPlatformAdminRole,
 } = require("../constants/role.constants");
 
-const MANAGEMENT_SET = new Set([USER_ROLES.ADMIN, ...MANAGEMENT_ROLES]);
+const MANAGEMENT_SET = new Set([...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES]);
 const EXECUTIVE_SET = new Set(EXECUTIVE_ROLES);
-const PLATFORM_SET = new Set();
+const PLATFORM_SET = new Set([USER_ROLES.SUPER_ADMIN]);
 
 const toUserView = (user) => ({
   id: user._id,
@@ -22,8 +24,8 @@ const toCapabilities = (role) => ({
   canManagePlatform: PLATFORM_SET.has(role),
   canManageUsers: MANAGEMENT_SET.has(role),
   canManageLeads: MANAGEMENT_SET.has(role) || EXECUTIVE_SET.has(role),
-  canManageInventory: role === USER_ROLES.ADMIN,
-  canApproveInventoryRequests: role === USER_ROLES.ADMIN,
+  canManageInventory: isPlatformAdminRole(role),
+  canApproveInventoryRequests: isPlatformAdminRole(role),
   canCreateInventoryRequests: role === USER_ROLES.FIELD_EXECUTIVE,
   canUseRealtimeChat: true,
 });
@@ -31,7 +33,7 @@ const toCapabilities = (role) => ({
 exports.health = (_req, res) => {
   res.json({
     ok: true,
-    service: "the-office-on-rent-client-api",
+    service: "samvid-os-client-api",
     channels: ["web", "mobile"],
     timestamp: new Date().toISOString(),
   });

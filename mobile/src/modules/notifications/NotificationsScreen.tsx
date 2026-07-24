@@ -141,7 +141,7 @@ const buildSearchText = (item: NotificationItem) => {
 
 export const NotificationsScreen = () => {
   const { role } = useAuth();
-  const isAdmin = role === "ADMIN";
+  const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

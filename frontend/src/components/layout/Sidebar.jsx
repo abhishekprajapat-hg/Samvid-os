@@ -216,7 +216,7 @@ const Sidebar = ({ userRole = "manager", onLogout, theme = "light", onToggleThem
         </div>
         <div className="min-w-0 md:w-0 md:overflow-hidden md:opacity-0 md:transition-all md:duration-200 md:group-hover/sidebar:w-auto md:group-hover/sidebar:opacity-100">
           <p className="text-sm font-bold leading-tight text-[#009FA8]">
-            The Office On Rent
+            Samvid OS
           </p>
           <p className={`mt-0.5 text-[10px] font-bold uppercase tracking-[0.22em] ${isDark ? "text-sky-300/80" : "text-blue-700"}`}>
             Operations

@@ -1461,7 +1461,7 @@ export const LeadDetailsScreen = () => {
     if (proposalSpecialNote.trim()) {
       lines.push(`Special Note: ${proposalSpecialNote.trim()}`);
     }
-    lines.push("", "Regards,", "The Office on Rent");
+    lines.push("", "Regards,", "Samvid OS");
 
     return lines.join("\n");
   }, [lead, proposalSpecialNote, proposalValidityDays, selectedProposalRows]);

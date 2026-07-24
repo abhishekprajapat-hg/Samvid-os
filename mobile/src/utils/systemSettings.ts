@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-export const SYSTEM_SETTINGS_STORAGE_KEY = "@the-office-on-rent/system_settings";
+export const SYSTEM_SETTINGS_STORAGE_KEY = "@samvid-os/system_settings";
 
 export type MobileSystemSettings = {
   appearance: {
