@@ -43,6 +43,9 @@ const isLanOrigin = (origin) =>
 
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
+  if (process.env.NODE_ENV === "production") {
+    return configuredOrigins.includes(origin);
+  }
   if (configuredOrigins.includes("*")) return true;
   if (configuredOrigins.includes(origin)) return true;
   if (isLoopbackOrigin(origin) || isLanOrigin(origin)) return true;
@@ -57,6 +60,17 @@ app.use(compression({
     return compression.filter(req, res);
   },
 }));
+app.use(attachRequestId);
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || "").trim();
+  if (origin && !isAllowedOrigin(origin)) {
+    return res.status(403).json({
+      message: "CORS origin not allowed",
+      requestId: req.requestId || null,
+    });
+  }
+  return next();
+});
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -64,15 +78,21 @@ app.use(
         callback(null, origin || true);
         return;
       }
-      callback(new Error("Not allowed by CORS"));
+      callback(null, false);
     },
     credentials: true,
   }),
 );
-app.use(attachRequestId);
 app.use(httpLogger);
 app.use(httpMetricsMiddleware);
-app.use(express.json({ limit: jsonBodyLimit }));
+app.use(express.json({
+  limit: jsonBodyLimit,
+  verify: (req, _res, buffer) => {
+    if (String(req.originalUrl || req.url || "").startsWith("/api/webhook")) {
+      req.rawBody = Buffer.from(buffer);
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: false, limit: urlencodedBodyLimit }));
 app.use(resolveTenantContext);
 

@@ -2,8 +2,10 @@ export type UserRole =
   | "SUPER_ADMIN"
   | "ADMIN"
   | "MANAGER"
+  | "INSIDE_EXECUTIVE"
   | "EXECUTIVE"
   | "FIELD_EXECUTIVE"
+  | "PRODUCTION_EXECUTIVE"
   | "CHANNEL_PARTNER";
 
 export interface User {

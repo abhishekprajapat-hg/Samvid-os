@@ -1,5 +1,7 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Company = require("../models/Company");
+const { USER_ROLES } = require("../constants/role.constants");
 const {
   sendDirectMessage,
   sendRoomMessage,
@@ -8,6 +10,10 @@ const {
   markRoomAsRead,
   getRoomByIdForUser,
 } = require("../services/chatRoom.service");
+const {
+  startCallForUser,
+  updateCallForUser,
+} = require("../services/chatCall.service");
 const { getTeamIdForUser } = require("../services/chatAccess.service");
 
 const toId = (value) => String(value || "").trim();
@@ -83,6 +89,16 @@ const authenticateSocket = async (socket, next) => {
 
     if (!user || !user.isActive) {
       return next(new Error("Unauthorized: invalid user"));
+    }
+
+    if (user.role !== USER_ROLES.SUPER_ADMIN) {
+      if (!user.companyId) {
+        return next(new Error("Unauthorized: company missing"));
+      }
+      const company = await Company.findById(user.companyId).select("_id status").lean();
+      if (company?.status !== "ACTIVE") {
+        return next(new Error("Unauthorized: company inactive"));
+      }
     }
 
     socket.user = user;
@@ -339,6 +355,69 @@ const registerChatSocketHandlers = (io) => {
         });
       }
     });
+
+    socket.on("chat:call:initiate", async (payload = {}, ack) => {
+      try {
+        const result = await startCallForUser({
+          user: socket.user,
+          roomId: payload.roomId || payload.conversationId,
+          mode: payload.mode || payload.callType,
+        });
+
+        io.to(`room:${result.conversationId}`).emit("chat:call:incoming", {
+          callId: result.call._id,
+          roomId: result.conversationId,
+          conversationId: result.conversationId,
+          mode: result.call.mode,
+          callType: result.call.mode === "video" ? "VIDEO" : "VOICE",
+          caller: result.call.caller,
+          call: result.call,
+        });
+        return sendAck(ack, { ok: true, ...result });
+      } catch (error) {
+        return sendAck(ack, {
+          ok: false,
+          error: error.message || "Failed to start call",
+        });
+      }
+    });
+
+    const updateCall = async (payload = {}, ack, status) => {
+      try {
+        const result = await updateCallForUser({
+          user: socket.user,
+          callId: payload.callId,
+          status,
+          reason: payload.reason,
+        });
+        const eventName =
+          status === "ACCEPTED"
+            ? "chat:call:accepted"
+            : status === "REJECTED"
+              ? "chat:call:rejected"
+              : "chat:call:ended";
+
+        const eventPayload = {
+          callId: result.call._id,
+          roomId: result.conversationId,
+          conversationId: result.conversationId,
+          status: result.call.status,
+          call: result.call,
+        };
+        io.to(`room:${result.conversationId}`).emit(eventName, eventPayload);
+        io.to(`room:${result.conversationId}`).emit("messenger:call:update", eventPayload);
+        return sendAck(ack, { ok: true, ...result });
+      } catch (error) {
+        return sendAck(ack, {
+          ok: false,
+          error: error.message || "Failed to update call",
+        });
+      }
+    };
+
+    socket.on("chat:call:accept", (payload = {}, ack) => updateCall(payload, ack, "ACCEPTED"));
+    socket.on("chat:call:reject", (payload = {}, ack) => updateCall(payload, ack, "REJECTED"));
+    socket.on("chat:call:end", (payload = {}, ack) => updateCall(payload, ack, "ENDED"));
 
     socket.on("messenger:send", async (payload = {}, ack) => {
       try {

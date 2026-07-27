@@ -115,6 +115,7 @@ export const AssetVaultFilters = ({
       </div>
 
       <select
+        aria-label="Filter inventory by status"
         value={statusFilter}
         onChange={(event) => onStatusFilterChange(event.target.value)}
         className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
@@ -139,6 +140,7 @@ export const AssetVaultFilters = ({
 
     <div className={`${advancedFiltersOpen ? "grid" : "hidden"} grid-cols-1 gap-3 md:grid md:grid-cols-2 xl:grid-cols-4`}>
       <select
+        aria-label="Filter inventory by type"
         value={inventoryTypeFilter}
         onChange={(event) => onInventoryTypeFilterChange(event.target.value)}
         className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
@@ -149,6 +151,7 @@ export const AssetVaultFilters = ({
       </select>
 
       <select
+        aria-label="Filter inventory by furnishing"
         value={furnishingFilter}
         onChange={(event) => onFurnishingFilterChange(event.target.value)}
         className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
@@ -164,6 +167,7 @@ export const AssetVaultFilters = ({
       </select>
 
       <select
+        aria-label="Filter inventory by BHK"
         value={bhkFilter}
         onChange={(event) => onBhkFilterChange(event.target.value)}
         className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
@@ -220,6 +224,7 @@ export const AssetVaultFilters = ({
       />
 
       <select
+        aria-label="Filter inventory by parking"
         value={parkingFilter}
         onChange={(event) => onParkingFilterChange(event.target.value)}
         className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
@@ -230,6 +235,7 @@ export const AssetVaultFilters = ({
       </select>
 
       <select
+        aria-label="Filter inventory by pantry"
         value={pantryFilter}
         onChange={(event) => onPantryFilterChange(event.target.value)}
         className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"

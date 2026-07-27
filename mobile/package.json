@@ -10,6 +10,14 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web --clear",
+    "test": "jest --runInBand",
+    "test:unit": "jest --runInBand",
+    "test:coverage": "jest --coverage --runInBand",
+    "test:e2e": "maestro test e2e/maestro",
+    "test:e2e:smoke": "maestro test e2e/maestro/android/smoke.yaml",
+    "test:e2e:android": "maestro test e2e/maestro/android",
+    "test:e2e:ios": "maestro test e2e/maestro/ios",
+    "test:e2e:docs": "node -e \"console.log('Maestro flows live in e2e/maestro. See e2e/README.md for Android and iOS setup.')\"",
     "build:apk": "eas build --platform android --profile development",
     "build:apk:preview": "eas build --platform android --profile preview"
   },
@@ -52,8 +60,18 @@
     "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
+    "@testing-library/react-native": "^13.3.3",
+    "@types/jest": "^29.5.14",
     "@types/react": "~19.1.10",
+    "axios-mock-adapter": "^1.22.0",
+    "jest": "^29.7.0",
+    "jest-expo": "~54.0.17",
+    "react-test-renderer": "^19.1.0",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "react-native": "0.81.5",
+    "@react-native/virtualized-lists": "0.81.5"
   },
   "private": true
 }

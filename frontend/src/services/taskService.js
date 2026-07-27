@@ -2,7 +2,9 @@ import api from "./api";
 
 export const getTasks = async (params = {}) => {
   const res = await api.get("/tasks", { params });
-  return res.data || [];
+  if (Array.isArray(res.data)) return res.data;
+  if (Array.isArray(res.data?.tasks)) return res.data.tasks;
+  return [];
 };
 
 export const getTaskById = async (taskId) => {

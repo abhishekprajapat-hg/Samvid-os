@@ -16,7 +16,8 @@ router.post(
   authMiddleware.checkRole([
     "ADMIN",
     "MANAGER",
-            "EXECUTIVE",
+    "INSIDE_EXECUTIVE",
+    "EXECUTIVE",
     "FIELD_EXECUTIVE",
     "CHANNEL_PARTNER",
   ]),
@@ -31,7 +32,8 @@ router.post(
   authMiddleware.checkRole([
     "ADMIN",
     "MANAGER",
-            "EXECUTIVE",
+    "INSIDE_EXECUTIVE",
+    "EXECUTIVE",
     "FIELD_EXECUTIVE",
     "CHANNEL_PARTNER",
   ]),
@@ -71,8 +73,9 @@ router.get(
   "/my",
   authMiddleware.checkRole([
     "FIELD_EXECUTIVE",
+    "INSIDE_EXECUTIVE",
     "EXECUTIVE",
-            "MANAGER",
+    "MANAGER",
     "ADMIN",
     "CHANNEL_PARTNER",
   ]),
@@ -84,8 +87,9 @@ router.post(
   writeLimiter,
   authMiddleware.checkRole([
     "FIELD_EXECUTIVE",
+    "INSIDE_EXECUTIVE",
     "EXECUTIVE",
-            "MANAGER",
+    "MANAGER",
     "ADMIN",
   ]),
   inventoryRequestController.updateRequest,
@@ -96,8 +100,9 @@ router.post(
   writeLimiter,
   authMiddleware.checkRole([
     "FIELD_EXECUTIVE",
+    "INSIDE_EXECUTIVE",
     "EXECUTIVE",
-            "MANAGER",
+    "MANAGER",
     "ADMIN",
     "CHANNEL_PARTNER",
   ]),

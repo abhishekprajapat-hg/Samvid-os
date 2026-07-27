@@ -448,6 +448,13 @@ const normalizeWeeklyOffDays = (value) => {
   return rows.sort((left, right) => left - right);
 };
 
+const hasInvalidWeeklyOffDays = (value) =>
+  !Array.isArray(value)
+  || value.some((item) => {
+    const parsed = Number(item);
+    return !Number.isInteger(parsed) || parsed < 0 || parsed > 6;
+  });
+
 const toPolicyView = (policy = null) => {
   const source = policy || {};
   const timezone = toTrimmedString(source.timezone) || DEFAULT_POLICY.timezone;
@@ -533,6 +540,10 @@ const resolveAttendanceStatus = ({
     return ATTENDANCE_STATUS.HALF_DAY;
   }
 
+  if (isLateCheckInTime(checkInAt, safePolicy)) {
+    return ATTENDANCE_STATUS.LATE;
+  }
+
   if (
     ATTENDANCE_DATE_PATTERN.test(attendanceDate)
     && safePolicy.weeklyOffDays.includes(new Date(toUtcMsFromDateKey(attendanceDate)).getUTCDay())
@@ -571,8 +582,14 @@ const isLateCheckInTime = (checkInAt, policy = DEFAULT_POLICY) => {
   const safeCheckInAt = toSafeDate(checkInAt);
   if (!safeCheckInAt) return false;
   const safePolicy = toPolicyView(policy || DEFAULT_POLICY);
+  const lateCutoffMinutes = clampInteger(
+    Number(safePolicy.shiftStartMinutes || DEFAULT_POLICY.shiftStartMinutes)
+      + Number(safePolicy.graceMinutes || 0),
+    0,
+    1439,
+  );
   return toMinutesOfDayInTimezone(safeCheckInAt, safePolicy.timezone)
-    > LATE_CHECK_IN_CUTOFF_MINUTES;
+    > lateCutoffMinutes;
 };
 
 const applyWorkingSnapshot = (
@@ -641,8 +658,16 @@ const toAttendanceView = (row, policy = DEFAULT_POLICY) => {
     ? Number(row?.workedMinutes || 0)
     : Math.max(0, grossWorkedMinutes - breakMinutes);
   const isLateCheckIn = isLateCheckInTime(row?.checkInAt, policy);
+  const todayKey = toDateKeyInTimezone(new Date(), toPolicyView(policy).timezone);
+  const isMissedCheckOut =
+    row?.checkInAt
+    && !row?.checkOutAt
+    && ATTENDANCE_DATE_PATTERN.test(row?.attendanceDate || "")
+    && row.attendanceDate < todayKey;
   const status = isManualStatus
     ? (row?.status || ATTENDANCE_STATUS.PENDING)
+    : isMissedCheckOut
+    ? ATTENDANCE_STATUS.MISSED_CHECK_OUT
     : row?.checkInAt
     ? (row?.checkOutAt
       ? resolveAttendanceStatus({
@@ -874,6 +899,15 @@ exports.upsertAttendancePolicy = async (req, res) => {
       return res.status(403).json({ message: "Company context is required" });
     }
     if (!ensureManageAttendanceRole(req, res)) return null;
+
+    if (
+      Object.prototype.hasOwnProperty.call(req.body || {}, "weeklyOffDays")
+      && hasInvalidWeeklyOffDays(req.body.weeklyOffDays)
+    ) {
+      return res.status(400).json({
+        message: "weeklyOffDays must contain weekday numbers between 0 and 6",
+      });
+    }
 
     const payload = {
       timezone: toTrimmedString(req.body?.timezone) || DEFAULT_POLICY.timezone,

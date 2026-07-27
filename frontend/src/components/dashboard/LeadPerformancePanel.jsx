@@ -491,13 +491,13 @@ const LeadPerformancePanel = ({
     >
       <div className="flex flex-wrap items-start justify-between gap-2 sm:gap-3">
         <div className="min-w-0">
-          <h3
+          <h2
             className={`truncate text-xs font-semibold uppercase tracking-[0.08em] sm:text-sm sm:tracking-[0.14em] ${
               isDark ? "text-slate-300" : "text-slate-600"
             }`}
           >
             {title}
-          </h3>
+          </h2>
           <p className={`mt-1 line-clamp-2 text-[11px] sm:text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>{subtitle}</p>
         </div>
 

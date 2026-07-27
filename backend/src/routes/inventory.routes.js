@@ -11,6 +11,7 @@ router.use(
   authMiddleware.checkRole([
     "ADMIN",
     "MANAGER",
+    "INSIDE_EXECUTIVE",
     "EXECUTIVE",
     "FIELD_EXECUTIVE",
     "CHANNEL_PARTNER",
@@ -38,6 +39,7 @@ router.post(
   authMiddleware.checkRole([
     "ADMIN",
     "MANAGER",
+    "INSIDE_EXECUTIVE",
     "EXECUTIVE",
     "FIELD_EXECUTIVE",
     "CHANNEL_PARTNER",

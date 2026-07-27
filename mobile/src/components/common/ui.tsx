@@ -1,9 +1,10 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import type { TextInputProps, ViewProps } from "react-native";
 import { clay, colors, radii } from "../../theme/tokens";
 
-export const AppCard = ({ children, style }: { children: React.ReactNode; style?: object }) => (
-  <View style={[styles.card, style]}>{children}</View>
+export const AppCard = ({ children, style, ...props }: { children: React.ReactNode; style?: object } & ViewProps) => (
+  <View style={[styles.card, style]} {...props}>{children}</View>
 );
 
 export const AppButton = ({
@@ -12,15 +13,22 @@ export const AppButton = ({
   disabled,
   variant = "primary",
   style,
+  accessibilityLabel,
+  testID,
 }: {
   title: string;
   onPress: () => void;
   disabled?: boolean;
   variant?: "primary" | "ghost";
   style?: object;
+  accessibilityLabel?: string;
+  testID?: string;
 }) => (
   <Pressable
     disabled={disabled}
+    accessibilityRole="button"
+    accessibilityLabel={accessibilityLabel || title}
+    testID={testID}
     style={[
       styles.button,
       variant === "primary" ? styles.buttonPrimary : styles.buttonGhost,
@@ -40,13 +48,24 @@ export const AppChip = ({
   active,
   onPress,
   style,
+  accessibilityLabel,
+  testID,
 }: {
   label: string;
   active?: boolean;
   onPress: () => void;
   style?: object;
+  accessibilityLabel?: string;
+  testID?: string;
 }) => (
-  <Pressable style={[styles.chip, active && styles.chipActive, style]} onPress={onPress}>
+  <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={accessibilityLabel || label}
+    accessibilityState={{ selected: Boolean(active) }}
+    testID={testID}
+    style={[styles.chip, active && styles.chipActive, style]}
+    onPress={onPress}
+  >
     <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
   </Pressable>
 );
@@ -60,6 +79,8 @@ export const AppInput = ({
   autoCapitalize,
   style,
   editable,
+  accessibilityLabel,
+  testID,
 }: {
   value: string;
   onChangeText: (value: string) => void;
@@ -69,9 +90,11 @@ export const AppInput = ({
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   style?: object;
   editable?: boolean;
-}) => (
+} & Pick<TextInputProps, "accessibilityLabel" | "testID">) => (
   <TextInput
     style={[styles.input, style]}
+    accessibilityLabel={accessibilityLabel || placeholder}
+    testID={testID}
     value={value}
     onChangeText={onChangeText}
     placeholder={placeholder}

@@ -28,7 +28,10 @@ const ActivityBar = ({
   );
 
   return (
-    <aside className="hidden h-full w-14 shrink-0 flex-col border-r border-slate-200 bg-slate-950 text-slate-300 shadow-crm-panel md:flex">
+    <aside
+      aria-label="Activity navigation"
+      className="hidden h-full w-14 shrink-0 flex-col border-r border-slate-200 bg-slate-950 text-slate-300 shadow-crm-panel md:flex"
+    >
       <div className="flex h-14 items-center justify-center border-b border-white/10 p-1.5">
         <div className="brand-logo-frame flex h-10 w-11 items-center justify-center rounded-md border border-slate-200 bg-white p-0.5 shadow-sm">
           <BrandLogo className="h-full w-full" />

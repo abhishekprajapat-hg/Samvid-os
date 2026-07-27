@@ -1,6 +1,6 @@
 import React from "react";
-import { ActivityIndicator, Platform, SafeAreaView, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ActivityIndicator, Platform, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { clay, colors, radii, spacing, typography } from "../../theme/tokens";
 
 export const Screen = ({ title, subtitle, loading, error, children }: {

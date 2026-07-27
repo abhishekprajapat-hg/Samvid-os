@@ -37,6 +37,9 @@ const isLanOrigin = (origin) =>
 
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
+  if (process.env.NODE_ENV === "production") {
+    return configuredOrigins.includes(origin);
+  }
   if (configuredOrigins.includes("*")) return true;
   if (configuredOrigins.includes(origin)) return true;
   if (isLoopbackOrigin(origin) || isLanOrigin(origin)) return true;

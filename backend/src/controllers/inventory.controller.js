@@ -248,6 +248,7 @@ exports.getInventory = async (req, res) => {
     const pagination = parsePagination(req.query, {
       defaultLimit: Number.parseInt(process.env.INVENTORY_PAGE_LIMIT, 10) || 50,
       maxLimit: Number.parseInt(process.env.INVENTORY_PAGE_MAX_LIMIT, 10) || 200,
+      strict: true,
     });
     const selectFields = parseFieldSelection(
       req.query?.fields,

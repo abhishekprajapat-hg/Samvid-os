@@ -142,7 +142,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
     );
   }
 
-  if (role === "EXECUTIVE") {
+  if (role === "EXECUTIVE" || role === "INSIDE_EXECUTIVE") {
     return (
       <Tab.Navigator
         screenOptions={({ route }) => ({
@@ -188,7 +188,52 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
     );
   }
 
-  // Default fallback for CHANNEL_PARTNER or unknown roles
+  if (role === "PRODUCTION_EXECUTIVE") {
+    return (
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          ...sharedOptions,
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={getTabIconName(route.name, focused)}
+              size={size}
+              color={color}
+            />
+          ),
+        })}
+      >
+        <Tab.Screen name="Dashboard" component={ExecutiveDashboardScreen} />
+        <Tab.Screen name="Tasks" component={TaskManagerScreen} />
+        <Tab.Screen name="Attendance" component={AttendanceScreen} />
+        <Tab.Screen name="Chat" component={TeamChatScreen} options={{ tabBarBadge: chatBadge }} />
+        <Tab.Screen name="More" component={MoreMenuScreen} />
+      </Tab.Navigator>
+    );
+  }
+
+  if (role === "CHANNEL_PARTNER") {
+    return (
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          ...sharedOptions,
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={getTabIconName(route.name, focused)}
+              size={size}
+              color={color}
+            />
+          ),
+        })}
+      >
+        <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
+        <Tab.Screen name="Inventory" component={AssetVaultScreen} />
+        <Tab.Screen name="Targets" component={PerformanceScreen} />
+        <Tab.Screen name="More" component={MoreMenuScreen} />
+      </Tab.Navigator>
+    );
+  }
+
+  // Unknown roles keep a minimal account surface.
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -202,9 +247,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
         ),
       })}
     >
-      <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
-      <Tab.Screen name="Inventory" component={AssetVaultScreen} />
-      <Tab.Screen name="Targets" component={PerformanceScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
       <Tab.Screen name="More" component={MoreMenuScreen} />
     </Tab.Navigator>
   );

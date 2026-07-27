@@ -9,16 +9,20 @@ import { toErrorMessage } from "../../utils/errorMessage";
 
 const ROLE_OPTIONS = [
   { label: "Manager", value: "MANAGER" },
+  { label: "Inside Executive", value: "INSIDE_EXECUTIVE" },
   { label: "Executive", value: "EXECUTIVE" },
   { label: "Field Executive", value: "FIELD_EXECUTIVE" },
+  { label: "Production Executive", value: "PRODUCTION_EXECUTIVE" },
   { label: "Channel Partner", value: "CHANNEL_PARTNER" },
 ];
 
 const REPORTING_PARENT_ROLES: Record<string, string[]> = {
   ADMIN: ["SUPER_ADMIN"],
   MANAGER: ["ADMIN"],
+  INSIDE_EXECUTIVE: ["MANAGER"],
   EXECUTIVE: ["MANAGER"],
   FIELD_EXECUTIVE: ["MANAGER"],
+  PRODUCTION_EXECUTIVE: ["MANAGER"],
   CHANNEL_PARTNER: ["MANAGER"],
 };
 
@@ -26,8 +30,10 @@ const ROLE_LABELS: Record<string, string> = {
   SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   MANAGER: "Manager",
+  INSIDE_EXECUTIVE: "Inside Executive",
   EXECUTIVE: "Executive",
   FIELD_EXECUTIVE: "Field Executive",
+  PRODUCTION_EXECUTIVE: "Production Executive",
   CHANNEL_PARTNER: "Channel Partner",
 };
 

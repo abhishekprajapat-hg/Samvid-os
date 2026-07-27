@@ -16,7 +16,12 @@
     "seed:leads": "node src/seeder/seedLeads.cjs",
     "seed:inventory": "node src/seeder/seedInventory.cjs",
     "seed:inventory:titles": "node src/seeder/seedInventoryTitles.cjs",
-    "migrate:company": "node src/seeder/backfillCompany.cjs"
+    "migrate:company": "node src/seeder/backfillCompany.cjs",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint ."
   },
   "type": "commonjs",
   "dependencies": {
@@ -30,12 +35,19 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.2.1",
+    "multer": "^2.2.0",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
     "prom-client": "^15.1.3",
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.11"
+    "@vitest/coverage-v8": "^4.1.10",
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0",
+    "nodemon": "^3.1.11",
+    "socket.io-client": "^4.8.3",
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.10"
   }
 }

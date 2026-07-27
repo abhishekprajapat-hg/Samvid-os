@@ -605,7 +605,12 @@ export const LeadsMatrixFilters = ({
             </div>
 
             <div className="min-w-[160px] flex-[1_1_170px]">
-              <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)} className={selectClass}>
+              <select
+                aria-label="Filter leads by status"
+                value={statusFilter}
+                onChange={(event) => onStatusFilterChange(event.target.value)}
+                className={selectClass}
+              >
                 <option value="ALL">All statuses</option>
                 {leadStatuses.map((status) => (
                   <option key={status} value={status}>{getStatusLabel(status)}</option>
@@ -615,6 +620,7 @@ export const LeadsMatrixFilters = ({
 
             <div className="min-w-[180px] flex-[1_1_190px]">
               <select
+                aria-label="Filter leads by property type"
                 value={propertySubtypeFilter}
                 onChange={(event) => onPropertySubtypeFilterChange?.(event.target.value)}
                 className={selectClass}
@@ -632,6 +638,7 @@ export const LeadsMatrixFilters = ({
               }`}>
                 <SlidersHorizontal className="shrink-0" size={14} />
                 <select
+                  aria-label="Sort leads"
                   value={sortBy}
                   onChange={(event) => onSortByChange(event.target.value)}
                   className="h-full min-w-0 w-full bg-transparent text-xs font-semibold outline-none sm:text-sm sm:font-normal"
@@ -689,6 +696,7 @@ export const LeadsMatrixFilters = ({
               isDark ? "border-slate-700 bg-slate-950/90" : "border-slate-200 bg-slate-50"
             }`}>
               <select
+                aria-label="Filter leads by property type"
                 value={propertySubtypeFilter}
                 onChange={(event) => onPropertySubtypeFilterChange?.(event.target.value)}
                 className={selectClass}
@@ -699,7 +707,12 @@ export const LeadsMatrixFilters = ({
                 ))}
               </select>
 
-              <select value={sortBy} onChange={(event) => onSortByChange(event.target.value)} className={selectClass}>
+              <select
+                aria-label="Sort leads"
+                value={sortBy}
+                onChange={(event) => onSortByChange(event.target.value)}
+                className={selectClass}
+              >
                 <option value="RECENT">Latest updated</option>
                 <option value="FOLLOW_UP">Next follow-up</option>
                 <option value="NAME">Name A-Z</option>
@@ -746,12 +759,6 @@ export const LeadsMatrixTable = ({
 
   const isFollowUpDue = (lead) => {
     return isLeadFollowUpDue(lead, nowMs);
-  };
-
-  const handleRowKeyDown = (event, lead) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    onOpenLeadDetails(lead);
   };
 
   const StatusPicker = ({ lead, compact = false }) => {
@@ -1125,11 +1132,8 @@ export const LeadsMatrixTable = ({
                 const isStatusMenuOpen = openStatusMenuId === String(lead._id || "");
                 return (
                   <div
-                    role="button"
-                    tabIndex={0}
                     key={lead._id}
                     onClick={() => onOpenLeadDetails(lead)}
-                    onKeyDown={(event) => handleRowKeyDown(event, lead)}
                     className={`relative w-full rounded-2xl border p-3.5 text-left transition-all ${
                       isStatusMenuOpen ? "z-50" : "z-0"
                     } ${
@@ -1253,11 +1257,8 @@ export const LeadsMatrixTable = ({
                   const isStatusMenuOpen = openStatusMenuId === String(lead._id || "");
                   return (
                     <div
-                      role="button"
-                      tabIndex={0}
                       key={lead._id}
                       onClick={() => onOpenLeadDetails(lead)}
-                      onKeyDown={(event) => handleRowKeyDown(event, lead)}
                       className={`group relative grid w-full grid-cols-12 items-center gap-3 overflow-visible rounded-2xl border px-4 py-3 text-left transition-all ${
                         isStatusMenuOpen ? "z-50" : "z-0"
                       } ${

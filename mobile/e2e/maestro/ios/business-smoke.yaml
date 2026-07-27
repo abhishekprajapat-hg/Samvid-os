@@ -1,0 +1,17 @@
+appId: ${SAMVID_IOS_APP_ID}
+name: iOS Business Navigation Smoke
+---
+- launchApp
+- assertVisible: "Logout"
+- tapOn: "More"
+- assertVisible: "Samvid Assistant"
+- assertVisible: "Profile"
+- assertVisible: "Tasks"
+- tapOn: "Tasks"
+- assertVisible: "Tasks"
+- tapOn: "More"
+- tapOn: "Attendance"
+- assertVisible: "Attendance"
+- tapOn: "More"
+- tapOn: "Profile"
+- assertVisible: "Profile"

@@ -218,6 +218,8 @@ const MAX_BROKERAGE_TEXT_LENGTH = 180;
 const BROKERAGE_AMOUNT_TOLERANCE = 0.01;
 const MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH = 500;
 const MAX_BULK_LEAD_UPLOAD_ROWS = 5000;
+const BULK_LEAD_AUTO_ASSIGN_SYNC_LIMIT =
+  Number.parseInt(process.env.BULK_LEAD_AUTO_ASSIGN_SYNC_LIMIT, 10) || 200;
 const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTIAL"]);
 const LEAD_REQUIREMENT_TRANSACTION_TYPES = Object.freeze(["SALE", "LEASE", "RENT"]);
 const LEAD_REQUIREMENT_AREA_UNITS = Object.freeze(["SQ_FT", "SQ_M"]);
@@ -277,6 +279,20 @@ const normalizePreferredLocations = (value) => {
       return true;
     })
     .slice(0, 20);
+};
+
+const sanitizeFormulaLikeText = (value) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  return /^[=+\-@]/.test(trimmed) ? `'${trimmed}` : trimmed;
+};
+
+const normalizeLeadPhoneInput = (value) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return digits.slice(2);
+  }
+  return digits;
 };
 
 const toObjectIdString = (value) => {
@@ -1250,8 +1266,17 @@ const parseBrokeragePayload = (rawPayload = {}) => {
     return { error: "brokerageDistributionBreakdown must be an array" };
   }
 
+  if (
+    hasBreakdown
+    && source.brokerageDistributionBreakdown.length > MAX_BROKERAGE_BREAKDOWN_ROWS
+  ) {
+    return {
+      error: `Maximum ${MAX_BROKERAGE_BREAKDOWN_ROWS} brokerage distribution rows are allowed`,
+    };
+  }
+
   const breakdown = hasBreakdown
-    ? source.brokerageDistributionBreakdown.slice(0, MAX_BROKERAGE_BREAKDOWN_ROWS).map((row) => {
+    ? source.brokerageDistributionBreakdown.map((row) => {
         const amount = toFiniteNumber(row?.amount);
         const paidDateRaw = String(row?.paidDate || "").trim();
         const paidDate = paidDateRaw ? new Date(paidDateRaw) : null;
@@ -1854,14 +1879,28 @@ exports.createLead = async (req, res) => {
       inventoryId: rawInventoryId,
       siteLocation: rawSiteLocation,
       requirements: rawRequirements,
+      source: rawSource,
     } = req.body;
+
+    const normalizedName = sanitizeFormulaLikeText(name);
+    const normalizedPhone = normalizeLeadPhoneInput(phone);
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const normalizedSource = normalizeEnumValue(rawSource) === "META" ? "META" : "MANUAL";
+
+    if (!normalizedName) {
+      return res.status(400).json({ message: "Name is required" });
+    }
+
+    if (!normalizedPhone || !/^\d{8,15}$/.test(normalizedPhone)) {
+      return res.status(400).json({ message: "Phone must be 8 to 15 digits" });
+    }
 
     const companyId = toObjectIdString(req.user?.companyId);
     if (!isValidObjectId(companyId)) {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const existing = await Lead.findOne({ phone, companyId }).select("_id").lean();
+    const existing = await Lead.findOne({ phone: normalizedPhone, companyId }).select("_id").lean();
     if (existing) {
       return res.status(400).json({ message: "Lead already exists" });
     }
@@ -1902,18 +1941,18 @@ exports.createLead = async (req, res) => {
       || resolveInventoryLeadCity(inventory);
 
     const createPayload = {
-      name,
-      phone,
-      email,
-      city: resolvedCity,
+      name: normalizedName,
+      phone: normalizedPhone,
+      email: normalizedEmail,
+      city: sanitizeFormulaLikeText(resolvedCity),
       preferredLocations: normalizePreferredLocations(preferredLocations),
-      projectInterested: resolvedProjectInterested,
+      projectInterested: sanitizeFormulaLikeText(resolvedProjectInterested),
       requirements: normalizeLeadRequirements({
         rawRequirements,
         inventory,
       }),
       companyId,
-      source: "MANUAL",
+      source: normalizedSource,
       createdBy: req.user._id,
     };
 
@@ -2062,9 +2101,7 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
     };
   }
 
-  inventory.status = "Sold";
-  inventory.updatedBy = user?._id || null;
-  inventory.saleDetails = {
+  const saleDetails = {
     leadId: lead._id,
     paymentMode,
     paymentType,
@@ -2075,10 +2112,54 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
     soldAt: inventory?.saleDetails?.soldAt || new Date(),
   };
 
-  await inventory.save();
+  const updatedInventory = await Inventory.findOneAndUpdate(
+    {
+      ...buildCompanyInventoryQuery({
+        inventoryId: selectedInventoryId,
+        companyId: user?.companyId || null,
+      }),
+      $or: [
+        { status: "Available" },
+        { status: "Blocked", reservationLeadId: lead._id },
+        { status: "Sold", "saleDetails.leadId": lead._id },
+      ],
+    },
+    {
+      $set: {
+        status: "Sold",
+        reservationLeadId: null,
+        reservationReason: "",
+        updatedBy: user?._id || null,
+        saleDetails,
+      },
+    },
+    {
+      returnDocument: "after",
+      runValidators: true,
+    },
+  ).lean();
+
+  if (!updatedInventory) {
+    const latest = await Inventory.findOne(
+      buildCompanyInventoryQuery({
+        inventoryId: selectedInventoryId,
+        companyId: user?.companyId || null,
+      }),
+    ).lean();
+    const latestStatus = String(latest?.status || "").trim().toLowerCase();
+    const latestReservationLeadId = toObjectIdString(latest?.reservationLeadId);
+    const latestSoldLeadId = toObjectIdString(latest?.saleDetails?.leadId);
+    if (latestStatus === "blocked" && latestReservationLeadId !== leadId) {
+      return { error: "Selected property is reserved for another lead" };
+    }
+    if (latestStatus === "sold" && latestSoldLeadId !== leadId) {
+      return { error: "Selected property is already sold to another lead" };
+    }
+    return { error: "Selected property is not available for closure" };
+  }
 
   return {
-    inventory,
+    inventory: updatedInventory,
   };
 };
 
@@ -2121,14 +2202,52 @@ const syncSelectedInventoryAsReservedForCloseRequest = async ({
     };
   }
 
-  inventory.status = "Blocked";
-  inventory.reservationLeadId = lead._id;
-  inventory.reservationReason = `Deal close request pending for ${String(lead?.name || "lead").trim() || "lead"}`;
-  inventory.updatedBy = user?._id || null;
-  await inventory.save();
+  const updatedInventory = await Inventory.findOneAndUpdate(
+    {
+      ...buildCompanyInventoryQuery({
+        inventoryId: selectedInventoryId,
+        companyId: user?.companyId || null,
+      }),
+      $or: [
+        { status: "Available" },
+        { status: "Blocked", reservationLeadId: lead._id },
+      ],
+    },
+    {
+      $set: {
+        status: "Blocked",
+        reservationLeadId: lead._id,
+        reservationReason:
+          `Deal close request pending for ${String(lead?.name || "lead").trim() || "lead"}`,
+        updatedBy: user?._id || null,
+      },
+    },
+    {
+      returnDocument: "after",
+      runValidators: true,
+    },
+  ).lean();
+
+  if (!updatedInventory) {
+    const latest = await Inventory.findOne(
+      buildCompanyInventoryQuery({
+        inventoryId: selectedInventoryId,
+        companyId: user?.companyId || null,
+      }),
+    ).lean();
+    const latestStatus = String(latest?.status || "").trim().toLowerCase();
+    const latestReservationLeadId = toObjectIdString(latest?.reservationLeadId);
+    if (latestStatus === "sold") {
+      return { error: "Selected property is already sold" };
+    }
+    if (latestStatus === "blocked" && latestReservationLeadId !== leadId) {
+      return { error: "Selected property is already reserved for another lead" };
+    }
+    return { error: "Selected property is not available for reservation" };
+  }
 
   return {
-    inventory,
+    inventory: updatedInventory,
   };
 };
 
@@ -2159,14 +2278,31 @@ const releaseSelectedInventoryReservationForLead = async ({
     return { inventory: null };
   }
 
-  inventory.status = "Available";
-  inventory.reservationLeadId = null;
-  inventory.reservationReason = "";
-  inventory.updatedBy = user?._id || null;
-  await inventory.save();
+  const updatedInventory = await Inventory.findOneAndUpdate(
+    {
+      ...buildCompanyInventoryQuery({
+        inventoryId: selectedInventoryId,
+        companyId: user?.companyId || null,
+      }),
+      status: "Blocked",
+      reservationLeadId: lead._id,
+    },
+    {
+      $set: {
+        status: "Available",
+        reservationLeadId: null,
+        reservationReason: "",
+        updatedBy: user?._id || null,
+      },
+    },
+    {
+      returnDocument: "after",
+      runValidators: true,
+    },
+  ).lean();
 
   return {
-    inventory,
+    inventory: updatedInventory || null,
   };
 };
 
@@ -2231,7 +2367,7 @@ exports.bulkUploadLeads = async (req, res) => {
     const payloadPhones = [
       ...new Set(
         rows
-          .map((row) => String(row?.phone || "").trim())
+          .map((row) => normalizeLeadPhoneInput(row?.phone))
           .filter(Boolean),
       ),
     ];
@@ -2314,13 +2450,13 @@ exports.bulkUploadLeads = async (req, res) => {
           throw new Error("Row must be an object");
         }
 
-        const name = String(row.name || "").trim();
-        const phone = String(row.phone || "").trim();
+        const name = sanitizeFormulaLikeText(row.name);
+        const phone = normalizeLeadPhoneInput(row.phone);
         const email = String(row.email || "").trim().toLowerCase();
-        const city = String(row.city || "").trim();
-        const projectInterested = String(
+        const city = sanitizeFormulaLikeText(row.city);
+        const projectInterested = sanitizeFormulaLikeText(
           row.projectInterested || row.project || row.project_name || "",
-        ).trim();
+        );
         const source = String(row.source || "").trim().toUpperCase() === "META"
           ? "META"
           : "MANUAL";
@@ -2555,30 +2691,37 @@ exports.bulkUploadLeads = async (req, res) => {
       }
     }
 
-    if (createdLeads.length) {
+    if (createdLeads.length && createdLeads.length <= BULK_LEAD_AUTO_ASSIGN_SYNC_LIMIT) {
       const requester = {
         _id: req.user._id,
         role: req.user.role,
         companyId: req.user.companyId,
       };
-      setImmediate(async () => {
-        for (const lead of createdLeads) {
-          try {
-            await autoAssignLead({
-              lead,
-              requester,
-              performedBy: requester._id,
-            });
-          } catch (assignmentError) {
-            logger.error({
-              requestId: req.requestId || null,
-              leadId: lead?._id || null,
-              error: assignmentError.message,
-              message: "Bulk lead auto assignment failed",
-            });
-          }
-        }
+
+      await Promise.all(
+        createdLeads.map((lead) =>
+          autoAssignLead({
+            lead,
+            requester,
+            performedBy: requester._id,
+          })),
+      );
+    } else if (createdLeads.length) {
+      logger.warn({
+        requestId: req.requestId || null,
+        createdCount: createdLeads.length,
+        syncLimit: BULK_LEAD_AUTO_ASSIGN_SYNC_LIMIT,
+        message: "Bulk lead auto assignment deferred for large batch",
       });
+      await LeadActivity.insertMany(
+        createdLeads.map((lead) => ({
+          lead: lead._id,
+          action:
+            "Auto assignment pending: bulk upload batch exceeds synchronous assignment limit",
+          performedBy: req.user._id,
+        })),
+        { ordered: false },
+      );
     }
 
     return res.status(201).json({
@@ -4200,7 +4343,7 @@ exports.getLeadStatusRequests = async (req, res) => {
       query.status = requestedStatus;
     }
 
-    const isAdmin = req.isPlatformAdminRole(user.role);
+    const isAdmin = isPlatformAdminRole(req.user.role);
     if (!isAdmin && !isManagementRole(req.user.role)) {
       query.requestedBy = req.user._id;
     }
@@ -4772,6 +4915,94 @@ exports.addLeadDiaryEntry = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "addLeadDiaryEntry failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateLeadDiaryEntry = async (req, res) => {
+  try {
+    const { leadId, entryId } = req.params;
+    if (!isValidObjectId(leadId)) {
+      return res.status(400).json({ message: "Invalid lead id" });
+    }
+    if (!isValidObjectId(entryId)) {
+      return res.status(400).json({ message: "Invalid diary entry id" });
+    }
+
+    const note = String(req.body?.note || "").trim();
+    if (!note) {
+      return res.status(400).json({ message: "Diary note is required" });
+    }
+    if (note.length > MAX_LEAD_DIARY_NOTE_LENGTH) {
+      return res.status(400).json({
+        message: `Diary note cannot exceed ${MAX_LEAD_DIARY_NOTE_LENGTH} characters`,
+      });
+    }
+
+    const accessibleLead = await findAccessibleLeadById({
+      leadId,
+      user: req.user,
+    });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const entry = await LeadDiary.findOne({
+      _id: entryId,
+      lead: leadId,
+    });
+    if (!entry) {
+      return res.status(404).json({ message: "Diary entry not found" });
+    }
+
+    const canEdit =
+      String(entry.createdBy || "") === String(req.user._id)
+      || isPlatformAdminRole(req.user.role)
+      || isManagementRole(req.user.role);
+
+    if (!canEdit) {
+      return res.status(403).json({ message: "You cannot edit this diary entry" });
+    }
+
+    const previousNote = entry.note || "";
+    if (previousNote !== note) {
+      entry.editHistory = [
+        ...(Array.isArray(entry.editHistory) ? entry.editHistory : []),
+        {
+          previousNote,
+          updatedNote: note,
+          editedBy: req.user._id,
+          editedAt: new Date(),
+        },
+      ];
+    }
+    entry.note = note;
+    entry.isEdited = true;
+    entry.lastEditedAt = new Date();
+    entry.lastEditedBy = req.user._id;
+    await entry.save();
+
+    await LeadActivity.create({
+      lead: leadId,
+      action: "Lead diary note edited",
+      performedBy: req.user._id,
+    });
+
+    const populatedEntry = await LeadDiary.findById(entry._id)
+      .populate("createdBy", "name role")
+      .populate("lastEditedBy", "name role")
+      .lean();
+
+    return res.json({
+      message: "Lead diary entry updated",
+      entry: populatedEntry,
+    });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "updateLeadDiaryEntry failed",
     });
     return res.status(500).json({ message: "Server error" });
   }

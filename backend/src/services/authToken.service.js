@@ -68,22 +68,46 @@ const rotateRefreshToken = async ({ rawRefreshToken, ip = "", userAgent = "" }) 
   const nextRawToken = createRawRefreshToken();
   const nextHash = buildTokenHash(nextRawToken);
 
-  existingToken.revokedAt = now;
-  existingToken.revokedByIp = String(ip || "");
-  existingToken.replacedByTokenHash = nextHash;
-  await existingToken.save();
+  const claimedToken = await RefreshToken.findOneAndUpdate(
+    {
+      _id: existingToken._id,
+      revokedAt: null,
+      expiresAt: { $gt: now },
+    },
+    {
+      $set: {
+        revokedAt: now,
+        revokedByIp: String(ip || ""),
+        replacedByTokenHash: nextHash,
+      },
+    },
+    { returnDocument: "before" },
+  );
+
+  if (!claimedToken) {
+    await RefreshToken.updateMany(
+      { familyId: existingToken.familyId, revokedAt: null },
+      {
+        $set: {
+          revokedAt: now,
+          revokedByIp: String(ip || ""),
+        },
+      },
+    );
+    return null;
+  }
 
   await RefreshToken.create({
-    userId: existingToken.userId,
+    userId: claimedToken.userId,
     tokenHash: nextHash,
-    familyId: existingToken.familyId,
+    familyId: claimedToken.familyId,
     expiresAt: buildRefreshExpiryDate(),
     createdByIp: String(ip || ""),
     userAgent: String(userAgent || "").slice(0, 300),
   });
 
   return {
-    userId: existingToken.userId,
+    userId: claimedToken.userId,
     refreshToken: nextRawToken,
   };
 };

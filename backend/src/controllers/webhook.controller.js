@@ -1,4 +1,5 @@
 const axios = require("axios");
+const crypto = require("crypto");
 const Lead = require("../models/Lead");
 const Company = require("../models/Company");
 const { autoAssignLead } = require("../services/leadAssignment.service");
@@ -82,6 +83,40 @@ const resolveAllowedMetaPageIds = (tenant = null, { includeEnv = true } = {}) =>
   ]);
 
   return ids;
+};
+
+const verifyMetaSignature = (req) => {
+  const secret = String(
+    process.env.META_APP_SECRET || process.env.META_WEBHOOK_SECRET || "",
+  ).trim();
+  if (!secret) {
+    return { ok: false, status: 500, message: "Meta webhook secret is not configured" };
+  }
+
+  const signatureHeader = String(req.get("x-hub-signature-256") || "").trim();
+  if (!signatureHeader.startsWith("sha256=")) {
+    return { ok: false, status: 401, message: "Missing Meta webhook signature" };
+  }
+
+  const rawBody = Buffer.isBuffer(req.rawBody)
+    ? req.rawBody
+    : Buffer.from(JSON.stringify(req.body || {}));
+  const expected = `sha256=${crypto
+    .createHmac("sha256", secret)
+    .update(rawBody)
+    .digest("hex")}`;
+
+  const provided = Buffer.from(signatureHeader, "utf8");
+  const computed = Buffer.from(expected, "utf8");
+  if (provided.length !== computed.length) {
+    return { ok: false, status: 401, message: "Invalid Meta webhook signature" };
+  }
+
+  if (!crypto.timingSafeEqual(provided, computed)) {
+    return { ok: false, status: 401, message: "Invalid Meta webhook signature" };
+  }
+
+  return { ok: true };
 };
 
 const buildCompanyPageRouteMap = async () => {
@@ -182,17 +217,12 @@ const routeLeadEventsByCompany = async ({ leadEvents = [], tenant = null } = {})
     let companyRoute = candidatesWithToken[0];
     if (candidatesWithToken.length > 1) {
       ambiguousPageCount += 1;
-      ambiguousResolvedCount += 1;
-      companyRoute = [...candidatesWithToken]
-        .sort((left, right) => (right.updatedAt || 0) - (left.updatedAt || 0))[0];
-
       logger.warn({
         pageId,
-        selectedCompanyId: companyRoute.companyId,
-        selectedTenantSlug: companyRoute.tenantSlug,
         candidateCompanyIds: candidatesWithToken.map((row) => row.companyId),
-        message: "Meta page configured in multiple companies; routed to most recently updated company",
+        message: "Meta page configured in multiple companies; event rejected as ambiguous",
       });
+      return;
     }
 
     const key = companyRoute.companyId;
@@ -429,6 +459,11 @@ exports.verifyWebhook = (req, res) => {
 
 exports.handleWebhook = async (req, res) => {
   try {
+    const signature = verifyMetaSignature(req);
+    if (!signature.ok) {
+      return res.status(signature.status).json({ message: signature.message });
+    }
+
     const leadEvents = extractLeadEvents(req.body);
     if (!leadEvents.length) {
       return res.status(200).json({ message: "No leadgen event found" });

@@ -89,6 +89,7 @@ const PrimarySidebar = ({
 
   const sidebar = useCallback((groups, { mobile = false } = {}) => (
     <aside
+      aria-label={mobile ? "Mobile section navigation" : "Section navigation"}
       className={cn(
         "flex h-full shrink-0 flex-col border-r border-slate-200 bg-white/95 shadow-crm-soft backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95",
         "transition-[width,transform] duration-200",

@@ -60,6 +60,15 @@ const PUBLIC_ROUTE_PREFIXES = [
   "/service-terms",
   "/shared",
 ];
+const E2E_SESSION_TIMEOUT_STORAGE_KEY = "samvid-os.e2e.sessionTimeoutMs";
+
+const resolveSessionTimeoutMs = () => {
+  const configuredTimeout = getSessionTimeoutMs(readSystemSettings().security.sessionTimeoutMinutes);
+  if (import.meta.env.MODE !== "e2e") return configuredTimeout;
+
+  const overrideMs = Number.parseInt(localStorage.getItem(E2E_SESSION_TIMEOUT_STORAGE_KEY) || "", 10);
+  return Number.isFinite(overrideMs) && overrideMs > 0 ? overrideMs : configuredTimeout;
+};
 const FORCE_LIGHT_ROUTE_PREFIXES = [
   "/login",
   "/privacy-policy",
@@ -72,7 +81,7 @@ const SUPER_ADMIN_ROLE = "SUPER_ADMIN";
 const ADMIN_ROLES = [SUPER_ADMIN_ROLE, "ADMIN"];
 const MANAGEMENT_ROLES = ["MANAGER"];
 const ADMIN_TOOL_ROLES = [SUPER_ADMIN_ROLE, "ADMIN", "MANAGER"];
-const CHAT_REFRESH_FALLBACK_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"];
+const CHAT_REFRESH_FALLBACK_ROLES = ["INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"];
 const TENANT_ROUTE_FIRST_SEGMENTS = new Set([
   "dashboard",
   "login",
@@ -96,6 +105,7 @@ const ROLE_LABELS = {
   SUPER_ADMIN: "Super Admin",
   ADMIN: "Admin",
   MANAGER: "Manager",
+  INSIDE_EXECUTIVE: "Inside Executive",
   EXECUTIVE: "Executive",
   FIELD_EXECUTIVE: "Field Executive",
   PRODUCTION_EXECUTIVE: "Production Executive",
@@ -141,6 +151,12 @@ const resolveHomeHeader = (userRole) => {
         title: "Management Command Center",
         subtitle: "Portfolio progress, team activity and execution signals",
         scopeLabel: "Home",
+      };
+    case "INSIDE_EXECUTIVE":
+      return {
+        title: "Inside Executive Command Center",
+        subtitle: "Lead priorities, follow-up discipline and conversion flow",
+        scopeLabel: "My Desk",
       };
     case "EXECUTIVE":
       return {
@@ -332,9 +348,7 @@ export default function App() {
     return storedTheme === "dark" ? "dark" : "light";
   });
   const inactivityTimerRef = useRef(null);
-  const sessionTimeoutMsRef = useRef(
-    getSessionTimeoutMs(readSystemSettings().security.sessionTimeoutMinutes),
-  );
+  const sessionTimeoutMsRef = useRef(resolveSessionTimeoutMs());
   const locationSyncStateRef = useRef({
     inFlight: false,
     lastSentAt: 0,
@@ -500,7 +514,7 @@ export default function App() {
   useEffect(() => {
     const applyRuntimeSystemSettings = () => {
       const settings = readSystemSettings();
-      sessionTimeoutMsRef.current = getSessionTimeoutMs(settings.security.sessionTimeoutMinutes);
+      sessionTimeoutMsRef.current = resolveSessionTimeoutMs();
       applySystemSettingsToDocument(settings);
       setSystemSettingsVersion((prev) => prev + 1);
     };
@@ -681,6 +695,8 @@ export default function App() {
         return <ManagerDashboard theme={theme} />;
       case "MANAGER":
         return <ManagerDashboard theme={theme} />;
+      case "INSIDE_EXECUTIVE":
+        return <ExecutiveDashboard />;
       case "EXECUTIVE":
         return <ExecutiveDashboard />;
       case "FIELD_EXECUTIVE":
@@ -718,7 +734,7 @@ export default function App() {
   }, [navigate]);
 
   const canAccess = useCallback(
-    (allowedRoles) => ADMIN_ROLES.includes(userRole) || allowedRoles.includes(userRole),
+    (allowedRoles) => allowedRoles.includes(userRole),
     [userRole],
   );
 
@@ -743,65 +759,65 @@ export default function App() {
       />
       <Route
         path="/leads"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
       />
       <Route
         path="/:tenantSlug/leads"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
       />
       <Route
         path="/leads/:leadId"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
       />
       <Route
         path="/:tenantSlug/leads/:leadId"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <LeadsMatrix /> : <Navigate to="/" />}
       />
       <Route
         path="/my-leads"
         element={
-          canAccess(["EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />
+          canAccess(["INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />
         }
       />
       <Route
         path="/:tenantSlug/my-leads"
         element={
-          canAccess(["EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />
+          canAccess(["INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />
         }
       />
       <Route
         path="/my-leads/:leadId"
-        element={canAccess(["EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+        element={canAccess(["INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
       />
       <Route
         path="/:tenantSlug/my-leads/:leadId"
-        element={canAccess(["EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
+        element={canAccess(["INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <LeadsMatrix /> : <Navigate to="/" />}
       />
       <Route
         path="/inventory"
         element={(
-          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
+          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
           && (userRole !== "CHANNEL_PARTNER" || canChannelPartnerViewInventory)
         ) ? <AssetVault /> : <Navigate to="/" />}
       />
       <Route
         path="/:tenantSlug/inventory"
         element={(
-          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
+          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
           && (userRole !== "CHANNEL_PARTNER" || canChannelPartnerViewInventory)
         ) ? <AssetVault /> : <Navigate to="/" />}
       />
       <Route
         path="/inventory/:id"
         element={(
-          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
+          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
           && (userRole !== "CHANNEL_PARTNER" || canChannelPartnerViewInventory)
         ) ? <InventoryDetails /> : <Navigate to="/" />}
       />
       <Route
         path="/:tenantSlug/inventory/:id"
         element={(
-          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
+          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])
           && (userRole !== "CHANNEL_PARTNER" || canChannelPartnerViewInventory)
         ) ? <InventoryDetails /> : <Navigate to="/" />}
       />
@@ -809,6 +825,7 @@ export default function App() {
         path="/finance"
         element={canAccess([
           ...MANAGEMENT_ROLES,
+          "INSIDE_EXECUTIVE",
           "EXECUTIVE",
           "FIELD_EXECUTIVE",
           "CHANNEL_PARTNER",
@@ -818,6 +835,7 @@ export default function App() {
         path="/:tenantSlug/finance"
         element={canAccess([
           ...MANAGEMENT_ROLES,
+          "INSIDE_EXECUTIVE",
           "EXECUTIVE",
           "FIELD_EXECUTIVE",
           "CHANNEL_PARTNER",
@@ -841,24 +859,24 @@ export default function App() {
       />
       <Route
         path="/leaderboard"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <RoleLeaderboard /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <RoleLeaderboard /> : <Navigate to="/" />}
       />
       <Route
         path="/:tenantSlug/leaderboard"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <RoleLeaderboard /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"]) ? <RoleLeaderboard /> : <Navigate to="/" />}
       />
       <Route
         path="/calendar"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <MasterSchedule /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <MasterSchedule /> : <Navigate to="/" />}
       />
       <Route
         path="/:tenantSlug/calendar"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <MasterSchedule /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"]) ? <MasterSchedule /> : <Navigate to="/" />}
       />
       <Route
         path="/tasks"
         element={
-          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"])
+          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"])
             ? <TaskManager theme={theme} />
             : <Navigate to="/" />
         }
@@ -866,18 +884,18 @@ export default function App() {
       <Route
         path="/:tenantSlug/tasks"
         element={
-          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"])
+          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"])
             ? <TaskManager theme={theme} />
             : <Navigate to="/" />
         }
       />
       <Route
         path="/attendance"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE", "CHANNEL_PARTNER"]) ? <AttendanceHub /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE", "CHANNEL_PARTNER"]) ? <AttendanceHub /> : <Navigate to="/" />}
       />
       <Route
         path="/:tenantSlug/attendance"
-        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE", "CHANNEL_PARTNER"]) ? <AttendanceHub /> : <Navigate to="/" />}
+        element={canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE", "CHANNEL_PARTNER"]) ? <AttendanceHub /> : <Navigate to="/" />}
       />
       <Route
         path="/admin/notifications"
@@ -932,7 +950,7 @@ export default function App() {
         element={
           userRole === "PRODUCTION_EXECUTIVE"
             ? <ProductionExecutiveDashboard mode="performance" />
-            : canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"])
+            : canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"])
               ? <Performance />
               : <Navigate to="/" />
         }
@@ -942,7 +960,7 @@ export default function App() {
         element={
           userRole === "PRODUCTION_EXECUTIVE"
             ? <ProductionExecutiveDashboard mode="performance" />
-            : canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"])
+            : canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"])
               ? <Performance />
               : <Navigate to="/" />
         }
@@ -950,7 +968,7 @@ export default function App() {
       <Route
         path="/chat"
         element={
-          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"])
+          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"])
             ? <TeamChat theme={theme} />
             : <Navigate to="/" />
         }
@@ -958,7 +976,7 @@ export default function App() {
       <Route
         path="/:tenantSlug/chat"
         element={
-          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"])
+          canAccess(["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "PRODUCTION_EXECUTIVE"])
             ? <TeamChat theme={theme} />
             : <Navigate to="/" />
         }
@@ -970,6 +988,7 @@ export default function App() {
             "ADMIN",
             "SUPER_ADMIN",
             ...MANAGEMENT_ROLES,
+            "INSIDE_EXECUTIVE",
             "EXECUTIVE",
             "FIELD_EXECUTIVE",
             "PRODUCTION_EXECUTIVE",
@@ -986,6 +1005,7 @@ export default function App() {
             "ADMIN",
             "SUPER_ADMIN",
             ...MANAGEMENT_ROLES,
+            "INSIDE_EXECUTIVE",
             "EXECUTIVE",
             "FIELD_EXECUTIVE",
             "PRODUCTION_EXECUTIVE",
@@ -1001,6 +1021,7 @@ export default function App() {
       <Route path="/service-terms" element={<ServiceTermsNotice />} />
       <Route path="/shared/inventory/:shareToken" element={<SharedInventoryView />} />
       <Route path="/portal/*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   ), [
     DashboardByRole,

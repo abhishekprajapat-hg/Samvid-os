@@ -1,4 +1,5 @@
 const ChatCallHistory = require("../models/ChatCallHistory");
+const mongoose = require("mongoose");
 const { getRoomByIdForUser } = require("./chatRoom.service");
 const { toObjectIdString, uniqueIds } = require("./chatAccess.service");
 
@@ -91,6 +92,25 @@ const findCallHistoryRow = async ({ callId, roomId }) => {
     callId: normalizedCallId,
     room: normalizedRoomId,
   });
+};
+
+const populateCallHistoryRow = (query) =>
+  query
+    .populate("caller", "name role")
+    .populate("answeredBy", "name role")
+    .populate("endedBy", "name role")
+    .populate("participants", "name role");
+
+const findCallHistoryRowByPublicId = async (callId) => {
+  const normalizedCallId = String(callId || "").trim();
+  if (!normalizedCallId) return null;
+
+  const criteria = [{ callId: normalizedCallId }];
+  if (mongoose.Types.ObjectId.isValid(normalizedCallId)) {
+    criteria.push({ _id: normalizedCallId });
+  }
+
+  return ChatCallHistory.findOne({ $or: criteria });
 };
 
 const recordCallInitiated = async ({
@@ -235,10 +255,92 @@ const listConversationCallHistory = async ({ user, roomId, limit = 30 }) => {
   return rows.map(toCallHistoryDto);
 };
 
+const normalizeRequestedCallMode = (value) => {
+  const mode = String(value || "").trim().toUpperCase();
+  return mode === "VIDEO" || mode === "video" ? "video" : "audio";
+};
+
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const startCallForUser = async ({ user, roomId, mode = "audio" }) => {
+  const room = await getRoomByIdForUser({
+    user,
+    roomId,
+    requireParticipantForSend: true,
+  });
+  const callId = new mongoose.Types.ObjectId().toString();
+  const row = await recordCallInitiated({
+    callId,
+    room,
+    caller: user,
+    mode: normalizeRequestedCallMode(mode),
+  });
+  const populated = await populateCallHistoryRow(ChatCallHistory.findById(row._id)).lean();
+  return {
+    conversationId: toId(room._id),
+    call: toCallHistoryDto(populated),
+  };
+};
+
+const updateCallForUser = async ({ user, callId, status = "", reason = "" }) => {
+  const row = await findCallHistoryRowByPublicId(callId);
+  if (!row) {
+    throw createHttpError(404, "Call not found");
+  }
+
+  const room = await getRoomByIdForUser({
+    user,
+    roomId: row.room,
+    requireParticipantForSend: true,
+  });
+
+  const normalizedStatus = String(status || "").trim().toUpperCase();
+  let updated = row;
+  if (normalizedStatus === "ACCEPTED" || normalizedStatus === "CONNECTED") {
+    updated = await markCallAccepted({
+      callId: row.callId,
+      roomId: row.room,
+      userId: user._id,
+    });
+  } else if (
+    normalizedStatus === "REJECTED"
+    || normalizedStatus === "MISSED"
+    || normalizedStatus === "FAILED"
+  ) {
+    updated = await markCallRejected({
+      callId: row.callId,
+      roomId: row.room,
+      userId: user._id,
+      reason: reason || normalizedStatus.toLowerCase(),
+    });
+  } else if (normalizedStatus === "ENDED" || normalizedStatus === "END") {
+    updated = await markCallEnded({
+      callId: row.callId,
+      roomId: row.room,
+      userId: user._id,
+      reason: reason || "ended",
+    });
+  } else {
+    throw createHttpError(400, "Invalid call status");
+  }
+
+  const populated = await populateCallHistoryRow(ChatCallHistory.findById(updated._id)).lean();
+  return {
+    conversationId: toId(room._id),
+    call: toCallHistoryDto(populated),
+  };
+};
+
 module.exports = {
   recordCallInitiated,
   markCallAccepted,
   markCallRejected,
   markCallEnded,
   listConversationCallHistory,
+  startCallForUser,
+  updateCallForUser,
 };

@@ -89,13 +89,6 @@ router.post(
   userController.createUserDeleteRequest
 );
 
-router.patch(
-  "/:userId",
-  writeLimiter,
-  authMiddleware.protect,
-  userController.updateUserByRole
-);
-
 router.get(
   "/field-locations",
   authMiddleware.protect,

@@ -866,7 +866,7 @@ exports.getUsers = async (req, res) => {
         _id: { $in: visibleIds },
       };
     } else {
-      query = { ...companyScope, _id: req.user._id };
+      return res.status(403).json({ message: "Access denied" });
     }
 
     const pagination = parsePagination(req.query, {

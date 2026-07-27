@@ -13,8 +13,14 @@ dist-ssr
 *.local
 backend/.env
 frontend/.env
+backend/coverage/
 backend/.mongo-data/
 backend/.mongo-log/
+frontend/coverage/
+frontend/playwright-report/
+frontend/test-results/
+frontend/e2e/.auth/
+mobile/coverage/
 
 # Editor directories and files
 .vscode/*

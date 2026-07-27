@@ -25,7 +25,7 @@ const PLATFORM_ADMIN_ROLES = ["SUPER_ADMIN"];
 const ADMIN_ROLES = ["ADMIN"];
 const MANAGEMENT_ROLES = [...ADMIN_ROLES, "MANAGER"];
 const ADMIN_TOOL_ROLES = [...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES];
-const SALES_ROLES = [...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"];
+const SALES_ROLES = [...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"];
 const PRODUCTION_ROLES = ["PRODUCTION_EXECUTIVE"];
 const PARTNER_ROLES = ["CHANNEL_PARTNER"];
 
@@ -113,7 +113,7 @@ export const WORKBENCH_MENU = {
       group: "Pipeline",
       items: [
         { label: "Pipeline", path: "/leads", icon: Users, roles: [...ADMIN_ROLES, "MANAGER", "CHANNEL_PARTNER"] },
-        { label: "My Leads", path: "/my-leads", icon: Briefcase, roles: ["EXECUTIVE", "FIELD_EXECUTIVE"] },
+        { label: "My Leads", path: "/my-leads", icon: Briefcase, roles: ["INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"] },
       ],
     },
   ],
@@ -130,7 +130,7 @@ export const WORKBENCH_MENU = {
     {
       group: "Money",
       items: [
-        { label: "Finance", path: "/finance", icon: PieChart, roles: [...ADMIN_ROLES, "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"] },
+        { label: "Finance", path: "/finance", icon: PieChart, roles: [...ADMIN_ROLES, "MANAGER", "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"] },
       ],
     },
   ],

@@ -666,9 +666,16 @@ const queryOverview = async ({ user }) => {
 
 exports.askOfficeAssistant = async (req, res) => {
   try {
-    const query = normalizeQuery(req.body?.query);
+    if (typeof req.body?.query !== "string") {
+      return res.status(400).json({ message: "Query must be text" });
+    }
+
+    const query = normalizeQuery(req.body.query);
     if (!query || query.length < 2) {
       return res.status(400).json({ message: "Query is required" });
+    }
+    if (query.length > 1000) {
+      return res.status(400).json({ message: "Query is too long" });
     }
 
     const intent = detectIntent(query);

@@ -5,6 +5,18 @@ const Lead = require("../models/Lead");
 const { USER_ROLES, isPlatformAdminRole } = require("../constants/role.constants");
 
 const isProductionExecutive = (user) => user?.role === USER_ROLES.PRODUCTION_EXECUTIVE;
+const TASK_STATUSES = Object.freeze(["TODO", "IN_PROGRESS", "COMPLETED", "BACKLOG"]);
+const TASK_PRIORITIES = Object.freeze(["LOW", "MEDIUM", "HIGH"]);
+
+const normalizeEnum = (value) => String(value || "").trim().toUpperCase();
+
+const handleTaskError = (req, res, error, fallbackMessage) => {
+  if (error?.name === "ValidationError" || error?.name === "CastError") {
+    return res.status(400).json({ message: error.message });
+  }
+  req.log?.error(error);
+  return res.status(500).json({ message: fallbackMessage, error: error.message });
+};
 
 // Helper to check access permissions
 const checkTaskAccess = (task, user) => {
@@ -30,6 +42,15 @@ exports.createTask = async (req, res) => {
       return res.status(400).json({ message: "Task title is required" });
     }
 
+    const normalizedStatus = status === undefined ? undefined : normalizeEnum(status);
+    const normalizedPriority = priority === undefined ? undefined : normalizeEnum(priority);
+    if (normalizedStatus !== undefined && !TASK_STATUSES.includes(normalizedStatus)) {
+      return res.status(400).json({ message: "Invalid task status" });
+    }
+    if (normalizedPriority !== undefined && !TASK_PRIORITIES.includes(normalizedPriority)) {
+      return res.status(400).json({ message: "Invalid task priority" });
+    }
+
     if (isProductionExecutive(req.user) && leadId) {
       return res.status(403).json({ message: "Production Executive tasks cannot be linked to leads" });
     }
@@ -41,7 +62,7 @@ exports.createTask = async (req, res) => {
       }
       const assignedUser = await User.findOne({ _id: assignedTo, companyId });
       if (!assignedUser) {
-        return res.status(400).json({ message: "Assignee does not belong to your company" });
+        return res.status(404).json({ message: "Assignee not found" });
       }
     }
 
@@ -52,15 +73,15 @@ exports.createTask = async (req, res) => {
       }
       const lead = await Lead.findOne({ _id: leadId, companyId });
       if (!lead) {
-        return res.status(400).json({ message: "Lead does not belong to your company" });
+        return res.status(404).json({ message: "Lead not found" });
       }
     }
 
     const newTask = new Task({
       title,
       description,
-      status,
-      priority,
+      status: normalizedStatus,
+      priority: normalizedPriority,
       dueDate: dueDate || null,
       assignedTo: assignedTo || null,
       leadId: leadId || null,
@@ -89,8 +110,7 @@ exports.createTask = async (req, res) => {
 
     res.status(201).json(populatedTask);
   } catch (error) {
-    req.log?.error(error);
-    res.status(500).json({ message: "Failed to create task", error: error.message });
+    return handleTaskError(req, res, error, "Failed to create task");
   }
 };
 
@@ -202,6 +222,15 @@ exports.updateTask = async (req, res) => {
       return res.status(403).json({ message: "Access denied. You do not have permission to edit this task" });
     }
 
+    const normalizedStatus = status === undefined ? undefined : normalizeEnum(status);
+    const normalizedPriority = priority === undefined ? undefined : normalizeEnum(priority);
+    if (normalizedStatus !== undefined && !TASK_STATUSES.includes(normalizedStatus)) {
+      return res.status(400).json({ message: "Invalid task status" });
+    }
+    if (normalizedPriority !== undefined && !TASK_PRIORITIES.includes(normalizedPriority)) {
+      return res.status(400).json({ message: "Invalid task priority" });
+    }
+
     // Validate updates if changed
     if (assignedTo && String(assignedTo) !== String(task.assignedTo)) {
       if (!mongoose.Types.ObjectId.isValid(assignedTo)) {
@@ -209,7 +238,7 @@ exports.updateTask = async (req, res) => {
       }
       const assignedUser = await User.findOne({ _id: assignedTo, companyId });
       if (!assignedUser) {
-        return res.status(400).json({ message: "Assignee does not belong to your company" });
+        return res.status(404).json({ message: "Assignee not found" });
       }
     }
 
@@ -219,7 +248,7 @@ exports.updateTask = async (req, res) => {
       }
       const lead = await Lead.findOne({ _id: leadId, companyId });
       if (!lead) {
-        return res.status(400).json({ message: "Lead does not belong to your company" });
+        return res.status(404).json({ message: "Lead not found" });
       }
     }
 
@@ -228,8 +257,8 @@ exports.updateTask = async (req, res) => {
     // Apply updates
     if (title !== undefined) task.title = title;
     if (description !== undefined) task.description = description;
-    if (status !== undefined) task.status = status;
-    if (priority !== undefined) task.priority = priority;
+    if (normalizedStatus !== undefined) task.status = normalizedStatus;
+    if (normalizedPriority !== undefined) task.priority = normalizedPriority;
     if (dueDate !== undefined) task.dueDate = dueDate || null;
     if (assignedTo !== undefined) task.assignedTo = assignedTo || null;
     if (leadId !== undefined) task.leadId = leadId || null;
@@ -285,8 +314,7 @@ exports.updateTask = async (req, res) => {
 
     res.status(200).json(populatedTask);
   } catch (error) {
-    req.log?.error(error);
-    res.status(500).json({ message: "Failed to update task", error: error.message });
+    return handleTaskError(req, res, error, "Failed to update task");
   }
 };
 
@@ -302,6 +330,9 @@ exports.deleteTask = async (req, res) => {
     const task = await Task.findById(taskId);
 
     if (!task) {
+      return res.status(404).json({ message: "Task not found" });
+    }
+    if (req.user.role !== USER_ROLES.SUPER_ADMIN && String(task.companyId) !== String(req.user.companyId)) {
       return res.status(404).json({ message: "Task not found" });
     }
 
@@ -331,8 +362,7 @@ exports.deleteTask = async (req, res) => {
 
     res.status(200).json({ message: "Task successfully deleted", taskId });
   } catch (error) {
-    req.log?.error(error);
-    res.status(500).json({ message: "Failed to delete task", error: error.message });
+    return handleTaskError(req, res, error, "Failed to delete task");
   }
 };
 

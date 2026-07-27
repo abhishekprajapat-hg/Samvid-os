@@ -2,6 +2,20 @@ import { io } from "socket.io-client";
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || window.location.origin;
 const SOCKET_PATH = import.meta.env.VITE_SOCKET_PATH || "/socket.io";
+const SOCKET_DISABLED = String(import.meta.env.VITE_DISABLE_SOCKET || "").toLowerCase() === "true";
+
+const createDisabledSocket = () => ({
+  connected: false,
+  on() { return this; },
+  off() { return this; },
+  once() { return this; },
+  emit(_event, _payload, ack) {
+    if (typeof ack === "function") ack({ ok: false, error: "Realtime disabled" });
+    return this;
+  },
+  removeAllListeners() { return this; },
+  disconnect() { return this; },
+});
 
 const buildSocketOptions = (token) => ({
   path: SOCKET_PATH,
@@ -23,7 +37,7 @@ const buildSocketOptions = (token) => ({
 });
 
 export const createChatSocket = (token) =>
-  io(SOCKET_URL, buildSocketOptions(token));
+  SOCKET_DISABLED ? createDisabledSocket() : io(SOCKET_URL, buildSocketOptions(token));
 
 let sharedSocket = null;
 let sharedToken = "";

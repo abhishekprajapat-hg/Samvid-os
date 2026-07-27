@@ -125,10 +125,7 @@ const chatRoomSchema = new mongoose.Schema(
     directKey: {
       type: String,
       trim: true,
-      default: null,
-      unique: true,
-      sparse: true,
-      index: true,
+      default: undefined,
     },
     lastMessage: {
       type: String,
@@ -173,6 +170,13 @@ const chatRoomSchema = new mongoose.Schema(
 chatRoomSchema.index({ participants: 1, lastMessageAt: -1 });
 chatRoomSchema.index({ type: 1, lastMessageAt: -1 });
 chatRoomSchema.index({ leadId: 1, type: 1 });
+chatRoomSchema.index(
+  { directKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { directKey: { $type: "string" } },
+  },
+);
 // Escalation inboxes can include managers who are observers but not direct participants.
 chatRoomSchema.index({ "escalation.managerToNotify": 1, lastMessageAt: -1 });
 

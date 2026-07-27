@@ -400,11 +400,7 @@ export const uploadChatFile = async ({
     const res = await api.post("/chat/uploads", formData);
     return toLegacyAttachment(res.data?.attachment || null);
   } catch (error: any) {
-    if (!isMissingRouteError(error)) {
-      const isNetworkError = String(error?.message || "").toLowerCase().includes("network");
-      if (!isNetworkError) throw error;
-    }
-    return uploadToCloudinary({ uri, name, mimeType, file });
+    throw error;
   }
 };
 
@@ -459,16 +455,7 @@ export const createCallLog = async ({
   metadata?: Record<string, unknown>;
 }) => {
   if (!conversationId) {
-    return {
-      call: createLocalCallLog({
-        conversationId,
-        recipientId,
-        callType,
-        e2ee,
-        metadata,
-      }),
-      conversationId: String(conversationId || ""),
-    };
+    throw new Error("Conversation is required before starting a call");
   }
 
   try {
@@ -484,18 +471,6 @@ export const createCallLog = async ({
       conversationId: String(res.data?.conversationId || ""),
     };
   } catch (error) {
-    if (isMissingRouteError(error)) {
-      return {
-        call: createLocalCallLog({
-          conversationId,
-          recipientId,
-          callType,
-          e2ee,
-          metadata,
-        }),
-        conversationId: String(conversationId || ""),
-      };
-    }
     throw error;
   }
 };
@@ -529,9 +504,6 @@ export const updateCallLog = async ({
     });
     return (res.data?.call || null) as ChatCallLog | null;
   } catch (error) {
-    if (isMissingRouteError(error)) {
-      return null;
-    }
     throw error;
   }
 };

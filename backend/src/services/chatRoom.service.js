@@ -557,10 +557,15 @@ const logEscalation = async ({
     meta,
   });
 
-const resolveLeadChatContext = async (leadId) => {
-  const lead = await Lead.findById(leadId)
+const resolveLeadChatContext = async (leadId, companyId = null) => {
+  const leadQuery = { _id: leadId };
+  if (companyId) {
+    leadQuery.companyId = companyId;
+  }
+
+  const lead = await Lead.findOne(leadQuery)
     .select(
-      "_id assignedManager assignedExecutive assignedFieldExecutive assignedTo createdBy",
+      "_id companyId assignedManager assignedExecutive assignedFieldExecutive assignedTo createdBy",
     )
     .lean();
 
@@ -577,6 +582,7 @@ const resolveLeadChatContext = async (leadId) => {
   const users = await User.find({
     _id: { $in: candidateUserIds },
     isActive: true,
+    ...(lead.companyId ? { companyId: lead.companyId } : {}),
   })
     .select("_id role parentId isActive")
     .lean();
@@ -636,7 +642,7 @@ const ensureLeadRoomAccess = async ({ user, room }) => {
     return;
   }
 
-  const context = await resolveLeadChatContext(room.leadId);
+  const context = await resolveLeadChatContext(room.leadId, user.companyId || null);
   const allowed = context.participantIds.includes(toObjectIdString(user._id));
 
   if (!allowed) {
@@ -886,7 +892,7 @@ const createOrGetLeadRoom = async ({ creator, leadId }) => {
     throw createHttpError(400, "Lead ID is required");
   }
 
-  const leadContext = await resolveLeadChatContext(leadId);
+  const leadContext = await resolveLeadChatContext(leadId, creator.companyId || null);
   const creatorId = toObjectIdString(creator._id);
 
   if (!leadContext.participantIds.length) {
@@ -952,6 +958,7 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
       const recipients = await User.find({
         isActive: true,
         _id: { $ne: creator._id },
+        ...(creator.companyId ? { companyId: creator.companyId } : {}),
         $or: [
           { _id: cleanTargetTeamId, role: { $in: MANAGEMENT_ROLES } },
           { parentId: cleanTargetTeamId, role: { $in: EXECUTIVE_ROLES } },
@@ -981,6 +988,7 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
       const recipients = await User.find({
         isActive: true,
         role: cleanTargetRole,
+        ...(creator.companyId ? { companyId: creator.companyId } : {}),
         _id: { $ne: creator._id },
       })
         .select("_id")
@@ -995,6 +1003,7 @@ const resolveBroadcastRecipients = async ({ creator, targetRole, targetTeamId })
 
     const allRecipients = await User.find({
       isActive: true,
+      ...(creator.companyId ? { companyId: creator.companyId } : {}),
       _id: { $ne: creator._id },
     })
       .select("_id")

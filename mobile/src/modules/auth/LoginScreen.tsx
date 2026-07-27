@@ -147,12 +147,14 @@ export const LoginScreen = () => {
             label="General Portal"
             active={portal === "GENERAL"}
             onPress={() => setPortal("GENERAL")}
+            testID="login-general-portal"
             style={styles.flexChip as object}
           />
           <AppChip
             label="Admin Portal"
             active={portal === "ADMIN"}
             onPress={() => setPortal("ADMIN")}
+            testID="login-admin-portal"
             style={styles.flexChip as object}
           />
         </View>
@@ -164,6 +166,8 @@ export const LoginScreen = () => {
           placeholder="Email"
           value={email}
           onChangeText={setEmail}
+          accessibilityLabel="Email"
+          testID="login-email"
         />
 
         <AppInput
@@ -172,6 +176,8 @@ export const LoginScreen = () => {
           secureTextEntry
           value={password}
           onChangeText={setPassword}
+          accessibilityLabel="Password"
+          testID="login-password"
         />
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -181,6 +187,8 @@ export const LoginScreen = () => {
           disabled={loading}
           title={loading ? "Please wait..." : "Login"}
           onPress={submitLogin}
+          accessibilityLabel="Login"
+          testID="login-submit"
         />
 
         <View style={styles.divider} />

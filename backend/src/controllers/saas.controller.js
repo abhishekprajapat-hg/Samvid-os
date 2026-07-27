@@ -843,7 +843,11 @@ exports.createCompany = async (req, res) => {
     }
 
     const cleanedName = String(name || "").trim();
+    const hasSubdomainInput = Object.prototype.hasOwnProperty.call(req.body || {}, "subdomain");
     const requestedSubdomain = sanitizeSubdomain(subdomain);
+    if (hasSubdomainInput && !requestedSubdomain) {
+      return res.status(400).json({ message: "Valid subdomain is required" });
+    }
     const baseSubdomain = requestedSubdomain || sanitizeSubdomain(cleanedName);
     if (!baseSubdomain) {
       return res.status(400).json({ message: "Valid subdomain is required" });

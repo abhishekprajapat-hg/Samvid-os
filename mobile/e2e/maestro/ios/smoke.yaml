@@ -1,0 +1,15 @@
+appId: ${SAMVID_IOS_APP_ID}
+name: iOS Auth Smoke
+---
+- launchApp:
+    clearState: true
+- assertVisible: "ADMIN LOGIN"
+- tapOn:
+    id: "login-email"
+- inputText: "${SAMVID_MOBILE_EMAIL}"
+- tapOn:
+    id: "login-password"
+- inputText: "${SAMVID_MOBILE_PASSWORD}"
+- tapOn:
+    id: "login-submit"
+- assertVisible: "Logout"

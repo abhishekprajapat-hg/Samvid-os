@@ -5,6 +5,36 @@ import { Screen } from "../../components/common/Screen";
 import { AppCard } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
+import type { UserRole } from "../../types";
+
+export type MoreMenuItem = {
+  label: string;
+  screen: string;
+  chatBadge?: boolean;
+};
+
+export const getMoreMenuItemsForRole = (role: UserRole | null): MoreMenuItem[] => {
+  const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
+  const isManagement = isAdmin || role === "MANAGER";
+  const isChannelPartner = role === "CHANNEL_PARTNER";
+
+  return [
+    { label: "Samvid Assistant", screen: "Samvid Assistant" },
+    ...(isAdmin ? [{ label: "Chat", screen: "Chat", chatBadge: true }] : []),
+    { label: "Profile", screen: "Profile" },
+    { label: "Tasks", screen: "Tasks" },
+    ...(isManagement ? [{ label: "Users", screen: "Users" }] : []),
+    { label: "Leaderboard", screen: "Leaderboard" },
+    ...(!isChannelPartner ? [{ label: "Attendance", screen: "Attendance" }] : []),
+    ...(isManagement ? [{ label: "Reports", screen: "Reports" }] : []),
+    ...(!isChannelPartner ? [{ label: "Finance", screen: "Finance" }] : []),
+    { label: "Targets", screen: "Targets" },
+    { label: "Calendar", screen: "Calendar" },
+    ...(isManagement ? [{ label: "Settings", screen: "Settings" }] : []),
+    ...(isManagement ? [{ label: "Meta Ads", screen: "MetaAds" }] : []),
+    ...(isAdmin ? [{ label: "Field Ops", screen: "Field Ops" }] : []),
+  ];
+};
 
 const Row = ({
   label,
@@ -15,7 +45,13 @@ const Row = ({
   badgeCount?: number;
   onPress: () => void;
 }) => (
-  <Pressable style={styles.row} onPress={onPress}>
+  <Pressable
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    testID={`more-menu-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`}
+    style={styles.row}
+    onPress={onPress}
+  >
     <Text style={styles.rowText}>{label}</Text>
     <View style={styles.rowRight}>
       {badgeCount > 0 ? (
@@ -31,8 +67,7 @@ const Row = ({
 export const MoreMenuScreen = ({ navigation }: any) => {
   const { role } = useAuth();
   const { chatUnreadTotal, markAllChatRead } = useRealtimeAlerts();
-  const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
-  const isManagement = isAdmin || role === "MANAGER";
+  const menuItems = getMoreMenuItemsForRole(role);
   const open = (screen: string) => {
     const parent = navigation?.getParent?.();
     if (parent?.navigate) {
@@ -46,32 +81,19 @@ export const MoreMenuScreen = ({ navigation }: any) => {
     <Screen title="More" subtitle="Quick Access">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
         <AppCard style={styles.card as object}>
-          <Row label="Samvid Assistant" onPress={() => open("Samvid Assistant")} />
-          {isAdmin ? (
+          {menuItems.map((item) => item.chatBadge ? (
             <Row
-              label="Chat"
+              key={item.screen}
+              label={item.label}
               badgeCount={chatUnreadTotal}
               onPress={() => {
                 markAllChatRead();
-                open("Chat");
+                open(item.screen);
               }}
             />
-          ) : null}
-          <Row label="Profile" onPress={() => open("Profile")} />
-          <Row label="Tasks" onPress={() => open("Tasks")} />
-          {isManagement ? <Row label="Users" onPress={() => open("Users")} /> : null}
-          <Row label="Leaderboard" onPress={() => open("Leaderboard")} />
-          
-          {/* Screens moved from overflowing bottom tabs */}
-          {role !== "CHANNEL_PARTNER" ? <Row label="Attendance" onPress={() => open("Attendance")} /> : null}
-          {isManagement ? <Row label="Reports" onPress={() => open("Reports")} /> : null}
-          {role !== "CHANNEL_PARTNER" ? <Row label="Finance" onPress={() => open("Finance")} /> : null}
-          <Row label="Targets" onPress={() => open("Targets")} />
-          <Row label="Calendar" onPress={() => open("Calendar")} />
-
-          {isManagement ? <Row label="Settings" onPress={() => open("Settings")} /> : null}
-          {isManagement ? <Row label="Meta Ads" onPress={() => open("MetaAds")} /> : null}
-          {isAdmin ? <Row label="Field Ops" onPress={() => open("Field Ops")} /> : null}
+          ) : (
+            <Row key={item.screen} label={item.label} onPress={() => open(item.screen)} />
+          ))}
         </AppCard>
       </ScrollView>
     </Screen>

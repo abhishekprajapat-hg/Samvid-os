@@ -1213,12 +1213,14 @@ const AttendanceHub = () => {
 
             <div className="flex flex-wrap items-center gap-2">
               <input
+                aria-label="Attendance report date"
                 type="date"
                 value={adminDate}
                 onChange={(event) => setAdminDate(event.target.value)}
                 className="h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
               />
               <select
+                aria-label="Attendance status filter"
                 value={adminStatus}
                 onChange={(event) => setAdminStatus(event.target.value)}
                 className="h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
@@ -1410,6 +1412,7 @@ const AttendanceHub = () => {
                   <h4 className="text-sm font-semibold text-slate-900">Leave Approvals</h4>
                 </div>
                 <select
+                  aria-label="Leave approval status filter"
                   value={adminLeaveStatusFilter}
                   onChange={(event) => setAdminLeaveStatusFilter(event.target.value)}
                   className="h-9 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"

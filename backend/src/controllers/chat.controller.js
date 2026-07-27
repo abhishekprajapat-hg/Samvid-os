@@ -16,6 +16,11 @@ const {
   listEscalationLogs,
   toPositiveInt,
 } = require("../services/chatRoom.service");
+const {
+  listConversationCallHistory,
+  startCallForUser,
+  updateCallForUser,
+} = require("../services/chatCall.service");
 
 const emitRealtimeMessage = (io, payload) => {
   if (!io || !payload?.room || !payload?.message) return;
@@ -351,5 +356,65 @@ exports.sendMessage = async (req, res) => {
     });
   } catch (error) {
     return handleControllerError(res, error, "Failed to send message");
+  }
+};
+
+exports.createCall = async (req, res) => {
+  try {
+    const payload = await startCallForUser({
+      user: req.user,
+      roomId: req.body?.conversationId || req.body?.roomId,
+      mode: req.body?.callType || req.body?.mode,
+    });
+
+    req.app.get("io")?.to(`room:${payload.conversationId}`).emit("chat:call:incoming", {
+      callId: payload.call._id,
+      roomId: payload.conversationId,
+      conversationId: payload.conversationId,
+      mode: payload.call.mode,
+      callType: payload.call.mode === "video" ? "VIDEO" : "VOICE",
+      caller: payload.call.caller,
+      call: payload.call,
+    });
+
+    return res.status(201).json(payload);
+  } catch (error) {
+    return handleControllerError(res, error, "Failed to create call");
+  }
+};
+
+exports.updateCall = async (req, res) => {
+  try {
+    const payload = await updateCallForUser({
+      user: req.user,
+      callId: req.params.callId,
+      status: req.body?.status,
+      reason: req.body?.reason,
+    });
+
+    req.app.get("io")?.to(`room:${payload.conversationId}`).emit("messenger:call:update", {
+      callId: payload.call._id,
+      conversationId: payload.conversationId,
+      status: payload.call.status,
+      call: payload.call,
+    });
+
+    return res.json(payload);
+  } catch (error) {
+    return handleControllerError(res, error, "Failed to update call");
+  }
+};
+
+exports.getConversationCalls = async (req, res) => {
+  try {
+    const calls = await listConversationCallHistory({
+      user: req.user,
+      roomId: req.params.conversationId,
+      limit: req.query?.limit,
+    });
+
+    return res.json({ count: calls.length, calls });
+  } catch (error) {
+    return handleControllerError(res, error, "Failed to load call history");
   }
 };

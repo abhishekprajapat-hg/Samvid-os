@@ -5,14 +5,16 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const devApiTarget = env.VITE_DEV_API_TARGET || 'http://127.0.0.1:8082'
+  const devPort = Number.parseInt(env.VITE_DEV_PORT || '', 10) || 5173
+  const isE2E = mode === 'e2e'
 
   return {
     plugins: [react()],
     server: {
       host: '0.0.0.0',
-      port: 5173,
+      port: devPort,
       strictPort: true,
-      proxy: {
+      proxy: isE2E ? undefined : {
         '/api': {
           target: devApiTarget,
           changeOrigin: true,

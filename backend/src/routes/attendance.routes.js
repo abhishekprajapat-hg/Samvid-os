@@ -33,4 +33,17 @@ router.patch(
   attendanceController.reviewLeaveRequest,
 );
 
+router.post(
+  "/regularizations",
+  writeLimiter,
+  attendanceController.createRegularizationRequest,
+);
+router.get("/regularizations/my", attendanceController.getMyRegularizations);
+router.get("/regularizations/admin", attendanceController.getAdminRegularizations);
+router.patch(
+  "/regularizations/:regularizationId/review",
+  writeLimiter,
+  attendanceController.reviewRegularization,
+);
+
 module.exports = router;

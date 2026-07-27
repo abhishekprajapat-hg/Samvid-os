@@ -50,24 +50,35 @@ type TeamLead = {
 
 const ROLE_OPTIONS = [
   { label: "Manager", value: "MANAGER" },
+  { label: "Inside Executive", value: "INSIDE_EXECUTIVE" },
   { label: "Executive", value: "EXECUTIVE" },
   { label: "Field Executive", value: "FIELD_EXECUTIVE" },
+  { label: "Production Executive", value: "PRODUCTION_EXECUTIVE" },
   { label: "Channel Partner", value: "CHANNEL_PARTNER" },
 ];
 const EDIT_ROLE_OPTIONS = [
   { label: "Manager", value: "MANAGER" },
+  { label: "Inside Executive", value: "INSIDE_EXECUTIVE" },
   { label: "Executive", value: "EXECUTIVE" },
   { label: "Field Executive", value: "FIELD_EXECUTIVE" },
+  { label: "Production Executive", value: "PRODUCTION_EXECUTIVE" },
   { label: "Channel Partner", value: "CHANNEL_PARTNER" },
 ];
 
-const EXECUTIVE_ROLES = new Set(["EXECUTIVE", "FIELD_EXECUTIVE"]);
+const EXECUTIVE_ROLES = new Set([
+  "INSIDE_EXECUTIVE",
+  "EXECUTIVE",
+  "FIELD_EXECUTIVE",
+  "PRODUCTION_EXECUTIVE",
+]);
 const MANAGEMENT_ROLES = new Set(["MANAGER"]);
 const REPORTING_PARENT_ROLES: Record<string, string[]> = {
   ADMIN: ["SUPER_ADMIN"],
   MANAGER: ["ADMIN"],
+  INSIDE_EXECUTIVE: ["MANAGER"],
   EXECUTIVE: ["MANAGER"],
   FIELD_EXECUTIVE: ["MANAGER"],
+  PRODUCTION_EXECUTIVE: ["MANAGER"],
   CHANNEL_PARTNER: ["MANAGER"],
 };
 const getRefId = (value: { _id?: string } | string | null | undefined) => {

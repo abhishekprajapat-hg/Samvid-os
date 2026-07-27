@@ -1,5 +1,6 @@
 const Inventory = require("../models/Inventory");
 const InventoryShareLink = require("../models/InventoryShareLink");
+const Company = require("../models/Company");
 const logger = require("../config/logger");
 
 const CLIENT_SAFE_FIELDS = [
@@ -72,6 +73,16 @@ exports.getSharedInventory = async (req, res) => {
 
     if (shareLink.expiresAt && new Date(shareLink.expiresAt) < new Date()) {
       return res.status(410).json({ message: "This share link has expired" });
+    }
+
+    const company = await Company.findById(shareLink.companyId)
+      .select("_id status")
+      .lean();
+    if (!company) {
+      return res.status(404).json({ message: "Property not found" });
+    }
+    if (company.status !== "ACTIVE") {
+      return res.status(403).json({ message: "This share link is not available" });
     }
 
     const inventory = await Inventory.findById(shareLink.inventoryId).lean();

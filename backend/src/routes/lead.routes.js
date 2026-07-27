@@ -171,4 +171,11 @@ router.post(
   leadController.addLeadDiaryEntry
 );
 
+router.patch(
+  "/:leadId/diary/:entryId",
+  writeLimiter,
+  authMiddleware.protect,
+  leadController.updateLeadDiaryEntry
+);
+
 module.exports = router;
