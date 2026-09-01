@@ -43,10 +43,6 @@ export default defineConfig(({ mode }) => {
               return 'maps'
             }
 
-            if (id.includes('xlsx')) {
-              return 'spreadsheet'
-            }
-
             if (id.includes('jspdf')) {
               return 'pdf'
             }

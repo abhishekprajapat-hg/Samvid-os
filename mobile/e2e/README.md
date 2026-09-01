@@ -7,7 +7,7 @@ These flows are Maestro smoke and contract flows for the Expo SDK 54 mobile app.
 - Install Maestro and make `maestro` available on `PATH`.
 - Build or install a development client for the target device.
 - Android uses `com.samvidos.crm` from `app.json`.
-- iOS requires a configured native bundle identifier and macOS/Xcode. On Windows, iOS flows are documentation-ready but not executable locally.
+- iOS uses the `com.samvidos.crm` bundle identifier from `app.json` and requires macOS/Xcode. On Windows, iOS flows are documentation-ready but not executable locally.
 - Point the app at an isolated backend/test tenant before running business flows. Do not run upload, call, or lead mutation flows against production data.
 
 ## Environment
@@ -17,7 +17,6 @@ Set these values before running login-based flows:
 ```powershell
 $env:SAMVID_MOBILE_EMAIL="admin@test.com"
 $env:SAMVID_MOBILE_PASSWORD="<test-password>"
-$env:SAMVID_IOS_APP_ID="<ios.bundle.identifier>"
 ```
 
 ## Commands

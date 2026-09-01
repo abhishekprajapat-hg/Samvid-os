@@ -13,7 +13,7 @@ const openAsRole = async (browser, role, path = "/dashboard", options = {}) => {
   });
   const page = await context.newPage();
   const assertClean = installFailureGuards(page, options);
-  await installApiMocks(page, { mode: options.mode || "populated" });
+  await installApiMocks(page, { mode: options.mode || "populated", role });
   await page.goto(new URL(path, "http://127.0.0.1:4173").toString());
   await expect(page.locator(".workspace-shell, main, form").first()).toBeVisible({ timeout: 15000 });
   return { context, page, assertClean };
@@ -34,6 +34,28 @@ test("login, session restore and logout @smoke", async ({ page }) => {
 
   await page.getByLabel("Logout").first().click();
   await expect(page).toHaveURL(/\/company-a\/login$/);
+  await assertClean();
+});
+
+test("token refresh rotates stored browser session during restoration", async ({ page }) => {
+  const assertClean = installFailureGuards(page, {
+    allowConsolePatterns: [
+      /Failed to load resource: the server responded with a status of 401/i,
+    ],
+  });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("token", "expired-token");
+    window.localStorage.setItem("refreshToken", "valid-refresh");
+    window.localStorage.setItem("role", "ADMIN");
+    window.localStorage.setItem("user", JSON.stringify({ _id: "e2e-admin", role: "ADMIN" }));
+  });
+  await installApiMocks(page, { mode: "refresh" });
+  await page.goto("/dashboard");
+  await expect(page.locator(".workspace-shell")).toBeVisible({ timeout: 15000 });
+
+  await expect(page.evaluate(() => window.localStorage.getItem("token"))).resolves.toBe("token-refreshed");
+  await expect(page.evaluate(() => window.localStorage.getItem("refreshToken"))).resolves.toBe("refresh-rotated");
+  await expect(page.evaluate(() => JSON.parse(window.localStorage.getItem("tenant") || "{}").subdomain)).resolves.toBe("company-a");
   await assertClean();
 });
 
@@ -86,6 +108,16 @@ test("navigation exposes Finance for Inside Executive and hides forbidden admin 
   const { context, page, assertClean } = await openAsRole(browser, "INSIDE_EXECUTIVE", "/dashboard");
   await expect(page.getByRole("link", { name: /finance/i }).first()).toBeVisible();
   await expect(page.getByRole("link", { name: /access/i })).toHaveCount(0);
+  await assertClean();
+  await context.close();
+});
+
+test("hidden navigation does not grant direct-route permission", async ({ browser }) => {
+  const { context, page, assertClean } = await openAsRole(browser, "CHANNEL_PARTNER", "/dashboard");
+  await expect(page.getByRole("link", { name: /chat/i })).toHaveCount(0);
+  await page.goto("/company-a/chat");
+  await expect(page).not.toHaveURL(/\/company-a\/chat$/);
+  await expect(page.locator(".workspace-shell")).toBeVisible();
   await assertClean();
   await context.close();
 });

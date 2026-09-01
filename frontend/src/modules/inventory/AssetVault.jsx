@@ -23,6 +23,7 @@ import {
   rejectInventoryRequest,
 } from "../../services/inventoryService";
 import { getAllLeads } from "../../services/leadService";
+import { uploadChatFile } from "../../services/chatService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import ToastNotice from "../../components/ui/ToastNotice";
@@ -1104,19 +1105,9 @@ const AssetVault = () => {
 
     try {
       for (const file of files) {
-        const data = new FormData();
-        data.append("file", file);
-        data.append("upload_preset", "office_on_rent_upload");
-        data.append("cloud_name", "djfiq8kiy");
-
-        const res = await fetch("https://api.cloudinary.com/v1_1/djfiq8kiy/image/upload", {
-          method: "POST",
-          body: data,
-        });
-
-        const cloudData = await res.json();
-        if (cloudData.secure_url) {
-          newImageUrls.push(cloudData.secure_url);
+        const uploaded = await uploadChatFile(file);
+        if (uploaded?.fileUrl) {
+          newImageUrls.push(uploaded.fileUrl);
         }
       }
 

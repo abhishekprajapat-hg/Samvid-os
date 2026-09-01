@@ -91,7 +91,10 @@ const RoleLeaderboard = () => {
     loadLeaderboard(windowDays, selectedRole);
   }, [windowDays, selectedRole]);
 
-  const rows = data.leaderboard || [];
+  const rows = useMemo(
+    () => (Array.isArray(data.leaderboard) ? data.leaderboard : []),
+    [data.leaderboard],
+  );
   const myRow = useMemo(
     () => rows.find((row) => Boolean(row?.isSelf)) || null,
     [rows],

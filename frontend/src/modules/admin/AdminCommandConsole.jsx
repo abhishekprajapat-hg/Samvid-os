@@ -9,6 +9,7 @@ import {
   UserCircle2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { escapeCsvValue } from "../../utils/csvSafety";
 import {
   getAllLeads,
   getLeadPaymentRequests,
@@ -2082,8 +2083,6 @@ const buildDrillDownLeadsReply = ({ item, leads }) => {
   }
   return lines.join("\n");
 };
-
-const escapeCsvValue = (value) => `"${String(value ?? "").replace(/"/g, "\"\"")}"`;
 
 const downloadCsvFile = (filename, rows) => {
   if (typeof window === "undefined") return;

@@ -41,6 +41,12 @@ export const records = {
   tasks: [
     { _id: "task-1", title: "Call Asha", status: "OPEN", priority: "HIGH", tags: ["follow-up"] },
   ],
+  contacts: [
+    { _id: "e2e-manager", name: "Manager User", role: "MANAGER", roleLabel: "Manager" },
+  ],
+  conversations: [
+    { _id: "room-1", participantIds: ["e2e-admin", "e2e-manager"], lastMessage: "Fixture conversation" },
+  ],
   companies: [tenant],
   leaderboard: [{ userId: "e2e-executive", name: "Executive User", score: 12 }],
 };

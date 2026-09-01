@@ -341,7 +341,7 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState(null);
   const [sessionReady, setSessionReady] = useState(false);
-  const [authVersion, setAuthVersion] = useState(0);
+  const [, setAuthVersion] = useState(0);
   const [systemSettingsVersion, setSystemSettingsVersion] = useState(0);
   const [theme, setTheme] = useState(() => {
     const storedTheme = localStorage.getItem("theme");
@@ -359,20 +359,20 @@ export default function App() {
 
   const location = useLocation();
   const navigate = useNavigate();
-  const authUser = useMemo(() => {
+  const authUser = (() => {
     try {
       return JSON.parse(localStorage.getItem("user") || "{}");
     } catch {
       return {};
     }
-  }, [authVersion, isLoggedIn, userRole]);
-  const authTenant = useMemo(() => {
+  })();
+  const authTenant = (() => {
     try {
       return JSON.parse(localStorage.getItem("tenant") || "null") || null;
     } catch {
       return null;
     }
-  }, [authVersion, isLoggedIn, userRole]);
+  })();
   const tenantSlug = sanitizeTenantSlug(authTenant?.subdomain);
   const tenantBasePath = userRole !== SUPER_ADMIN_ROLE && tenantSlug ? `/${tenantSlug}` : "";
   const normalizedPathname = stripTenantPathPrefix(location.pathname);

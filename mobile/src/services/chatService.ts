@@ -6,9 +6,6 @@ const isMissingRouteError = (error: unknown) => {
   return status === 404;
 };
 
-const CLOUDINARY_CLOUD_NAME = String(process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME || "djfiq8kiy").trim();
-const CLOUDINARY_UPLOAD_PRESET = String(process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "office_on_rent_upload").trim();
-
 const toRole = (value: unknown) => String(value || "").toUpperCase();
 
 const pickUrlString = (value: unknown): string => {
@@ -128,22 +125,6 @@ const normalizeCallLog = (row: any): ChatCallLog => {
   };
 };
 
-const inferMimeTypeFromName = (name: string) => {
-  const normalized = String(name || "").toLowerCase();
-  if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
-  if (normalized.endsWith(".png")) return "image/png";
-  if (normalized.endsWith(".webp")) return "image/webp";
-  if (normalized.endsWith(".heic")) return "image/heic";
-  if (normalized.endsWith(".pdf")) return "application/pdf";
-  if (normalized.endsWith(".mp3")) return "audio/mpeg";
-  if (normalized.endsWith(".m4a")) return "audio/m4a";
-  if (normalized.endsWith(".wav")) return "audio/wav";
-  if (normalized.endsWith(".aac")) return "audio/aac";
-  if (normalized.endsWith(".ogg")) return "audio/ogg";
-  if (normalized.endsWith(".mp4")) return "video/mp4";
-  return "application/octet-stream";
-};
-
 const isWebRuntime = () => typeof window !== "undefined" && typeof document !== "undefined";
 
 const toFormFileValue = async ({
@@ -180,74 +161,6 @@ const toFormFileValue = async ({
     name,
     type: mimeType,
   } as any;
-};
-
-const uploadToCloudinary = async ({
-  uri,
-  name,
-  mimeType,
-  file,
-}: {
-  uri: string;
-  name: string;
-  mimeType?: string;
-  file?: any;
-}) => {
-  const resolvedMimeType = String(mimeType || inferMimeTypeFromName(name) || "application/octet-stream");
-  const lower = resolvedMimeType.toLowerCase();
-
-  const endpointPriority = lower.startsWith("image/")
-    ? ["image", "auto", "raw"]
-    : lower.startsWith("video/")
-      ? ["video", "auto", "raw"]
-      : ["raw", "auto", "image"];
-
-  let lastError = "Upload failed";
-
-  for (const resourceType of endpointPriority) {
-    const formData = new FormData();
-    const fileValue = await toFormFileValue({
-      uri,
-      name,
-      mimeType: resolvedMimeType,
-      file,
-    });
-    formData.append("file", fileValue as any);
-    formData.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-
-    const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/${resourceType}/upload`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { Accept: "application/json" },
-      body: formData as any,
-    }).catch((error) => {
-      lastError = String((error as Error)?.message || "Network error while uploading");
-      return null;
-    });
-
-    if (!response) continue;
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      lastError = String(data?.error?.message || data?.message || "File upload failed");
-      continue;
-    }
-
-    const secureUrl = String(data?.secure_url || data?.url || "");
-    if (!secureUrl) {
-      lastError = "Upload completed but URL missing";
-      continue;
-    }
-
-    return {
-      fileName: String(data?.original_filename || name || "attachment"),
-      fileUrl: secureUrl,
-      mimeType: resolvedMimeType,
-      size: Number(data?.bytes || 0) || 0,
-      storagePath: String(data?.public_id || ""),
-    };
-  }
-
-  throw new Error(lastError);
 };
 
 const createLocalCallLog = ({
@@ -473,6 +386,62 @@ export const createCallLog = async ({
   } catch (error) {
     throw error;
   }
+};
+
+export const createMobileCallSession = async ({
+  conversationId,
+  recipientId,
+  callType,
+  e2ee,
+  socket,
+  createCallLog: createCallLogImpl = createCallLog,
+}: {
+  conversationId: string;
+  recipientId?: string;
+  callType: "VOICE" | "VIDEO";
+  e2ee?: {
+    enabled?: boolean;
+    protocol?: string;
+    senderKeyFingerprint?: string;
+    receiverKeyFingerprint?: string;
+  };
+  socket?: {
+    emit: (event: string, payload?: any, ack?: (payload: any) => void) => void;
+  } | null;
+  createCallLog?: typeof createCallLog;
+}) => {
+  const created = await createCallLogImpl({
+    conversationId,
+    recipientId,
+    callType,
+    e2ee,
+  });
+  const call = created.call || null;
+  const stableCallId = String((call as any)?._id || (call as any)?.callId || "").trim();
+  const stableConversationId = String(created.conversationId || conversationId || "").trim();
+  if (!stableCallId || !stableConversationId) {
+    throw new Error("Failed to create call");
+  }
+
+  socket?.emit("chat:call:initiate", {
+    callId: stableCallId,
+    conversationId: stableConversationId,
+    mode: callType === "VIDEO" ? "video" : "audio",
+  });
+  socket?.emit("messenger:call:initiate", {
+    callId: stableCallId,
+    conversationId: stableConversationId,
+    recipientId,
+    callType,
+    e2ee,
+  });
+
+  return {
+    ...created,
+    call,
+    callId: stableCallId,
+    conversationId: stableConversationId,
+  };
 };
 
 export const updateCallLog = async ({

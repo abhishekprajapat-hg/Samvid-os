@@ -63,6 +63,8 @@ Do not reuse production passwords or production tenant IDs in test fixtures.
 
 ## CI Gates
 
+Direct pushes to `main` must run `.github/workflows/pr-gates.yml` through the `push` trigger. Repository rules should still require this workflow before allowing direct updates to `main`; Codex must not change branch protection without explicit authorization.
+
 PR gates block merge on:
 
 - backend lint, coverage tests, and production audit
@@ -70,10 +72,11 @@ PR gates block merge on:
 - mobile unit coverage, TypeScript check, and production audit
 - CodeQL
 - Gitleaks secret scan
+- package-specific audit policy checks for accepted advisories
 
-Nightly gates run full backend regression, browser E2E, mobile unit/typecheck, and moderate k6 load when `STAGING_BASE_URL` is configured.
+Nightly gates run full backend regression, browser E2E, mobile unit/typecheck, and authenticated k6 load when `STAGING_BASE_URL` and `STAGING_ACCESS_TOKEN` are configured. Mobile device E2E runs only on a dedicated self-hosted runner labelled `mobile-e2e`; otherwise the workflow must report it as not executed.
 
-Release gates require PR gates, k6 threshold pass, and deployment smoke against an explicitly supplied isolated staging URL.
+Release gates require PR/main gates, authenticated k6 threshold pass, deployment smoke against an explicitly supplied isolated staging URL, and device E2E evidence or an explicit blocked/not-executed report.
 
 ## Security Triage Rules
 
@@ -123,6 +126,7 @@ Initial release thresholds:
 
 ## Rollback Checklist
 
+- Use the detailed staging runbook in `docs/DATA_INTEGRITY_BACKUP_ROLLBACK_RUNBOOK.md` for backup, restore, migration, deployment compatibility, rollback, and observability drills.
 - identify release artifact/version
 - pause new deployments
 - restore previous backend and frontend artifacts

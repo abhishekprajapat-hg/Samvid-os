@@ -77,7 +77,12 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
 
   const sharedOptions = {
     headerRight: () => (
-      <Pressable onPress={logout} style={{ marginRight: 12 }}>
+      <Pressable
+        onPress={logout}
+        style={{ marginRight: 12 }}
+        accessibilityLabel="Logout"
+        testID="header-logout"
+      >
         <Text style={{ color: "#0f172a", fontWeight: "600" }}>Logout</Text>
       </Pressable>
     ),

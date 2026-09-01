@@ -11,6 +11,26 @@ const chatUpload = multer({
   },
 });
 
+const handleUploadError = (error, req, res, next) => {
+  if (!error) return next();
+
+  if (error instanceof multer.MulterError) {
+    if (error.code === "LIMIT_FILE_SIZE") {
+      return res.status(413).json({
+        message: "File size exceeds the upload limit",
+        requestId: req.requestId || null,
+      });
+    }
+    return res.status(400).json({
+      message: "Invalid file upload request",
+      requestId: req.requestId || null,
+    });
+  }
+
+  return next(error);
+};
+
 module.exports = {
   chatUpload,
+  handleUploadError,
 };

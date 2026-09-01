@@ -7,7 +7,7 @@ const uploadController = require("../controllers/upload.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 const { requireChatRoles } = require("../middleware/chatPermission.middleware");
 const { chatMessageLimiter } = require("../middleware/rateLimit.middleware");
-const { chatUpload } = require("../middleware/upload.middleware");
+const { chatUpload, handleUploadError } = require("../middleware/upload.middleware");
 
 router.use(authMiddleware.protect);
 
@@ -28,7 +28,7 @@ router.patch("/messages/:messageId/delivered", chatController.markDelivered);
 router.patch("/messages/:messageId/seen", chatController.markSeen);
 router.post("/calls", chatController.createCall);
 router.patch("/calls/:callId", chatController.updateCall);
-router.post("/uploads", chatUpload.single("file"), uploadController.handleChatUpload);
+router.post("/uploads", chatUpload.single("file"), handleUploadError, uploadController.handleChatUpload);
 router.get("/escalations", chatController.getEscalations);
 router.get("/escalation-logs", chatController.getEscalationLogs);
 router.get("/escalations/:roomId/logs", chatController.getEscalationLogs);

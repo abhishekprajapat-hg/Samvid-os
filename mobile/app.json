@@ -14,10 +14,15 @@
       "backgroundColor": "#000000"
     },
     "ios": {
+      "bundleIdentifier": "com.samvidos.crm",
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera for video calls.",
-        "NSMicrophoneUsageDescription": "This app uses the microphone for voice and video calls."
+        "NSMicrophoneUsageDescription": "This app uses the microphone for voice and video calls.",
+        "NSPhotoLibraryUsageDescription": "This app uses the photo library to upload profile, chat, lead, and inventory media.",
+        "NSPhotoLibraryAddUsageDescription": "This app saves generated or downloaded documents when you choose to export them.",
+        "NSLocationWhenInUseUsageDescription": "This app uses your location for attendance and field visit verification.",
+        "NSUserNotificationUsageDescription": "This app uses notifications for chat, call, approval, and task alerts."
       }
     },
     "android": {
@@ -29,7 +34,13 @@
         "CAMERA",
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",
-        "INTERNET"
+        "INTERNET",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE",
+        "POST_NOTIFICATIONS"
       ],
       "edgeToEdgeEnabled": false,
       "softwareKeyboardLayoutMode": "resize",

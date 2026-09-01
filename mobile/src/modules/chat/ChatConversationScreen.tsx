@@ -29,7 +29,7 @@ import {
   getCallLogs,
   getMessengerContacts,
   sendDirectMessage,
-  createCallLog,
+  createMobileCallSession,
   updateCallLog,
   uploadChatFile,
 } from "../../services/chatService";
@@ -474,7 +474,7 @@ export const ChatConversationScreen = () => {
       const picked = await DocumentPicker.getDocumentAsync({
         copyToCacheDirectory: true,
         multiple: true,
-        type: "*/*",
+        type: ["image/*", "video/mp4", "audio/*", "application/pdf"],
       });
       if (picked.canceled || !picked.assets?.length) return;
 
@@ -748,13 +748,14 @@ export const ChatConversationScreen = () => {
         protocol: "X25519-AES-256-GCM",
         senderKeyFingerprint: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
       };
-      const created = await createCallLog({
+      const created = await createMobileCallSession({
         conversationId: resolvedConversationId,
         recipientId: contactId || undefined,
         callType,
         e2ee,
+        socket: socketRef.current,
       });
-      if (!created.call?._id) {
+      if (!created.callId) {
         throw new Error("Failed to create call");
       }
 
@@ -762,21 +763,8 @@ export const ChatConversationScreen = () => {
         setConversationId(created.conversationId);
       }
 
-      const socket = socketRef.current;
-      socket?.emit("chat:call:initiate", {
-        callId: created.call._id,
-        conversationId: created.conversationId || resolvedConversationId,
-        mode: callType === "VIDEO" ? "video" : "audio",
-      });
-      socket?.emit("messenger:call:initiate", {
-        callId: created.call._id,
-        conversationId: created.conversationId || resolvedConversationId,
-        recipientId: contactId,
-        callType,
-        e2ee,
-      });
       navigation.navigate("CallScreen", {
-        callId: created.call._id,
+        callId: created.callId,
         callType,
         peerId: contactId,
         peerName: contactName,

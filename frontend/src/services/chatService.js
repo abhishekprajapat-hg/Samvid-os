@@ -93,3 +93,11 @@ export const sendDirectMessage = async ({
     message: res.data?.message || null,
   };
 };
+
+export const uploadChatFile = async (file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const res = await api.post("/chat/uploads", formData);
+  return res.data?.attachment || null;
+};

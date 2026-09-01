@@ -31,6 +31,10 @@ import {
 } from "./components/LeadsMatrixSections";
 import { LeadDetailsRebuilt } from "./components/LeadDetailsRebuilt";
 import {
+  assertSupportedBulkLeadUploadFileName,
+  BULK_LEAD_CSV_ONLY_MESSAGE,
+} from "./bulkLeadFilePolicy";
+import {
   getPropertySubtypeConfig,
   getPropertySubtypeOptions,
 } from "../../config/propertyRequirementConfig";
@@ -1058,40 +1062,6 @@ const parseBulkLeadCsvRows = (csvText) => {
   return rows;
 };
 
-const parseBulkLeadWorkbookRows = async (file) => {
-  const XLSX = await import("xlsx");
-  const buffer = await file.arrayBuffer();
-  const workbook = XLSX.read(buffer, {
-    type: "array",
-    cellDates: true,
-    raw: false,
-  });
-  const rows = [];
-
-  workbook.SheetNames.forEach((sheetName) => {
-    const normalizedSheetName = normalizeCsvHeader(sheetName);
-    if (
-      normalizedSheetName.includes("performance")
-      || normalizedSheetName.includes("perfomance")
-      || ["broker", "owners", "dealclose"].includes(normalizedSheetName)
-    ) return;
-    const worksheet = workbook.Sheets[sheetName];
-    const matrix = XLSX.utils.sheet_to_json(worksheet, {
-      header: 1,
-      defval: "",
-      blankrows: false,
-      raw: false,
-    });
-    rows.push(...parseBulkLeadRowsFromMatrix({ matrix, sheetName }));
-  });
-
-  if (!rows.length) {
-    throw new Error("No valid lead rows found in workbook");
-  }
-
-  return rows;
-};
-
 const WhatsAppIcon = ({ size = 13, className = "" }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -2099,21 +2069,19 @@ const LeadsMatrix = () => {
     if (!file) return;
 
     try {
-      const extension = String(file.name || "").split(".").pop()?.toLowerCase();
-      if (["xlsx", "xls"].includes(extension)) {
-        const rows = await parseBulkLeadWorkbookRows(file);
-        setBulkUploadParsedRows(rows);
-        setBulkUploadText(`Parsed ${rows.length} lead rows from ${file.name}`);
-      } else {
-        const csvText = await file.text();
-        setBulkUploadParsedRows(null);
-        setBulkUploadText(String(csvText || ""));
-      }
+      assertSupportedBulkLeadUploadFileName(file.name);
+      const csvText = await file.text();
+      setBulkUploadParsedRows(null);
+      setBulkUploadText(String(csvText || ""));
       setBulkUploadFileName(String(file.name || ""));
       setError("");
-    } catch {
+    } catch (readError) {
       setBulkUploadParsedRows(null);
-      setError("Unable to read selected bulk lead file");
+      setBulkUploadText("");
+      setBulkUploadFileName("");
+      setError(readError?.message === BULK_LEAD_CSV_ONLY_MESSAGE
+        ? BULK_LEAD_CSV_ONLY_MESSAGE
+        : "Unable to read selected bulk lead file");
     }
   };
 

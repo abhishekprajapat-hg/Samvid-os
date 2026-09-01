@@ -11,8 +11,9 @@ const {
   getRoomByIdForUser,
 } = require("../services/chatRoom.service");
 const {
-  startCallForUser,
+  startCallForUserWithId,
   updateCallForUser,
+  getAuthorizedCallSignalContext,
 } = require("../services/chatCall.service");
 const { getTeamIdForUser } = require("../services/chatAccess.service");
 
@@ -73,6 +74,17 @@ const emitRealtimeMessageEvent = (io, payload) => {
       message: payload.message,
     });
   }
+};
+
+const emitToCallParticipants = (io, participantIds = [], eventName, payload, options = {}) => {
+  const skipUserId = toId(options.skipUserId);
+  participantIds
+    .map((participantId) => toId(participantId?._id || participantId))
+    .filter(Boolean)
+    .filter((participantId) => participantId !== skipUserId)
+    .forEach((participantId) => {
+      io.to(`user:${participantId}`).emit(eventName, payload);
+    });
 };
 
 const authenticateSocket = async (socket, next) => {
@@ -358,13 +370,14 @@ const registerChatSocketHandlers = (io) => {
 
     socket.on("chat:call:initiate", async (payload = {}, ack) => {
       try {
-        const result = await startCallForUser({
+        const result = await startCallForUserWithId({
           user: socket.user,
           roomId: payload.roomId || payload.conversationId,
+          callId: payload.callId,
           mode: payload.mode || payload.callType,
         });
-
-        io.to(`room:${result.conversationId}`).emit("chat:call:incoming", {
+        const participantIds = (result.call.participants || []).map((participant) => participant._id);
+        const eventPayload = {
           callId: result.call._id,
           roomId: result.conversationId,
           conversationId: result.conversationId,
@@ -372,6 +385,13 @@ const registerChatSocketHandlers = (io) => {
           callType: result.call.mode === "video" ? "VIDEO" : "VOICE",
           caller: result.call.caller,
           call: result.call,
+        };
+
+        emitToCallParticipants(io, participantIds, "chat:call:incoming", eventPayload, {
+          skipUserId: socket.user._id,
+        });
+        emitToCallParticipants(io, participantIds, "messenger:call:incoming", eventPayload, {
+          skipUserId: socket.user._id,
         });
         return sendAck(ack, { ok: true, ...result });
       } catch (error) {
@@ -381,6 +401,86 @@ const registerChatSocketHandlers = (io) => {
         });
       }
     });
+
+    socket.on("messenger:call:initiate", async (payload = {}, ack) => {
+      try {
+        const result = await startCallForUserWithId({
+          user: socket.user,
+          roomId: payload.roomId || payload.conversationId,
+          callId: payload.callId,
+          mode: payload.mode || payload.callType,
+        });
+        const participantIds = (result.call.participants || []).map((participant) => participant._id);
+        const eventPayload = {
+          callId: result.call._id,
+          roomId: result.conversationId,
+          conversationId: result.conversationId,
+          mode: result.call.mode,
+          callType: result.call.mode === "video" ? "VIDEO" : "VOICE",
+          caller: result.call.caller,
+          call: result.call,
+        };
+
+        emitToCallParticipants(io, participantIds, "chat:call:incoming", eventPayload, {
+          skipUserId: socket.user._id,
+        });
+        emitToCallParticipants(io, participantIds, "messenger:call:incoming", eventPayload, {
+          skipUserId: socket.user._id,
+        });
+        return sendAck(ack, { ok: true, ...result });
+      } catch (error) {
+        return sendAck(ack, {
+          ok: false,
+          error: error.message || "Failed to start call",
+        });
+      }
+    });
+
+    const relayCallSignal = async (payload = {}, ack) => {
+      try {
+        const targetUserId = payload.targetUserId || payload.recipientId || payload.toUserId;
+        const context = await getAuthorizedCallSignalContext({
+          user: socket.user,
+          callId: payload.callId,
+          roomId: payload.roomId || payload.conversationId,
+          targetUserId,
+          signal: payload.signalType
+            ? {
+                type: payload.signalType,
+                ...(payload.signal && typeof payload.signal === "object" ? payload.signal : {}),
+                candidate: payload.signalType === "ice-candidate" ? payload.signal : payload.signal?.candidate,
+              }
+            : payload.signal,
+        });
+
+        const chatPayload = {
+          callId: context.call._id,
+          roomId: toId(context.room._id),
+          conversationId: toId(context.room._id),
+          fromUserId: context.senderId,
+          toUserId: context.targetUserId,
+          signal: context.signal,
+          call: context.call,
+        };
+        const messengerPayload = {
+          ...chatPayload,
+          recipientId: context.targetUserId,
+          signalType: context.signal.type === "candidate" ? "ice-candidate" : context.signal.type,
+        };
+
+        io.to(`user:${context.targetUserId}`).emit("chat:call:signal", chatPayload);
+        io.to(`user:${context.targetUserId}`).emit("messenger:call:signal", messengerPayload);
+        return sendAck(ack, { ok: true, ...chatPayload });
+      } catch (error) {
+        return sendAck(ack, {
+          ok: false,
+          error: error.message || "Failed to relay call signal",
+        });
+      }
+    };
+
+    socket.on("chat:call:signal", relayCallSignal);
+    socket.on("messenger:call:signal", relayCallSignal);
 
     const updateCall = async (payload = {}, ack, status) => {
       try {
@@ -404,8 +504,9 @@ const registerChatSocketHandlers = (io) => {
           status: result.call.status,
           call: result.call,
         };
-        io.to(`room:${result.conversationId}`).emit(eventName, eventPayload);
-        io.to(`room:${result.conversationId}`).emit("messenger:call:update", eventPayload);
+        const participantIds = (result.call.participants || []).map((participant) => participant._id);
+        emitToCallParticipants(io, participantIds, eventName, eventPayload);
+        emitToCallParticipants(io, participantIds, "messenger:call:update", eventPayload);
         return sendAck(ack, { ok: true, ...result });
       } catch (error) {
         return sendAck(ack, {
@@ -418,6 +519,14 @@ const registerChatSocketHandlers = (io) => {
     socket.on("chat:call:accept", (payload = {}, ack) => updateCall(payload, ack, "ACCEPTED"));
     socket.on("chat:call:reject", (payload = {}, ack) => updateCall(payload, ack, "REJECTED"));
     socket.on("chat:call:end", (payload = {}, ack) => updateCall(payload, ack, "ENDED"));
+    socket.on("messenger:call:update", (payload = {}, ack) => {
+      const status = String(payload.status || "").trim().toUpperCase();
+      if (status === "ACCEPTED" || status === "CONNECTED") return updateCall(payload, ack, "ACCEPTED");
+      if (status === "REJECTED" || status === "MISSED" || status === "FAILED") {
+        return updateCall(payload, ack, status);
+      }
+      return updateCall(payload, ack, "ENDED");
+    });
 
     socket.on("messenger:send", async (payload = {}, ack) => {
       try {

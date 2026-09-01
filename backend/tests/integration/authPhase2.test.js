@@ -38,6 +38,18 @@ describe("authentication contracts", () => {
       .expect(403);
   });
 
+  it("rejects NoSQL operator-shaped login credentials without authenticating a matched user", async () => {
+    await createPhase2FixtureGraph();
+
+    const res = await login({
+      email: { $ne: null },
+      password: "password123",
+      portal: "GENERAL",
+    }).expect(400);
+
+    expect(res.body.message).toBe("Email and password must be strings");
+  });
+
   it("enforces GENERAL, ADMIN, and SUPER_ADMIN portal restrictions", async () => {
     await createPhase2FixtureGraph();
 

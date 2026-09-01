@@ -88,7 +88,11 @@ app.use(httpMetricsMiddleware);
 app.use(express.json({
   limit: jsonBodyLimit,
   verify: (req, _res, buffer) => {
-    if (String(req.originalUrl || req.url || "").startsWith("/api/webhook")) {
+    const requestPath = String(req.originalUrl || req.url || "");
+    if (
+      requestPath.startsWith("/api/webhook")
+      || requestPath.startsWith("/api/client/webhook")
+    ) {
       req.rawBody = Buffer.from(buffer);
     }
   },

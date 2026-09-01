@@ -149,6 +149,18 @@ const buildMapHtml = ({
       try { if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) window.ReactNativeWebView.postMessage(text); } catch (_) {}
       try { if (window.parent && window.parent !== window) window.parent.postMessage(text, "*"); } catch (_) {}
     };
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    }[char]));
+    const buildPropertyPopup = (row) => (
+      '<div><b>' + escapeHtml(row.title || "Property") + '</b><br/>' +
+      escapeHtml(row.location || "") + '<br/>Status: ' + escapeHtml(row.status || "-") +
+      '<br/><button class="popup-btn" type="button" data-direction-id="' + escapeHtml(row.id || "") + '">Direction</button></div>'
+    );
     (input.executives || []).forEach((row) => {
       const selected = String(row.id || "") === String(input.selectedExecutiveId || "");
       const marker = L.circleMarker([row.lat, row.lng], { radius:selected ? 9 : 7, weight:selected ? 3 : 2, color:"#0f172a", fillColor:selected ? "#0f172a" : "#0ea5e9", fillOpacity:selected ? 0.95 : 0.78 }).addTo(map);
@@ -160,7 +172,15 @@ const buildMapHtml = ({
       const marker = L.marker([row.lat, row.lng], {
         icon: L.divIcon({ className:"", html:'<div class="' + (selected ? "property-pin property-pin-active" : "property-pin") + '">&#8962;</div>', iconSize: selected ? [28,28] : [24,24], iconAnchor: selected ? [14,14] : [12,12], popupAnchor:[0,-10] })
       }).addTo(map);
-      marker.bindPopup('<div><b>' + (row.title || "Property") + '</b><br/>' + (row.location || "") + '<br/>Status: ' + (row.status || "-") + '<br/><button class="popup-btn" onclick="window.__goDirection(\\'' + row.id + '\\')">Direction</button></div>');
+      marker.bindPopup(buildPropertyPopup(row));
+      marker.on("popupopen", (event) => {
+        const element = event.popup && event.popup.getElement ? event.popup.getElement() : null;
+        const button = element && element.querySelector ? element.querySelector("[data-direction-id]") : null;
+        if (button && !button.dataset.bound) {
+          button.dataset.bound = "true";
+          button.addEventListener("click", () => window.__goDirection(row.id));
+        }
+      });
       marker.on("click", () => postNative({ type:"select-property", id: row.id }));
       bounds.push([row.lat, row.lng]);
     });
@@ -192,7 +212,19 @@ const WebMapCanvas = ({ html, onMessage }: { html: string; onMessage: (event: an
     return <iframe ref={frameRef} srcDoc={html} style={{ width: "100%", height: "100%", border: "0", display: "block" }} sandbox="allow-scripts allow-same-origin allow-popups allow-forms" />;
   }
 
-  return <WebView originWhitelist={["*"]} source={{ html }} style={styles.mapView} onMessage={onMessage} javaScriptEnabled domStorageEnabled />;
+  return (
+    <WebView
+      originWhitelist={["about:blank"]}
+      source={{ html }}
+      style={styles.mapView}
+      onMessage={onMessage}
+      javaScriptEnabled
+      domStorageEnabled={false}
+      allowFileAccess={false}
+      allowUniversalAccessFromFileURLs={false}
+      setSupportMultipleWindows={false}
+    />
+  );
 };
 
 export const FieldOpsScreen = () => {

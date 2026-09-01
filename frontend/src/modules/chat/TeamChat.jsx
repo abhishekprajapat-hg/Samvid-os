@@ -37,6 +37,7 @@ import {
   markMessageDelivered,
   markMessageSeen,
   sendDirectMessage,
+  uploadChatFile,
 } from "../../services/chatService";
 import ToastNotice from "../../components/ui/ToastNotice";
 import { acquireChatSocket, releaseChatSocket } from "../../services/chatSocket";
@@ -97,8 +98,6 @@ const formatCurrency = (value) => {
   return `Rs ${parsed.toLocaleString("en-IN")}`;
 };
 
-const CLOUDINARY_CLOUD_NAME = "djfiq8kiy";
-const CLOUDINARY_UPLOAD_PRESET = "office_on_rent_upload";
 const MAX_MEDIA_ATTACHMENTS = 8;
 const MAX_MEDIA_SIZE_BYTES = 25 * 1024 * 1024;
 const TYPING_IDLE_TIMEOUT_MS = 1200;
@@ -249,30 +248,14 @@ const getCurrentUser = () => {
 };
 
 const uploadMediaFile = async (file) => {
-  const data = new FormData();
-  data.append("file", file);
-  data.append("upload_preset", CLOUDINARY_UPLOAD_PRESET);
-  data.append("cloud_name", CLOUDINARY_CLOUD_NAME);
-
-  const res = await fetch(
-    `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/auto/upload`,
-    {
-      method: "POST",
-      body: data,
-    },
-  );
-
-  const payload = await res.json();
-  if (!res.ok || !payload?.secure_url) {
-    throw new Error(payload?.error?.message || "Failed to upload media");
-  }
+  const payload = await uploadChatFile(file);
 
   const uploaded = sanitizeMediaAttachment({
-    url: payload.secure_url,
+    url: payload?.fileUrl,
     kind: detectMediaKind({ mimeType: file.type }),
-    mimeType: file.type,
-    name: file.name,
-    size: file.size,
+    mimeType: payload?.mimeType || file.type,
+    name: payload?.fileName || file.name,
+    size: payload?.size || file.size,
   });
 
   if (!uploaded) {
@@ -3240,7 +3223,7 @@ const TeamChat = ({ theme = "light" }) => {
                 multiple
                 onChange={handleMediaSelected}
                 className="hidden"
-                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar"
+                accept="image/*,video/*,audio/*,.pdf"
               />
               <button
                 type="button"

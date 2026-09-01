@@ -1,7 +1,10 @@
-name: PR Gates
+name: PR And Main Gates
 
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
   workflow_call:
 
@@ -10,9 +13,13 @@ permissions:
   security-events: write
   actions: read
 
+concurrency:
+  group: pr-main-gates-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
-    name: Backend Lint And Tests
+    name: Backend Lint Coverage Integration Audit
     runs-on: ubuntu-latest
     services:
       mongo:
@@ -20,13 +27,16 @@ jobs:
         ports:
           - 27017:27017
         options: >-
-          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 12
     defaults:
       run:
         working-directory: backend
+    env:
+      MONGO_TEST_URI: mongodb://127.0.0.1:27017/samvid_os_ci_test
+      NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,23 +45,35 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      - name: Confirm Mongo test database safety
+        run: |
+          node -e "const uri=process.env.MONGO_TEST_URI||''; if(!/127\\.0\\.0\\.1|localhost/.test(uri) || !/test|ci|integration|e2e/.test(uri)) { throw new Error('Unsafe MONGO_TEST_URI for CI'); } console.log('Using isolated Mongo test URI');"
       - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run test:integration
       - run: npm run test:coverage
-        env:
-          MONGO_TEST_URI: mongodb://127.0.0.1:27017/samvid_os_ci_test
-      - run: npm audit --omit=dev --audit-level=high
+      - name: Production dependency audit policy
+        run: |
+          mkdir -p ../artifacts
+          npm audit --omit=dev --json > ../artifacts/backend-audit.json || true
+          node ../.github/scripts/audit-policy.cjs backend ../artifacts/backend-audit.json ../.github/audit-policy.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: backend-coverage
-          path: backend/coverage
+          name: backend-artifacts
+          path: |
+            backend/coverage
+            artifacts/backend-audit.json
 
   frontend:
-    name: Frontend Tests Build Smoke
+    name: Frontend Lint Coverage Build Browser Audit
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
+    env:
+      CI: true
+      PLAYWRIGHT_UPDATE_SNAPSHOTS: none
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -63,24 +85,31 @@ jobs:
       - run: npm run lint
       - run: npm run test:coverage
       - run: npm run build
-      - run: npx playwright install --with-deps
+      - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:e2e:smoke
-      - run: npm audit --omit=dev --audit-level=high
+      - name: Production dependency audit policy
+        run: |
+          mkdir -p ../artifacts
+          npm audit --omit=dev --json > ../artifacts/frontend-audit.json || true
+          node ../.github/scripts/audit-policy.cjs frontend ../artifacts/frontend-audit.json ../.github/audit-policy.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: frontend-test-artifacts
+          name: frontend-artifacts
           path: |
             frontend/coverage
             frontend/playwright-report
             frontend/test-results
+            artifacts/frontend-audit.json
 
   mobile:
-    name: Mobile Unit And Typecheck
+    name: Mobile Unit Coverage Typecheck Audit
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: mobile
+    env:
+      CI: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -91,12 +120,18 @@ jobs:
       - run: npm ci
       - run: npm run test:coverage
       - run: npx tsc --noEmit
-      - run: npm audit --omit=dev --audit-level=high
+      - name: Production dependency audit policy
+        run: |
+          mkdir -p ../artifacts
+          npm audit --omit=dev --json > ../artifacts/mobile-audit.json || true
+          node ../.github/scripts/audit-policy.cjs mobile ../artifacts/mobile-audit.json ../.github/audit-policy.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: mobile-coverage
-          path: mobile/coverage
+          name: mobile-artifacts
+          path: |
+            mobile/coverage
+            artifacts/mobile-audit.json
 
   codeql:
     name: CodeQL
@@ -112,7 +147,7 @@ jobs:
       - uses: github/codeql-action/analyze@v3
 
   secret-scan:
-    name: Secret Scan
+    name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

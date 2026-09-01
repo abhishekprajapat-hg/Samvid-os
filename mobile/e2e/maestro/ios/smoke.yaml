@@ -1,4 +1,4 @@
-appId: ${SAMVID_IOS_APP_ID}
+appId: com.samvidos.crm
 name: iOS Auth Smoke
 ---
 - launchApp:

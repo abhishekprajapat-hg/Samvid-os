@@ -121,4 +121,20 @@ describe("AuthContext", () => {
 
     expect(textOf(screen, "role")).toBe("none");
   });
+
+  it("does not restore expired local sessions", async () => {
+    await sessionStorage.setSession("expired-access", makeUser("ADMIN"), "expired-refresh");
+    jest.setSystemTime(new Date("2026-01-01T13:00:00.000Z"));
+
+    const screen = render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(textOf(screen, "loading")).toBe("ready"));
+    expect(textOf(screen, "role")).toBe("none");
+    expect(await sessionStorage.getToken()).toBeNull();
+    expect(getCurrentUser).not.toHaveBeenCalled();
+  });
 });

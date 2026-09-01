@@ -367,7 +367,7 @@ exports.createCall = async (req, res) => {
       mode: req.body?.callType || req.body?.mode,
     });
 
-    req.app.get("io")?.to(`room:${payload.conversationId}`).emit("chat:call:incoming", {
+    const eventPayload = {
       callId: payload.call._id,
       roomId: payload.conversationId,
       conversationId: payload.conversationId,
@@ -375,7 +375,17 @@ exports.createCall = async (req, res) => {
       callType: payload.call.mode === "video" ? "VIDEO" : "VOICE",
       caller: payload.call.caller,
       call: payload.call,
-    });
+    };
+    const io = req.app.get("io");
+    const callerId = String(req.user?._id || "");
+    (payload.call.participants || [])
+      .map((participant) => String(participant?._id || participant || ""))
+      .filter(Boolean)
+      .filter((participantId) => participantId !== callerId)
+      .forEach((participantId) => {
+        io?.to(`user:${participantId}`).emit("chat:call:incoming", eventPayload);
+        io?.to(`user:${participantId}`).emit("messenger:call:incoming", eventPayload);
+      });
 
     return res.status(201).json(payload);
   } catch (error) {
@@ -392,12 +402,19 @@ exports.updateCall = async (req, res) => {
       reason: req.body?.reason,
     });
 
-    req.app.get("io")?.to(`room:${payload.conversationId}`).emit("messenger:call:update", {
+    const eventPayload = {
       callId: payload.call._id,
       conversationId: payload.conversationId,
       status: payload.call.status,
       call: payload.call,
-    });
+    };
+    const io = req.app.get("io");
+    (payload.call.participants || [])
+      .map((participant) => String(participant?._id || participant || ""))
+      .filter(Boolean)
+      .forEach((participantId) => {
+        io?.to(`user:${participantId}`).emit("messenger:call:update", eventPayload);
+      });
 
     return res.json(payload);
   } catch (error) {

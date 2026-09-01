@@ -1791,10 +1791,10 @@ export const BulkLeadUploadModal = ({
         }`}
         >
           <UploadCloud size={16} />
-          <span>{selectedFileName ? `Selected: ${selectedFileName}` : "Choose Excel / CSV File"}</span>
+          <span>{selectedFileName ? `Selected: ${selectedFileName}` : "Choose CSV File"}</span>
           <input
             type="file"
-            accept=".xlsx,.xls,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            accept=".csv,text/csv"
             className="hidden"
             onChange={(event) => onFileSelect(event.target.files?.[0] || null)}
           />
@@ -1816,7 +1816,7 @@ export const BulkLeadUploadModal = ({
         <textarea
           value={csvText}
           onChange={(event) => onCsvTextChange(event.target.value)}
-          placeholder="Paste CSV content here, or choose the PRE - SALES - LEADS Excel workbook"
+          placeholder="Paste CSV content here, or choose a CSV file"
           rows={10}
           className={`w-full resize-y rounded-xl border px-3 py-2 text-sm ${
             isDark

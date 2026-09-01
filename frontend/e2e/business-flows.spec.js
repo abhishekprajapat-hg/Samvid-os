@@ -108,3 +108,62 @@ test("realtime chat page survives socket disconnect style failures", async ({ br
   await assertClean();
   await context.close();
 });
+
+test("file upload success and failure contracts are controlled", async ({ browser }) => {
+  for (const mode of ["populated", "upload-error"]) {
+    const { context, page, assertClean } = await openAdminPage(browser, "/leads/lead-1", mode);
+    await expect(page.locator(".workspace-shell")).toBeVisible();
+    const fileInput = page.locator('input[type="file"]').first();
+    if (await fileInput.count()) {
+      await fileInput.setInputFiles({
+        name: mode === "upload-error" ? "bad.exe" : "fixture.png",
+        mimeType: mode === "upload-error" ? "application/x-msdownload" : "image/png",
+        buffer: Buffer.from(mode === "upload-error" ? "MZ" : "PNGDATA"),
+      });
+      await expect(page.locator("body")).toContainText(mode === "upload-error" ? /failed|unsupported|select/i : /uploaded|fixture|document/i);
+    }
+    await assertClean();
+    await context.close();
+  }
+});
+
+test("unsupported browser call capabilities do not break chat", async ({ browser }) => {
+  const context = await browser.newContext({ storageState: "e2e/.auth/ADMIN.json" });
+  const page = await context.newPage();
+  const assertClean = installFailureGuards(page);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: undefined,
+    });
+  });
+  await installApiMocks(page);
+  await page.goto("/chat");
+  await expect(page.locator(".workspace-shell")).toBeVisible();
+  await expect(page.locator("body")).toContainText(/chat|manager|message/i);
+  await assertClean();
+  await context.close();
+});
+
+test("offline and unauthorized states stay inside the app shell", async ({ browser }) => {
+  for (const mode of ["offline", "unauthorized"]) {
+    const context = await browser.newContext({
+      storageState: "e2e/.auth/ADMIN.json",
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await context.newPage();
+    const assertClean = installFailureGuards(page, {
+      allowConsolePatterns: [
+        /Failed to load resource: net::ERR_INTERNET_DISCONNECTED/i,
+        /Failed to load resource: the server responded with a status of 401 \(Unauthorized\)/i,
+        /Error loading inventory: Network Error/i,
+        /Error loading inventory: Unauthorized fixture/i,
+      ],
+    });
+    await installApiMocks(page, { mode });
+    await page.goto("/inventory");
+    await expect(page.locator(".workspace-shell")).toBeVisible();
+    await assertClean();
+    await context.close();
+  }
+});

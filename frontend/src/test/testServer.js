@@ -74,6 +74,23 @@ export const handlers = [
   http.get(apiUrl("/saas/plans"), () => HttpResponse.json({ plans: [] })),
   http.get(apiUrl("/chat/contacts"), () => HttpResponse.json({ contacts: [] })),
   http.get(apiUrl("/chat/conversations"), () => HttpResponse.json({ conversations: [] })),
+  http.post(apiUrl("/chat/uploads"), async ({ request }) => {
+    const formData = await request.formData();
+    const file = formData.get("file");
+    if (!file || Number(file.size || 0) === 0) {
+      return HttpResponse.json({ message: "File is required" }, { status: 400 });
+    }
+
+    return HttpResponse.json({
+      attachment: {
+        fileName: file.name || "attachment.bin",
+        fileUrl: "https://cdn.test/samvid/attachment.png",
+        mimeType: file.type || "application/octet-stream",
+        size: file.size || 0,
+        storagePath: "test/company-a/attachment.png",
+      },
+    });
+  }),
   http.get(apiUrl("/assistant/ask"), () => HttpResponse.json({ answer: "ok" })),
 ];
 

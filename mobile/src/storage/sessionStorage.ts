@@ -39,6 +39,7 @@ export const sessionStorage = {
     try {
       return JSON.parse(raw);
     } catch {
+      await AsyncStorage.removeItem(USER_KEY);
       return null;
     }
   },

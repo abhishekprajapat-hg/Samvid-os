@@ -8,9 +8,15 @@ const parseMongoUri = (uri) => {
     throw new Error("MONGO_TEST_URI is required for backend tests");
   }
 
-  const parsed = new URL(uri);
-  const dbName = decodeURIComponent(parsed.pathname.replace(/^\//, "").split("/")[0] || "");
-  const hosts = parsed.host
+  const normalizedUri = String(uri || "").trim();
+  const match = /^mongodb(?:\+srv)?:\/\/([^/]+)(?:\/([^?]*))?/i.exec(normalizedUri);
+  if (!match) {
+    throw new Error("MONGO_TEST_URI must be a valid MongoDB URI");
+  }
+
+  const authority = match[1].includes("@") ? match[1].split("@").pop() : match[1];
+  const dbName = decodeURIComponent(String(match[2] || "").split("/")[0] || "");
+  const hosts = authority
     .split(",")
     .map((host) => host.split(":")[0].replace(/^\[|\]$/g, "").toLowerCase())
     .filter(Boolean);

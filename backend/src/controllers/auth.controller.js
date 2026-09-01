@@ -159,7 +159,18 @@ const toAuthResponse = ({ user, tokenBundle, tenant = null }) => ({
 
 exports.login = async (req, res) => {
   try {
-    const { email, password, portal } = req.body;
+    const rawEmail = req.body?.email;
+    const rawPassword = req.body?.password;
+    const portal = typeof req.body?.portal === "string" ? req.body.portal : "";
+
+    if (typeof rawEmail !== "string" || typeof rawPassword !== "string") {
+      return res.status(400).json({
+        message: "Email and password must be strings",
+      });
+    }
+
+    const email = rawEmail.trim().toLowerCase();
+    const password = rawPassword;
 
     if (!email || !password) {
       return res.status(400).json({

@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { escapeCsvValue } from "../../utils/csvSafety";
 import ToastNotice from "../../components/ui/ToastNotice";
 import {
   ExecutivePerformanceSection,
@@ -156,10 +157,8 @@ const formatCurrency = (value) =>
     maximumFractionDigits: 0,
   }).format(Number(value) || 0);
 
-const toCsvValue = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-
 const downloadCsv = (filename, rows) => {
-  const csv = rows.map((row) => row.map((value) => toCsvValue(value)).join(",")).join("\n");
+  const csv = rows.map((row) => row.map((value) => escapeCsvValue(value)).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
 

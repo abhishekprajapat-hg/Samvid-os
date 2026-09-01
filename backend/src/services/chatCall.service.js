@@ -5,6 +5,7 @@ const { toObjectIdString, uniqueIds } = require("./chatAccess.service");
 
 const CALL_MODES = new Set(["audio", "video"]);
 const CALL_TERMINAL_STATUSES = new Set(["ended", "rejected", "missed", "failed"]);
+const ACTIVE_CALL_STATUSES = new Set(["ringing", "connected"]);
 
 const toId = (value) => toObjectIdString(value || "");
 
@@ -113,6 +114,22 @@ const findCallHistoryRowByPublicId = async (callId) => {
   return ChatCallHistory.findOne({ $or: criteria });
 };
 
+const findActiveCallForParticipants = async ({ participantIds = [], excludeCallId = "" }) => {
+  const ids = uniqueIds(participantIds);
+  if (!ids.length) return null;
+
+  const query = {
+    participants: { $in: ids },
+    status: { $in: [...ACTIVE_CALL_STATUSES] },
+  };
+  const normalizedExcludeCallId = String(excludeCallId || "").trim();
+  if (normalizedExcludeCallId) {
+    query.callId = { $ne: normalizedExcludeCallId };
+  }
+
+  return ChatCallHistory.findOne(query).sort({ startedAt: -1 });
+};
+
 const recordCallInitiated = async ({
   callId,
   room,
@@ -129,6 +146,17 @@ const recordCallInitiated = async ({
 
   const participants = resolveParticipantsFromRoom(room, callerId);
   const now = startedAt instanceof Date ? startedAt : new Date(startedAt || Date.now());
+  const setOnInsert = {
+    participants,
+    caller: callerId,
+    mode: sanitizeMode(mode),
+    status: "ringing",
+    startedAt: now,
+    durationSeconds: 0,
+  };
+  if (mongoose.Types.ObjectId.isValid(normalizedCallId)) {
+    setOnInsert._id = new mongoose.Types.ObjectId(normalizedCallId);
+  }
 
   return ChatCallHistory.findOneAndUpdate(
     {
@@ -136,14 +164,7 @@ const recordCallInitiated = async ({
       room: normalizedRoomId,
     },
     {
-      $setOnInsert: {
-        participants,
-        caller: callerId,
-        mode: sanitizeMode(mode),
-        status: "ringing",
-        startedAt: now,
-        durationSeconds: 0,
-      },
+      $setOnInsert: setOnInsert,
     },
     { new: true, upsert: true },
   );
@@ -188,7 +209,13 @@ const markCallRejected = async ({
 
   const now = endedAt instanceof Date ? endedAt : new Date(endedAt || Date.now());
   const normalizedReason = sanitizeReason(reason) || "rejected";
-  row.status = normalizedReason === "busy" ? "missed" : "rejected";
+  if (normalizedReason === "failed") {
+    row.status = "failed";
+  } else if (["busy", "missed", "no-answer", "no_answer"].includes(normalizedReason)) {
+    row.status = "missed";
+  } else {
+    row.status = "rejected";
+  }
   row.endReason = normalizedReason;
   row.endedAt = now;
   row.endedBy = userId ? toId(userId) : null;
@@ -273,8 +300,31 @@ const startCallForUser = async ({ user, roomId, mode = "audio" }) => {
     requireParticipantForSend: true,
   });
   const callId = new mongoose.Types.ObjectId().toString();
+  return startCallForUserWithId({ user, roomId: room._id, callId, mode });
+};
+
+const startCallForUserWithId = async ({ user, roomId, callId, mode = "audio" }) => {
+  const normalizedCallId = String(callId || "").trim() || new mongoose.Types.ObjectId().toString();
+  if (!mongoose.Types.ObjectId.isValid(normalizedCallId)) {
+    throw createHttpError(400, "Invalid call ID");
+  }
+
+  const room = await getRoomByIdForUser({
+    user,
+    roomId,
+    requireParticipantForSend: true,
+  });
+  const participantIds = resolveParticipantsFromRoom(room, user._id);
+  const busyCall = await findActiveCallForParticipants({
+    participantIds: participantIds.filter((participantId) => participantId !== toId(user._id)),
+    excludeCallId: normalizedCallId,
+  });
+  if (busyCall) {
+    throw createHttpError(409, "Recipient is busy on another call");
+  }
+
   const row = await recordCallInitiated({
-    callId,
+    callId: normalizedCallId,
     room,
     caller: user,
     mode: normalizeRequestedCallMode(mode),
@@ -335,12 +385,113 @@ const updateCallForUser = async ({ user, callId, status = "", reason = "" }) => 
   };
 };
 
+const normalizeSignalPayload = (signal) => {
+  if (!signal || typeof signal !== "object" || Array.isArray(signal)) {
+    throw createHttpError(400, "Signal payload is required");
+  }
+
+  const type = String(signal.type || "").trim().toLowerCase();
+  if (type === "offer" || type === "answer") {
+    const sdp = String(signal.sdp || "");
+    if (!sdp || sdp.length > 200000) {
+      throw createHttpError(400, "Invalid SDP payload");
+    }
+    return {
+      type,
+      sdp,
+    };
+  }
+
+  if (type === "candidate" || type === "ice-candidate") {
+    const candidateInput = signal.candidate && typeof signal.candidate === "object"
+      ? signal.candidate
+      : signal;
+    const candidate = String(candidateInput?.candidate || "").trim();
+    if (!candidate || candidate.length > 8192) {
+      throw createHttpError(400, "Invalid ICE candidate payload");
+    }
+    return {
+      type: "candidate",
+      candidate: {
+        candidate,
+        sdpMid: typeof candidateInput?.sdpMid === "string" ? candidateInput.sdpMid : null,
+        sdpMLineIndex: Number.isInteger(candidateInput?.sdpMLineIndex)
+          ? candidateInput.sdpMLineIndex
+          : null,
+        usernameFragment:
+          typeof candidateInput?.usernameFragment === "string"
+            ? candidateInput.usernameFragment.slice(0, 256)
+            : undefined,
+      },
+    };
+  }
+
+  throw createHttpError(400, "Unsupported call signal type");
+};
+
+const getAuthorizedCallSignalContext = async ({
+  user,
+  callId,
+  roomId = "",
+  targetUserId = "",
+  signal,
+}) => {
+  const row = await findCallHistoryRowByPublicId(callId);
+  if (!row) {
+    throw createHttpError(404, "Call not found");
+  }
+
+  const requestedRoomId = toId(roomId);
+  if (requestedRoomId && requestedRoomId !== toId(row.room)) {
+    throw createHttpError(403, "Call does not belong to this conversation");
+  }
+
+  const room = await getRoomByIdForUser({
+    user,
+    roomId: row.room,
+    requireParticipantForSend: true,
+  });
+
+  const participantIds = resolveParticipantsFromRoom(room, row.caller);
+  const senderId = toId(user._id);
+  let normalizedTargetUserId = toId(targetUserId);
+  if (!participantIds.includes(senderId)) {
+    throw createHttpError(403, "Caller is not a call participant");
+  }
+  if (!normalizedTargetUserId) {
+    const otherParticipants = participantIds.filter((participantId) => participantId !== senderId);
+    if (otherParticipants.length === 1) {
+      normalizedTargetUserId = otherParticipants[0];
+    }
+  }
+  if (!normalizedTargetUserId || normalizedTargetUserId === senderId) {
+    throw createHttpError(400, "Target participant is required");
+  }
+  if (!participantIds.includes(normalizedTargetUserId)) {
+    throw createHttpError(403, "Target is not a call participant");
+  }
+  if (CALL_TERMINAL_STATUSES.has(String(row.status || "").trim().toLowerCase())) {
+    throw createHttpError(409, "Call has already ended");
+  }
+
+  return {
+    call: toCallHistoryDto(await populateCallHistoryRow(ChatCallHistory.findById(row._id)).lean()),
+    room,
+    participantIds,
+    senderId,
+    targetUserId: normalizedTargetUserId,
+    signal: normalizeSignalPayload(signal),
+  };
+};
+
 module.exports = {
+  getAuthorizedCallSignalContext,
   recordCallInitiated,
   markCallAccepted,
   markCallRejected,
   markCallEnded,
   listConversationCallHistory,
   startCallForUser,
+  startCallForUserWithId,
   updateCallForUser,
 };

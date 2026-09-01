@@ -104,22 +104,29 @@ Generated for the automated-test-foundation/P0 contract phase.
 - Target service calls map to `/targets` routes.
 - SaaS service calls map to `/saas` routes.
 - Office assistant calls map to `/assistant/ask`.
-- Meta webhook service calls map to `/webhook/meta`.
+- Meta webhook service calls map to `/webhook/meta` and `/client/webhook/meta`; both POST routes verify the exact raw JSON body with `X-Hub-Signature-256`.
+- Authenticated upload flows for chat, profile photos, lead closure/status documents, and inventory media use `POST /chat/uploads`.
 
 ## Missing Routes Fixed In This Phase
 - Active and implemented: `PATCH /leads/:leadId/diary/:entryId`.
 - Active and mounted: attendance regularization create/my/admin/review endpoints.
 - Active and consolidated: duplicate `PATCH /users/:userId` route definitions.
+- Active and implemented: `POST /chat/uploads` stores validated files through the configured backend storage adapter.
 
 ## Intentionally Socket Or Service Flow
 - Chat realtime connection, typing, delivery, read, call signaling and popup alerts are intentionally handled through the existing Socket.IO client/server flow plus the REST chat routes for persistence.
-- Mobile `POST /chat/uploads` falls back to the existing Cloudinary upload flow when the backend route is absent.
 - Mobile `/chat/calls` REST calls fall back to local call-log state when absent; live call signaling remains socket/WebRTC driven.
+
+## Upload Contract
+- `POST /chat/uploads` requires a valid bearer token and tenant/company context.
+- Response shape is `{ attachment: { fileName, fileUrl, mimeType, size, storagePath } }`.
+- Supported file types are limited to active UI needs: JPEG, PNG, WebP, HEIC/HEIF images, PDF, MP4 video, and common chat audio formats (`mp3`, `m4a/mp4`, `aac`, `ogg`, `wav`).
+- The backend validates filename/path traversal, extension, declared MIME type, magic bytes, empty files, maximum size, executable signatures, and obvious script/polyglot content before calling storage.
+- Expected upload failures return controlled `400`, `413`, `415`, `500`, or `503` responses.
 
 ## Dead Code To Remove Later
 - `POST /auth/register` is present in the mobile service but no current screen usage was found in this phase.
 - `POST /users/profile-picture` and `DELETE /users/profile-picture` are present in mobile user service, but current profile upload usage goes through `uploadChatFile`; confirm and remove or implement in a later profile-media phase.
 
 ## Remaining Mismatches Deferred
-- Mobile chat upload/call-log persistence is not backed by first-class REST routes; existing fallback behavior was left intact because implementing persistent media/call storage is larger than this P0 route/runtime phase.
 - Mobile auth register/profile-picture service helpers remain unmounted backend contracts and should be cleaned up or implemented after a UI usage decision.

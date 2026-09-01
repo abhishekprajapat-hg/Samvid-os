@@ -1,6 +1,6 @@
 const pino = require("pino");
 
-const logger = pino({
+const loggerOptions = {
   level: process.env.LOG_LEVEL || "info",
   timestamp: pino.stdTimeFunctions.isoTime,
   redact: {
@@ -15,6 +15,9 @@ const logger = pino({
     ],
     censor: "[REDACTED]",
   },
-});
+};
+
+const logger = pino(loggerOptions);
 
 module.exports = logger;
+module.exports.loggerOptions = loggerOptions;

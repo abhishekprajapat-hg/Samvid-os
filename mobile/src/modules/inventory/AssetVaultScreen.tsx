@@ -340,7 +340,7 @@ export const AssetVaultScreen = () => {
       const result = await DocumentPicker.getDocumentAsync({
         multiple: true,
         copyToCacheDirectory: true,
-        type: "*/*",
+        type: "application/pdf",
       });
 
       if (result.canceled) return;

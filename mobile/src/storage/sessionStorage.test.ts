@@ -39,5 +39,14 @@ describe("sessionStorage", () => {
     await AsyncStorage.setItem("user", "{bad-json");
 
     await expect(sessionStorage.getUser()).resolves.toBeNull();
+    expect(await AsyncStorage.getItem("user")).toBeNull();
+  });
+
+  it("ignores malformed session expiry values without expiring a valid token", async () => {
+    await AsyncStorage.setItem("token", "access-token");
+    await AsyncStorage.setItem("session_expires_at", "not-a-date");
+
+    expect(await sessionStorage.getRemainingSessionMs()).toBeNull();
+    expect(await sessionStorage.getToken()).toBe("access-token");
   });
 });

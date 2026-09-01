@@ -7,6 +7,7 @@ const axios = require("axios");
 
 const app = require("../../src/app");
 const { registerChatSocketHandlers } = require("../../src/socket/chat.socket");
+const uploadStorage = require("../../src/services/uploadStorage.service");
 const Lead = require("../../src/models/Lead");
 const ChatCallHistory = require("../../src/models/ChatCallHistory");
 const {
@@ -69,11 +70,30 @@ const emitWithAck = (socket, event, payload) =>
     socket.emit(event, payload, (ack) => resolve(ack));
   });
 
+const waitForSocketEvent = (socket, event, timeoutMs = 1500) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.off(event, handler);
+      reject(new Error(`Timed out waiting for ${event}`));
+    }, timeoutMs);
+    const handler = (payload) => {
+      clearTimeout(timer);
+      resolve(payload);
+    };
+    socket.once(event, handler);
+  });
+
 const signMetaBody = (body) =>
   `sha256=${crypto
     .createHmac("sha256", process.env.META_APP_SECRET)
     .update(body)
     .digest("hex")}`;
+
+const pngBuffer = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64",
+);
+const pdfBuffer = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n");
 
 describe("chat realtime, calls, uploads, assistant and Meta webhook contracts", () => {
   let httpServer;
@@ -103,6 +123,7 @@ describe("chat realtime, calls, uploads, assistant and Meta webhook contracts", 
     sockets.splice(0).forEach((socket) => socket.close());
     if (io) await io.close();
     if (httpServer?.listening) await closeServer(httpServer);
+    uploadStorage.__setStorageAdapterForTests(null);
     vi.restoreAllMocks();
   });
 
@@ -353,6 +374,148 @@ describe("chat realtime, calls, uploads, assistant and Meta webhook contracts", 
     expect(await ChatCallHistory.countDocuments()).toBe(2);
   });
 
+  it("uses one stable call ID across REST and socket initiation and reaches idle recipients", async () => {
+    const { manager, executive } = await createCompanyUsers();
+    const direct = await request(app)
+      .post("/api/chat/rooms/direct")
+      .set(authHeaderFor(manager))
+      .send({ recipientId: executive._id })
+      .expect(201);
+
+    const created = await request(app)
+      .post("/api/chat/calls")
+      .set(authHeaderFor(manager))
+      .send({ conversationId: direct.body.room._id, callType: "VIDEO" })
+      .expect(201);
+    const callId = String(created.body.call._id);
+
+    const managerSocket = await connectSocket(baseUrl, authTokenFor(manager));
+    const executiveSocket = await connectSocket(baseUrl, authTokenFor(executive));
+    sockets.push(managerSocket, executiveSocket);
+
+    const incomingPromise = waitForSocketEvent(executiveSocket, "chat:call:incoming");
+    const callerEchoPromise = waitForSocketEvent(managerSocket, "chat:call:incoming", 300)
+      .then(() => true)
+      .catch(() => false);
+
+    const startAck = await emitWithAck(managerSocket, "chat:call:initiate", {
+      callId,
+      conversationId: direct.body.room._id,
+      mode: "video",
+    });
+    expect(startAck.ok).toBe(true);
+    expect(String(startAck.call._id)).toBe(callId);
+
+    const incoming = await incomingPromise;
+    expect(String(incoming.callId)).toBe(callId);
+    expect(String(incoming.caller._id)).toBe(String(manager._id));
+    expect(await callerEchoPromise).toBe(false);
+    expect(await ChatCallHistory.countDocuments({ room: direct.body.room._id })).toBe(1);
+  });
+
+  it("relays authorized call signaling only to active same-company call participants", async () => {
+    const { manager, executive, fieldExecutive } = await createCompanyUsers();
+    const otherCompany = await createCompany();
+    const otherExecutive = await createUser({ company: otherCompany, role: "EXECUTIVE" });
+    const direct = await request(app)
+      .post("/api/chat/rooms/direct")
+      .set(authHeaderFor(manager))
+      .send({ recipientId: executive._id })
+      .expect(201);
+    const created = await request(app)
+      .post("/api/chat/calls")
+      .set(authHeaderFor(manager))
+      .send({ conversationId: direct.body.room._id, callType: "VOICE" })
+      .expect(201);
+    const callId = String(created.body.call._id);
+
+    const managerSocket = await connectSocket(baseUrl, authTokenFor(manager));
+    const executiveSocket = await connectSocket(baseUrl, authTokenFor(executive));
+    const nonParticipantSocket = await connectSocket(baseUrl, authTokenFor(fieldExecutive));
+    const otherSocket = await connectSocket(baseUrl, authTokenFor(otherExecutive));
+    sockets.push(managerSocket, executiveSocket, nonParticipantSocket, otherSocket);
+
+    const offer = { type: "offer", sdp: "v=0\r\na=fingerprint:sha-256 test\r\n" };
+    const relayedPromise = waitForSocketEvent(executiveSocket, "chat:call:signal");
+    const echoPromise = waitForSocketEvent(managerSocket, "chat:call:signal", 300)
+      .then(() => true)
+      .catch(() => false);
+
+    const ack = await emitWithAck(managerSocket, "chat:call:signal", {
+      callId,
+      conversationId: direct.body.room._id,
+      targetUserId: String(executive._id),
+      signal: offer,
+    });
+    expect(ack.ok).toBe(true);
+    const relayed = await relayedPromise;
+    expect(relayed.signal).toEqual(offer);
+    expect(String(relayed.fromUserId)).toBe(String(manager._id));
+    expect(String(relayed.toUserId)).toBe(String(executive._id));
+    expect(await echoPromise).toBe(false);
+
+    const forged = await emitWithAck(executiveSocket, "chat:call:signal", {
+      callId: "forged-call-id",
+      conversationId: direct.body.room._id,
+      targetUserId: String(manager._id),
+      signal: { type: "answer", sdp: "v=0\r\n" },
+    });
+    expect(forged.ok).toBe(false);
+
+    const nonParticipant = await emitWithAck(nonParticipantSocket, "chat:call:signal", {
+      callId,
+      conversationId: direct.body.room._id,
+      targetUserId: String(manager._id),
+      signal: { type: "candidate", candidate: { candidate: "candidate:1 1 udp 1 127.0.0.1 9 typ host" } },
+    });
+    expect(nonParticipant.ok).toBe(false);
+
+    const crossCompany = await emitWithAck(otherSocket, "chat:call:signal", {
+      callId,
+      conversationId: direct.body.room._id,
+      targetUserId: String(manager._id),
+      signal: { type: "answer", sdp: "v=0\r\n" },
+    });
+    expect(crossCompany.ok).toBe(false);
+  });
+
+  it("keeps call terminal operations idempotent for repeated socket events", async () => {
+    const { manager, executive } = await createCompanyUsers();
+    const direct = await request(app)
+      .post("/api/chat/rooms/direct")
+      .set(authHeaderFor(manager))
+      .send({ recipientId: executive._id })
+      .expect(201);
+    const created = await request(app)
+      .post("/api/chat/calls")
+      .set(authHeaderFor(manager))
+      .send({ conversationId: direct.body.room._id, callType: "VOICE" })
+      .expect(201);
+    const callId = String(created.body.call._id);
+
+    const managerSocket = await connectSocket(baseUrl, authTokenFor(manager));
+    const executiveSocket = await connectSocket(baseUrl, authTokenFor(executive));
+    sockets.push(managerSocket, executiveSocket);
+
+    const acceptedOne = await emitWithAck(executiveSocket, "chat:call:accept", { callId });
+    const acceptedTwo = await emitWithAck(executiveSocket, "chat:call:accept", { callId });
+    expect(acceptedOne.ok).toBe(true);
+    expect(acceptedTwo.ok).toBe(true);
+
+    const endedOne = await emitWithAck(managerSocket, "chat:call:end", { callId });
+    const endedTwo = await emitWithAck(managerSocket, "chat:call:end", { callId });
+    const rejectedAfterEnd = await emitWithAck(executiveSocket, "chat:call:reject", { callId });
+    expect(endedOne.ok).toBe(true);
+    expect(endedTwo.ok).toBe(true);
+    expect(rejectedAfterEnd.ok).toBe(true);
+
+    const rows = await ChatCallHistory.find({ callId }).lean();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("ended");
+    expect(rows[0].answeredBy).toBeTruthy();
+    expect(rows[0].endedAt).toBeTruthy();
+  });
+
   it("mounts assistant in both namespaces and rejects malformed, oversized and cross-company prompts", async () => {
     const graph = await createPhase2FixtureGraph();
     await createLead({
@@ -409,7 +572,130 @@ describe("chat realtime, calls, uploads, assistant and Meta webhook contracts", 
         filename: "../../owned.sh",
         contentType: "image/png",
       })
+      .expect(415);
+  });
+
+  it("uploads validated attachments through durable storage and returns the shared attachment contract", async () => {
+    const { manager } = await createCompanyUsers();
+    const uploadMock = vi.fn(async ({ fileName, mimeType, size, tenantId, userId }) => ({
+      fileName,
+      fileUrl: `https://cdn.example.test/${tenantId}/${userId}/${encodeURIComponent(fileName)}`,
+      mimeType,
+      size,
+      storagePath: `samvid-os/${tenantId}/${userId}/${encodeURIComponent(fileName)}`,
+    }));
+    uploadStorage.__setStorageAdapterForTests({ upload: uploadMock });
+
+    const response = await request(app)
+      .post("/api/chat/uploads")
+      .set(authHeaderFor(manager))
+      .attach("file", pngBuffer, {
+        filename: "../../Rental Photo.png",
+        contentType: "image/png",
+      })
+      .expect(201);
+
+    expect(response.body).toEqual({
+      attachment: {
+        fileName: "Rental Photo.png",
+        fileUrl: expect.stringContaining("Rental%20Photo.png"),
+        mimeType: "image/png",
+        size: pngBuffer.length,
+        storagePath: expect.stringContaining("Rental%20Photo.png"),
+      },
+    });
+    expect(uploadMock).toHaveBeenCalledWith(expect.objectContaining({
+      buffer: pngBuffer,
+      fileName: "Rental Photo.png",
+      mimeType: "image/png",
+      size: pngBuffer.length,
+      tenantId: String(manager.companyId),
+      userId: String(manager._id),
+    }));
+  });
+
+  it("returns controlled upload errors for empty, mismatched, executable, oversized and unavailable storage cases", async () => {
+    const { manager } = await createCompanyUsers();
+
+    await request(app)
+      .post("/api/chat/uploads")
+      .set(authHeaderFor(manager))
+      .attach("file", Buffer.alloc(0), {
+        filename: "empty.pdf",
+        contentType: "application/pdf",
+      })
       .expect(400);
+
+    await request(app)
+      .post("/api/chat/uploads")
+      .set(authHeaderFor(manager))
+      .attach("file", pdfBuffer, {
+        filename: "proof.png",
+        contentType: "image/png",
+      })
+      .expect(415);
+
+    await request(app)
+      .post("/api/chat/uploads")
+      .set(authHeaderFor(manager))
+      .attach("file", Buffer.from("MZ\x00\x00malware"),
+        {
+          filename: "invoice.jpg",
+          contentType: "image/jpeg",
+        })
+      .expect(415);
+
+    await request(app)
+      .post("/api/chat/uploads")
+      .set(authHeaderFor(manager))
+      .attach("file", Buffer.from("hello"), {
+        filename: "archive.zip",
+        contentType: "application/zip",
+      })
+      .expect(415);
+
+    await request(app)
+      .post("/api/chat/uploads")
+      .set(authHeaderFor(manager))
+      .field("note", "oversized")
+      .attach("file", Buffer.concat([pngBuffer, Buffer.alloc(26 * 1024 * 1024)]), {
+        filename: "large.png",
+        contentType: "image/png",
+      })
+      .expect(413);
+
+    uploadStorage.__setStorageAdapterForTests({
+      upload: async () => {
+        const error = new Error("provider offline");
+        error.statusCode = 503;
+        throw error;
+      },
+    });
+
+    await request(app)
+      .post("/api/chat/uploads")
+      .set(authHeaderFor(manager))
+      .attach("file", pngBuffer, {
+        filename: "photo.png",
+        contentType: "image/png",
+      })
+      .expect(503);
+  });
+
+  it("requires authenticated tenant users before storage upload", async () => {
+    uploadStorage.__setStorageAdapterForTests({
+      upload: vi.fn(async () => {
+        throw new Error("storage should not be called");
+      }),
+    });
+
+    await request(app)
+      .post("/api/chat/uploads")
+      .attach("file", pngBuffer, {
+        filename: "photo.png",
+        contentType: "image/png",
+      })
+      .expect(401);
   });
 
   it("verifies Meta webhooks with raw-body HMAC and creates leads idempotently", async () => {
@@ -529,5 +815,44 @@ describe("chat realtime, calls, uploads, assistant and Meta webhook contracts", 
     expect(ambiguous.body.ambiguousPage).toBe(1);
     expect(ambiguous.body.processed).toBe(0);
     expect(axios.get).not.toHaveBeenCalled();
+  });
+
+  it("verifies client-namespaced Meta webhooks with the exact raw request body", async () => {
+    const rawBody = JSON.stringify(
+      {
+        object: "page",
+        entry: [{ id: "page-1", changes: [] }],
+      },
+      null,
+      2,
+    );
+
+    await request(app)
+      .post("/api/client/webhook/meta")
+      .set("Content-Type", "application/json")
+      .send(rawBody)
+      .expect(401);
+
+    await request(app)
+      .post("/api/client/webhook/meta")
+      .set("Content-Type", "application/json")
+      .set("X-Hub-Signature-256", "not-a-meta-signature")
+      .send(rawBody)
+      .expect(401);
+
+    await request(app)
+      .post("/api/client/webhook/meta")
+      .set("Content-Type", "application/json")
+      .set("X-Hub-Signature-256", signMetaBody(`${rawBody}\n`))
+      .send(rawBody)
+      .expect(401);
+
+    const valid = await request(app)
+      .post("/api/client/webhook/meta")
+      .set("Content-Type", "application/json")
+      .set("X-Hub-Signature-256", signMetaBody(rawBody))
+      .send(rawBody)
+      .expect(200);
+    expect(valid.body.message).toBe("No leadgen event found");
   });
 });

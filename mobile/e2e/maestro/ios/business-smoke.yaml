@@ -1,17 +1,34 @@
-appId: ${SAMVID_IOS_APP_ID}
+appId: com.samvidos.crm
 name: iOS Business Navigation Smoke
 ---
-- launchApp
+- launchApp:
+    clearState: true
+- assertVisible: "ADMIN LOGIN"
+- tapOn:
+    id: "login-email"
+- inputText: "${SAMVID_MOBILE_EMAIL}"
+- tapOn:
+    id: "login-password"
+- inputText: "${SAMVID_MOBILE_PASSWORD}"
+- tapOn:
+    id: "login-submit"
 - assertVisible: "Logout"
 - tapOn: "More"
 - assertVisible: "Samvid Assistant"
 - assertVisible: "Profile"
 - assertVisible: "Tasks"
-- tapOn: "Tasks"
+- tapOn:
+    id: "more-menu-tasks"
 - assertVisible: "Tasks"
-- tapOn: "More"
-- tapOn: "Attendance"
+- back
+- assertVisible: "More"
+- tapOn:
+    id: "more-menu-attendance"
 - assertVisible: "Attendance"
-- tapOn: "More"
-- tapOn: "Profile"
+- back
+- assertVisible: "More"
+- tapOn:
+    id: "more-menu-profile"
 - assertVisible: "Profile"
+- back
+- assertVisible: "More"
