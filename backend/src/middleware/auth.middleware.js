@@ -82,9 +82,15 @@ exports.protect = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    if (decoded.scope === "client-portal") {
-      // A client-portal token, replayed against a staff-only route — reject
-      // outright rather than trying to resolve it as a User id.
+    if (decoded.scope) {
+      /*
+       * Tokens minted for one narrow purpose carry a scope: a client-portal
+       * session, or the push-reply token that rides inside a notification
+       * payload. Neither stands in for a staff session, so reject any scoped
+       * token outright rather than trying to resolve one as a User id. Staff
+       * access tokens (utils/generateToken) carry no scope, which keeps this
+       * closed by default as further scoped tokens are added.
+       */
       return res.status(401).json({ message: "Invalid or expired token" });
     }
     const user = await User.findById(decoded.id).select("-password");

@@ -1,19 +1,24 @@
-import React, { useState } from "react";
+import BirthdayReminders from "./components/BirthdayReminders";
+import React, { useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   CheckSquare,
+  CloudOff,
   Download,
   History,
   LayoutGrid,
   Map as MapIcon,
+  Save,
   Search,
   Square,
   Undo2,
+  Upload,
   UserPlus,
   Users,
 } from "lucide-react";
 import { Button, Input } from "../../../components/ui";
 import ToastNotice from "../../../components/ui/ToastNotice";
+import { downloadBackup, restoreBackup, readBackupFile } from "./boardBackup";
 import ActivityLogDialog from "./components/ActivityLogDialog";
 import CabinDetailPanel from "./components/CabinDetailPanel";
 import CabinSheet from "./components/CabinSheet";
@@ -43,12 +48,13 @@ import { STATUS_META, STATUS_ORDER, WINGS } from "./cabinData";
  * capacity ("4 seater") and a status, never a count of filled seats.
  *
  * Every action runs through boardStore's reducer, which owns the floor, keeps
- * an undo stack and persists to localStorage. This screen holds only what is
+ * an undo stack and saves to the server. This screen holds only what is
  * genuinely view state - filters, selection, which dialog is open.
  *
- * The state is client-side: it is the shape a server would return, and each
- * reducer case is one endpoint, but nothing here talks to the API yet. See the
- * note at the top of boardStore.js.
+ * The floor is company data: it loads from and saves to /coworking/board, with
+ * localStorage kept only as an offline cache. Before that it lived in
+ * localStorage alone, which meant every machine showed a different set of
+ * bookings and an admin could see none of them.
  */
 
 const SEAT_BANDS = [
@@ -75,7 +81,7 @@ const csvEscape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 const BookingBoard = () => {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [board, dispatch] = useBoard();
+  const [board, dispatch, sync] = useBoard();
   const [view, setView] = useState("wings");
   const [statusFilter, setStatusFilter] = useState("all");
   const [wingFilter, setWingFilter] = useState("");
@@ -84,6 +90,7 @@ const BookingBoard = () => {
   const [selectMode, setSelectMode] = useState(false);
   const [cart, setCart] = useState([]);
   const [onboarding, setOnboarding] = useState(null);
+  const [editingClientId, setEditingClientId] = useState("");
   /*
    * The open cabin lives in the URL, so the clients page can link straight to
    * one and a reload keeps you where you were.
@@ -94,6 +101,8 @@ const BookingBoard = () => {
   const [transferCode, setTransferCode] = useState("");
   const [showActivity, setShowActivity] = useState(false);
   const [toast, setToast] = useState(null);
+  const [backingUp, setBackingUp] = useState(false);
+  const restoreInputRef = useRef(null);
 
   const { cabins, activity, undoStack } = board;
 
@@ -136,6 +145,11 @@ const BookingBoard = () => {
   const detailCabin = byCode(detailCode);
   const holdCabin = byCode(holdCode);
   const transferCabin = byCode(transferCode);
+  const editingClient = cabins.find((cabin) => cabin.client?.id === editingClientId)?.client || null;
+  const editingCabins = editingClientId
+    ? cabins.filter((cabin) => cabin.client?.id === editingClientId)
+    : [];
+  const editingContract = editingCabins[0]?.contract || null;
   const cartCabins = cart.map(byCode).filter(Boolean);
   const vacantCount = cabins.filter((cabin) => cabin.status === "VACANT").length;
 
@@ -190,6 +204,45 @@ const BookingBoard = () => {
    * The floor as a spreadsheet. Asked for constantly - for the owner, for a
    * broker, for a meeting - and without it the answer is a screenshot.
    */
+  /*
+   * This board has never been saved to a server, so these two buttons are the
+   * only way its data leaves the machine it was typed on.
+   */
+  const handleBackup = async () => {
+    setBackingUp(true);
+    try {
+      const backup = await downloadBackup();
+      setToast({
+        type: backup.counts.cabinsLet ? "success" : "info",
+        message: backup.counts.cabinsLet
+          ? `Backed up ${backup.counts.cabinsLet} let cabin(s) and ${backup.counts.documents} document(s). Keep this file safe.`
+          : "Backup saved, but this browser holds no let cabins. Check you are on the machine the bookings were made on.",
+      });
+    } catch {
+      setToast({ type: "error", message: "Could not create the backup." });
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const handleRestore = async (file) => {
+    if (restoreInputRef.current) restoreInputRef.current.value = "";
+    if (!file) return;
+    if (!window.confirm("Restoring replaces the booking board in this browser with the contents of the file. Continue?")) return;
+    try {
+      const result = await restoreBackup(await readBackupFile(file));
+      setToast({
+        type: "success",
+        message: `Restored ${result.cabinsLet || 0} let cabin(s) and ${result.restoredDocuments} document(s). Reloading…`,
+      });
+      // The board reads localStorage once on mount, so a reload is the honest
+      // way to show restored data rather than patching the reducer around it.
+      window.setTimeout(() => window.location.reload(), 1200);
+    } catch (error) {
+      setToast({ type: "error", message: error.message || "Could not read that backup file." });
+    }
+  };
+
   const exportCsv = () => {
     const header = ["Cabin", "Wing", "Capacity", "Status", "Client", "Monthly rent", "Agreement ends", "Dues"];
     const rows = cabins.map((cabin) => [
@@ -245,6 +298,19 @@ const BookingBoard = () => {
         <Button size="sm" variant="ghost" leftIcon={Download} className="px-1" onClick={exportCsv}>
           Export
         </Button>
+        <Button size="sm" variant="ghost" leftIcon={backingUp ? undefined : Save} className="px-1" disabled={backingUp} onClick={handleBackup}>
+          {backingUp ? "Saving…" : "Backup"}
+        </Button>
+        <input
+          ref={restoreInputRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(event) => handleRestore(event.target.files?.[0])}
+        />
+        <Button size="sm" variant="ghost" leftIcon={Upload} className="px-1" onClick={() => restoreInputRef.current?.click()}>
+          Restore
+        </Button>
         <Button
           size="sm"
           variant="ghost"
@@ -267,6 +333,7 @@ const BookingBoard = () => {
   return (
     <div className="custom-scrollbar h-full min-h-0 w-full min-w-0 flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950">
       <div className="mx-auto max-w-[1560px] px-4 py-5 sm:px-6">
+        <BirthdayReminders clients={[...new Map(board.cabins.filter(cabin => cabin.client).map(cabin => [cabin.client.id, cabin.client])).values()]} />
         {/* Title, then the two controls that scope the whole screen, then the
             one action the screen exists for. */}
         <header className="flex items-start justify-between gap-3">
@@ -296,6 +363,15 @@ const BookingBoard = () => {
         </header>
 
         {/* Search gets its own full-width row: on a phone it cannot share one. */}
+        {/* Whether this floor is the company's copy or just this browser's is
+            the difference the whole board turns on, so it is stated. */}
+        {sync.error ? (
+          <p role="alert" className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-900">
+            <CloudOff size={15} className="mt-px shrink-0" aria-hidden="true" />
+            <span>{sync.error}</span>
+          </p>
+        ) : null}
+
         <label className="relative mt-3 block sm:max-w-sm">
           <span className="sr-only">Search cabins or clients</span>
           <Input
@@ -439,6 +515,10 @@ const BookingBoard = () => {
               setDetailCode("");
               setTransferCode(cabin.code);
             }}
+            onEditClient={() => {
+              setEditingClientId(detailCabin.client.id);
+              setDetailCode("");
+            }}
             onOpenClient={() => navigate(`/coworking/clients?client=${detailCabin.client.id}`)}
           />
         ) : null}
@@ -488,6 +568,35 @@ const BookingBoard = () => {
         onClose={() => setOnboarding(null)}
         onConfirm={confirmOnboarding}
       />
+
+      {editingClient && editingContract ? (
+        <OnboardClientDialog
+          key={editingClient.id}
+          open
+          editMode
+          cabins={editingCabins}
+          initialClient={editingClient}
+          initialTerms={{
+            startDate: editingContract.startDate,
+            termMonths: Math.max(1, Math.round((new Date(editingContract.endDate) - new Date(editingContract.startDate)) / (30 * 24 * 60 * 60 * 1000))),
+            lockInMonths: editingContract.lockInMonths,
+            rent: editingCabins.reduce((total, cabin) => total + (cabin.contract?.monthlyRent || 0), 0),
+            depositMonths: editingContract.monthlyRent
+              ? Math.max(1, Math.round(editingContract.deposit / editingContract.monthlyRent))
+              : 2,
+            notes: editingContract.notes,
+            noticePeriodDays: editingContract.noticePeriodDays,
+            tokenAmount: editingCabins.reduce((total, cabin) => total + (cabin.contract?.tokenAmount || 0), 0),
+            securityCheque: editingContract.securityCheque,
+          }}
+          onClose={() => setEditingClientId("")}
+          onConfirm={({ client, terms }) => {
+            dispatch({ type: "UPDATE_CLIENT", clientId: editingClientId, client, terms });
+            setEditingClientId("");
+            setToast({ type: "success", message: `${client.name} updated.` });
+          }}
+        />
+      ) : null}
 
       {toast ? (
         <ToastNotice key={toast.message} type={toast.type} message={toast.message} onDismiss={() => setToast(null)} />

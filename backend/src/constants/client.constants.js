@@ -18,7 +18,7 @@ const CLIENT_TYPES = Object.freeze([
 
 const KYC_STATUSES = Object.freeze(["PENDING", "SUBMITTED", "VERIFIED", "REJECTED"]);
 
-const DOCUMENT_CATEGORIES = Object.freeze(["KYC", "AGREEMENT", "ID_PROOF", "OTHER"]);
+const DOCUMENT_CATEGORIES = Object.freeze(["KYC", "AGREEMENT", "ID_PROOF", "POLICE_VERIFICATION", "OTHER"]);
 
 const GST_PATTERN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/;
 const PAN_PATTERN = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
@@ -27,6 +27,7 @@ const MOBILE_PATTERN = /^[0-9]{10}$/;
 const CLIENT_ALLOWED_FIELDS = Object.freeze([
   "companyName",
   "contactPerson",
+  "dateOfBirth",
   "phone",
   "email",
   "alternatePhone",

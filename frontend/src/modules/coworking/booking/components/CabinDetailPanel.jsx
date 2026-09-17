@@ -4,11 +4,13 @@ import {
   ArrowUpRight,
   Ban,
   CalendarPlus,
+  FileText,
   History,
   IndianRupee,
   LogOut,
   Mail,
   MoveRight,
+  Pencil,
   Phone,
   RotateCcw,
   Timer,
@@ -20,6 +22,7 @@ import {
 import { Button, cn } from "../../../../components/ui";
 import { formatCurrency, formatDate } from "../../../../utils/format";
 import { STATUS_META } from "../cabinData";
+import DocumentChecklist from "./DocumentChecklist";
 
 /*
  * Everything known about one cabin, in the order a manager asks for it:
@@ -91,7 +94,7 @@ const CabinFacts = ({ cabin }) => (
   </div>
 );
 
-const CabinDetailPanel = ({ cabin, onClose, onAction, onOnboard, onHold, onTransfer, onOpenClient, propertyLabel }) => {
+const CabinDetailPanel = ({ cabin, onClose, onAction, onOnboard, onHold, onTransfer, onOpenClient, onEditClient, propertyLabel }) => {
   const meta = STATUS_META[cabin.status];
   const contract = cabin.contract;
   const isLet = cabin.status === "BOOKED" || cabin.status === "RESERVED";
@@ -101,6 +104,12 @@ const CabinDetailPanel = ({ cabin, onClose, onAction, onOnboard, onHold, onTrans
   // be impure, and the numbers already say everything needed.
   const termDays = contract ? daysBetween(contract.startDate, contract.endDate) : 0;
   const elapsed = contract ? Math.max(0, termDays - contract.endsInDays) : 0;
+
+  // A stored birth date wins; otherwise fall back to one read off an uploaded document.
+  const clientDateOfBirth =
+    cabin.client?.dateOfBirth
+    || cabin.client?.documents?.find((doc) => doc.extractedDateOfBirth)?.extractedDateOfBirth
+    || "";
 
   // Rendered inside a Modal, which owns the padding and the scroll. The panel
   // keeps its own header because the dialog is opened without one.
@@ -161,15 +170,14 @@ const CabinDetailPanel = ({ cabin, onClose, onAction, onOnboard, onHold, onTrans
               <Row label="GSTIN" value={cabin.client.gstin} mono />
             </dl>
 
-            <Button
-              size="sm"
-              variant="secondary"
-              rightIcon={ArrowUpRight}
-              className="mt-2 w-full"
-              onClick={onOpenClient}
-            >
-              Open client record
-            </Button>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <Button size="sm" variant="secondary" leftIcon={Pencil} onClick={onEditClient}>
+                Edit client
+              </Button>
+              <Button size="sm" variant="secondary" rightIcon={ArrowUpRight} onClick={onOpenClient}>
+                Open client record
+              </Button>
+            </div>
           </Section>
 
           <Section title="Agreement" count={contract.id}>
@@ -208,6 +216,10 @@ const CabinDetailPanel = ({ cabin, onClose, onAction, onOnboard, onHold, onTrans
             <dl className="mt-2">
               <Row label="Monthly rent" value={formatCurrency(contract.monthlyRent)} />
               <Row label="Deposit" value={formatCurrency(contract.deposit)} />
+              <Row label="Token paid" value={formatCurrency(contract.tokenAmount || 0)} />
+              <Row label="Notice period" value={`${contract.noticePeriodDays ?? 30} days`} />
+              <Row label="Date of birth" value={formatDate(clientDateOfBirth) || "-"} />
+              <div className="mt-3 border-t pt-2"><h4 className="text-xs font-semibold">Security Cheque</h4><Row label="Cheque number" value={contract.securityCheque?.number} /><Row label="Bank" value={contract.securityCheque?.bank} /><Row label="Amount" value={formatCurrency(contract.securityCheque?.amount || 0)} /><Row label="Cheque date" value={contract.securityCheque?.date} /></div>
               <Row
                 label="Payment status"
                 value={
@@ -284,6 +296,23 @@ const CabinDetailPanel = ({ cabin, onClose, onAction, onOnboard, onHold, onTrans
                 </>
               )}
             </div>
+          </Section>
+
+          <Section title="Client documents" count={cabin.client.documents?.length || 0} icon={FileText}>
+            <DocumentChecklist
+              kind={cabin.client.kind || "company"}
+              documents={cabin.client.documents || []}
+              readOnly
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              rightIcon={ArrowUpRight}
+              className="mt-2 w-full"
+              onClick={onOpenClient}
+            >
+              Manage documents in client profile
+            </Button>
           </Section>
         </>
       ) : null}

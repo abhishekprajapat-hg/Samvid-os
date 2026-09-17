@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import PushNotificationCard from "../../components/common/PushNotificationCard";
 import { useNavigate } from "react-router-dom";
 import {
   UserCircle2,
@@ -670,6 +671,8 @@ const UserProfile = () => {
               </div>
             </div>
           </div>
+
+          <PushNotificationCard />
 
           <section className="ui-soft-panel rounded-2xl border bg-white p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../../../../components/ui";
 
 /*
@@ -27,7 +28,7 @@ const CabinSheet = ({ open, onClose, children, labelledBy }) => {
 
   if (!open) return null;
 
-  return (
+  return createPortal((
     <div className="fixed inset-0 z-[90] flex items-end justify-center sm:items-center sm:p-4">
       <button
         type="button"
@@ -58,7 +59,7 @@ const CabinSheet = ({ open, onClose, children, labelledBy }) => {
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 };
 
 export default CabinSheet;

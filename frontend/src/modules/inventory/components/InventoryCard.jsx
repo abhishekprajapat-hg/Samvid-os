@@ -35,7 +35,7 @@ const floorOf = (asset) => {
   return `${floor}${suffix} floor`;
 };
 
-const InventoryCard = React.memo(({ asset, priceLabel, onView, onEdit, onShare, onDelete, canOpenEditModal, canDelete, deleting }) => {
+const InventoryCard = React.memo(({ asset, priceLabel, onView, onEdit, onShare, onDelete, canOpenEditModal, canDelete, deleting, deleteRequested }) => {
   const [favorite, setFavorite] = useState(false);
   const status = toApiInventoryStatus(asset?.status);
   const image = Array.isArray(asset?.images) ? asset.images[0] : "";
@@ -59,6 +59,12 @@ const InventoryCard = React.memo(({ asset, priceLabel, onView, onEdit, onShare, 
         <p className="mt-1 truncate text-[13px] text-slate-500">{subtitleOf(asset) || "Property unit"}</p>
         <p className="mt-3 text-[18px] font-bold tracking-[-0.02em] text-blue-700">{priceLabel}</p>
 
+        {deleteRequested ? (
+          <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+            Delete requested - awaiting approval
+          </div>
+        ) : null}
+
         <div className="mt-5 grid grid-cols-3 gap-2 border-t border-slate-100 pt-4 text-[13px] text-slate-600">
           <span className="inline-flex items-center gap-1.5 truncate"><Ruler size={16} className="shrink-0 text-slate-700" />{areaOf(asset)}</span>
           <span className="inline-flex items-center gap-1.5 truncate"><Armchair size={16} className="shrink-0 text-slate-700" />{furnishing}</span>
@@ -74,7 +80,7 @@ const InventoryCard = React.memo(({ asset, priceLabel, onView, onEdit, onShare, 
         <div className="mt-2 flex justify-end gap-1 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
           {canOpenEditModal ? <IconButton icon={Pencil} label="Edit property" size="sm" className="h-7 w-7 border-transparent bg-transparent" onClick={() => onEdit?.(asset)} /> : null}
           <IconButton icon={Share2} label="Share property" size="sm" className="h-7 w-7 border-transparent bg-transparent" onClick={() => onShare?.(asset)} />
-          {canDelete ? <IconButton icon={deleting ? MoreHorizontal : Trash2} label="Delete property" size="sm" className="h-7 w-7 border-transparent bg-transparent hover:text-rose-600" onClick={() => onDelete?.(asset?._id)} disabled={deleting} /> : null}
+          {canDelete ? <IconButton icon={deleting ? MoreHorizontal : Trash2} label={deleteRequested ? "Property delete already requested" : "Delete property"} size="sm" className="h-7 w-7 border-transparent bg-transparent hover:text-rose-600" onClick={() => onDelete?.(asset?._id)} disabled={deleting || deleteRequested} /> : null}
         </div>
       </div>
     </article>

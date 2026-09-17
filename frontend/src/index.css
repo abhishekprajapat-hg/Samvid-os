@@ -717,9 +717,19 @@ html.theme-dark .workspace-shell::after {
   background-image: none;
 }
 
+/*
+ * Kept as a positioning context for absolutely-placed page content, but
+ * deliberately WITHOUT a z-index.
+ *
+ * A z-index here makes this div a stacking context, and everything a page
+ * renders is then trapped beneath it - including `fixed` dialog overlays, which
+ * could never rise above the z-40 header no matter what z-index they asked for.
+ * That is what put every modal's top edge behind the header. The shell
+ * decorations this used to lift content above sit at z-index -1 already, so
+ * nothing needs the lift.
+ */
 .workspace-main > div {
   position: relative;
-  z-index: 1;
 }
 
 html.theme-light .workspace-shell .bg-white,

@@ -5,6 +5,12 @@ export const correctUserBreak = async (userId, date, payload) => {
   return res.data;
 };
 
+// Starts or ends a break for someone else, as of now, from the team list.
+export const manageUserBreak = async (userId, payload) => {
+  const res = await api.post(`/attendance/users/${userId}/break`, payload);
+  return res.data;
+};
+
 export const checkInAttendance = async (payload = {}) => {
   const res = await api.post("/attendance/check-in", payload);
   return {

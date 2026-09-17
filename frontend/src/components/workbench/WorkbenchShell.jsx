@@ -3,6 +3,9 @@ import { useChatNotifications } from "../../context/useChatNotifications";
 import { usePermissions } from "../../context/usePermissions";
 import { cn } from "../ui";
 import AppTopCommandBar from "./AppTopCommandBar";
+import FloatingMessenger from "./FloatingMessenger";
+import { useIsMobileViewport } from "../../hooks/useIsMobileViewport";
+import { getAllVisibleMenuGroups } from "./workbenchNavigation";
 import PrimarySidebar from "./PrimarySidebar";
 
 const WorkbenchShell = ({
@@ -18,6 +21,7 @@ const WorkbenchShell = ({
   shouldLockDocumentScroll = true,
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isMobileViewport = useIsMobileViewport();
   const { adminRequestUnread, unreadTotal } = useChatNotifications();
   const { permissions, enforcePageAccess, loading: permissionsLoading } = usePermissions();
   const userForNav = useMemo(
@@ -68,6 +72,12 @@ const WorkbenchShell = ({
           {children}
         </div>
       </main>
+      {/*
+        Desktop only. On a phone the messenger panel covers most of the screen
+        and leaves the page under it unusable, so the header's chat icon goes
+        to the full /chat page instead (see AppTopCommandBar).
+      */}
+      {!isMobileViewport && !isChatPage && getAllVisibleMenuGroups(userRole, userForNav).some(group => group.items.some(item => item.path === "/chat")) && <FloatingMessenger theme={theme} unreadTotal={unreadTotal} />}
     </div>
   );
 };

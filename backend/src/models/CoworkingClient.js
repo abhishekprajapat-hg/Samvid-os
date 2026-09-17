@@ -66,6 +66,7 @@ const coworkingClientSchema = new mongoose.Schema(
       trim: true,
       maxlength: 200,
     },
+    dateOfBirth: { type: Date, default: null },
     contactPerson: {
       type: String,
       trim: true,

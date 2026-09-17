@@ -34,6 +34,11 @@ const parseDate = (value, fieldName) => {
   return date;
 };
 
+const sanitizeSecurityCheque = (value = {}) => {
+ const amount = Number(value.amount || 0);
+ if (!Number.isFinite(amount) || amount < 0) throw createHttpError(400, "Security cheque amount must be non-negative");
+ return { number: String(value.number || "").trim().slice(0, 80), bank: String(value.bank || "").trim().slice(0, 200), amount, date: value.date ? parseDate(value.date, "cheque date") : null, notes: String(value.notes || "").slice(0, 1000) };
+};
 const sanitizeCreatePayload = async (companyId, payload = {}) => {
   const clientId = String(payload.clientId || "").trim();
   const propertyId = String(payload.propertyId || "").trim();
@@ -70,6 +75,8 @@ const sanitizeCreatePayload = async (companyId, payload = {}) => {
 
   const rent = Number(payload.rent);
   if (!Number.isFinite(rent) || rent < 0) throw createHttpError(400, "rent must be a non-negative number");
+  const tokenAmount = Number(payload.tokenAmount || 0);
+  if (!Number.isFinite(tokenAmount) || tokenAmount < 0) throw createHttpError(400, "Token amount must be non-negative");
   const deposit = Number(payload.deposit) || 0;
   if (deposit < 0) throw createHttpError(400, "deposit cannot be negative");
   const lockInPeriodMonths = Number(payload.lockInPeriodMonths) || 0;
@@ -91,6 +98,8 @@ const sanitizeCreatePayload = async (companyId, payload = {}) => {
     deposit,
     lockInPeriodMonths,
     noticePeriodDays,
+    tokenAmount,
+    securityCheque: sanitizeSecurityCheque(payload.securityCheque),
     notes: String(payload.notes || "").trim().slice(0, 2000),
   };
 };
@@ -172,7 +181,9 @@ const updateContract = async ({ companyId, contractId, payload, actingUser }) =>
 
   for (const field of CONTRACT_ALLOWED_UPDATE_FIELDS) {
     if (!Object.prototype.hasOwnProperty.call(payload, field)) continue;
-    if (field === "notes") {
+    if (field === "securityCheque") {
+      safe.securityCheque = sanitizeSecurityCheque(payload.securityCheque);
+    } else if (field === "notes") {
       safe.notes = String(payload.notes || "").trim().slice(0, 2000);
     } else {
       const value = Number(payload[field]);

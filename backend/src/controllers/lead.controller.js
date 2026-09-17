@@ -6,6 +6,8 @@ const LeadDiary = require("../models/leadDiary.model");
 const LeadStatusRequest = require("../models/LeadStatusRequest");
 const logger = require("../config/logger");
 const { resolveAccessProfile } = require("../services/access.service");
+const CrmContact = require("../models/CrmContact");
+const { findBrokerByPhone, recordBlockedLead, normalizePhone } = require("../services/crmContact.service");
 const { isDeepStrictEqual } = require("util");
 const {
   autoAssignLead,
@@ -140,6 +142,8 @@ const LEAD_SELECTABLE_FIELDS = [
   "assignedExecutive",
   "assignedFieldExecutive",
   "assignmentHistory",
+  "hotClient",
+  "brokerContactId",
   "qualifiedBy",
   "qualifiedAt",
   "createdBy",
@@ -176,6 +180,9 @@ const CLOSED_STATUS = "CLOSED";
 const LEAD_STATUS_VALUES = Object.freeze([
   "NEW",
   "CONTACTED",
+  "FOLLOW_UP_1",
+  "FOLLOW_UP_2",
+  "FOLLOW_UP_3",
   "INTERESTED",
   "SITE_VISIT_SCHEDULED",
   "SITE_VISIT",
@@ -920,6 +927,7 @@ const addLeadAndClause = (query, clause) => {
 
 const applyLeadListFilters = (query, rawQuery = {}) => {
   require("../utils/leadAdvancedFilters").applyLeadAdvancedFilters(query, rawQuery);
+  if (rawQuery.status === "TRANSFER") addLeadAndClause(query, { "assignmentHistory.action": "MANUAL_TRANSFER" });
   const status = normalizeLeadStatusValue(rawQuery.status);
   if (status && LEAD_STATUS_VALUES.includes(status)) {
     query.status = status;
@@ -1823,6 +1831,7 @@ const buildCompanyPerformanceOverview = ({
   return {
     summary: {
       totalLeads,
+      transferredLeads: leads.filter(lead => lead.assignmentHistory?.some(entry => entry.action === "MANUAL_TRANSFER")).length,
       closed,
       closeVelocity,
     },
@@ -1990,6 +1999,20 @@ exports.createLead = async (req, res) => {
     const existing = await Lead.findOne({ phone, companyId }).select("_id").lean();
     if (existing) {
       return res.status(400).json({ message: "Lead already exists" });
+    }
+
+    // A number in the Broker Database is a broker, not an enquiry. Refuse it
+    // here so it never reaches the pipeline, and record the attempt against the
+    // broker so the refusal can be accounted for later.
+    const broker = await findBrokerByPhone(companyId, phone);
+    if (broker) {
+      await recordBlockedLead(broker._id, { name, phone, origin: "MANUAL", attemptedBy: req.user?._id || null });
+      return res.status(409).json({
+        message: `${broker.name} is in your Broker Database, so this number cannot be added as a lead. Remove them from the Broker Database first if this is genuinely a client enquiry.`,
+        brokerBlocked: true,
+        brokerId: broker._id,
+        brokerName: broker.name,
+      });
     }
 
     const parsedSiteLocation = parseSiteLocationPayload(rawSiteLocation);
@@ -2450,6 +2473,21 @@ exports.bulkUploadLeads = async (req, res) => {
       inventoryRows.map((row) => [String(row._id), row]),
     );
 
+    // One lookup for the whole sheet: broker numbers are refused row by row
+    // below rather than with a query each.
+    const brokersByPhone = new Map(
+      (payloadPhones.length
+        ? await CrmContact.find({
+          companyId,
+          kind: "BROKER",
+          phone: { $in: payloadPhones.map((value) => normalizePhone(value)).filter(Boolean) },
+        })
+          .select("_id name phone")
+          .lean()
+        : []
+      ).map((row) => [row.phone, row]),
+    );
+
     const createdIds = [];
     const updatedPhones = [];
     const failures = [];
@@ -2497,6 +2535,11 @@ exports.bulkUploadLeads = async (req, res) => {
         }
         if (uploadedPhoneSet.has(phone)) {
           throw new Error("Duplicate phone in uploaded sheet");
+        }
+        const rowBroker = brokersByPhone.get(normalizePhone(phone));
+        if (rowBroker) {
+          await recordBlockedLead(rowBroker._id, { name, phone, origin: "BULK", attemptedBy: req.user?._id || null });
+          throw new Error(`${rowBroker.name} is in the Broker Database, so this row was not added as a lead`);
         }
         if (companyPhoneSet.has(phone) && !accessiblePhoneSet.has(phone)) {
           throw new Error("Lead already exists outside your accessible team");
@@ -3478,6 +3521,7 @@ exports.updateLeadStatus = async (req, res) => {
       requirements: rawRequirements,
     } = req.body;
     const requestedStatus = normalizeLeadStatusValue(rawStatus);
+    if (req.body.hotClient !== undefined && typeof req.body.hotClient !== "boolean") return res.status(400).json({ message: "hotClient must be boolean" });
 
     if (!requestedStatus) {
       return res.status(400).json({ message: "Status is required" });
@@ -4092,6 +4136,7 @@ exports.updateLeadStatus = async (req, res) => {
       releasedInventory = releaseResult?.inventory || null;
     }
 
+    if (req.body.hotClient !== undefined) lead.hotClient = req.body.hotClient;
     await lead.save();
 
     const didTransitionToClosed =

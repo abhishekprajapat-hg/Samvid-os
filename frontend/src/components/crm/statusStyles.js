@@ -1,6 +1,6 @@
 export const STATUS_STYLES = {
-  // ---- Lead pipeline. Mirrors the 14-value enum in backend/src/models/Lead.js,
-  // grouped into six semantic families so a stage reads by colour alone.
+  // ---- Lead pipeline. Mirrors the 17-value enum in backend/src/models/Lead.js,
+  // grouped into seven semantic families so a stage reads by colour alone.
   // Open
   NEW: {
     label: "New",
@@ -9,6 +9,19 @@ export const STATUS_STYLES = {
   CONTACTED: {
     label: "Contacted",
     tone: "blue",
+  },
+  // Nurturing - successive follow-up attempts before the lead commits either way.
+  FOLLOW_UP_1: {
+    label: "Follow-Up 1",
+    tone: "cyan",
+  },
+  FOLLOW_UP_2: {
+    label: "Follow-Up 2",
+    tone: "cyan",
+  },
+  FOLLOW_UP_3: {
+    label: "Follow-Up 3",
+    tone: "cyan",
   },
   // Warm
   INTERESTED: {

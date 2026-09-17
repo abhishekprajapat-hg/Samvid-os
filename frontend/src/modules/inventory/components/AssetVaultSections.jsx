@@ -64,7 +64,6 @@ export const AssetVaultFilters = ({
   inventoryTypeFilter,
   onInventoryTypeFilterChange,
   canChooseInventoryRoleType = true,
-  userRoleType = "COMMERCIAL",
   furnishingFilter,
   onFurnishingFilterChange,
   bhkFilter,
@@ -87,11 +86,13 @@ export const AssetVaultFilters = ({
   <div className="inventory-filter-panel z-20 space-y-2 bg-transparent p-0">
     <div className="inventory-reference-filter-row flex flex-wrap items-center gap-2">
       <InventoryFilterControl icon={Building2} label={inventoryTypeFilter === "RESIDENTIAL" ? "Residential" : "Commercial"}>
-        <select aria-label="Inventory type" value={inventoryTypeFilter} onChange={(event) => onInventoryTypeFilterChange(event.target.value)} disabled={!canChooseInventoryRoleType} className="absolute inset-0 cursor-pointer opacity-0">
-          {canChooseInventoryRoleType ? <option value="all">All inventory types</option> : null}
-          {canChooseInventoryRoleType || userRoleType === "COMMERCIAL" ? <option value="COMMERCIAL">Commercial</option> : null}
-          {canChooseInventoryRoleType || userRoleType === "RESIDENTIAL" ? <option value="RESIDENTIAL">Residential</option> : null}
-        </select>
+        {canChooseInventoryRoleType ? (
+          <select aria-label="Inventory type" value={inventoryTypeFilter} onChange={(event) => onInventoryTypeFilterChange(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">
+            <option value="all">All inventory types</option>
+            <option value="COMMERCIAL">Commercial</option>
+            <option value="RESIDENTIAL">Residential</option>
+          </select>
+        ) : null}
       </InventoryFilterControl>
       <InventoryFilterControl icon={Armchair} label={furnishingFilter ? furnishingFilter.replace(/_/g, " ") : "Furnishing"}>
         <select aria-label="Furnishing" value={furnishingFilter} onChange={(event) => onFurnishingFilterChange(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0"><option value="">All furnishing</option><option value="UNFURNISHED">Unfurnished</option><option value="SEMI_FURNISHED">Semi Furnished</option><option value="FULLY_FURNISHED">Fully Furnished</option><option value="BARE_SHELL">Bare Shell</option><option value="WARM_SHELL">Warm Shell</option><option value="MANAGED_OFFICE">Managed Office</option><option value="COWORKING">Coworking</option></select>

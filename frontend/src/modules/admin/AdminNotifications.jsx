@@ -161,7 +161,7 @@ const formatInventoryStatusLabel = (value) => {
 };
 
 const getInventoryUnitLabel = (inventoryLike = {}) =>
-  [inventoryLike.projectName, inventoryLike.towerName, inventoryLike.unitNumber]
+  [inventoryLike?.projectName, inventoryLike?.towerName, inventoryLike?.unitNumber]
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(" - ");

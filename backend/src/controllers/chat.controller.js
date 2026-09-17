@@ -16,12 +16,53 @@ const {
   listEscalationLogs,
   toPositiveInt,
 } = require("../services/chatRoom.service");
+const User = require("../models/User");
+// notify() is already fire-and-forget: a slow push service must not delay a message.
+const { notify } = require("../services/push.service");
+const { signPushReplyToken, verifyPushReplyToken } = require("../utils/pushReplyToken");
 
 const emitRealtimeMessage = (io, payload) => {
-  if (!io || !payload?.room || !payload?.message) return;
+  if (!payload?.room || !payload?.message) return;
 
   const roomId = payload.room._id;
   const participantIds = payload.participantIds || [];
+
+  /*
+   * Push runs whether or not a socket server is present, and goes to everyone
+   * except the sender - their own phone buzzing for a message they just typed
+   * is the fastest way to get notifications turned off.
+   */
+  const senderId = String(payload.message.sender?._id || payload.message.sender || "");
+  const senderName = payload.message.sender?.name || "New message";
+  const preview = String(payload.message.text || payload.message.content || "").trim();
+  // One notification per conversation that updates, not one per message.
+  const tag = `chat:${roomId}`;
+  try {
+    participantIds
+      .filter((id) => String(id) !== senderId)
+      .forEach((recipientId) => {
+        /*
+         * Minted per recipient rather than once for the room: the token carries
+         * who is replying, so one shared token would let any recipient post as
+         * any other.
+         */
+        notify(recipientId, {
+          title: senderName,
+          body: preview ? preview.slice(0, 160) : "Sent you a message",
+          url: "/chat",
+          tag,
+          data: { tag, replyToken: signPushReplyToken({ userId: recipientId, roomId }) },
+        });
+      });
+  } catch {
+    /*
+     * Signing is the only part of this that can throw synchronously, and push
+     * is best-effort by design: a message still has to send and still has to
+     * reach everyone's open sockets below.
+     */
+  }
+
+  if (!io) return;
   const eventPayload = {
     room: payload.room,
     message: payload.message,
@@ -173,6 +214,46 @@ exports.sendRoomMessage = async (req, res) => {
     return res.status(201).json(payload);
   } catch (error) {
     return handleControllerError(res, error, "Failed to send message");
+  }
+};
+
+/*
+ * A reply typed straight into the notification drawer, without opening the app.
+ *
+ * This one is mounted above `protect` because a service worker has no session
+ * to send: the access token lives in localStorage, which no worker can read.
+ * It authenticates on the single-purpose token that arrived inside the push
+ * payload instead (see utils/pushReplyToken). That token fixes both who is
+ * replying and which room, so nothing here trusts the request body beyond the
+ * text itself.
+ */
+exports.replyFromNotification = async (req, res) => {
+  const claims = verifyPushReplyToken(req.body?.token);
+  if (!claims) {
+    return res.status(401).json({ message: "This notification has expired. Open the app to reply." });
+  }
+
+  const text = String(req.body?.text || "").trim();
+  if (!text) {
+    return res.status(400).json({ message: "A reply cannot be empty" });
+  }
+
+  try {
+    const sender = await User.findById(claims.userId).select("-password");
+    if (!sender || !sender.isActive) {
+      return res.status(401).json({ message: "This account can no longer send messages" });
+    }
+
+    /*
+     * Deliberately the same service call as a reply typed inside the app, so
+     * room membership, broadcast rules and escalation logging all still apply.
+     * A reply from the drawer is a normal message, not a privileged side door.
+     */
+    const payload = await sendRoomMessage({ sender, roomId: claims.roomId, text });
+    emitRealtimeMessage(req.app.get("io"), payload);
+    return res.status(201).json({ message: "Reply sent" });
+  } catch (error) {
+    return handleControllerError(res, error, "Failed to send reply");
   }
 };
 

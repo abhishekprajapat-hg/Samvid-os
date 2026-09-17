@@ -77,6 +77,8 @@ const breakSessionSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    breakType: { type: String, enum: ["LUNCH", "TEA", "COFFEE", "UTILITY"], default: "UTILITY" },
+    expectedMinutes: { type: Number, default: null },
     startNote: {
       type: String,
       trim: true,

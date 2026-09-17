@@ -23,6 +23,7 @@ router.use(companyMiddleware.requireCompanyContext);
 
 router.use("/properties", require("./coworkingProperty.routes"));
 router.use("/floors", require("./coworkingFloor.routes"));
+router.use("/board", require("./coworkingBoard.routes"));
 router.use("/cabins", require("./coworkingCabin.routes"));
 router.use("/clients", require("./coworkingClient.routes"));
 router.use("/bookings", require("./coworkingBooking.routes"));

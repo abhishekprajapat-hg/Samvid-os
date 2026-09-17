@@ -3,6 +3,7 @@ const Task = require("../models/Task");
 const User = require("../models/User");
 const Lead = require("../models/Lead");
 const { USER_ROLES, PRODUCTION_ROLES } = require("../constants/role.constants");
+const { notify } = require("../services/push.service");
 
 const isProductionTaskRole = (user) => PRODUCTION_ROLES.includes(user?.role);
 const referenceId = (value) => String(value?._id || value || "");
@@ -65,10 +66,11 @@ exports.createTask = async (req, res) => {
       dueDate: dueDate || null,
       assignedTo: assignedTo || null,
       leadId: leadId || null,
-      subtasks: Array.isArray(subtasks) ? subtasks.map(s => ({ title: String(s.title || "").trim(), isCompleted: Boolean(s.isCompleted) })).filter(s => s.title) : [],
+      subtasks: Array.isArray(subtasks) ? subtasks.map(s => ({ title: String(s.title || "").trim(), isCompleted: Boolean(s.isCompleted), description: String(s.description || "").trim().slice(0, 5000), dueDate: s.dueDate || null })).filter(s => s.title) : [],
       tags: Array.isArray(tags) ? tags.map(t => String(t || "").trim()).filter(Boolean) : [],
       companyId,
       createdBy: req.user._id,
+      assignmentHistory: [{ fromUser: null, toUser: assignedTo || null, actor: req.user._id }],
     });
 
     const savedTask = await newTask.save();
@@ -81,13 +83,18 @@ exports.createTask = async (req, res) => {
 
     // Real-time notification via Socket.io
     const io = req.app.get("io");
-    if (io && assignedTo && referenceId(assignedTo) !== referenceId(req.user)) {
-      io.to(`user:${assignedTo}`).emit("task:created", {
-        actorId: referenceId(req.user),
-        eventId: `task:created:${savedTask._id}:${savedTask.createdAt || Date.now()}`,
-        task: populatedTask,
-        message: `You have been assigned a new task: "${title}" by ${req.user.name}`,
-      });
+    if (assignedTo && referenceId(assignedTo) !== referenceId(req.user)) {
+      const message = `You have been assigned a new task: "${title}" by ${req.user.name}`;
+      if (io) {
+        io.to(`user:${assignedTo}`).emit("task:created", {
+          actorId: referenceId(req.user),
+          eventId: `task:created:${savedTask._id}:${savedTask.createdAt || Date.now()}`,
+          task: populatedTask,
+          message,
+        });
+      }
+      // The socket only reaches an open tab; this reaches the phone.
+      notify(assignedTo, { title: "New task assigned", body: message, url: "/tasks", tag: `task:${savedTask._id}` });
     }
 
     res.status(201).json(populatedTask);
@@ -120,8 +127,10 @@ exports.getTasks = async (req, res) => {
     if (priority) query.priority = priority;
     if (leadId && !isProductionTaskRole(req.user)) query.leadId = leadId;
     if (assignedTo) query.assignedTo = assignedTo;
-    if (scope === "assigned") query.createdBy = req.user._id;
-    if (scope === "mine") query.assignedTo = req.user._id;
+    if (scope === "assigned") {
+      query.$and = [...(query.$and || []), { assignedTo: req.user._id }, { createdBy: { $ne: req.user._id } }];
+    }
+    if (scope === "mine") query.createdBy = req.user._id;
     if (tag) query.tags = tag;
     
     if (search) {
@@ -250,7 +259,7 @@ exports.updateTask = async (req, res) => {
     if (leadId !== undefined) task.leadId = leadId || null;
     if (subtasks !== undefined) {
       task.subtasks = Array.isArray(subtasks)
-        ? subtasks.map(s => ({ title: String(s.title || "").trim(), isCompleted: Boolean(s.isCompleted) })).filter(s => s.title)
+        ? subtasks.map(s => ({ title: String(s.title || "").trim(), isCompleted: Boolean(s.isCompleted), description: String(s.description || "").trim().slice(0, 5000), dueDate: s.dueDate || null })).filter(s => s.title)
         : [];
     }
     if (tags !== undefined) {
@@ -259,6 +268,9 @@ exports.updateTask = async (req, res) => {
         : [];
     }
 
+    if (assignedTo !== undefined && referenceId(assignedTo) !== referenceId(originalAssignee)) {
+      task.assignmentHistory = [...(task.assignmentHistory || []), { fromUser: originalAssignee || null, toUser: assignedTo || null, actor: req.user._id, at: new Date() }];
+    }
     const updatedTask = await task.save();
 
     const populatedTask = await Task.findById(updatedTask._id)
@@ -360,9 +372,9 @@ exports.getTaskStats = async (req, res) => {
   try {
     const companyId = req.user.companyId;
     const query = { companyId };
-    if (req.query.scope === "assigned") query.createdBy = req.user._id;
-    if (req.query.scope === "mine") query.assignedTo = req.user._id;
-    else if (req.query.assignedTo) {
+    if (req.query.scope === "assigned") query.$and = [{ assignedTo: req.user._id }, { createdBy: { $ne: req.user._id } }];
+    if (req.query.scope === "mine") query.createdBy = req.user._id;
+    if (req.query.assignedTo) {
       if (!mongoose.Types.ObjectId.isValid(req.query.assignedTo)) return res.status(400).json({ message: "Invalid assignee ID" });
       query.assignedTo = new mongoose.Types.ObjectId(req.query.assignedTo);
     }
@@ -501,4 +513,12 @@ exports.getTaskStatsByUser = async (req, res) => {
     req.log?.error(error);
     res.status(500).json({ message: "Failed to compile per-user task statistics", error: error.message });
   }
+};
+
+// A minimal company directory for task assignment, independent of team hierarchy.
+exports.getAssignees = async (req, res) => {
+  try {
+    const users = await User.find({ companyId: req.user.companyId, isActive: true }).select("_id name role isActive profileImageUrl").sort({ name: 1 }).lean();
+    res.json({ users });
+  } catch (error) { req.log?.error(error); res.status(500).json({ message: "Failed to load assignees" }); }
 };

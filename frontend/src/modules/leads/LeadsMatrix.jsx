@@ -50,6 +50,9 @@ import {
 const LEAD_STATUSES = [
   "NEW",
   "CONTACTED",
+  "FOLLOW_UP_1",
+  "FOLLOW_UP_2",
+  "FOLLOW_UP_3",
   "INTERESTED",
   "SITE_VISIT_SCHEDULED",
   "SITE_VISIT",
@@ -63,7 +66,7 @@ const LEAD_STATUSES = [
   "CLOSED",
   "LOST",
 ];
-const LEAD_STATUS_SET = new Set(["ALL", ...LEAD_STATUSES]);
+const LEAD_STATUS_SET = new Set(["ALL", "TRANSFER", ...LEAD_STATUSES]);
 
 const LEAD_SORT_OPTIONS = {
   RECENT: "RECENT",
@@ -96,6 +99,9 @@ const LEAD_LIST_FIELDS = [
   "createdBy",
   "nextFollowUp",
   "lastContactedAt",
+  "assignmentHistory",
+  "hotClient",
+  "brokerContactId",
   "createdAt",
   "updatedAt",
 ].join(",");
@@ -1951,7 +1957,7 @@ const LeadsMatrix = () => {
       // page in the browser. A needsFollowUpBefore + assignedTo=null pair on
       // GET /leads would make them exact across every page.
       const viewMatch = matchesView(lead, view, nowMs);
-      const statusMatch = statusFilter === "ALL" || lead.status === statusFilter;
+      const statusMatch = statusFilter === "ALL" || (statusFilter === "TRANSFER" ? lead.assignmentHistory?.some(entry => entry.action === "MANUAL_TRANSFER") : lead.status === statusFilter);
       const leadPropertySubtype = String(lead?.requirements?.propertySubtype || "").trim().toUpperCase();
       const propertySubtypeMatch = !propertySubtypeFilter || leadPropertySubtype === propertySubtypeFilter;
       const relatedInventorySearchValue = getLeadRelatedInventories(lead)
@@ -3088,6 +3094,7 @@ const LeadsMatrix = () => {
       return;
     }
 
+    if (!window.confirm("Are you sure you want to transfer this lead?")) return;
     try {
       setAssigning(true);
       setError("");
@@ -3638,6 +3645,10 @@ const LeadsMatrix = () => {
             executiveDraft={executiveDraft}
             setExecutiveDraft={setExecutiveDraft}
             executives={executives}
+            onToggleHotClient={async () => {
+              try { const updated = await updateLeadStatus(selectedLead._id, { status: selectedLead.status, hotClient: !selectedLead.hotClient }); applyUpdatedLeadState(updated); }
+              catch (error) { setError(toErrorMessage(error, "Failed to update qualification")); }
+            }}
             transferReasonDraft={transferReasonDraft}
             setTransferReasonDraft={setTransferReasonDraft}
             assigneeSearchDraft={assigneeSearchDraft}

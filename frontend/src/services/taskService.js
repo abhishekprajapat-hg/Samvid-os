@@ -34,3 +34,5 @@ export const getTaskStatsByUser = async () => {
   const res = await api.get("/tasks/stats/by-user");
   return res.data || {};
 };
+
+export const getTaskAssignees = async () => (await api.get("/tasks/assignees")).data;

@@ -129,6 +129,8 @@ app.use("/api/uploads", require("./routes/upload.routes"));
 app.use("/api/webhook", require("./routes/webhook.routes"));
 app.use("/api/chat", require("./routes/chat.routes"));
 app.use("/api/assistant", require("./routes/officeAssistant.routes"));
+app.use("/api/contacts", require("./routes/crmContact.routes"));
+app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/tasks", require("./routes/task.routes"));
 app.use("/api/coworking", require("./routes/coworkingAccess.routes"));
 app.use("/api/portal/auth", require("./routes/clientPortalAuth.routes"));

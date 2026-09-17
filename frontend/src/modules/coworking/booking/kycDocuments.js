@@ -22,11 +22,17 @@ export const CLIENT_KINDS = [
 
 export const ENTITY_TYPES = ["Private Limited", "Limited", "One Person Company", "LLP"];
 
+const COMMON_TENANCY_DOCUMENTS = [
+  { key: "rentAgreement", label: "Rent agreement", required: true },
+  { key: "policeVerification", label: "Police verification", required: true },
+];
+
 export const DOCUMENT_SETS = {
   individual: [
     { key: "aadhaar", label: "Aadhaar card", required: true },
     { key: "pan", label: "PAN card", required: true },
     { key: "photo", label: "Passport size photo", required: true },
+    ...COMMON_TENANCY_DOCUMENTS,
   ],
   proprietorship: [
     { key: "gumasta", label: "Gumasta", hint: "Shop and establishment licence", required: true },
@@ -34,6 +40,7 @@ export const DOCUMENT_SETS = {
     { key: "aadhaar", label: "Aadhaar card", hint: "Of the proprietor", required: true },
     { key: "pan", label: "PAN card", hint: "Of the proprietor", required: true },
     { key: "photo", label: "Passport size photo", required: true },
+    ...COMMON_TENANCY_DOCUMENTS,
   ],
   company: [
     { key: "coi", label: "COI", hint: "Certificate of incorporation", required: true },
@@ -43,6 +50,7 @@ export const DOCUMENT_SETS = {
     { key: "signatureAuthorityAadhaar", label: "Signature authority Aadhaar card", required: true },
     { key: "photo", label: "Passport size photo", required: true },
     { key: "authorisationLetter", label: "Authorization letter", required: true },
+    ...COMMON_TENANCY_DOCUMENTS,
   ],
 };
 
@@ -118,14 +126,104 @@ export const formatBytes = (bytes) => {
  * upload endpoint takes over when the API is wired.
  */
 const sessionFiles = new Map();
+const DOCUMENT_DB_NAME = "oor-coworking-documents";
+const DOCUMENT_STORE_NAME = "files";
+
+const openDocumentDb = () => new Promise((resolve, reject) => {
+  if (typeof indexedDB === "undefined") {
+    reject(new Error("IndexedDB is unavailable"));
+    return;
+  }
+  const request = indexedDB.open(DOCUMENT_DB_NAME, 1);
+  request.onupgradeneeded = () => {
+    if (!request.result.objectStoreNames.contains(DOCUMENT_STORE_NAME)) {
+      request.result.createObjectStore(DOCUMENT_STORE_NAME);
+    }
+  };
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+
+const storeFile = async (docId, file) => {
+  const db = await openDocumentDb();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(DOCUMENT_STORE_NAME, "readwrite");
+    transaction.objectStore(DOCUMENT_STORE_NAME).put(file, docId);
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+  });
+  db.close();
+};
 
 export const keepFile = (docId, file) => {
   const url = URL.createObjectURL(file);
   sessionFiles.set(docId, url);
+  storeFile(docId, file).catch(() => {});
   return url;
 };
 
 export const fileUrl = (docId) => sessionFiles.get(docId) || null;
+
+export const loadFileUrl = async (docId) => {
+  const current = fileUrl(docId);
+  if (current) return current;
+  try {
+    const db = await openDocumentDb();
+    const file = await new Promise((resolve, reject) => {
+      const request = db.transaction(DOCUMENT_STORE_NAME, "readonly")
+        .objectStore(DOCUMENT_STORE_NAME)
+        .get(docId);
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    if (!file) return null;
+    const url = URL.createObjectURL(file);
+    sessionFiles.set(docId, url);
+    return url;
+  } catch {
+    return null;
+  }
+};
+
+/*
+ * Every stored file, for backup.
+ *
+ * These scans exist in exactly one browser on one machine and nowhere else, so
+ * something has to be able to read the whole store out. Kept here rather than
+ * in the backup module because the database name and store name are this
+ * file's business, and two places knowing them is how they drift apart.
+ */
+export const listStoredFiles = async () => {
+  try {
+    const db = await openDocumentDb();
+    const entries = await new Promise((resolve, reject) => {
+      const store = db.transaction(DOCUMENT_STORE_NAME, "readonly").objectStore(DOCUMENT_STORE_NAME);
+      const keysRequest = store.getAllKeys();
+      const valuesRequest = store.getAll();
+      let keys = null;
+      let values = null;
+      const settle = () => { if (keys && values) resolve(keys.map((id, index) => ({ id, file: values[index] }))); };
+      keysRequest.onsuccess = () => { keys = keysRequest.result || []; settle(); };
+      valuesRequest.onsuccess = () => { values = valuesRequest.result || []; settle(); };
+      keysRequest.onerror = () => reject(keysRequest.error);
+      valuesRequest.onerror = () => reject(valuesRequest.error);
+    });
+    db.close();
+    return entries.filter((entry) => entry.file);
+  } catch {
+    return [];
+  }
+};
+
+export const putStoredFile = async (docId, file) => {
+  try {
+    await storeFile(docId, file);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 /*
  * Building the record - id, timestamp - lives here rather than in the
@@ -159,4 +257,12 @@ export const forgetFile = (docId) => {
   const url = sessionFiles.get(docId);
   if (url) URL.revokeObjectURL(url);
   sessionFiles.delete(docId);
+  openDocumentDb()
+    .then((db) => {
+      const transaction = db.transaction(DOCUMENT_STORE_NAME, "readwrite");
+      transaction.objectStore(DOCUMENT_STORE_NAME).delete(docId);
+      transaction.oncomplete = () => db.close();
+      transaction.onerror = () => db.close();
+    })
+    .catch(() => {});
 };

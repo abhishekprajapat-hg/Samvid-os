@@ -1,3 +1,4 @@
+import BrokerPhoneHint from "./BrokerPhoneHint";
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import { createInventoryShareLink } from "../../../services/inventoryService";
@@ -11,6 +12,7 @@ import {
   Download,
   Eye,
   FileText,
+  Flame,
   History,
   Image,
   Loader,
@@ -531,6 +533,7 @@ const LeadDetailsRebuiltContent = ({
   setExecutiveDraft,
   executives,
   transferReasonDraft,
+  onToggleHotClient,
   setTransferReasonDraft,
   assigneeSearchDraft,
   setAssigneeSearchDraft,
@@ -2050,6 +2053,27 @@ const LeadDetailsRebuiltContent = ({
               {String(projectInterestedDraft || "").trim() || selectedLead?.projectInterested || "Project not tagged yet"}
             </p>
             <div className="mt-2 flex flex-wrap items-end gap-2">
+              <button
+                type="button"
+                disabled={!canEditLead}
+                aria-pressed={Boolean(selectedLead?.hotClient)}
+                onClick={onToggleHotClient}
+                title="High-intent client who is ready to transact and mainly needs the right inventory"
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
+                  selectedLead?.hotClient
+                    ? "border-orange-300 bg-orange-100 text-orange-800"
+                    : isDark
+                      ? "border-slate-700 text-slate-300"
+                      : "border-slate-300 text-slate-600"
+                }`}
+              >
+                <Flame size={13} className={selectedLead?.hotClient ? "" : "opacity-50"} />
+                Hot Client
+              </button>
+              <BrokerPhoneHint phone={phoneDraft} />
+              {canAssignLead && <button type="button" onClick={() => document.getElementById("lead-transfer-panel")?.scrollIntoView({ behavior: "smooth", block: "center" })} className="rounded-xl border px-3 py-2 text-xs font-semibold">Transfer</button>}
+              {selectedLead?.brokerContactId && <span className="text-xs font-semibold text-violet-600">Known broker</span>}
+
               <label className="min-w-[168px]">
                 <span className={`mb-1 block text-[9px] font-bold uppercase tracking-[0.14em] ${
                   isDark ? "text-slate-400" : "text-slate-500"
@@ -3323,7 +3347,7 @@ const LeadDetailsRebuiltContent = ({
           </section>
 
           {canAssignLead ? (
-            <section className={`rounded-3xl border p-4 ${card}`}>
+            <section id="lead-transfer-panel" className={`rounded-3xl border p-4 ${card}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>Assign / Transfer Lead</div>

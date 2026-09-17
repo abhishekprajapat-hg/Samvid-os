@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -20,6 +20,7 @@ import {
   requestInventoryStatusChange,
   requestInventoryUpdateChange,
   getPendingInventoryRequests,
+  getMyInventoryRequests,
   approveInventoryRequest,
   rejectInventoryRequest,
 } from "../../services/inventoryService";
@@ -782,6 +783,14 @@ const AssetVault = () => {
   const [reserveReason, setReserveReason] = useState("");
   const [reserveSubmitting, setReserveSubmitting] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
+  const pendingDeleteAssetIds = useMemo(() => new Set(
+    pendingRequests
+      .filter((request) =>
+        String(request?.type || "").toLowerCase() === "delete"
+        && String(request?.status || "PENDING").toUpperCase() === "PENDING")
+      .map((request) => String(request?.inventoryId?._id || request?.inventoryId || ""))
+      .filter(Boolean),
+  ), [pendingRequests]);
   const [reviewingRequestId, setReviewingRequestId] = useState("");
   const [leadOptions, setLeadOptions] = useState([]);
   const [loadingLeadOptions, setLoadingLeadOptions] = useState(false);
@@ -1111,7 +1120,9 @@ const AssetVault = () => {
           limit: INVENTORY_LIST_PAGE_LIMIT,
           fields: INVENTORY_LIST_FIELDS,
         }),
-        !append && canReviewInventoryRequests ? getPendingInventoryRequests() : Promise.resolve(null),
+        !append
+          ? (canReviewInventoryRequests ? getPendingInventoryRequests() : getMyInventoryRequests())
+          : Promise.resolve(null),
       ]);
 
       const list = Array.isArray(result?.assets) ? result.assets : [];
@@ -2431,6 +2442,10 @@ const AssetVault = () => {
 
   const handleDeleteAsset = async (assetId) => {
     if (!canDeleteDirect && !canRequestDelete) return;
+    if (pendingDeleteAssetIds.has(String(assetId || ""))) {
+      setError("Delete has already been requested for this property");
+      return;
+    }
 
     const shouldDelete = window.confirm(
       canDeleteDirect
@@ -2449,7 +2464,13 @@ const AssetVault = () => {
         setAssets((prev) => prev.filter((asset) => asset._id !== assetId));
         setSuccess("Asset deleted");
       } else {
-        await requestInventoryDelete(assetId, "Delete requested from inventory workspace");
+        const request = await requestInventoryDelete(assetId, "Delete requested from inventory workspace");
+        if (request) {
+          setPendingRequests((prev) => [
+            request,
+            ...prev.filter((row) => String(row?._id || "") !== String(request?._id || "")),
+          ]);
+        }
         setSuccess("Delete request submitted for admin approval");
       }
     } catch (deleteError) {
@@ -2890,6 +2911,12 @@ const AssetVault = () => {
 
   return (
     <div className="ui-page-shell inventory-route-page asset-vault-page custom-scrollbar relative flex flex-col bg-slate-50/50">
+      {role !== "CHANNEL_PARTNER" && (
+        <div className="flex flex-wrap justify-end gap-4 px-4 py-2">
+          <Link to="/inventory/owners" className="text-sm font-semibold text-blue-600 hover:underline">Owner Database</Link>
+          <Link to="/inventory/brokers" className="text-sm font-semibold text-blue-600 hover:underline">Broker Database</Link>
+        </div>
+      )}
       <InventoryToolbar
         modeType={modeType}
         onModeChange={setModeType}
@@ -2971,6 +2998,7 @@ const AssetVault = () => {
           canManage,
           canDeleteDirect,
           canRequestDelete,
+          pendingDeleteAssetIds,
           canOpenEditModal,
           canRequestStatusChange,
           deletingId,

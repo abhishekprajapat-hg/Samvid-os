@@ -1,5 +1,14 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
+import api from "../../../services/api";
 import { CABIN_SEATS } from "./cabinData";
+
+export const fetchBoardState = async () => (await api.get("/coworking/board")).data;
+
+export const pushBoardState = async (board, version) =>
+  (await api.put("/coworking/board", {
+    state: { cabins: board.cabins, activity: (board.activity || []).slice(0, 200) },
+    version,
+  })).data;
 
 /*
  * The board's single source of truth.
@@ -90,7 +99,9 @@ const archiveClient = (cabin) => {
   return [
     {
       id: `${slug(cabin.client.name)}-${cabin.code}-${Date.now()}`,
+      clientId: cabin.client.id,
       name: cabin.client.name,
+      client: { ...cabin.client, documents: [...(cabin.client.documents || [])] },
       from: cabin.contract.startDate,
       to: new Date().toISOString(),
       seats: cabin.seats,
@@ -150,6 +161,9 @@ export const boardReducer = (state, action) => {
             monthlyRent: rent,
             deposit: Math.round(rent * (terms.depositMonths ?? 2)),
             lockInMonths: terms.lockInMonths ?? 0,
+            noticePeriodDays: Number(terms.noticePeriodDays ?? 30),
+            tokenAmount: shareOf(cabin, selected, Number(terms.tokenAmount || 0)),
+            securityCheque: { ...terms.securityCheque },
             nextInvoiceDate: addMonths(startDate, 1),
             nextInvoiceAmount: rent,
             duesAmount: 0,
@@ -329,19 +343,88 @@ export const boardReducer = (state, action) => {
      */
     case "SET_CLIENT_DOCUMENTS": {
       const held = cabins.filter((cabin) => cabin.client?.id === action.clientId);
+      const formerCabins = cabins.filter((cabin) => cabin.previousClients.some((stay) =>
+        String(stay.clientId || stay.client?.id || slug(stay.name)) === String(action.clientId)));
+      if (!held.length && !formerCabins.length) return state;
+      const previousDocuments = held[0]?.client?.documents
+        || formerCabins[0]?.previousClients.find((stay) =>
+          String(stay.clientId || stay.client?.id || slug(stay.name)) === String(action.clientId))?.client?.documents
+        || [];
+      const clientName = held[0]?.client?.name
+        || formerCabins[0]?.previousClients.find((stay) =>
+          String(stay.clientId || stay.client?.id || slug(stay.name)) === String(action.clientId))?.name
+        || "Former client";
+      const affectedCabins = [...new Set([...held, ...formerCabins].map((cabin) => cabin.code))];
+      const added = action.documents.length - previousDocuments.length;
+      return {
+        cabins: cabins.map((cabin) => ({
+          ...cabin,
+          client: cabin.client?.id === action.clientId
+            ? { ...cabin.client, documents: action.documents, dateOfBirth: cabin.client.dateOfBirth || action.documents.find(doc => doc.extractedDateOfBirth)?.extractedDateOfBirth || "" }
+            : cabin.client,
+          previousClients: cabin.previousClients.map((stay) =>
+            String(stay.clientId || stay.client?.id || slug(stay.name)) === String(action.clientId)
+              ? {
+                  ...stay,
+                  clientId: action.clientId,
+                  client: {
+                    ...(stay.client || {}),
+                    id: action.clientId,
+                    name: stay.name,
+                    kind: stay.client?.kind || "company",
+                    documents: action.documents,
+                  },
+                }
+              : stay),
+        })),
+        activity: [
+          entry(
+            "document",
+            `Documents updated for ${clientName}`,
+            `${action.documents.length} on file${added > 0 ? `, ${added} added` : ""}`,
+            affectedCabins,
+          ),
+          ...activity,
+        ],
+      };
+    }
+
+    case "UPDATE_CLIENT": {
+      const held = cabins.filter((cabin) => cabin.client?.id === action.clientId);
       if (!held.length) return state;
-      const added = action.documents.length - (held[0].client.documents?.length || 0);
+      const changes = action.client || {};
+      const terms = action.terms || {};
+      const startDate = new Date(terms.startDate || held[0].contract.startDate).toISOString();
+      const endDate = addMonths(startDate, Number(terms.termMonths) || 12);
+      const totalRent = Number(terms.rent);
       return {
         cabins: cabins.map((cabin) =>
           cabin.client?.id === action.clientId
-            ? { ...cabin, client: { ...cabin.client, documents: action.documents } }
+            ? {
+                ...cabin,
+                client: { ...cabin.client, ...changes, id: cabin.client.id },
+                contract: {
+                  ...cabin.contract,
+                  startDate,
+                  endDate,
+                  monthlyRent: Number.isFinite(totalRent) ? shareOf(cabin, held, totalRent) : cabin.contract.monthlyRent,
+                  deposit: Number.isFinite(totalRent)
+                    ? Math.round(shareOf(cabin, held, totalRent) * (Number(terms.depositMonths) || 2))
+                    : cabin.contract.deposit,
+                  lockInMonths: Number(terms.lockInMonths) || 0,
+                  noticePeriodDays: Number(terms.noticePeriodDays ?? 30),
+                  tokenAmount: shareOf(cabin, held, Number(terms.tokenAmount || 0)),
+                  securityCheque: { ...terms.securityCheque },
+                  notes: terms.notes || "",
+                },
+              }
             : cabin,
         ),
         activity: [
           entry(
-            "document",
-            `Documents updated for ${held[0].client.name}`,
-            `${action.documents.length} on file${added > 0 ? `, ${added} added` : ""}`,
+            "edit",
+            `${changes.name || held[0].client.name} updated`,
+            "Onboarded client details updated",
             held.map((cabin) => cabin.code),
           ),
           ...activity,
@@ -434,6 +517,18 @@ export const resetBoard = () => {
 
 /** Reducer wrapper that keeps an undo stack and re-derives the day counts. */
 export const boardWithHistory = (state, action) => {
+  /*
+   * Hydration from the server. It replaces the floor outright and clears the
+   * undo stack, because undoing back past someone else's saved state would push
+   * this tab's idea of the floor over theirs.
+   */
+  if (action.type === "REPLACE_ALL") {
+    const swept = expireHolds({
+      cabins: Array.isArray(action.state?.cabins) ? action.state.cabins : [],
+      activity: Array.isArray(action.state?.activity) ? action.state.activity : [],
+    });
+    return { cabins: decorate(swept.cabins), activity: swept.activity, undoStack: [] };
+  }
   if (action.type === "UNDO") {
     if (!state.undoStack.length) return state;
     const [previous, ...rest] = state.undoStack;
@@ -452,10 +547,78 @@ export const boardWithHistory = (state, action) => {
 };
 
 /** One board, shared by every screen that reads or changes the floor. */
+/*
+ * The board is company data, not browser data.
+ *
+ * It used to live only in localStorage, so every machine held a different floor
+ * and an admin could see none of them. It now loads from the server and saves
+ * back there, with localStorage kept as an offline cache so the board still
+ * opens if the request fails.
+ *
+ * Saves carry the version they were built on. If someone else booked a cabin
+ * meanwhile the server refuses the write, and `syncError` says so rather than
+ * letting this tab silently overwrite their work.
+ */
 export const useBoard = () => {
   const [board, dispatch] = useReducer(boardWithHistory, undefined, loadBoard);
-  useEffect(() => saveBoard(board), [board]);
-  return [board, dispatch];
+  const [sync, setSync] = useState({ loading: true, version: 0, error: "", savedAt: null });
+  // Skips the save that would otherwise fire for the server's own payload.
+  const hydrating = useRef(true);
+  const versionRef = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    fetchBoardState()
+      .then(({ state, version }) => {
+        if (!active) return;
+        versionRef.current = version;
+        if (Array.isArray(state?.cabins) && state.cabins.length) {
+          hydrating.current = true;
+          dispatch({ type: "REPLACE_ALL", state });
+        }
+        setSync({ loading: false, version, error: "", savedAt: null });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setSync({
+          loading: false,
+          version: 0,
+          error: error.response?.data?.message || "Working offline: this board could not reach the server.",
+          savedAt: null,
+        });
+      })
+      .finally(() => {
+        // Whatever happened, later changes are the user's and must be saved.
+        window.setTimeout(() => { hydrating.current = false; }, 0);
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    // The local cache is written every time regardless, so a failed save still
+    // leaves the work recoverable on this machine.
+    saveBoard(board);
+    if (hydrating.current || sync.loading) return undefined;
+
+    const timer = window.setTimeout(() => {
+      pushBoardState(board, versionRef.current)
+        .then(({ version }) => {
+          versionRef.current = version;
+          setSync((current) => ({ ...current, version, error: "", savedAt: new Date() }));
+        })
+        .catch((error) => {
+          setSync((current) => ({
+            ...current,
+            error: error.response?.status === 409
+              ? "Someone else changed this board. Reload to see their changes before booking again."
+              : error.response?.data?.message || "Could not save to the server. Changes are held on this device only.",
+          }));
+        });
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [board, sync.loading]);
+
+  return [board, dispatch, sync];
 };
 
 const monthsBetween = (from, to) => Math.max(1, Math.round((new Date(to) - new Date(from)) / DAY / 30));
@@ -511,15 +674,19 @@ export const directoryFrom = (cabins) => {
 
   cabins.forEach((cabin) => {
     cabin.previousClients.forEach((stay) => {
+      const snapshot = stay.client || {};
       const record = byName.get(stay.name) || {
-        id: slug(stay.name),
+        ...snapshot,
+        id: stay.clientId || snapshot.id || slug(stay.name),
         name: stay.name,
         kind: "former",
-        industry: "",
-        contactPerson: "",
-        phone: "",
-        email: "",
-        gstin: "",
+        entityKind: snapshot.kind || "company",
+        documents: snapshot.documents || [],
+        industry: snapshot.industry || "",
+        contactPerson: snapshot.contactPerson || "",
+        phone: snapshot.phone || "",
+        email: snapshot.email || "",
+        gstin: snapshot.gstin || "",
         cabins: [],
         capacity: 0,
         monthlyRent: 0,

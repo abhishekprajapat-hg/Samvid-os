@@ -21,6 +21,8 @@ router.use("/uploads", require("./upload.routes"));
 router.use("/webhook", require("./webhook.routes"));
 router.use("/chat", require("./chat.routes"));
 router.use("/saas", require("./saas.routes"));
+router.use("/contacts", require("./crmContact.routes"));
+router.use("/push", require("./push.routes"));
 router.use("/tasks", require("./task.routes"));
 router.use("/coworking", require("./coworkingAccess.routes"));
 router.use("/access", require("./accessControl.routes"));

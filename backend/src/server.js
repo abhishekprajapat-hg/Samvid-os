@@ -213,9 +213,15 @@ const startInvoiceOverdueSweep = () => {
   runSweep();
 };
 
+const startAttendanceViolationSweep = () => {
+ let running = false;
+ const sweep = async () => { if (running) return; running = true; try { await require("./services/attendanceViolation.service").runViolationSweep(); } catch (error) { logger.error({ error: error.message, message: "Attendance violation sweep failed" }); } finally { running = false; } };
+ const timer = setInterval(sweep, 60 * 60 * 1000); timer.unref(); sweep();
+};
 const bootstrap = async () => {
   await connectDB();
   startAttendanceAutoCheckoutSweep();
+  startAttendanceViolationSweep();
   startBookingExpirySweep();
   startContractLifecycleSweep();
   startInvoiceOverdueSweep();

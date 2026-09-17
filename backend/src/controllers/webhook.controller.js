@@ -2,6 +2,7 @@ const axios = require("axios");
 const Lead = require("../models/Lead");
 const Company = require("../models/Company");
 const { autoAssignLead } = require("../services/leadAssignment.service");
+const { findBrokerByPhone, recordBlockedLead } = require("../services/crmContact.service");
 const logger = require("../config/logger");
 
 const META_GRAPH_VERSION = String(process.env.META_GRAPH_VERSION || "v24.0").trim();
@@ -465,6 +466,7 @@ exports.handleWebhook = async (req, res) => {
     let invalidCount = 0;
     let failedCount = 0;
     let missingPhoneCount = 0;
+    let brokerBlockedCount = 0;
     let permissionDeniedCount = 0;
     let fallbackCreatedCount = 0;
     let recoveredAssignments = 0;
@@ -529,6 +531,25 @@ exports.handleWebhook = async (req, res) => {
               generatedPhone: fallbackPhone,
               message: "Meta lead missing phone; generated fallback phone for intake",
             });
+          }
+
+          // A broker submitting a Meta form is not a customer enquiry. Refused
+          // before creation so it never reaches the pipeline or an executive's
+          // queue, and counted against the broker for later review.
+          if (hasRealPhone) {
+            const broker = await findBrokerByPhone(tenantCompanyId, phone);
+            if (broker) {
+              await recordBlockedLead(broker._id, { name: normalized.name || "", phone, origin: "META" });
+              brokerBlockedCount += 1;
+              logger.info({
+                companyId: tenantCompanyId,
+                brokerId: broker._id,
+                brokerName: broker.name,
+                metaLeadId: event.leadId,
+                message: "Meta lead blocked: number belongs to a broker",
+              });
+              continue;
+            }
           }
 
           if (META_DEDUPE_BY_PHONE && hasRealPhone) {
@@ -657,6 +678,7 @@ exports.handleWebhook = async (req, res) => {
       invalid: invalidCount,
       failed: failedCount,
       missingPhone: missingPhoneCount,
+      brokerBlocked: brokerBlockedCount,
       permissionDenied: permissionDeniedCount,
       fallbackCreated: fallbackCreatedCount,
       assignmentRecovered: recoveredAssignments,

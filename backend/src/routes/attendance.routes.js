@@ -11,10 +11,13 @@ router.use(protect);
 router.use(requirePageAccess("attendance"));
 router.use(requirePageActionForMethod("attendance"));
 
+router.get("/violations", attendanceController.getViolations);
+router.patch("/violations/:violationId", writeLimiter, attendanceController.reviewViolation);
 router.get("/me", attendanceController.getMyAttendance);
 router.post("/check-in", writeLimiter, attendanceController.checkIn);
 router.post("/break/start", writeLimiter, attendanceController.startBreak);
 router.post("/break/end", writeLimiter, attendanceController.endBreak);
+router.post("/users/:userId/break", writeLimiter, attendanceController.manageUserBreak);
 router.patch("/users/:userId/:date/breaks", writeLimiter, attendanceController.correctUserBreak);
 router.post("/check-out", writeLimiter, attendanceController.checkOut);
 router.patch(

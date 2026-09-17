@@ -126,33 +126,37 @@ const OrderSummary = ({ cabins, rent, deposit, term, startDate }) => (
   </aside>
 );
 
-const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
+const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialClient = null, initialTerms = null, editMode = false }) => {
   const [step, setStep] = useState(0);
   const [mode, setMode] = useState("new");
   const [clientQuery, setClientQuery] = useState("");
   const [existingClientId, setExistingClientId] = useState("");
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => ({
     // Company is the default because most cabins go to one; an individual
     // taking a private cabin is the rarer case, not the assumed one.
-    kind: "company",
-    entityType: ENTITY_TYPES[0],
-    companyName: "",
-    contactPerson: "",
-    phone: "",
-    email: "",
-    industry: INDUSTRIES[0],
-    gstin: "",
-    pan: "",
-    documents: [],
-  });
-  const [terms, setTerms] = useState({
-    startDate: today(),
-    termMonths: 12,
-    lockInMonths: 6,
-    rentOverride: "",
-    depositMonths: 2,
-    notes: "",
-  });
+    kind: initialClient?.kind || "company",
+    entityType: initialClient?.entityType || ENTITY_TYPES[0],
+    companyName: initialClient?.name || initialClient?.companyName || "",
+    contactPerson: initialClient?.contactPerson || "",
+    dateOfBirth: initialClient?.dateOfBirth?.slice(0, 10) || "",
+    phone: initialClient?.phone || "",
+    email: initialClient?.email || "",
+    industry: initialClient?.industry || INDUSTRIES[0],
+    gstin: initialClient?.gstin || "",
+    pan: initialClient?.pan || "",
+    documents: Array.isArray(initialClient?.documents) ? initialClient.documents : [],
+  }));
+  const [terms, setTerms] = useState(() => ({
+    startDate: initialTerms?.startDate?.slice(0, 10) || today(),
+    termMonths: initialTerms?.termMonths || 12,
+    lockInMonths: initialTerms?.lockInMonths ?? 6,
+    rentOverride: initialTerms?.rent ?? "",
+    depositMonths: initialTerms?.depositMonths ?? 2,
+    noticePeriodDays: initialTerms?.noticePeriodDays ?? 30,
+    tokenAmount: initialTerms?.tokenAmount ?? 0,
+    securityCheque: initialTerms?.securityCheque || { number: "", bank: "", amount: 0, date: "", notes: "" },
+    notes: initialTerms?.notes || "",
+  }));
 
   const listRent = cabins.reduce((total, cabin) => total + cabin.monthlyRent, 0);
   const rent = terms.rentOverride === "" ? listRent : Number(terms.rentOverride) || 0;
@@ -171,7 +175,9 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
   const kyc = kycStatusOf(form);
   const selectedClient = null;
   const clientName = mode === "new" ? form.companyName.trim() : selectedClient?.name || "";
-  const canAdvance = step === 0 ? Boolean(clientName) : true;
+  const validTerms = [terms.noticePeriodDays, terms.tokenAmount, terms.securityCheque.amount].every(value => Number.isFinite(Number(value)) && Number(value) >= 0);
+  const validBirthDate = !form.dateOfBirth || (form.dateOfBirth >= "1900-01-01" && form.dateOfBirth <= today());
+  const canAdvance = step === 0 ? Boolean(clientName) : validTerms && validBirthDate;
 
   const set = (key) => (event) => setForm((value) => ({ ...value, [key]: event.target.value }));
   const setTerm = (key) => (event) => setTerms((value) => ({ ...value, [key]: event.target.value }));
@@ -183,7 +189,7 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
       open={open}
       onClose={onClose}
       size="xl"
-      title="Onboard client"
+      title={editMode ? "Edit onboarded client" : "Onboard client"}
       description={`${cabins.length} ${cabins.length === 1 ? "cabin" : "cabins"} · seats ${capacity} · ${cabins
         .map((cabin) => cabin.label)
         .join(", ")}`}
@@ -207,6 +213,7 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
           ) : (
             <Button
               leftIcon={UserPlus}
+              disabled={!validTerms || !validBirthDate}
               onClick={() =>
                 onConfirm({
                   clientName,
@@ -221,7 +228,7 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
                 })
               }
             >
-              Confirm and allot
+              {editMode ? "Save client and agreement" : "Confirm and allot"}
             </Button>
           )}
         </>
@@ -233,7 +240,7 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
         <div className="min-w-0">
           {step === 0 ? (
             <div className="space-y-3">
-              <div className="flex gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-950">
+              {!editMode ? <div className="flex gap-0.5 rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-950">
                 {[
                   { value: "new", label: "New client" },
                   { value: "existing", label: "Existing client" },
@@ -254,7 +261,7 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
                     {option.label}
                   </button>
                 ))}
-              </div>
+              </div> : null}
 
               {mode === "new" ? (
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -396,7 +403,9 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
                   ? "A company signs through someone, so there are two identities to establish - the entity and the person authorised to bind it - plus the authorisation joining them."
                   : "An individual signs for themselves, so their identity is the whole of it."}
               </p>
+              <Field label="Contact date of birth" hint="Extracted dates must be checked against the document"><Input type="date" value={form.dateOfBirth} max={today()} onChange={set("dateOfBirth")} /></Field>
               <DocumentChecklist
+                onDateOfBirth={date => setForm(old => ({ ...old, dateOfBirth: old.dateOfBirth || date }))}
                 kind={form.kind}
                 documents={form.documents}
                 onChange={(documents) => setForm((value) => ({ ...value, documents }))}
@@ -475,6 +484,9 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm }) => {
                   ))}
                 </Select>
               </Field>
+              <Field label="Notice period (days)"><Input type="number" min="0" value={terms.noticePeriodDays} onChange={setTerm("noticePeriodDays")} /></Field>
+              <Field label="Token amount paid" hint="Recorded separately from rent and deposit"><Input type="number" min="0" value={terms.tokenAmount} onChange={setTerm("tokenAmount")} /></Field>
+              <fieldset className="rounded-lg border p-3 sm:col-span-2"><legend className="px-2 text-sm font-semibold">Security Cheque</legend><div className="grid gap-3 sm:grid-cols-2">{["number", "bank", "amount", "date", "notes"].map(key => <Field key={key} label={key === "number" ? "Cheque number" : key.charAt(0).toUpperCase() + key.slice(1)}><Input type={key === "amount" ? "number" : key === "date" ? "date" : "text"} min={key === "amount" ? "0" : undefined} value={terms.securityCheque[key]} onChange={e => setTerms(old => ({ ...old, securityCheque: { ...old.securityCheque, [key]: e.target.value } }))}/></Field>)}</div></fieldset>
               <Field label="Total capacity" hint="Cabins are let whole, not by the seat">
                 <Input value={`${capacity} seater`} readOnly disabled />
               </Field>

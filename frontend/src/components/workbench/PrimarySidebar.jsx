@@ -21,6 +21,14 @@ const PrimarySidebar = ({
 }) => {
   const location = useLocation();
   const groups = useMemo(() => getVisibleSidebarGroups(userRole, user).map((group) => ({ ...group, items: group.items.filter((item) => !["/admin/notifications", "/profile", "/chat"].includes(item.path)) })).filter((group) => group.items.length), [userRole, user]);
+
+  // A parent entry like /inventory must not stay lit while a child page such as
+  // /inventory/owners is open, or two rows read as active at once. Derived from
+  // the nav itself so a future sub-page needs no change here.
+  const exactMatchPaths = useMemo(() => {
+    const paths = groups.flatMap((group) => group.items.map((item) => item.path));
+    return new Set(paths.filter((path) => paths.some((other) => other !== path && other.startsWith(`${path}/`))));
+  }, [groups]);
   const activeGroupName = useMemo(() => {
     const activeGroup = groups.find((group) =>
       group.items.some((item) => pathMatchesItem(location.pathname, item.path)),
@@ -88,7 +96,7 @@ const PrimarySidebar = ({
                       <NavLink
                         key={`${group.group}-${item.path}`}
                         to={item.path}
-                        end={item.path === "/dashboard"}
+                        end={item.path === "/dashboard" || exactMatchPaths.has(item.path)}
                         onClick={onMobileClose}
                         className={({ isActive }) =>
                           cn(
@@ -132,7 +140,7 @@ const PrimarySidebar = ({
         })}
       </nav>
     ),
-    [expandedGroupNames, groups, location.pathname, onMobileClose],
+    [expandedGroupNames, exactMatchPaths, groups, location.pathname, onMobileClose],
   );
 
   const sidebar = useCallback(

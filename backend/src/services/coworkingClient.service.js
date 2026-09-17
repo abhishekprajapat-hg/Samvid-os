@@ -42,7 +42,11 @@ const sanitizeClientPayload = (payload = {}, { mode }) => {
   for (const field of CLIENT_ALLOWED_FIELDS) {
     if (!Object.prototype.hasOwnProperty.call(payload, field)) continue;
 
-    if (field === "companyName") {
+    if (field === "dateOfBirth") {
+      const date = payload.dateOfBirth ? new Date(payload.dateOfBirth) : null;
+      if (date && (!Number.isFinite(date.getTime()) || date > new Date() || date.getUTCFullYear() < 1900)) throw createHttpError(400, "Enter a valid date of birth");
+      safe.dateOfBirth = date;
+    } else if (field === "companyName") {
       const companyName = String(payload.companyName || "").trim();
       if (!companyName) throw createHttpError(400, "companyName is required");
       safe.companyName = companyName.slice(0, 200);

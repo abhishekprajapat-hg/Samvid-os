@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import IconButton from "./IconButton";
 import { cn } from "./utils";
@@ -33,7 +34,7 @@ const Modal = ({
 
   if (!open) return null;
 
-  return (
+  return createPortal((
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-4">
       <button
         type="button"
@@ -68,7 +69,7 @@ const Modal = ({
         {footer ? <footer className="flex items-center justify-end gap-2 border-t border-slate-200 p-4 dark:border-slate-800">{footer}</footer> : null}
       </div>
     </div>
-  );
+  ), document.body);
 };
 
 export default Modal;

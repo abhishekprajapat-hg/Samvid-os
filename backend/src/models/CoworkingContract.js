@@ -33,6 +33,8 @@ const coworkingContractSchema = new mongoose.Schema(
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     rent: { type: Number, required: true, min: 0 },
+    tokenAmount: { type: Number, default: 0, min: 0 },
+    securityCheque: { number: { type: String, default: "", maxlength: 80 }, bank: { type: String, default: "", maxlength: 200 }, amount: { type: Number, default: 0, min: 0 }, date: { type: Date, default: null }, notes: { type: String, default: "", maxlength: 1000 } },
     deposit: { type: Number, default: 0, min: 0 },
     lockInPeriodMonths: { type: Number, default: 0, min: 0 },
     noticePeriodDays: { type: Number, default: 30, min: 0 },

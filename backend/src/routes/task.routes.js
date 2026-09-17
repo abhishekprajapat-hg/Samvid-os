@@ -13,6 +13,7 @@ router.use(requirePageActionForMethod("tasks"));
 router.get("/", taskController.getTasks);
 router.get("/stats", taskController.getTaskStats);
 router.get("/stats/by-user", taskController.getTaskStatsByUser);
+router.get("/assignees", taskController.getAssignees);
 router.get("/:taskId", taskController.getTaskById);
 
 router.post("/", writeLimiter, taskController.createTask);

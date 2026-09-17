@@ -1,3 +1,4 @@
+import BirthdayReminders from "../booking/components/BirthdayReminders";
 import React, { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Download, FileWarning, Repeat2, Search, Users } from "lucide-react";
@@ -103,6 +104,7 @@ const ClientsPage = () => {
   return (
     <div className="custom-scrollbar h-full min-h-0 flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950">
       <div className="mx-auto max-w-[1560px] px-4 py-5 sm:px-6">
+        <BirthdayReminders clients={directory} />
         <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-3">
           <div className="min-w-0">
             <h1 className="text-[24px] font-semibold leading-tight tracking-tight text-slate-950 dark:text-slate-50">

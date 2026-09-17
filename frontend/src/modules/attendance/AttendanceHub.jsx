@@ -1,15 +1,33 @@
+import AttendanceViolations from "./AttendanceViolations";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  BarChart3,
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
   ClipboardCheck,
   CheckCircle2,
+  Clock,
+  Coffee,
+  FileText,
+  Gauge,
+  Hourglass,
+  Info,
+  Lightbulb,
   Loader2,
   LogIn,
   LogOut,
   MapPin,
+  MoreVertical,
   PauseCircle,
   PlayCircle,
   RefreshCw,
+  Save,
+  Send,
+  Sparkles,
+  Timer,
+  Users,
 } from "lucide-react";
 import {
   checkInAttendance,
@@ -21,6 +39,7 @@ import {
   getAttendancePolicy,
   getMyLeaveRequests,
   getMyAttendance,
+  manageUserBreak,
   reviewLeaveRequest,
   startBreakAttendance,
   updateAttendancePolicy,
@@ -122,18 +141,87 @@ const formatDuration = (minutes) => {
   return `${hours}h ${mins}m`;
 };
 
+const minutesBetween = (from, to) => {
+  const start = new Date(from).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(to)) return 0;
+  return Math.max(0, Math.floor((to - start) / 60000));
+};
+
+const BREAK_TYPE_LABELS = { LUNCH: "Lunch", TEA: "Tea", COFFEE: "Coffee", UTILITY: "Utility" };
+const formatBreakType = (value) => BREAK_TYPE_LABELS[value] || "Utility";
+
+// A stable colour per person so the same face keeps the same badge between
+// loads. Derived from the name rather than the row index, which would reshuffle
+// every time the list is filtered or sorted.
+const AVATAR_TONES = ["bg-blue-500", "bg-emerald-500", "bg-violet-500", "bg-amber-500", "bg-rose-500", "bg-cyan-600", "bg-indigo-500", "bg-teal-600"];
+const avatarTone = (name = "") => {
+  const text = String(name || "?");
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  return AVATAR_TONES[hash % AVATAR_TONES.length];
+};
+
 const getInitials = (name = "") => {
   const parts = String(name || "-").trim().split(/\s+/).filter(Boolean);
   return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "-";
 };
 
-const statCardClass = "rounded-lg border border-slate-200 bg-white p-4 shadow-sm";
-const cardClass = "rounded-lg border border-slate-200 bg-white shadow-sm";
-const cardHeaderClass = "flex flex-wrap items-center gap-3 border-b border-slate-200 px-4 py-3";
-const cardBodyClass = "p-4";
+const statCardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]";
+const cardClass = "rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]";
+const cardHeaderClass = "flex flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-3.5";
+const cardBodyClass = "p-5";
+
+/*
+ * One vocabulary for the page: every heading, stat and tile is an icon in a
+ * soft tinted square next to its label. Tints carry meaning rather than
+ * decoration - green is attendance, amber is lateness, rose is leave, violet is
+ * an average, blue is neutral information - so a glance at the colour already
+ * says which family a number belongs to.
+ */
+const TONES = {
+  blue: "bg-blue-50 text-blue-600",
+  green: "bg-emerald-50 text-emerald-600",
+  amber: "bg-amber-50 text-amber-600",
+  rose: "bg-rose-50 text-rose-600",
+  violet: "bg-violet-50 text-violet-600",
+  slate: "bg-slate-100 text-slate-500",
+};
+
+const IconBox = ({ icon, tone = "blue", boxSize = "h-9 w-9", iconSize = 17 }) => {
+  const Glyph = icon;
+  return (
+    <span className={`grid ${boxSize} shrink-0 place-items-center rounded-lg ${TONES[tone] || TONES.blue}`}>
+      <Glyph size={iconSize} aria-hidden="true" />
+    </span>
+  );
+};
+
+const SectionHeader = ({ icon, tone, title, subtitle, children }) => (
+  <div className={cardHeaderClass}>
+    <IconBox icon={icon} tone={tone} />
+    <div className="min-w-0 flex-1">
+      <h4 className="text-[14px] font-semibold leading-tight text-slate-900">{title}</h4>
+      {subtitle ? <p className="mt-0.5 text-[12px] text-slate-500">{subtitle}</p> : null}
+    </div>
+    {children}
+  </div>
+);
+
+// Which icon and tint each summary figure wears, keyed by the card's own key so
+// the personal and team variants stay in step without a second table.
+const STAT_META = {
+  presentDays: { icon: Users, tone: "green" },
+  checkedIn: { icon: Users, tone: "green" },
+  lateDays: { icon: Clock, tone: "amber" },
+  onBreak: { icon: Clock, tone: "amber" },
+  leaveDays: { icon: CalendarDays, tone: "rose" },
+  leave: { icon: CalendarDays, tone: "rose" },
+  averageHours: { icon: BarChart3, tone: "violet" },
+};
 const fieldClass = "h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
 const secondaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
 const primaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-lg border border-blue-700 bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
+const selectControlClass = "h-9 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm outline-none";
 
 const statusBadgeClass = (status) =>
   STATUS_STYLES[status] || "bg-slate-100 text-slate-700 border-slate-200";
@@ -234,6 +322,14 @@ const AttendanceHub = () => {
   const [showTeamHistory, setShowTeamHistory] = useState(viewerRole === "ADMIN");
   const showPersonalHistory = canUsePersonalAttendance && !showTeamHistory;
   const [breakCorrectionRow, setBreakCorrectionRow] = useState(null);
+  const [breakType, setBreakType] = useState("LUNCH");
+  const [breakReason, setBreakReason] = useState("");
+  // Break type chosen per teammate in the team list, keyed by user id.
+  const [teamBreakTypes, setTeamBreakTypes] = useState({});
+  const [teamBreakAction, setTeamBreakAction] = useState("");
+  const [openRowMenu, setOpenRowMenu] = useState("");
+  const [liveNow, setLiveNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setLiveNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
 
   const [month, setMonth] = useState(toMonthInputValue(new Date()));
   const [myLoading, setMyLoading] = useState(true);
@@ -412,6 +508,21 @@ const AttendanceHub = () => {
     loadMyAttendance();
   }, [loadMyAttendance]);
 
+  /*
+   * A manager can start or end this employee's break from the team list, so the
+   * page cannot assume its own actions are the only thing that changes the
+   * record. Refreshing quietly every half minute is what makes that appear here
+   * without the employee reloading. Skipped while the tab is hidden - nobody is
+   * reading it, and a background tab polling all day is pure waste.
+   */
+  useEffect(() => {
+    if (!canUsePersonalAttendance) return undefined;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") loadMyAttendance({ quiet: true });
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [canUsePersonalAttendance, loadMyAttendance]);
+
   useEffect(() => {
     if (!isAdminViewer) return;
     loadAdminAttendance();
@@ -496,7 +607,7 @@ const AttendanceHub = () => {
       setAttendanceAction("checkout");
       setMyError("");
       const location = await requestAttendanceLocation({
-        required: Boolean(myData.policy?.geofenceEnabled),
+        required: false,
       });
       const result = await checkOutAttendance({
         source: "WEB",
@@ -578,8 +689,9 @@ const AttendanceHub = () => {
     try {
       setAttendanceAction("breakstart");
       setMyError("");
-      const result = await startBreakAttendance({ source: "WEB" });
+      const result = await startBreakAttendance({ source: "WEB", breakType, note: breakReason });
       setMySuccess(result.message || "Break started");
+      setBreakReason("");
       await loadMyAttendance({ quiet: true });
       if (isAdminViewer) {
         await loadAdminAttendance({ quiet: true });
@@ -588,6 +700,34 @@ const AttendanceHub = () => {
       setMyError(toErrorMessage(error, "Failed to start break"));
     } finally {
       setAttendanceAction("");
+    }
+  };
+
+  // Starts or ends a teammate's break as of now. The employee's own page reads
+  // the same attendance record, so it shows up there on its next refresh.
+  // A row is busy while either of its two writes is in flight.
+  const rowBusy = (row) =>
+    manualStatusAction === `${String(row.user?._id || "").trim()}:${String(adminData.date || adminDate || "").trim()}`
+    || teamBreakAction === String(row.user?._id || "");
+
+  const handleTeamBreak = async (row, action) => {
+    const userId = String(row.user?._id || "");
+    if (!userId) return;
+    try {
+      setTeamBreakAction(userId);
+      setAdminError("");
+      const result = await manageUserBreak(userId, {
+        action,
+        ...(action === "START" ? { breakType: teamBreakTypes[userId] || "UTILITY" } : {}),
+      });
+      setMySuccess(result.message || "Break updated");
+      await loadAdminAttendance({ quiet: true });
+      // A manager can act on their own row, so refresh the personal panel too.
+      if (canUsePersonalAttendance) await loadMyAttendance({ quiet: true });
+    } catch (error) {
+      setAdminError(toErrorMessage(error, "Failed to update the break"));
+    } finally {
+      setTeamBreakAction("");
     }
   };
 
@@ -718,6 +858,24 @@ const AttendanceHub = () => {
     ? todayAttendance.breakSessions
     : [];
 
+  // The stored workedMinutes only advances on check-out, so the live panel ticks
+  // its own total from check-in minus every break taken so far.
+  const activeBreak = isOnBreak ? todayBreakSessions.at(-1) || null : null;
+  const activeBreakMinutes = activeBreak?.startAt
+    ? minutesBetween(activeBreak.startAt, liveNow)
+    : 0;
+  const liveWorkedMinutes =
+    todayAttendance?.checkInAt && !todayAttendance?.checkOutAt
+      ? Math.max(
+          0,
+          minutesBetween(todayAttendance.checkInAt, liveNow)
+            - todayBreakSessions.reduce(
+              (total, session) => total + minutesBetween(session.startAt, session.endAt ? new Date(session.endAt).getTime() : liveNow),
+              0,
+            ),
+        )
+      : todayWorkedMinutes;
+
   const mySummaryCards = useMemo(() => {
     const summary = myData.summary || {};
     const totalDays = Number(summary.totalDays || 0);
@@ -753,6 +911,33 @@ const AttendanceHub = () => {
       },
     ];
   }, [myData.summary]);
+
+  /*
+   * Three readings of today's team, each a percentage so the bars are
+   * comparable. Everything here comes off the rows already loaded - no extra
+   * request, and no number that cannot be traced back to the table below it.
+   */
+  const todayInsights = useMemo(() => {
+    const rows = adminData.attendance || [];
+    const checkedIn = rows.filter((row) => row.attendance?.checkInAt);
+    const onTime = checkedIn.filter((row) => !row.attendance?.isLateCheckIn).length;
+    const onTimeRate = checkedIn.length ? Math.round((onTime / checkedIn.length) * 100) : 0;
+
+    const totalUsers = Number(adminData.summary?.totalUsers || 0) || rows.length;
+    const attendanceRate = totalUsers ? Math.round((checkedIn.length / totalUsers) * 100) : 0;
+
+    const targetMinutes = 9 * 60;
+    const workedRatios = checkedIn.map((row) => Math.min(1, Number(row.attendance?.workedMinutes || 0) / targetMinutes));
+    const productivity = workedRatios.length
+      ? Math.round((workedRatios.reduce((sum, value) => sum + value, 0) / workedRatios.length) * 100)
+      : 0;
+
+    return [
+      { label: "On time arrival rate", percent: onTimeRate, value: `${onTimeRate}%`, tone: onTimeRate >= 80 ? "bg-emerald-500" : onTimeRate >= 50 ? "bg-amber-500" : "bg-rose-500" },
+      { label: "Attendance vs target", percent: attendanceRate, value: `${attendanceRate}%`, tone: attendanceRate >= 80 ? "bg-emerald-500" : attendanceRate >= 50 ? "bg-amber-500" : "bg-blue-500" },
+      { label: "Hours vs 9h target", percent: productivity, value: `${productivity}%`, tone: productivity >= 80 ? "bg-emerald-500" : productivity >= 50 ? "bg-amber-500" : "bg-blue-500" },
+    ];
+  }, [adminData.attendance, adminData.summary]);
 
   const adminSummaryCards = useMemo(() => {
     const summary = adminData.summary || {};
@@ -798,9 +983,6 @@ const AttendanceHub = () => {
 
   const todayDateKey = toLocalDateInputValue(new Date());
   const todayClockLabel = formatTimeOnly(todayAttendance?.checkInAt);
-  const todayLocationLabel = todayAttendance?.checkInLocation
-    ? `Office radius ${formatDistance(todayAttendance.checkInLocation.distanceMeters)}`
-    : "Andheri branch";
   const pendingAdminLeaveRequests = adminLeaveRequests.filter((row) => row.status === "PENDING");
   const visibleAdminLeaveRequests = pendingAdminLeaveRequests.length
     ? pendingAdminLeaveRequests.slice(0, 2)
@@ -812,6 +994,22 @@ const AttendanceHub = () => {
       <ToastNotice message={mySuccess} type="success" />
       <ToastNotice message={adminError} type="error" />
 
+      {/* The command bar above already carries the page title, so this row adds
+          only what it does not: where you are, and whose view this is. */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[12px] text-slate-400">
+          <button type="button" onClick={() => navigate("/")} className="hover:text-slate-600">Home</button>
+          <ChevronRight size={13} aria-hidden="true" />
+          <span className="font-medium text-slate-600">Attendance</span>
+        </nav>
+        {isAdminViewer ? (
+          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-[12px] font-semibold text-violet-700">
+            <Sparkles size={13} aria-hidden="true" />
+            Admin View
+          </span>
+        ) : null}
+      </div>
+
       {myLoading && canUsePersonalAttendance ? (
         <div className={`${cardClass} flex h-40 items-center justify-center text-sm text-slate-500`}>
           <Loader2 size={18} className="mr-2 animate-spin" />
@@ -822,30 +1020,57 @@ const AttendanceHub = () => {
           <div className="flex flex-col gap-4">
             <section className={cardClass}>
               <div className={`${cardBodyClass} flex flex-wrap items-center gap-5`}>
-                <div className="min-w-[180px] flex-1">
-                  <div className="mb-1 text-[11px] font-bold uppercase tracking-[0.08em] text-slate-400">
-                    Today · {formatDateShort(todayDateKey)}
-                  </div>
-                  <div className="flex flex-wrap items-baseline gap-2.5">
-                    <span className="font-mono text-[26px] font-semibold leading-none tracking-normal text-slate-950">
-                      {canUsePersonalAttendance ? todayClockLabel : formatDateShort(adminDate)}
+                <div className="min-w-[240px] flex-1">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <IconBox icon={CalendarDays} tone="blue" boxSize="h-8 w-8" iconSize={15} />
+                    <span className="text-[14px] font-semibold text-slate-900">
+                      Today · {formatDateShort(todayDateKey)}
                     </span>
-                    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(todayStatus)}`}>
+                    <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-semibold ${statusBadgeClass(todayStatus)}`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-current" />
                       {canUsePersonalAttendance ? formatAttendanceStatus(todayStatus) : "Admin view"}
                     </span>
                     {isOnBreak ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-100 px-2 py-1 text-[11.5px] font-semibold text-indigo-700">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11.5px] font-semibold text-amber-700">
                         <span className="h-1.5 w-1.5 rounded-full bg-current" />
                         On Break
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-2 text-[11.5px] text-slate-500">
-                    {canUsePersonalAttendance
-                      ? `${todayLocationLabel} · ${formatDuration(todayWorkedMinutes)} elapsed`
-                      : `Team attendance · ${Number(adminData.summary?.totalUsers || 0)} users`}
-                  </p>
+
+                  <div className="mt-3 font-mono text-[34px] font-semibold leading-none tracking-tight text-slate-950">
+                    {canUsePersonalAttendance ? todayClockLabel : formatDateShort(adminDate)}
+                  </div>
+
+                  <div className="mt-3.5 flex flex-wrap items-center gap-x-6 gap-y-2">
+                    {canUsePersonalAttendance ? (
+                      <>
+                        <span className="flex items-center gap-2">
+                          <MapPin size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                          <span className="leading-tight">
+                            <span className="block text-[11px] text-slate-400">Office radius</span>
+                            <strong className="font-mono text-[13px] text-slate-800">
+                              {formatDistance(todayAttendance?.checkInLocation?.distanceMeters)}
+                            </strong>
+                          </span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <Timer size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                          <span className="leading-tight">
+                            <span className="block text-[11px] text-slate-400">Elapsed</span>
+                            <strong className="font-mono text-[13px] text-slate-800">{formatDuration(liveWorkedMinutes)}</strong>
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <Users size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                        <span className="text-[12px] text-slate-500">
+                          Team attendance · {Number(adminData.summary?.totalUsers || 0)} users
+                        </span>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {canUsePersonalAttendance ? (
@@ -855,6 +1080,31 @@ const AttendanceHub = () => {
                         {attendanceAction === "checkin" ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
                         Check in
                       </button>
+                    ) : null}
+                    {canStartBreak ? (
+                      <>
+                        <select
+                          aria-label="Break type"
+                          value={breakType}
+                          onChange={(event) => setBreakType(event.target.value)}
+                          className={selectControlClass}
+                        >
+                          <option value="LUNCH">Lunch - 30 minutes</option>
+                          <option value="TEA">Tea - 15 minutes</option>
+                          <option value="COFFEE">Coffee - 15 minutes</option>
+                          <option value="UTILITY">Utility - other reasons</option>
+                        </select>
+                        {breakType === "UTILITY" ? (
+                          <input
+                            aria-label="Utility break reason"
+                            placeholder="Reason for break"
+                            value={breakReason}
+                            maxLength={240}
+                            onChange={(event) => setBreakReason(event.target.value)}
+                            className={selectControlClass}
+                          />
+                        ) : null}
+                      </>
                     ) : null}
                     {canStartBreak ? (
                       <button type="button" onClick={handleStartBreak} disabled={Boolean(attendanceAction)} className={secondaryButtonClass}>
@@ -887,11 +1137,112 @@ const AttendanceHub = () => {
               </div>
             </section>
 
+            {canUsePersonalAttendance && <section className={cardClass}>
+              <SectionHeader
+                icon={Gauge}
+                tone="blue"
+                title="Live Attendance Summary"
+                subtitle="Your work hours and break details for today"
+              />
+              <div className={`${cardBodyClass} grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4`}>
+                <div className="flex items-center gap-2.5">
+                  <IconBox icon={Clock} tone="blue" boxSize="h-8 w-8" iconSize={15} />
+                  <div className="min-w-0">
+                    <p className="text-[11.5px] text-slate-500">Logged hours</p>
+                    <strong className="font-mono text-[15px] text-slate-900">{formatDuration(liveWorkedMinutes)}</strong>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <IconBox icon={Coffee} tone="violet" boxSize="h-8 w-8" iconSize={15} />
+                  <div className="min-w-0">
+                    <p className="text-[11.5px] text-slate-500">Daily breaks</p>
+                    <strong className="font-mono text-[15px] text-slate-900">{todayBreakSessions.length}</strong>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${activeBreak ? TONES.amber : TONES.green}`}>
+                    <span className="h-2 w-2 rounded-full bg-current" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[11.5px] text-slate-500">Current status</p>
+                    <strong className="text-[14px] text-slate-900">
+                      {activeBreak ? `On ${formatBreakType(activeBreak.breakType).toLowerCase()} break` : "Not on break"}
+                    </strong>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5">
+                  <IconBox icon={Hourglass} tone={activeBreak?.expectedMinutes && activeBreakMinutes > activeBreak.expectedMinutes ? "rose" : "slate"} boxSize="h-8 w-8" iconSize={15} />
+                  <div className="min-w-0">
+                    <p className="text-[11.5px] text-slate-500">Elapsed break</p>
+                    <strong className={`font-mono text-[15px] ${activeBreak?.expectedMinutes && activeBreakMinutes > activeBreak.expectedMinutes ? "text-rose-700" : "text-slate-900"}`}>
+                      {activeBreak ? `${activeBreakMinutes}m${activeBreak.expectedMinutes ? ` / ${activeBreak.expectedMinutes}m` : ""}` : "—"}
+                    </strong>
+                  </div>
+                </div>
+              </div>
+            </section>}
+
+            {canUsePersonalAttendance && todayBreakSessions.length ? (
+              <section className={cardClass}>
+                <SectionHeader
+                  icon={Coffee}
+                  tone="violet"
+                  title="Break Sessions Today"
+                  subtitle={`${todayBreakSessions.length} break${todayBreakSessions.length === 1 ? "" : "s"} · ${formatDuration(todayAttendance?.totalBreakMinutes || 0)} total`}
+                >
+                  <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11.5px] font-semibold text-blue-700">
+                    Total Break Time
+                    <span className="font-mono">{formatDuration(todayAttendance?.totalBreakMinutes || 0)}</span>
+                  </span>
+                </SectionHeader>
+                <div className={cardBodyClass}>
+                  {/* A timeline rather than a table: these are moments in a day,
+                      and the rail makes the sequence readable at a glance. */}
+                  <ol className="relative flex flex-col">
+                    {todayBreakSessions.map((session, index) => {
+                      const minutes = Number(session.durationMinutes || 0);
+                      const overran = session.expectedMinutes && minutes > session.expectedMinutes;
+                      const running = !session.endAt;
+                      return (
+                        <li key={`${session.startAt || "break"}-${index}`} className="relative flex flex-wrap items-center gap-3 py-2.5 pl-6 text-[12.8px]">
+                          {index < todayBreakSessions.length - 1 ? (
+                            <span aria-hidden="true" className="absolute left-[4.5px] top-6 h-full w-px bg-slate-200" />
+                          ) : null}
+                          <span aria-hidden="true" className={`absolute left-0 top-4 h-2.5 w-2.5 rounded-full ring-2 ring-white ${running ? "bg-amber-500" : "bg-blue-500"}`} />
+                          <span className="min-w-[150px] flex-1 font-semibold text-slate-800">
+                            {formatBreakType(session.breakType)} break
+                            {/* A break a manager recorded should not read as one
+                                this person logged themselves. */}
+                            {session.correctedByName ? (
+                              <span className="block text-[11px] font-normal text-slate-400">Recorded by {session.correctedByName}</span>
+                            ) : null}
+                          </span>
+                          <span className="font-mono text-slate-500">
+                            {formatTimeOnly(session.startAt)} &ndash; {running ? "Running" : formatTimeOnly(session.endAt)}
+                          </span>
+                          <span className={`ml-auto font-mono font-semibold tabular-nums ${overran ? "text-rose-700" : "text-slate-900"}`}>
+                            {formatDuration(minutes)}
+                            {session.expectedMinutes ? <span className="font-normal text-slate-400"> / {session.expectedMinutes}m</span> : null}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              </section>
+            ) : null}
+
             <section className={cardClass}>
               <div className={cardHeaderClass}>
-                <h4 className="text-[13.5px] font-semibold text-slate-900">
-                  {showPersonalHistory ? "This month" : "Team daily attendance"}
-                </h4>
+                <IconBox icon={CalendarDays} tone="blue" />
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-[14px] font-semibold leading-tight text-slate-900">
+                    {showPersonalHistory ? "Daily Attendance History" : "Team Daily Attendance History"}
+                  </h4>
+                  <p className="mt-0.5 text-[12px] text-slate-500">
+                    {showPersonalHistory ? "View your daily check-in and work hours" : "Check-in, hours and status for your team"}
+                  </p>
+                </div>
                 {isAdminViewer && canUsePersonalAttendance && (
                   <div className="flex gap-2">
                     <button type="button" onClick={() => setShowTeamHistory(false)} aria-pressed={!showTeamHistory} className={secondaryButtonClass}>My attendance</button>
@@ -952,7 +1303,7 @@ const AttendanceHub = () => {
                           <th className="border-b border-slate-200 px-3 py-2.5">Out</th>
                           <th className="border-b border-slate-200 px-3 py-2.5">Hours</th>
                           <th className="border-b border-slate-200 px-3 py-2.5">Status</th>
-                          <th className="border-b border-slate-200 px-3 py-2.5">Role</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5 text-right">Actions</th>
                         </>
                       )}
                     </tr>
@@ -999,9 +1350,22 @@ const AttendanceHub = () => {
                       adminData.attendance.map((row) => (
                         <tr key={String(row.user?._id || "")} className="transition hover:bg-slate-50">
                           <td className="border-b border-slate-100 px-3 py-2.5">
-                            <button type="button" onClick={() => openUserProfile(row.user?._id)} className="text-left font-semibold text-slate-900 transition hover:text-blue-700">
-                              {row.user?.name || "-"}
-                            </button>
+                            <div className="flex items-center gap-2.5">
+                              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[11.5px] font-bold text-white ${avatarTone(row.user?.name)}`}>
+                                {getInitials(row.user?.name)}
+                              </span>
+                              <div className="min-w-0">
+                                <button type="button" onClick={() => openUserProfile(row.user?._id)} className="block max-w-[170px] truncate text-left font-semibold text-slate-900 transition hover:text-blue-700">
+                                  {row.user?.name || "-"}
+                                </button>
+                                {/* Role reads as a label under the name; it used to be
+                                    the placeholder of the status select, where a long
+                                    one truncated to "PRODUCT". */}
+                                <span className="block max-w-[170px] truncate text-[11px] capitalize text-slate-400">
+                                  {String(row.user?.role || "").replaceAll("_", " ").toLowerCase() || "-"}
+                                </span>
+                              </div>
+                            </div>
                           </td>
                           <td className={`border-b border-slate-100 px-3 py-2.5 font-mono ${row.attendance?.isLateCheckIn ? "font-semibold text-rose-700" : "text-slate-700"}`}>{formatTimeOnly(row.attendance?.checkInAt)}</td>
                           <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-500">{formatTimeOnly(row.attendance?.checkOutAt)}</td>
@@ -1013,21 +1377,129 @@ const AttendanceHub = () => {
                             </span>
                           </td>
                           <td className="border-b border-slate-100 px-3 py-2.5">
-                            <select
-                              value={MANUAL_ATTENDANCE_STATUS_OPTIONS.some((option) => option.value === row.attendance?.status) ? row.attendance?.status : ""}
-                              onChange={(event) => handleManualStatusChange(row, event.target.value)}
-                              disabled={manualStatusAction === `${String(row.user?._id || "").trim()}:${String(adminData.date || adminDate || "").trim()}`}
-                              className="h-8 w-28 rounded-md border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 outline-none"
-                              title="Manual status"
-                            >
-                              <option value="">{row.user?.role || "-"}</option>
-                              {MANUAL_ATTENDANCE_STATUS_OPTIONS.map((option) => (
-                                <option key={option.value} value={option.value}>{option.label}</option>
-                              ))}
-                            </select>
-                            {row.attendance?.checkInAt && (
-                              <button type="button" onClick={() => setBreakCorrectionRow(row)} className="mt-2 block rounded border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700">Manage breaks</button>
-                            )}
+                            <div className="flex items-center justify-end gap-1.5">
+                              {row.attendance?.checkInAt ? (
+                                /* Native select arrows are sized by the browser and
+                                   were clipping the label, so the chevron is ours. */
+                                <span className="relative inline-flex">
+                                  <select
+                                    value={MANUAL_ATTENDANCE_STATUS_OPTIONS.some((option) => option.value === row.attendance?.status) ? row.attendance?.status : ""}
+                                    onChange={(event) => handleManualStatusChange(row, event.target.value)}
+                                    disabled={rowBusy(row)}
+                                    className="h-8 appearance-none rounded-lg border border-blue-600 bg-blue-600 pl-3 pr-7 text-xs font-semibold text-white outline-none disabled:opacity-60"
+                                    title="Set attendance manually"
+                                  >
+                                    <option value="">Set Status</option>
+                                    {MANUAL_ATTENDANCE_STATUS_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                  <ChevronDown aria-hidden="true" size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white" />
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleManualStatusChange(row, "PRESENT")}
+                                  disabled={rowBusy(row)}
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                                  title="Mark this employee present for the day"
+                                >
+                                  {rowBusy(row) ? <Loader2 size={12} className="animate-spin" /> : null}
+                                  Mark Present
+                                </button>
+                              )}
+
+                              {/* Break controls live behind the kebab: they matter
+                                  on a handful of rows, and inline they crowded out
+                                  the column on every one. */}
+                              <span className="relative inline-flex">
+                                <button
+                                  type="button"
+                                  aria-label={`More actions for ${row.user?.name || "employee"}`}
+                                  aria-expanded={openRowMenu === String(row.user?._id || "")}
+                                  onClick={() => setOpenRowMenu((current) => (current === String(row.user?._id || "") ? "" : String(row.user?._id || "")))}
+                                  className="grid h-8 w-8 place-items-center rounded-lg border border-slate-300 bg-white text-slate-500 transition hover:bg-slate-50"
+                                >
+                                  <MoreVertical size={15} />
+                                </button>
+                                {openRowMenu === String(row.user?._id || "") ? (
+                                  <>
+                                    <button type="button" aria-label="Close menu" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpenRowMenu("")} />
+                                    <div className="absolute right-0 top-9 z-20 w-56 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-lg">
+                                      {!row.attendance?.checkInAt ? (
+                                        <p className="px-2 py-1.5 text-[11.5px] text-slate-400">Not checked in today.</p>
+                                      ) : null}
+
+                                      {row.attendance?.checkInAt && !row.attendance?.checkOutAt ? (
+                                        row.attendance?.isOnBreak ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => { setOpenRowMenu(""); handleTeamBreak(row, "END"); }}
+                                            disabled={teamBreakAction === String(row.user?._id || "")}
+                                            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                          >
+                                            <PlayCircle size={14} />
+                                            End break
+                                            <span className="ml-auto font-mono text-[11.5px] font-normal tabular-nums text-slate-400">
+                                              {minutesBetween(row.attendance?.activeBreakStartedAt, liveNow)}m
+                                            </span>
+                                          </button>
+                                        ) : (
+                                          <div className="px-2 py-1.5">
+                                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">Start a break</span>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="relative inline-flex flex-1">
+                                                <select
+                                                  aria-label={`Break type for ${row.user?.name || "employee"}`}
+                                                  value={teamBreakTypes[String(row.user?._id || "")] || "UTILITY"}
+                                                  onChange={(event) => setTeamBreakTypes((value) => ({ ...value, [String(row.user?._id || "")]: event.target.value }))}
+                                                  className="h-8 w-full appearance-none rounded-lg border border-slate-300 bg-white pl-2 pr-6 text-xs font-semibold text-slate-700 outline-none"
+                                                >
+                                                  <option value="UTILITY">Utility</option>
+                                                  <option value="LUNCH">Lunch</option>
+                                                  <option value="TEA">Tea</option>
+                                                  <option value="COFFEE">Coffee</option>
+                                                </select>
+                                                <ChevronDown aria-hidden="true" size={12} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={() => { setOpenRowMenu(""); handleTeamBreak(row, "START"); }}
+                                                disabled={teamBreakAction === String(row.user?._id || "")}
+                                                className="inline-flex h-8 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 disabled:opacity-60"
+                                              >
+                                                <PauseCircle size={13} />
+                                                Start
+                                              </button>
+                                            </div>
+                                          </div>
+                                        )
+                                      ) : null}
+
+                                      {row.attendance?.checkInAt ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => { setOpenRowMenu(""); setBreakCorrectionRow(row); }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                                        >
+                                          <Timer size={14} className="text-slate-400" />
+                                          Manage breaks
+                                        </button>
+                                      ) : null}
+
+                                      <button
+                                        type="button"
+                                        onClick={() => { setOpenRowMenu(""); openUserProfile(row.user?._id); }}
+                                        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                                      >
+                                        <Users size={14} className="text-slate-400" />
+                                        Open profile
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : null}
+                              </span>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1036,6 +1508,8 @@ const AttendanceHub = () => {
                 </table>
               </div>
             </section>
+
+            <AttendanceViolations month={month} canReview={isAdminViewer} />
 
             {breakCorrectionRow && isAdminViewer && (
               <BreakCorrectionDialog
@@ -1051,43 +1525,37 @@ const AttendanceHub = () => {
               />
             )}
 
-            {canUsePersonalAttendance && todayBreakSessions.length ? (
-              <section className={cardClass}>
-                <div className={cardHeaderClass}><h4 className="text-[13.5px] font-semibold text-slate-900">Break sessions today</h4></div>
-                <div className={cardBodyClass}>
-                  <div className="flex flex-col divide-y divide-slate-100">
-                    {todayBreakSessions.map((session, index) => (
-                      <div key={`${session.startAt || "break"}-${index}`} className="flex flex-wrap items-center justify-between gap-3 py-2 text-[12.8px]">
-                        <span className="font-semibold text-slate-800">Break {index + 1}</span>
-                        <span className="font-mono text-slate-500">{formatTimeOnly(session.startAt)} - {session.endAt ? formatTimeOnly(session.endAt) : "Running"}</span>
-                        <span className="font-mono font-semibold text-slate-900">{formatDuration(session.durationMinutes || 0)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </section>
-            ) : null}
           </div>
 
           <div className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {(canUsePersonalAttendance ? mySummaryCards : adminSummaryCards).map((card) => (
-                <div key={card.key} className={statCardClass}>
-                  <div className="text-[11px] font-bold uppercase tracking-[0.04em] text-slate-400">{card.label}</div>
-                  <div className="mt-2 font-mono text-[25px] font-semibold leading-none tracking-normal text-slate-950">{card.value}</div>
-                  <div className="mt-2 text-[11.5px] text-slate-500">{card.detail}</div>
-                </div>
-              ))}
+              {(canUsePersonalAttendance ? mySummaryCards : adminSummaryCards).map((card) => {
+                const meta = STAT_META[card.key] || { icon: Gauge, tone: "blue" };
+                return (
+                  <div key={card.key} className={`${statCardClass} flex items-start gap-3`}>
+                    <IconBox icon={meta.icon} tone={meta.tone} boxSize="h-10 w-10" iconSize={18} />
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-slate-500">{card.label}</div>
+                      <div className="mt-1 font-mono text-[24px] font-semibold leading-none tracking-normal text-slate-950">{card.value}</div>
+                      <div className="mt-1.5 truncate text-[11.5px] text-slate-400">{card.detail}</div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             {canUsePersonalAttendance ? (
               <section className={cardClass}>
-                <div className={cardHeaderClass}>
-                  <h4 className="text-[13.5px] font-semibold text-slate-900">Requests</h4>
+                <SectionHeader
+                  icon={FileText}
+                  tone="blue"
+                  title="Leave Requests"
+                  subtitle="Apply for leave or view your recent requests"
+                >
                   <button type="button" onClick={loadLeaveRequestsData} disabled={leaveLoading} className="ml-auto text-xs font-semibold text-blue-600 transition hover:text-blue-800 disabled:opacity-60">
                     {leaveLoading ? "Loading" : "New request"}
                   </button>
-                </div>
+                </SectionHeader>
                 <div className={cardBodyClass}>
                   <form className="grid grid-cols-1 gap-2 sm:grid-cols-2" onSubmit={handleSubmitLeaveRequest}>
                     <input type="date" value={leaveForm.fromDate} onChange={(event) => setLeaveForm((prev) => ({ ...prev, fromDate: event.target.value }))} className={fieldClass} aria-label="Leave from date" />
@@ -1103,8 +1571,8 @@ const AttendanceHub = () => {
                       className="sm:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                     />
                     <button type="submit" disabled={leaveSubmitting} className={`${primaryButtonClass} sm:col-span-2`}>
-                      {leaveSubmitting ? <Loader2 size={14} className="animate-spin" /> : <ClipboardCheck size={14} />}
-                      Submit
+                      {leaveSubmitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                      Submit Request
                     </button>
                   </form>
 
@@ -1133,25 +1601,42 @@ const AttendanceHub = () => {
             {isAdminViewer ? (
               <section className={cardClass}>
                 <div className={cardHeaderClass}>
-                  <h4 className="text-[13.5px] font-semibold text-slate-900">Team approvals</h4>
-                  <select value={adminLeaveStatusFilter} onChange={(event) => setAdminLeaveStatusFilter(event.target.value)} className={`${fieldClass} ml-auto h-8`} aria-label="Approval status">
-                    <option value="PENDING">Pending</option>
-                    <option value="APPROVED">Approved</option>
-                    <option value="REJECTED">Rejected</option>
-                    <option value="CANCELLED">Cancelled</option>
-                    <option value="">All</option>
-                  </select>
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-100 px-2 py-1 text-[11.5px] font-semibold text-amber-700">
-                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                    {pendingAdminLeaveRequests.length} pending
-                  </span>
+                  <h4 className="flex-1 text-[14px] font-semibold text-slate-900">Team Approvals</h4>
+                  {/* Two tabs rather than a five-option select: pending is the
+                      queue you act on, everything else is history. */}
+                  <div className="inline-flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="Approval view">
+                    {[["PENDING", "Pending"], ["", "History"]].map(([value, label]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-pressed={adminLeaveStatusFilter === value}
+                        onClick={() => setAdminLeaveStatusFilter(value)}
+                        className={`rounded-md px-3 py-1 text-[12px] font-semibold transition ${
+                          adminLeaveStatusFilter === value ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                        }`}
+                      >
+                        {label}
+                        {value === "PENDING" && pendingAdminLeaveRequests.length ? (
+                          <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-[10.5px] text-amber-700">{pendingAdminLeaveRequests.length}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className={cardBodyClass}>
                   <div className="flex flex-col divide-y divide-slate-100">
                     {adminWorkflowLoading ? (
                       <div className="py-2 text-[12.8px] text-slate-500"><Loader2 size={16} className="mr-2 inline animate-spin" />Loading approvals...</div>
                     ) : visibleAdminLeaveRequests.length === 0 ? (
-                      <div className="py-2 text-[12.8px] text-slate-500">No leave requests found.</div>
+                      <div className="flex flex-col items-center gap-2 py-8 text-center">
+                        <span className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-slate-400">
+                          <FileText size={22} aria-hidden="true" />
+                        </span>
+                        <p className="text-[12.8px] font-semibold text-slate-600">No leave requests found.</p>
+                        <p className="text-[11.5px] text-slate-400">
+                          {adminLeaveStatusFilter === "PENDING" ? "All team members are in office today." : "Nothing in the history for this filter."}
+                        </p>
+                      </div>
                     ) : (
                       visibleAdminLeaveRequests.map((row) => (
                         <div key={String(row._id)} className="flex flex-wrap items-center gap-3 py-2">
@@ -1183,32 +1668,75 @@ const AttendanceHub = () => {
               <section className={cardClass}>
                 <form onSubmit={handleSaveAttendancePolicy}>
                   <div className={cardHeaderClass}>
-                    <h4 className="text-[13.5px] font-semibold text-slate-900">Attendance policy</h4>
-                    <label className="ml-auto inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+                    <h4 className="flex-1 text-[14px] font-semibold text-slate-900">Attendance Policy</h4>
+                    <label className="inline-flex items-center gap-2 text-[12px] font-semibold text-slate-600">
                       <input type="checkbox" checked={Boolean(policyForm.geofenceEnabled)} onChange={(event) => setPolicyForm((prev) => ({ ...prev, geofenceEnabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                       Geofence
                     </label>
                   </div>
-                  <div className={`${cardBodyClass} grid grid-cols-1 gap-2 sm:grid-cols-3`}>
+                  <div className={`${cardBodyClass} space-y-3`}>
                     <ToastNotice message={policyError} type="error" />
-                    <input type="number" step="any" value={policyForm.officeLatitude} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeLatitude: event.target.value }))} className={fieldClass} placeholder="Latitude" aria-label="Office latitude" />
-                    <input type="number" step="any" value={policyForm.officeLongitude} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeLongitude: event.target.value }))} className={fieldClass} placeholder="Longitude" aria-label="Office longitude" />
-                    <input type="number" min="10" max="5000" value={policyForm.officeRadiusMeters} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeRadiusMeters: event.target.value }))} className={fieldClass} placeholder="Radius" aria-label="Office radius" />
-                    <button type="button" onClick={handleUseCurrentOfficeLocation} disabled={policyLoading || policySaving} className={secondaryButtonClass}>
-                      <MapPin size={14} />
-                      Current
-                    </button>
-                    <button type="submit" disabled={policyLoading || policySaving} className={`${primaryButtonClass} sm:col-span-2`}>
-                      {policySaving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                      Save
-                    </button>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="mb-1 block text-[11.5px] text-slate-500">Office Latitude</span>
+                        <input type="number" step="any" value={policyForm.officeLatitude} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeLatitude: event.target.value }))} className={fieldClass} aria-label="Office latitude" />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[11.5px] text-slate-500">Office Longitude</span>
+                        <input type="number" step="any" value={policyForm.officeLongitude} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeLongitude: event.target.value }))} className={fieldClass} aria-label="Office longitude" />
+                      </label>
+                    </div>
+                    <label className="block">
+                      <span className="mb-1 block text-[11.5px] text-slate-500">Allowed Radius (meters)</span>
+                      <input type="number" min="10" max="5000" value={policyForm.officeRadiusMeters} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeRadiusMeters: event.target.value }))} className={fieldClass} aria-label="Office radius" />
+                    </label>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={handleUseCurrentOfficeLocation} disabled={policyLoading || policySaving} className={secondaryButtonClass}>
+                        <MapPin size={14} />
+                        Use current
+                      </button>
+                      <button type="submit" disabled={policyLoading || policySaving} className={`${primaryButtonClass} flex-1`}>
+                        {policySaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                        Save
+                      </button>
+                    </div>
                   </div>
                 </form>
+              </section>
+            ) : null}
+
+            {isAdminViewer ? (
+              <section className={cardClass}>
+                <div className={cardHeaderClass}>
+                  <IconBox icon={Lightbulb} tone="amber" boxSize="h-8 w-8" iconSize={15} />
+                  <h4 className="text-[14px] font-semibold text-slate-900">Today&rsquo;s Insights</h4>
+                </div>
+                <div className={`${cardBodyClass} space-y-3`}>
+                  {todayInsights.map((insight) => (
+                    <div key={insight.label} className="flex items-center gap-3">
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] text-slate-600">{insight.label}</span>
+                      <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
+                        <span className={`block h-full rounded-full ${insight.tone}`} style={{ width: `${insight.percent}%` }} />
+                      </span>
+                      <span className="w-12 shrink-0 text-right font-mono text-[12px] font-semibold text-slate-800">{insight.value}</span>
+                    </div>
+                  ))}
+                </div>
               </section>
             ) : null}
           </div>
         </div>
       )}
+
+      {isAdminViewer ? (
+        <p className="mt-4 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3.5 text-[12.5px] text-blue-900">
+          <Info size={15} className="mt-px shrink-0" aria-hidden="true" />
+          <span>
+            Tip: team members can only check in within the allowed office radius.
+            Break time is excluded from total working hours, and check-out works from anywhere.
+          </span>
+        </p>
+      ) : null}
     </div>
   );
 };

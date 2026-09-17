@@ -264,6 +264,7 @@ const inventorySchema = new mongoose.Schema(
       default: "",
       maxlength: 40,
     },
+    ownerContactId: { type: mongoose.Schema.Types.ObjectId, ref: "CrmContact", default: null },
     ownerName: {
       type: String,
       trim: true,
@@ -655,4 +656,10 @@ inventorySchema.pre("validate", function enforceStatusDetails() {
   }
 });
 
+inventorySchema.pre("save", async function syncOwner() {
+ if (!this.companyId || !this.ownerNumber || !(this.isNew || this.isModified("ownerName") || this.isModified("ownerNumber"))) return;
+ const contact = await require("../services/crmContact.service").upsertContact({ companyId: this.companyId, kind: "OWNER", phone: this.ownerNumber, name: this.ownerName, inventoryId: this._id, actor: this.createdBy,
+ propertyDetails: [this.projectName, this.buildingName, this.unitNumber, this.location, this.city].filter(Boolean).join(", ") });
+ this.ownerContactId = contact?._id || null;
+});
 module.exports = mongoose.model("Inventory", inventorySchema);

@@ -1,3 +1,4 @@
+import BrokerPhoneHint from "./BrokerPhoneHint";
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import {
@@ -1689,7 +1690,7 @@ export const AddLeadModal = ({
               <input placeholder="Name" value={formData.name} onChange={(event) => updateField("name", event.target.value)} className={inputClass} />
             </AddLeadFieldShell>
             <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Phone">
-              <input placeholder="Phone" value={formData.phone} onChange={(event) => updateField("phone", event.target.value)} className={inputClass} />
+              <div><input placeholder="Phone" value={formData.phone} onChange={(event) => updateField("phone", event.target.value)} className={inputClass} /><BrokerPhoneHint phone={formData.phone} /></div>
             </AddLeadFieldShell>
             <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Email">
               <input placeholder="Email" value={formData.email} onChange={(event) => updateField("email", event.target.value)} className={inputClass} />

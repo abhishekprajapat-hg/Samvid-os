@@ -2,11 +2,13 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Bell, CalendarDays, LogOut, Menu, MessageCircle, Moon, Search, Sun, User } from "lucide-react";
 import { PROFILE_ITEM, getAllVisibleMenuGroups, roleCanSeeItem } from "./workbenchNavigation";
+import { useIsMobileViewport } from "../../hooks/useIsMobileViewport";
 import "./AppTopCommandBar.css";
 
 const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogout, actions, user, userRole, unreadAlerts = 0, unreadChats = 0 }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const isMobileViewport = useIsMobileViewport();
   const searchRef = useRef(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -22,6 +24,20 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
   const initials = String(user?.name || user?.fullName || "User").trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }).format(new Date());
   const results = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
+
+  /*
+   * On a phone the floating messenger is not rendered at all - a draggable
+   * panel over a 360px screen covers the very thing it is meant to sit beside -
+   * so the icon opens the full chat page. On a desktop it still opens the
+   * messenger over whatever you were doing, which is the point of it.
+   */
+  const openChat = () => {
+    if (isMobileViewport) {
+      navigate("/chat");
+      return;
+    }
+    window.dispatchEvent(new Event("crm:open-messenger"));
+  };
 
   useEffect(() => {
     const key = (event) => {
@@ -55,7 +71,7 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
       <div className="app-header-controls">
         {actions}
         {canNotify && <button type="button" className="app-header-icon" aria-label="Open notifications" title="Notifications" onClick={() => navigate("/admin/notifications")}><Bell size={21} />{unreadAlerts > 0 && <span className="app-header-unread">{unreadAlerts > 99 ? "99+" : unreadAlerts}</span>}</button>}
-        {canChat && <button type="button" className="app-header-icon" aria-label="Open team chat" title="Chat" onClick={() => navigate("/chat")}><MessageCircle size={21} />{unreadChats > 0 && <span className="app-header-unread">{unreadChats > 99 ? "99+" : unreadChats}</span>}</button>}
+        {canChat && <button type="button" className="app-header-icon" aria-label="Open team chat" title="Chat" onClick={openChat}><MessageCircle size={21} />{unreadChats > 0 && <span className="app-header-unread">{unreadChats > 99 ? "99+" : unreadChats}</span>}</button>}
         <div className="app-header-date"><CalendarDays size={17} />{today}</div>
         {canProfile && <button type="button" className="app-header-avatar" aria-label="Open profile" title={user?.name || "Profile"} onClick={() => navigate("/profile")}>{initials || <User size={18} />}</button>}
         <button type="button" className="app-header-icon" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={onToggleTheme}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>

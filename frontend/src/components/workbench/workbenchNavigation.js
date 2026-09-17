@@ -1,9 +1,11 @@
 import {
   BarChart3,
   Bell,
+  BookUser,
   Briefcase,
   Building,
   Building2,
+  Handshake,
   Calendar,
   CheckSquare,
   ClipboardList,
@@ -130,6 +132,10 @@ export const WORKBENCH_MENU = {
       group: "Assets",
       items: [
         { label: "Inventory", path: "/inventory", icon: Building2, page: "inventory", roles: [...SALES_ROLES, ...PARTNER_ROLES], requiresInventoryAccessForPartner: true },
+        // Both contact directories are internal, so channel partners are left
+        // out here exactly as the API leaves them out.
+        { label: "Owner Database", path: "/inventory/owners", icon: BookUser, page: "inventory", roles: SALES_ROLES },
+        { label: "Broker Database", path: "/inventory/brokers", icon: Handshake, page: "inventory", roles: SALES_ROLES },
         { label: "Projects", path: "/projects", icon: Briefcase, page: "projects", roles: [...SALES_ROLES, ...PARTNER_ROLES], requiresInventoryAccessForPartner: true },
         { label: "Field Ops", path: "/map", icon: Map, page: "field_ops", roles: ["ADMIN", "MANAGER", "FIELD_EXECUTIVE"] },
       ],
@@ -245,6 +251,8 @@ export const SIDEBAR_GROUPS = [
       navItem("/leads", { label: "Pipeline" }),
       navItem("/my-leads", { label: "My Leads" }),
       navItem("/inventory", { label: "Inventory" }),
+      navItem("/inventory/owners", { label: "Owner Database" }),
+      navItem("/inventory/brokers", { label: "Broker Database" }),
       navItem("/projects", { label: "Projects", icon: Layers }),
       navItem("/map", { label: "Field Ops" }),
     ],

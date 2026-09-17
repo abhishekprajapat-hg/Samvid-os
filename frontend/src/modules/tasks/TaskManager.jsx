@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "./tasks-reference.css";
+import SubtaskDetailPanel from "./SubtaskDetailPanel";
 import { useNavigate } from "react-router-dom";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import {
@@ -40,7 +41,8 @@ import {
   updateTask,
   deleteTask,
   getTaskStats,
-  getTaskStatsByUser
+  getTaskStatsByUser,
+  getTaskAssignees
 } from "../../services/taskService";
 import { getUsers } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
@@ -150,7 +152,7 @@ export default function TaskManager({ theme = "light" }) {
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
-  const [taskScope, setTaskScope] = useState(canViewRoster ? "all" : "mine");
+  const [taskScope, setTaskScope] = useState("all");
   const [leadFilter, setLeadFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
 
@@ -213,6 +215,9 @@ export default function TaskManager({ theme = "light" }) {
   // Subtask being renamed on a saved task, keyed as `${taskId}:${index}`
   const [subtaskEditKey, setSubtaskEditKey] = useState(null);
   const [subtaskEditValue, setSubtaskEditValue] = useState("");
+  // Subtask whose detail panel is open, keyed as `${scope}:${index}` where the
+  // scope is a task id, or "form" for a task still being written.
+  const [subtaskDetailKey, setSubtaskDetailKey] = useState(null);
 
   // Fetch initial data
   const fetchSequence = useRef(0);
@@ -233,7 +238,7 @@ export default function TaskManager({ theme = "light" }) {
       const [taskResult, statsResult, usersResult, leadsResult] = await Promise.allSettled([
         getTasks(filters),
         getTaskStats({ scope: taskScope, assignedTo: assigneeFilter }),
-        getUsers(),
+        getTaskAssignees(),
         isProductionExecutive ? Promise.resolve([]) : getAllLeads()
       ]);
       if (sequence !== fetchSequence.current) return;
@@ -598,8 +603,43 @@ export default function TaskManager({ theme = "light" }) {
     if (!window.confirm("Delete this subtask?")) return;
     const nextSubtasks = (task.subtasks || []).filter((_, i) => i !== index);
     handleCancelSubtaskEdit();
+    setSubtaskDetailKey(null);
     await persistSubtasks(task, nextSubtasks);
   };
+
+  // Detail panel plumbing. A saved task writes through to the API; a task still
+  // being composed only touches form state.
+  const toggleSubtaskDetail = (scope, index) =>
+    setSubtaskDetailKey(prev => (prev === `${scope}:${index}` ? null : `${scope}:${index}`));
+
+  const isSubtaskDetailOpen = (scope, index) => subtaskDetailKey === `${scope}:${index}`;
+
+  // The open subtask for a scope, or null. Guards against a stale key left
+  // behind when the list shrinks or another task is selected.
+  const openSubtaskIndex = (scope, subtasks = []) => {
+    if (!String(subtaskDetailKey || "").startsWith(`${scope}:`)) return null;
+    const index = Number(String(subtaskDetailKey).slice(String(scope).length + 1));
+    return Number.isInteger(index) && index >= 0 && index < subtasks.length ? index : null;
+  };
+
+  // A one-glance hint that a subtask carries more than its title.
+  const subtaskMeta = (subtask) => {
+    const parts = [];
+    if (subtask?.description) parts.push("note");
+    if (subtask?.dueDate) parts.push(new Date(subtask.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" }));
+    return parts.join(" · ");
+  };
+
+  const patchSubtask = (task, index, patch) => {
+    if (!canEditTask(task)) return;
+    persistSubtasks(task, (task.subtasks || []).map((s, i) => (i === index ? { ...s, ...patch } : s)));
+  };
+
+  const patchFormSubtask = (index, patch) =>
+    setFormData(prev => ({
+      ...prev,
+      subtasks: (prev.subtasks || []).map((s, i) => (i === index ? { ...s, ...patch } : s)),
+    }));
 
   // Drag and Drop (Native HTML5)
   const handleDragStart = (e, taskId) => {
@@ -687,7 +727,7 @@ export default function TaskManager({ theme = "light" }) {
     if (!newSubtaskTitle.trim()) return;
     setFormData(prev => ({
       ...prev,
-      subtasks: [...(prev.subtasks || []), { title: newSubtaskTitle.trim(), isCompleted: false }]
+      subtasks: [...(prev.subtasks || []), { title: newSubtaskTitle.trim(), isCompleted: false, description: "", dueDate: null }]
     }));
     setNewSubtaskTitle("");
   };
@@ -698,6 +738,8 @@ export default function TaskManager({ theme = "light" }) {
       subtasks: (prev.subtasks || []).filter((_, i) => i !== index)
     }));
     handleCancelFormSubtaskEdit();
+    // Indexes shift on removal, so the open panel no longer points at the same subtask.
+    setSubtaskDetailKey(null);
   };
 
   const handleStartFormSubtaskEdit = (index, title) => {
@@ -992,7 +1034,7 @@ export default function TaskManager({ theme = "light" }) {
       <div className={`inline-flex flex-wrap items-center gap-1 rounded-xl border p-1 ${
         isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
       }`}>
-        {[["mine", "My Tasks"], ["assigned", "Assigned by Me"], ["all", "All Tasks"]].map(([scope, label]) => {
+        {[["all", "All Task"], ["assigned", "Assigned to Me"], ["mine", "My Task"]].map(([scope, label]) => {
           const isActiveScope = taskScope === scope && viewLevel === "board" && !selectedUserObj;
           return (
             <button
@@ -1442,7 +1484,7 @@ export default function TaskManager({ theme = "light" }) {
               </>
             ) : (
               <h2 className={`truncate text-xl font-black ${styles.title}`}>
-                {taskScope === "mine" ? "My Tasks" : taskScope === "assigned" ? "Assigned by Me" : "All Accessible Tasks"}
+                {taskScope === "mine" ? "My Task" : taskScope === "assigned" ? "Assigned to Me" : "All Accessible Tasks"}
               </h2>
             )}
           </div>
@@ -2154,7 +2196,8 @@ export default function TaskManager({ theme = "light" }) {
                     <p className={`text-sm font-black ${styles.title}`}>
                       Subtasks ({(panelTask.subtasks || []).filter(st => st.isCompleted).length} of {(panelTask.subtasks || []).length})
                     </p>
-                    <div className="mt-2 space-y-1.5">
+                    <div className={`mt-2 grid gap-2 ${openSubtaskIndex(panelTask._id, panelTask.subtasks) !== null ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,230px)]" : ""}`}>
+                    <div className="space-y-1.5">
                       {(panelTask.subtasks || []).map((st, idx) => {
                         const isEditingSubtask = subtaskEditKey === `${panelTask._id}:${idx}`;
                         return (
@@ -2189,7 +2232,18 @@ export default function TaskManager({ theme = "light" }) {
                                   onChange={() => handleInlineToggleSubtask(panelTask, idx)}
                                   className="h-3.5 w-3.5 shrink-0 rounded"
                                 />
-                                <span className={`min-w-0 flex-1 truncate ${st.isCompleted ? `line-through ${styles.label}` : styles.title}`}>{st.title}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSubtaskDetail(panelTask._id, idx)}
+                                  aria-expanded={isSubtaskDetailOpen(panelTask._id, idx)}
+                                  title="Open subtask details"
+                                  className={`min-w-0 flex-1 truncate text-left hover:underline ${st.isCompleted ? `line-through ${styles.label}` : styles.title}`}
+                                >
+                                  {st.title}
+                                </button>
+                                {subtaskMeta(st) ? (
+                                  <span className={`shrink-0 text-[10px] ${styles.label}`}>{subtaskMeta(st)}</span>
+                                ) : null}
                                 <button
                                   type="button"
                                   onClick={() => handleStartSubtaskEdit(panelTask, idx, st.title)}
@@ -2215,6 +2269,18 @@ export default function TaskManager({ theme = "light" }) {
                           </div>
                         );
                       })}
+                    </div>
+                    {openSubtaskIndex(panelTask._id, panelTask.subtasks) !== null ? (
+                      <SubtaskDetailPanel
+                        key={subtaskDetailKey}
+                        subtask={panelTask.subtasks[openSubtaskIndex(panelTask._id, panelTask.subtasks)]}
+                        readOnly={!canEditTask(panelTask)}
+                        styles={styles}
+                        isDark={isDark}
+                        onClose={() => setSubtaskDetailKey(null)}
+                        onChange={(patch) => patchSubtask(panelTask, openSubtaskIndex(panelTask._id, panelTask.subtasks), patch)}
+                      />
+                    ) : null}
                     </div>
                     <div className={`mt-2 flex items-center gap-2 rounded-xl border border-dashed px-3 py-2 ${isDark ? "border-slate-800" : "border-slate-200"}`}>
                       <Plus size={14} className={styles.label} />
@@ -2438,6 +2504,7 @@ export default function TaskManager({ theme = "light" }) {
                       <span className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>
                         Subtasks ({detailsTask.subtasks.filter(s => s.isCompleted).length}/{detailsTask.subtasks.length})
                       </span>
+                      <div className={`grid gap-2 ${openSubtaskIndex(detailsTask._id, detailsTask.subtasks) !== null ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,230px)]" : ""}`}>
                       <div className={`rounded-xl border p-2 space-y-1.5 ${isDark ? "border-slate-850 bg-slate-950/40" : "border-slate-150 bg-slate-50/50"}`}>
                         {detailsTask.subtasks.map((st, idx) => (
                           <div key={idx} className="flex items-center gap-2 text-xs py-0.5">
@@ -2483,9 +2550,18 @@ export default function TaskManager({ theme = "light" }) {
                               onChange={() => handleInlineToggleSubtask(detailsTask, idx)}
                               className="h-3.5 w-3.5 shrink-0 rounded"
                             />
-                            <span className={`min-w-0 flex-1 truncate ${st.isCompleted ? "line-through text-slate-500" : styles.text}`}>
+                            <button
+                              type="button"
+                              onClick={() => toggleSubtaskDetail(detailsTask._id, idx)}
+                              aria-expanded={isSubtaskDetailOpen(detailsTask._id, idx)}
+                              title="Open subtask details"
+                              className={`min-w-0 flex-1 truncate text-left hover:underline ${st.isCompleted ? "line-through text-slate-500" : styles.text}`}
+                            >
                               {st.title}
-                            </span>
+                            </button>
+                            {subtaskMeta(st) ? (
+                              <span className={`shrink-0 text-[10px] ${styles.label}`}>{subtaskMeta(st)}</span>
+                            ) : null}
                             <button
                               type="button"
                               onClick={() => handleStartSubtaskEdit(detailsTask, idx, st.title)}
@@ -2510,6 +2586,18 @@ export default function TaskManager({ theme = "light" }) {
                             )}
                           </div>
                         ))}
+                      </div>
+                      {openSubtaskIndex(detailsTask._id, detailsTask.subtasks) !== null ? (
+                        <SubtaskDetailPanel
+                          key={subtaskDetailKey}
+                          subtask={detailsTask.subtasks[openSubtaskIndex(detailsTask._id, detailsTask.subtasks)]}
+                          readOnly={!canEditTask(detailsTask)}
+                          styles={styles}
+                          isDark={isDark}
+                          onClose={() => setSubtaskDetailKey(null)}
+                          onChange={(patch) => patchSubtask(detailsTask, openSubtaskIndex(detailsTask._id, detailsTask.subtasks), patch)}
+                        />
+                      ) : null}
                       </div>
                     </div>
                   )}
@@ -2764,6 +2852,7 @@ export default function TaskManager({ theme = "light" }) {
                   </div>
 
                   {formData.subtasks && formData.subtasks.length > 0 && (
+                    <div className={`grid gap-2 ${openSubtaskIndex("form", formData.subtasks) !== null ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,230px)]" : ""}`}>
                     <div className={`scrollbar-hide rounded-xl border p-2 space-y-1.5 max-h-32 overflow-y-auto ${
                       isDark ? "border-slate-850 bg-slate-950/40" : "border-slate-150 bg-slate-50/50"
                     }`}>
@@ -2803,17 +2892,25 @@ export default function TaskManager({ theme = "light" }) {
                             </>
                           ) : (
                             <>
-                              <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 pr-2">
-                                <input
-                                  type="checkbox"
-                                  checked={st.isCompleted}
-                                  onChange={() => handleToggleSubtaskInForm(idx)}
-                                  className="rounded border-slate-700 bg-transparent text-sky-500 focus:ring-0 focus:ring-offset-0"
-                                />
-                                <span className={`truncate ${st.isCompleted ? "line-through text-slate-500" : styles.text}`}>
-                                  {st.title}
-                                </span>
-                              </label>
+                              <input
+                                type="checkbox"
+                                aria-label={st.title}
+                                checked={st.isCompleted}
+                                onChange={() => handleToggleSubtaskInForm(idx)}
+                                className="rounded border-slate-700 bg-transparent text-sky-500 focus:ring-0 focus:ring-offset-0"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => toggleSubtaskDetail("form", idx)}
+                                aria-expanded={isSubtaskDetailOpen("form", idx)}
+                                title="Open subtask details"
+                                className={`min-w-0 flex-1 truncate pr-2 text-left hover:underline ${st.isCompleted ? "line-through text-slate-500" : styles.text}`}
+                              >
+                                {st.title}
+                              </button>
+                              {subtaskMeta(st) ? (
+                                <span className={`shrink-0 text-[10px] ${styles.label}`}>{subtaskMeta(st)}</span>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={() => handleStartFormSubtaskEdit(idx, st.title)}
@@ -2836,6 +2933,17 @@ export default function TaskManager({ theme = "light" }) {
                           )}
                         </div>
                       ))}
+                    </div>
+                    {openSubtaskIndex("form", formData.subtasks) !== null ? (
+                      <SubtaskDetailPanel
+                        key={subtaskDetailKey}
+                        subtask={formData.subtasks[openSubtaskIndex("form", formData.subtasks)]}
+                        styles={styles}
+                        isDark={isDark}
+                        onClose={() => setSubtaskDetailKey(null)}
+                        onChange={(patch) => patchFormSubtask(openSubtaskIndex("form", formData.subtasks), patch)}
+                      />
+                    ) : null}
                     </div>
                   )}
                 </div>

@@ -38,6 +38,8 @@ const ChatMessageAlertToast = lazy(() => import("./components/layout/ChatMessage
 const FollowUpReminderToast = lazy(() => import("./components/layout/FollowUpReminderToast"));
 
 const LeadsMatrix = lazy(() => import("./modules/leads/LeadsMatrix"));
+const OwnerDatabase = lazy(() => import("./modules/inventory/OwnerDatabase"));
+const BrokerDatabase = lazy(() => import("./modules/inventory/BrokerDatabase"));
 const AssetVault = lazy(() => import("./modules/inventory/AssetVault"));
 const InventoryDetails = lazy(() => import("./modules/inventory/InventoryDetails"));
 const Projects = lazy(() => import("./modules/inventory/Projects"));
@@ -208,7 +210,7 @@ const resolvePageHeader = (pathname, userRole) => {
 
   if (pathname.startsWith("/attendance")) {
     return {
-      title: "Attendance Command Center",
+      title: "Attendance",
       subtitle: "Daily check-in, work-hour tracking and team attendance visibility",
       scopeLabel: "Attendance",
     };
@@ -696,6 +698,16 @@ export default function App() {
         path="/inventory"
         element={withPageAccess("inventory", <AssetVault />, ["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])}
       />
+      <Route
+        path="/inventory/owners"
+        element={withPageAccess("inventory", <OwnerDatabase />, ["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"])}
+      />
+      <Route
+        path="/inventory/brokers"
+        element={withPageAccess("inventory", <BrokerDatabase />, ["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE"])}
+      />
+      {/* Replaced by the two pages above; existing links still resolve. */}
+      <Route path="/inventory/contacts" element={<Navigate to="/inventory/owners" replace />} />
       <Route
         path="/inventory/:id"
         element={withPageAccess("inventory", <InventoryDetails />, ["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])}

@@ -280,6 +280,13 @@ const IntelligenceReports = () => {
     [leads, previousBounds, rangeKey],
   );
 
+  // Transfers stay countable after the lead moves on, so they read off the
+  // assignment history rather than the current stage.
+  const transferredLeadCount = useMemo(
+    () => scopedLeads.filter((lead) => lead.assignmentHistory?.some((entry) => entry.action === "MANUAL_TRANSFER")).length,
+    [scopedLeads],
+  );
+
   const summary = useMemo(() => buildSummary(scopedLeads), [scopedLeads]);
   const previousSummary = useMemo(() => buildSummary(previousLeads), [previousLeads]);
 
@@ -399,6 +406,7 @@ const IntelligenceReports = () => {
     const rows = [
       ["Section", "Metric", "Value"],
       ["Summary", "Leads received", summary.received],
+      ["Summary", "Transferred leads", transferredLeadCount],
       ["Summary", "Conversion", formatPercent(summary.conversion, 1)],
       ["Summary", "Avg. days to close", Math.round(summary.avgDaysToClose)],
       ["Summary", "Cost per lead", summary.costPerLead === null ? "" : Math.round(summary.costPerLead)],
@@ -426,6 +434,9 @@ const IntelligenceReports = () => {
     <div className="reports-doc-screen ui-page-shell custom-scrollbar">
       <ToastNotice message={error} type="error" />
 
+      <section className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+        <strong>{transferredLeadCount} transferred leads</strong> in this period. Transfer history is retained separately from the current lead stage.
+      </section>
       <div className="reports-toolbar">
         <div className="reports-seg">
           {RANGE_OPTIONS.map((range) => (

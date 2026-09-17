@@ -43,6 +43,7 @@ import { uploadFile } from "../../services/uploadService";
 import { acquireChatSocket, releaseChatSocket } from "../../services/chatSocket";
 import { useChatNotifications } from "../../context/useChatNotifications";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { useIsMobileViewport } from "../../hooks/useIsMobileViewport";
 import {
   TeamChatSidebar,
 } from "./components/TeamChatPanels";
@@ -503,7 +504,7 @@ const updateTypingUsers = (prev, { roomId, userId, isTyping }) => {
   return next;
 };
 
-const TeamChat = ({ theme = "light" }) => {
+const TeamChat = ({ theme = "light", embedded = false, visible = true }) => {
   const isDark = theme === "dark";
   const location = useLocation();
   const navigate = useNavigate();
@@ -518,6 +519,8 @@ const TeamChat = ({ theme = "light" }) => {
   const socketRef = useRef(null);
   const selectedConversationRef = useRef("");
   const chatOpenReadSyncRef = useRef(false);
+  const panelVisibleRef = useRef(visible);
+  useEffect(() => { panelVisibleRef.current = visible; }, [visible]);
   const typingStateRef = useRef({ roomId: "", isTyping: false });
   const bottomRef = useRef(null);
   const mediaInputRef = useRef(null);
@@ -577,38 +580,13 @@ const TeamChat = ({ theme = "light" }) => {
   const [activeMessageActionId, setActiveMessageActionId] = useState("");
   const [messageActionLoadingId, setMessageActionLoadingId] = useState("");
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
-  const [isMobileViewport, setIsMobileViewport] = useState(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return false;
-    }
-    return window.matchMedia("(max-width: 767px)").matches;
-  });
+  const isMobileViewport = useIsMobileViewport();
 
   useEffect(() => {
     const host = document.querySelector("main.app-page-bg");
     if (host) {
       host.scrollTop = 0;
     }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return undefined;
-    }
-
-    const mediaQuery = window.matchMedia("(max-width: 767px)");
-    const handleViewportChange = (event) => {
-      setIsMobileViewport(event.matches);
-    };
-
-    setIsMobileViewport(mediaQuery.matches);
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", handleViewportChange);
-      return () => mediaQuery.removeEventListener("change", handleViewportChange);
-    }
-
-    mediaQuery.addListener(handleViewportChange);
-    return () => mediaQuery.removeListener(handleViewportChange);
   }, []);
 
   useEffect(() => {
@@ -681,6 +659,7 @@ const TeamChat = ({ theme = "light" }) => {
 
   const emitConversationRead = useCallback(
     async (conversationId, options = {}) => {
+      if (!panelVisibleRef.current) return;
       const id = toId(conversationId);
       if (!id) return;
 
@@ -1161,7 +1140,7 @@ const TeamChat = ({ theme = "light" }) => {
   }, [clearActiveCallLocally, emitCallAck]);
 
   useEffect(() => {
-    setActiveConversationId(selectedConversationId || "");
+    setActiveConversationId(visible ? selectedConversationId || "" : "");
 
     if (selectedConversationId) {
       emitConversationRead(selectedConversationId).catch(() => null);
@@ -1170,7 +1149,7 @@ const TeamChat = ({ theme = "light" }) => {
     return () => {
       setActiveConversationId("");
     };
-  }, [emitConversationRead, selectedConversationId, setActiveConversationId]);
+  }, [emitConversationRead, selectedConversationId, setActiveConversationId, visible]);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -1188,10 +1167,10 @@ const TeamChat = ({ theme = "light" }) => {
   }, [emitConversationRead]);
 
   useEffect(() => {
-    if (chatOpenReadSyncRef.current) return;
+    if (embedded || chatOpenReadSyncRef.current) return;
     chatOpenReadSyncRef.current = true;
     markAllRead().catch(() => null);
-  }, [markAllRead]);
+  }, [markAllRead, embedded]);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => String(conversation._id) === String(selectedConversationId)) || null,

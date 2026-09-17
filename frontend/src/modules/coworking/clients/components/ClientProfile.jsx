@@ -73,7 +73,7 @@ const Section = ({ title, count, icon: Icon, children }) => (
 
 const ClientProfile = ({ client, onOpenCabin, onRecordPayment, onDocumentsChange }) => {
   const isActive = client.kind === "active";
-  const kyc = isActive ? kycStatusOf({ kind: client.entityKind, documents: client.documents }) : null;
+  const kyc = kycStatusOf({ kind: client.entityKind, documents: client.documents });
   const kindLabel = CLIENT_KINDS.find((option) => option.id === client.entityKind)?.label;
   const tenureLabel = client.totalMonths
     ? `${client.totalMonths} ${client.totalMonths === 1 ? "month" : "months"} of earlier tenancy`
@@ -152,6 +152,7 @@ const ClientProfile = ({ client, onOpenCabin, onRecordPayment, onDocumentsChange
         </div>
       )}
 
+      <Row label="Date of birth" value={client.dateOfBirth || client.documents?.find(doc => doc.extractedDateOfBirth)?.extractedDateOfBirth} />
       {client.duesAmount > 0 ? (
         <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 dark:border-rose-500/30 dark:bg-rose-500/10">
           <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-rose-800 dark:text-rose-300">
@@ -231,15 +232,13 @@ const ClientProfile = ({ client, onOpenCabin, onRecordPayment, onDocumentsChange
         </Section>
       ) : null}
 
-      {isActive ? (
-        <Section title="Documents" count={`${kyc.totalUploaded}/${kyc.total}`} icon={FileText}>
-          <DocumentChecklist
-            kind={client.entityKind}
-            documents={client.documents}
-            onChange={(documents) => onDocumentsChange(client.id, documents)}
-          />
-        </Section>
-      ) : null}
+      <Section title="Documents" count={`${kyc.totalUploaded}/${kyc.total}`} icon={FileText}>
+        <DocumentChecklist
+          kind={client.entityKind || "company"}
+          documents={client.documents || []}
+          onChange={(documents) => onDocumentsChange(client.id, documents)}
+        />
+      </Section>
 
       <Section title="Tenancy history" count={client.stays.length} icon={History}>
         {client.stays.length ? (

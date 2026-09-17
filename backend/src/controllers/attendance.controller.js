@@ -401,6 +401,8 @@ const normalizeBreakSessions = (
         startAt: start,
         endAt: end || null,
         durationMinutes: closedDuration,
+        breakType: session?.breakType || "UTILITY",
+        expectedMinutes: session?.expectedMinutes ?? null,
         startNote: toBreakNote(session?.startNote),
         endNote: toBreakNote(session?.endNote),
         correctedBy: session?.correctedBy || null,
@@ -684,6 +686,8 @@ const toAttendanceView = (row, policy = DEFAULT_POLICY) => {
         endAt: session.endAt || null,
         durationMinutes: liveDurationMinutes,
         closedDurationMinutes: Number(session.durationMinutes || 0),
+        breakType: session.breakType || "UTILITY",
+        expectedMinutes: session.expectedMinutes ?? null,
         startNote: session.startNote || "",
         endNote: session.endNote || "",
       };
@@ -1245,12 +1249,18 @@ exports.startBreak = async (req, res) => {
       });
     }
 
+    const breakType = String(req.body?.breakType || "").toUpperCase();
+    const breakDurations = { LUNCH: 30, TEA: 15, COFFEE: 15, UTILITY: null };
+    if (!Object.hasOwn(breakDurations, breakType)) return res.status(400).json({ message: "Select Lunch, Tea, Coffee or Utility break" });
+    if (breakType === "UTILITY" && !toBreakNote(req.body?.note)) return res.status(400).json({ message: "Enter a reason for the utility break" });
     attendance.breakSessions = [
       ...normalized.sessions,
       {
         startAt: now,
         endAt: null,
         durationMinutes: 0,
+        breakType,
+        expectedMinutes: breakDurations[breakType],
         startNote: toBreakNote(req.body?.note),
         endNote: "",
       },
@@ -1388,19 +1398,7 @@ exports.checkOut = async (req, res) => {
     }
 
     const parsedLocation = parseAttendanceLocation(req.body?.location);
-    const geofenceResult = validateAttendanceGeofence({
-      policy,
-      location: parsedLocation,
-      actionLabel: "check-out",
-    });
-    if (geofenceResult?.status) {
-      return res.status(geofenceResult.status).json({
-        message: geofenceResult.message,
-        distanceMeters: geofenceResult.distanceMeters,
-        effectiveDistanceMeters: geofenceResult.effectiveDistanceMeters,
-        accuracyMeters: geofenceResult.accuracyMeters,
-      });
-    }
+    // Checkout is allowed from any location; all other action policies remain intact.
 
     attendance.checkOutAt = now;
     applyWorkingSnapshot(attendance, {
@@ -1414,7 +1412,7 @@ exports.checkOut = async (req, res) => {
       policy,
     });
     attendance.checkOutNote = toTrimmedString(req.body?.note).slice(0, 240);
-    attendance.checkOutLocation = geofenceResult?.location || parsedLocation || null;
+    attendance.checkOutLocation = parsedLocation || null;
     attendance.metadata = {
       ...(attendance.metadata || {}),
       checkOutIp:
@@ -2424,6 +2422,108 @@ exports.correctUserBreak = async (req, res) => {
   }
 };
 
+/*
+ * Start or end a break for somebody else, right now.
+ *
+ * The correction form exists for fixing a break that has already happened, and
+ * asking for start and end times is right there. It is the wrong tool for the
+ * common case: an employee is on a break this minute and did not record it, and
+ * the manager watching the team list wants one click, not a timestamp they have
+ * to read off a clock.
+ *
+ * It writes the same attendance document the employee's own page reads, and
+ * leaves the same breakAudit trail as a manual correction, so the break shows up
+ * for them and the record still says who added it.
+ */
+exports.manageUserBreak = async (req, res) => {
+  try {
+    if (!req.user?.companyId) return res.status(403).json({ message: "Company context is required" });
+    if (!ensureManageAttendanceRole(req, res)) return null;
+
+    const targetUserId = toTrimmedString(req.params?.userId);
+    if (!/^[a-f\d]{24}$/i.test(targetUserId)) return res.status(400).json({ message: "Valid user is required" });
+    if (!await ensureUserInScope({ actor: req.user, targetUserId })) {
+      return res.status(403).json({ message: "User is outside your attendance scope" });
+    }
+    const target = await User.findOne({ _id: targetUserId, companyId: req.user.companyId, isActive: true }).select("_id name role").lean();
+    if (!target || target.role === USER_ROLES.ADMIN) return res.status(403).json({ message: "Select an active employee in your company" });
+
+    const action = String(req.body?.action || "").toUpperCase();
+    if (!["START", "END"].includes(action)) return res.status(400).json({ message: "Action must be START or END" });
+
+    const policy = await resolvePolicyForCompany(req.user.companyId);
+    const now = new Date();
+    const attendanceDate = toDateKeyInTimezone(now, policy.timezone);
+    const attendance = await Attendance.findOne({ companyId: req.user.companyId, userId: targetUserId, attendanceDate });
+
+    if (!attendance?.checkInAt) return res.status(400).json({ message: `${target.name} has not checked in today` });
+    if (attendance.checkOutAt) return res.status(400).json({ message: `${target.name} has already checked out today` });
+
+    const normalized = normalizeBreakSessions(attendance.breakSessions, { includeOpenTill: now });
+    const sessions = normalized.sessions;
+    const reason = toTrimmedString(req.body?.reason).slice(0, 240)
+      || `${action === "START" ? "Break started" : "Break ended"} by ${req.user.name || "a manager"} from the team attendance view`;
+
+    let sessionIndex;
+    let before = null;
+    let after;
+
+    if (action === "START") {
+      if (normalized.activeBreakStartedAt) {
+        return res.status(409).json({ message: `${target.name} is already on a break`, attendance: toAttendanceView(attendance, policy) });
+      }
+      const breakType = String(req.body?.breakType || "UTILITY").toUpperCase();
+      const breakDurations = { LUNCH: 30, TEA: 15, COFFEE: 15, UTILITY: null };
+      if (!Object.hasOwn(breakDurations, breakType)) return res.status(400).json({ message: "Select Lunch, Tea, Coffee or Utility break" });
+      after = {
+        startAt: now, endAt: null, durationMinutes: 0,
+        breakType, expectedMinutes: breakDurations[breakType],
+        startNote: reason, endNote: "",
+        correctedBy: req.user._id, correctedByName: req.user.name || "", correctedByRole: req.user.role,
+        correctedAt: now, correctionReason: reason,
+      };
+      sessionIndex = sessions.length;
+      sessions.push(after);
+    } else {
+      sessionIndex = sessions.findIndex((session) => !session.endAt);
+      if (sessionIndex === -1) {
+        return res.status(409).json({ message: `${target.name} is not on a break`, attendance: toAttendanceView(attendance, policy) });
+      }
+      before = { ...sessions[sessionIndex] };
+      after = {
+        ...before, endAt: now, durationMinutes: toMinutesBetween(before.startAt, now), endNote: reason,
+        correctedBy: req.user._id, correctedByName: req.user.name || "", correctedByRole: req.user.role,
+        correctedAt: now, correctionReason: reason,
+      };
+      sessions[sessionIndex] = after;
+    }
+
+    validateBreakTimeline({ sessions, checkInAt: attendance.checkInAt, checkOutAt: attendance.checkOutAt, now });
+    attendance.breakSessions = sessions;
+    applyWorkingSnapshot(attendance, { referenceTime: now });
+
+    const updated = await Attendance.findOneAndUpdate(
+      { _id: attendance._id, companyId: req.user.companyId, updatedAt: attendance.updatedAt },
+      {
+        $set: { breakSessions: attendance.breakSessions, totalBreakMinutes: attendance.totalBreakMinutes, workedMinutes: attendance.workedMinutes },
+        $push: { breakAudit: { actorId: req.user._id, actorName: req.user.name || "", actorRole: req.user.role, changedAt: now, reason, sessionIndex, before, after } },
+        $inc: { __v: 1 },
+      },
+      { new: true, runValidators: true },
+    );
+    if (!updated) return res.status(409).json({ message: "Attendance changed while saving. Refresh and try again." });
+
+    return res.json({
+      message: action === "START" ? `Break started for ${target.name}` : `Break ended for ${target.name}`,
+      attendance: toAttendanceView(updated.toObject(), policy),
+    });
+  } catch (error) {
+    if (error.statusCode === 400) return res.status(400).json({ message: error.message });
+    req.log?.error(error);
+    return res.status(500).json({ message: "Failed to update the break" });
+  }
+};
+
 exports.updateUserAttendanceStatus = async (req, res) => {
   try {
     if (!req.user?.companyId) {
@@ -2713,4 +2813,31 @@ exports.getDailyAttendanceForAdmin = async (req, res) => {
     });
     return res.status(500).json({ message: "Server error" });
   }
+};
+
+exports.getViolations = async (req, res) => {
+ try {
+  if (!req.user.companyId) return res.status(403).json({ message: "Company context required" });
+  const policy = await resolvePolicyForCompany(req.user.companyId);
+  const month = String(req.query.month || toDateKeyInTimezone(new Date(), policy.timezone).slice(0, 7));
+  if (!MONTH_KEY_PATTERN.test(month) || month > toDateKeyInTimezone(new Date(), policy.timezone).slice(0, 7)) return res.status(400).json({ message: "Select a current or past month" });
+  const users = canManageAttendance(req.user.role) ? await getScopedUsersForAttendanceViewer(req.user) : [req.user];
+  res.json(await require("../services/attendanceViolation.service").reconcileMonth({ companyId: req.user.companyId, userIds: users.map(user => user._id), month, policy }));
+ } catch (error) { req.log?.error(error); res.status(500).json({ message: "Failed to load attendance violations" }); }
+};
+exports.reviewViolation = async (req, res) => {
+ try {
+  if (!ensureManageAttendanceRole(req, res)) return;
+  const { action, note } = req.body;
+  if (!["WARNING_ISSUED", "MANAGEMENT_REVIEW", "EXCUSED"].includes(action) || !String(note || "").trim()) return res.status(400).json({ message: "Select an action and enter the management note" });
+  if (!/^[a-f0-9]{24}$/i.test(req.params.violationId)) return res.status(400).json({ message: "Invalid violation" });
+  const users = await getScopedUsersForAttendanceViewer(req.user);
+  const Model = require("../models/AttendanceViolation");
+  const row = await Model.findOne({ _id: req.params.violationId, companyId: req.user.companyId, userId: { $in: users.map(user => user._id) } });
+  if (!row) return res.status(404).json({ message: "Violation not found" });
+  if (action === "WARNING_ISSUED" && row.level === "RECORDED") return res.status(400).json({ message: "The policy does not call for a warning at this occurrence" });
+  if (action === "EXCUSED") { row.excused = true; row.active = false; }
+  row.history.push({ action, note: String(note).trim().slice(0, 1000), actor: req.user._id, at: new Date() });
+  await row.save(); res.json(row);
+ } catch (error) { req.log?.error(error); res.status(error.name === "VersionError" ? 409 : 500).json({ message: "Unable to save review; refresh and try again" }); }
 };

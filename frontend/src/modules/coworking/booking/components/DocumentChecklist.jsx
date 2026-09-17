@@ -1,5 +1,6 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Eye, Paperclip, Upload, X } from "lucide-react";
+import { readDocumentBirthDate } from "../../../../utils/documentBirthDate";
 import { cn } from "../../../../components/ui";
 import {
   ACCEPTED_TYPES,
@@ -10,6 +11,7 @@ import {
   forgetFile,
   formatBytes,
   kycStatusOf,
+  loadFileUrl,
 } from "../kycDocuments";
 
 /*
@@ -26,7 +28,22 @@ import {
 const DocumentRow = ({ doc, uploaded, onUpload, onRemove, readOnly }) => {
   const inputRef = useRef(null);
   const [error, setError] = useState("");
-  const url = uploaded ? fileUrl(uploaded.id) : null;
+  const [url, setUrl] = useState(() => uploaded ? fileUrl(uploaded.id) : null);
+  const isImage = Boolean(uploaded && (
+    String(uploaded.type || "").startsWith("image/")
+    || /\.(png|jpe?g)$/i.test(String(uploaded.fileName || ""))
+  ));
+
+  useEffect(() => {
+    if (!uploaded?.id || url) return undefined;
+    let active = true;
+    loadFileUrl(uploaded.id).then((storedUrl) => {
+      if (active && storedUrl) setUrl(storedUrl);
+    });
+    return () => {
+      active = false;
+    };
+  }, [uploaded?.id, url]);
 
   const handleFile = (event) => {
     const file = event.target.files?.[0];
@@ -79,23 +96,44 @@ const DocumentRow = ({ doc, uploaded, onUpload, onRemove, readOnly }) => {
           ) : null}
 
           {uploaded ? (
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-600 dark:text-slate-300">
-              <span className="truncate font-medium">{uploaded.fileName}</span>
-              <span className="text-slate-400 dark:text-slate-500">{formatBytes(uploaded.size)}</span>
+            <>
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] text-slate-600 dark:text-slate-300">
+                <span className="truncate font-medium">{uploaded.fileName}</span>
+                <span className="text-slate-400 dark:text-slate-500">{formatBytes(uploaded.size)}</span>
+                {url ? (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                  >
+                    <Eye aria-hidden="true" size={11} />
+                    Open full preview
+                  </a>
+                ) : (
+                  <span className="text-slate-400 dark:text-slate-500">Loading preview...</span>
+                )}
+              </p>
               {url ? (
                 <a
                   href={url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                  className="mt-2 block w-full max-w-sm overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
+                  aria-label={`Preview ${uploaded.fileName}`}
                 >
-                  <Eye aria-hidden="true" size={11} />
-                  View
+                  {isImage ? (
+                    <img src={url} alt={`Preview of ${uploaded.fileName}`} className="h-36 w-full object-contain" />
+                  ) : (
+                    <iframe
+                      src={`${url}#toolbar=0&navpanes=0`}
+                      title={`Preview of ${uploaded.fileName}`}
+                      className="pointer-events-none h-44 w-full bg-white"
+                    />
+                  )}
                 </a>
-              ) : (
-                <span className="text-slate-400 dark:text-slate-500">On file</span>
-              )}
-            </p>
+              ) : null}
+            </>
           ) : null}
 
           {error ? <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">{error}</p> : null}
@@ -136,15 +174,27 @@ const DocumentRow = ({ doc, uploaded, onUpload, onRemove, readOnly }) => {
   );
 };
 
-const DocumentChecklist = ({ kind, documents = [], onChange, readOnly = false, className }) => {
+const DocumentChecklist = ({ kind, documents = [], onChange, onDateOfBirth, readOnly = false, className }) => {
+  const [extracting, setExtracting] = useState(false);
+  const [extractionMessage, setExtractionMessage] = useState("");
   const set = documentsFor(kind);
   const status = kycStatusOf({ kind, documents });
   const byKey = new Map(documents.map((doc) => [doc.key, doc]));
 
-  const upload = (doc, file) => {
+  const upload = async (doc, file) => {
+    if (extracting) return;
+    setExtracting(true);
+    setExtractionMessage("Reading document for date of birth...");
+    const attached = attachFile(doc, file);
+    try {
+      const date = await readDocumentBirthDate(file);
+      if (date) { attached.extractedDateOfBirth = date; onDateOfBirth?.(date); }
+      setExtractionMessage(date ? `Date of birth found: ${date}. Please verify it against the document.` : "No unambiguous date of birth found. You can enter it manually.");
+    } catch { setExtractionMessage("Document attached; automatic date extraction was unavailable. Enter the date of birth manually."); }
     const existing = byKey.get(doc.key);
     if (existing) forgetFile(existing.id);
-    onChange([...documents.filter((item) => item.key !== doc.key), attachFile(doc, file)]);
+    onChange([...documents.filter((item) => item.key !== doc.key), attached]);
+    setExtracting(false);
   };
 
   const remove = (doc) => {
@@ -155,6 +205,7 @@ const DocumentChecklist = ({ kind, documents = [], onChange, readOnly = false, c
 
   return (
     <div className={className}>
+      {extractionMessage && <p role="status" className="mb-3 text-xs text-blue-600">{extractionMessage}</p>}
       <div
         className={cn(
           "mb-3 flex flex-wrap items-center gap-2 rounded-lg border p-2.5",
@@ -195,12 +246,12 @@ const DocumentChecklist = ({ kind, documents = [], onChange, readOnly = false, c
       <ul className="space-y-1.5">
         {set.map((doc) => (
           <DocumentRow
-            key={doc.key}
+            key={`${doc.key}:${byKey.get(doc.key)?.id || "missing"}`}
             doc={doc}
             uploaded={byKey.get(doc.key)}
             onUpload={upload}
             onRemove={remove}
-            readOnly={readOnly}
+            readOnly={readOnly || extracting}
           />
         ))}
       </ul>
