@@ -4,6 +4,32 @@ import { CABIN_SEATS } from "./cabinData";
 
 export const fetchBoardState = async () => (await api.get("/coworking/board")).data;
 
+/*
+ * Why the board is not on the server, in words that say what to do about it.
+ *
+ * This matters more than a usual error string. A board that cannot save keeps
+ * working perfectly against localStorage, so the failure has no symptom until
+ * somebody opens the CRM on another machine and finds their clients missing.
+ * A permission problem in particular reads as "it works, but only here", which
+ * is indistinguishable from the bug this whole sync was built to fix - so it is
+ * named rather than folded into a generic failure.
+ */
+export const describeSyncFailure = (error, verb) => {
+  const status = error?.response?.status;
+  if (status === 403) {
+    return `This board could not be ${verb} to the server: your account is not allowed to save coworking changes. Ask an admin for edit access on the Booking Board — until then anything you do here stays on this device only.`;
+  }
+  if (status === 409) {
+    return "Someone else changed this board. Reload to see their changes before booking again.";
+  }
+  if (status === 401) {
+    return "Your session has expired, so this board is not being saved. Sign in again.";
+  }
+  return `This board could not be ${verb} to the server${
+    error?.response?.data?.message ? `: ${error.response.data.message}` : ""
+  }. Changes are held on this device only.`;
+};
+
 export const pushBoardState = async (board, version) =>
   (await api.put("/coworking/board", {
     state: { cabins: board.cabins, activity: (board.activity || []).slice(0, 200) },
@@ -580,12 +606,7 @@ export const useBoard = () => {
       })
       .catch((error) => {
         if (!active) return;
-        setSync({
-          loading: false,
-          version: 0,
-          error: error.response?.data?.message || "Working offline: this board could not reach the server.",
-          savedAt: null,
-        });
+        setSync({ loading: false, version: 0, error: describeSyncFailure(error, "loaded"), savedAt: null });
       })
       .finally(() => {
         // Whatever happened, later changes are the user's and must be saved.
@@ -607,12 +628,7 @@ export const useBoard = () => {
           setSync((current) => ({ ...current, version, error: "", savedAt: new Date() }));
         })
         .catch((error) => {
-          setSync((current) => ({
-            ...current,
-            error: error.response?.status === 409
-              ? "Someone else changed this board. Reload to see their changes before booking again."
-              : error.response?.data?.message || "Could not save to the server. Changes are held on this device only.",
-          }));
+          setSync((current) => ({ ...current, error: describeSyncFailure(error, "saved") }));
         });
     }, 600);
     return () => window.clearTimeout(timer);

@@ -35,7 +35,7 @@ const csvEscape = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 const ClientsPage = () => {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
-  const [board, dispatch] = useBoard();
+  const [board, dispatch, sync] = useBoard();
   const [tab, setTab] = useState("all");
   const [query, setQuery] = useState("");
   const [toast, setToast] = useState(null);
@@ -104,6 +104,13 @@ const ClientsPage = () => {
   return (
     <div className="custom-scrollbar h-full min-h-0 flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-950">
       <div className="mx-auto max-w-[1560px] px-4 py-5 sm:px-6">
+        {/* Clients are onboarded from here too, so a board that is not saving
+            has to say so on this page as well as on the board itself. */}
+        {sync.error ? (
+          <p role="alert" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[12.5px] text-amber-900">
+            {sync.error}
+          </p>
+        ) : null}
         <BirthdayReminders clients={directory} />
         <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-3">
           <div className="min-w-0">

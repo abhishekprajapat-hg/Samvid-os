@@ -658,3 +658,32 @@ test("a break cannot be started for somebody who has checked out", async () => {
   assert.equal(res.code, 400);
   assert.match(res.body.message, /checked out/);
 });
+
+// ---- The booking board's own state must stay reachable by the people who
+// work it. It is the board page's data, not the cabin admin CRUD.
+test("the board routes are not gated on cabin admin permissions", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/routes/coworkingBoard.routes.js"), "utf8");
+  assert.doesNotMatch(
+    source,
+    /requirePermission\(/,
+    "cabins.* permissions are held only by COWORKING_ADMIN and MANAGER by default; requiring them here 403s the executives who run the board, which silently drops it back to localStorage",
+  );
+});
+
+test("the board is mounted inside the coworking router, which carries its authorisation", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/routes/coworkingAccess.routes.js"), "utf8");
+  assert.match(source, /router\.use\("\/board", require\("\.\/coworkingBoard\.routes"\)\)/);
+  // The gate the board relies on instead of its own: page access, and a method
+  // to page-action mapping that already makes GET a view and PUT an edit.
+  assert.match(source, /checkRoleOrPageAccess\(/);
+  assert.match(source, /requirePageActionForMethod\(/);
+});
+
+test("a board save must state the version it was built on", async () => {
+  const route = require("../src/routes/coworkingBoard.routes.js");
+  const layer = route.stack.find((row) => row.route?.path === "/" && row.route.methods.put);
+  assert.ok(layer, "PUT / is registered");
+  // Two handlers at most: the write limiter and the handler. A third would mean
+  // a permission gate crept back in.
+  assert.ok(layer.route.stack.length <= 2, `PUT / has ${layer.route.stack.length} handlers; a permission gate may have been re-added`);
+});

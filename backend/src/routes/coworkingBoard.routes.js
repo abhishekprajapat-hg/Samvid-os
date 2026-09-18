@@ -1,7 +1,21 @@
 const router = require("express").Router();
 const BoardState = require("../models/CoworkingBoardState");
-const { requirePermission } = require("../middleware/permission.middleware");
 const { writeLimiter } = require("../middleware/rateLimit.middleware");
+
+/*
+ * Authorisation is the parent router's, deliberately.
+ *
+ * /coworking already gates every request on being allowed to use the booking
+ * board page, and maps the method to a page action - GET needs view, PUT needs
+ * edit. That is exactly the question here: this is the booking board's own
+ * state, not the cabin admin CRUD.
+ *
+ * This previously also demanded cabins.view / cabins.update, which only
+ * COWORKING_ADMIN and MANAGER hold by default. The executives who actually work
+ * this board all day got 403 on every save, so the board fell back to
+ * localStorage and each machine quietly kept its own floor - the exact bug the
+ * server copy was added to fix.
+ */
 
 // A floor of 65 cabins with their activity log; generous, but a hard ceiling so
 // a runaway client cannot grow the document without bound.
@@ -10,7 +24,7 @@ const MAX_ACTIVITY_ENTRIES = 200;
 
 const isPlainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-router.get("/", requirePermission("cabins.view"), async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const row = await BoardState.findOne({ companyId: req.user.companyId }).lean();
     res.json({
@@ -25,7 +39,7 @@ router.get("/", requirePermission("cabins.view"), async (req, res) => {
   }
 });
 
-router.put("/", writeLimiter, requirePermission("cabins.update"), async (req, res) => {
+router.put("/", writeLimiter, async (req, res) => {
   try {
     const state = req.body?.state;
     if (!isPlainObject(state) || !Array.isArray(state.cabins)) {
