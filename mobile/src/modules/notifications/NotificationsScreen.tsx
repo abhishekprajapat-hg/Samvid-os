@@ -14,6 +14,7 @@ import {
   type LeadPaymentApprovalRequest,
   type LeadStatusRequest,
 } from "../../services/leadService";
+import { getAdminUserDeleteRequests, reviewUserDeleteRequest } from "../../services/userService";
 import {
   approveInventoryRequest,
   getPendingInventoryRequests,
@@ -33,8 +34,19 @@ type InventoryRequest = {
   proposedData?: Record<string, unknown>;
 };
 
+type UserDeleteRequest = {
+  _id: string;
+  status?: string;
+  reason?: string;
+  createdAt?: string;
+  requestedBy?: { _id?: string; name?: string; role?: string };
+  targetUser?: { _id?: string; name?: string; role?: string; email?: string } | null;
+  user?: { _id?: string; name?: string; role?: string; email?: string } | null;
+};
+
 type NotificationItem =
   | { kind: "LEAD"; id: string; createdAt: string; request: LeadStatusRequest }
+  | { kind: "USER_DELETE"; id: string; createdAt: string; request: UserDeleteRequest }
   | { kind: "INVENTORY"; id: string; createdAt: string; request: InventoryRequest }
   | { kind: "PAYMENT"; id: string; createdAt: string; request: LeadPaymentApprovalRequest };
 
@@ -45,6 +57,7 @@ const FILTERS: Array<{ value: NotificationFilter; label: string }> = [
   { value: "LEAD", label: "Lead" },
   { value: "PAYMENT", label: "Payment" },
   { value: "INVENTORY", label: "Inventory" },
+  { value: "USER_DELETE", label: "User" },
 ];
 
 const asDate = (value?: string) => {
@@ -67,8 +80,11 @@ const formatDate = (value?: string) => {
 
 const isRouteMissingError = (error: unknown) => /route not found|404|not found/i.test(toErrorMessage(error, ""));
 
+const targetUserOf = (request: UserDeleteRequest) => request.targetUser || request.user || null;
+
 const getRequestTitle = (item: NotificationItem) => {
   if (item.kind === "LEAD") return item.request.lead?.name || "Lead status request";
+  if (item.kind === "USER_DELETE") return targetUserOf(item.request)?.name || "User deletion";
   if (item.kind === "PAYMENT") return String(item.request.name || "Lead payment approval");
   const inventory = item.request.inventoryId;
   return [inventory?.projectName, inventory?.towerName, inventory?.unitNumber].filter(Boolean).join(" - ") || "Inventory request";
@@ -76,12 +92,15 @@ const getRequestTitle = (item: NotificationItem) => {
 
 const getRequestTypeLabel = (kind: NotificationItem["kind"]) => {
   if (kind === "LEAD") return "Lead Status";
+  if (kind === "USER_DELETE") return "User Deletion";
   if (kind === "PAYMENT") return "Payment";
   return "Inventory";
 };
 
 const getRequester = (item: NotificationItem) => {
-  const source = item.kind === "PAYMENT" ? item.request?.dealPayment?.approvalRequestedBy : item.request?.requestedBy;
+  const source = item.kind === "PAYMENT"
+    ? item.request?.dealPayment?.approvalRequestedBy
+    : item.request?.requestedBy;
   return {
     name: String(source?.name || "User"),
     role: String(source?.role || "-"),
@@ -103,6 +122,10 @@ const getAgeLabel = (value?: string) => {
 
 const buildSearchText = (item: NotificationItem) => {
   const requester = getRequester(item);
+  if (item.kind === "USER_DELETE") {
+    const target = targetUserOf(item.request);
+    return [item.kind, requester.name, requester.role, target?.name, target?.role, target?.email, item.request.reason].join(" ");
+  }
   if (item.kind === "LEAD") {
     return [
       item.kind,
@@ -151,6 +174,7 @@ export const NotificationsScreen = () => {
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState<NotificationFilter>("ALL");
 
+  const [userDeleteRequests, setUserDeleteRequests] = useState<UserDeleteRequest[]>([]);
   const [leadRequests, setLeadRequests] = useState<LeadStatusRequest[]>([]);
   const [leadRequestHistory, setLeadRequestHistory] = useState<LeadStatusRequest[]>([]);
   const [inventoryRequests, setInventoryRequests] = useState<InventoryRequest[]>([]);
@@ -204,7 +228,7 @@ export const NotificationsScreen = () => {
       else setLoading(true);
       setError("");
 
-      const [leadRows, leadApprovedRows, leadRejectedRows, inventoryRows, paymentRows] = await Promise.all([
+      const [leadRows, leadApprovedRows, leadRejectedRows, inventoryRows, paymentRows, userDeleteRows] = await Promise.all([
         getPendingLeadStatusRequests().catch((err) => {
           if (!isRouteMissingError(err)) throw err;
           return [];
@@ -225,8 +249,19 @@ export const NotificationsScreen = () => {
           if (!isRouteMissingError(err)) throw err;
           return [];
         }),
+        /*
+         * Deleting a person goes through approval the same way inventory does:
+         * a manager raises the request from Team Manager, an admin reviews it
+         * here. Without this the request could be raised and never answered
+         * from the app.
+         */
+        getAdminUserDeleteRequests({ status: "PENDING" }).catch((err) => {
+          if (!isRouteMissingError(err)) throw err;
+          return [];
+        }),
       ]);
 
+      setUserDeleteRequests(Array.isArray(userDeleteRows) ? (userDeleteRows as UserDeleteRequest[]) : []);
       setLeadRequests(Array.isArray(leadRows) ? leadRows : []);
       const historyMap = new Map<string, LeadStatusRequest>();
       const mergedRows = [
@@ -288,12 +323,18 @@ export const NotificationsScreen = () => {
       createdAt: String((row as any)?.dealPayment?.approvalRequestedAt || row.updatedAt || row.createdAt || ""),
       request: row,
     }));
-    return [...leadItems, ...inventoryItems, ...paymentItems].sort((a, b) => {
+    const userDeleteItems: NotificationItem[] = userDeleteRequests.map((row) => ({
+      kind: "USER_DELETE",
+      id: String(row._id || ""),
+      createdAt: String(row.createdAt || ""),
+      request: row,
+    }));
+    return [...leadItems, ...inventoryItems, ...paymentItems, ...userDeleteItems].sort((a, b) => {
       const ta = asDate(a.createdAt)?.getTime() || 0;
       const tb = asDate(b.createdAt)?.getTime() || 0;
       return tb - ta;
     });
-  }, [leadRequests, inventoryRequests, paymentRequests]);
+  }, [leadRequests, inventoryRequests, paymentRequests, userDeleteRequests]);
 
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -325,6 +366,10 @@ export const NotificationsScreen = () => {
           status: currentStatus,
           approvalStatus: "APPROVED",
         });
+      } else if (item.kind === "USER_DELETE") {
+        // Approving this actually removes the person, so it is the one action
+        // here that cannot be undone from the app.
+        await reviewUserDeleteRequest(item.id, { status: "APPROVED" });
       } else {
         await approveInventoryRequest(item.id);
       }
@@ -358,6 +403,8 @@ export const NotificationsScreen = () => {
           approvalStatus: "REJECTED",
           approvalNote: reason,
         });
+      } else if (item.kind === "USER_DELETE") {
+        await reviewUserDeleteRequest(item.id, { status: "REJECTED", reviewNote: reason });
       } else {
         await rejectInventoryRequest(item.id, reason);
       }
@@ -473,9 +520,9 @@ export const NotificationsScreen = () => {
             <AppCard key={`${item.kind}-${item.id}`} style={styles.requestCard as object}>
               <View style={styles.rowBetween}>
                 <View style={styles.requestHeading}>
-                  <View style={[styles.kindIcon, item.kind === "PAYMENT" ? styles.kindIconGreen : item.kind === "INVENTORY" ? styles.kindIconViolet : styles.kindIconBlue]}>
+                  <View style={[styles.kindIcon, item.kind === "PAYMENT" ? styles.kindIconGreen : item.kind === "INVENTORY" ? styles.kindIconViolet : item.kind === "USER_DELETE" ? styles.kindIconRose : styles.kindIconBlue]}>
                     <Icon
-                      name={item.kind === "PAYMENT" ? "card" : item.kind === "INVENTORY" ? "business" : "person"}
+                      name={item.kind === "PAYMENT" ? "card" : item.kind === "INVENTORY" ? "business" : item.kind === "USER_DELETE" ? "trash-outline" : "person"}
                       size={15}
                       color="#ffffff"
                     />
@@ -503,6 +550,13 @@ export const NotificationsScreen = () => {
                   <Text style={styles.detailLine}>Payment: {String(item.request?.dealPayment?.mode || "-")} | {String(item.request?.dealPayment?.paymentType || "-")}</Text>
                   <Text style={styles.meta}>Reference: {String(item.request?.dealPayment?.paymentReference || "-")}</Text>
                   <Text style={styles.noteLine}>Note: {String(item.request?.dealPayment?.note || "-")}</Text>
+                </>
+              ) : item.kind === "USER_DELETE" ? (
+                <>
+                  <Text style={styles.detailLine}>
+                    Remove: {targetUserOf(item.request)?.name || "-"} ({targetUserOf(item.request)?.role || "-"})
+                  </Text>
+                  <Text style={styles.noteLine}>Reason: {item.request.reason || "-"}</Text>
                 </>
               ) : (
                 <>
@@ -708,6 +762,14 @@ export const NotificationsScreen = () => {
                     <Text style={styles.previewText}>Payment Reference: {String(previewItem.request?.dealPayment?.paymentReference || "-")}</Text>
                     <Text style={styles.previewText}>Request Note: {String(previewItem.request?.dealPayment?.note || "-")}</Text>
                     <Text style={styles.previewText}>Requested By: {previewItem.request?.dealPayment?.approvalRequestedBy?.name || "-"}</Text>
+                  </>
+                ) : previewItem.kind === "USER_DELETE" ? (
+                  <>
+                    <Text style={styles.previewText}>User: {targetUserOf(previewItem.request)?.name || "-"}</Text>
+                    <Text style={styles.previewText}>Role: {targetUserOf(previewItem.request)?.role || "-"}</Text>
+                    <Text style={styles.previewText}>Email: {targetUserOf(previewItem.request)?.email || "-"}</Text>
+                    <Text style={styles.previewText}>Reason: {previewItem.request.reason || "-"}</Text>
+                    <Text style={styles.previewText}>Requested By: {previewItem.request.requestedBy?.name || "-"}</Text>
                   </>
                 ) : (
                   <>
@@ -1025,6 +1087,9 @@ const styles = StyleSheet.create({
   },
   kindIconViolet: {
     backgroundColor: "#6440dd",
+  },
+  kindIconRose: {
+    backgroundColor: "#b83232",
   },
   requestType: {
     color: "#161c24",

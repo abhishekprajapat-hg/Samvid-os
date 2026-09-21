@@ -359,12 +359,39 @@ The store-blocking half is done.
 | `MoreMenuScreen` | Links added |
 | `LoginScreen` | **Fixed:** it carried its own abbreviated copy of the terms with different headings — two divergent statements of the legal position. Both modals now read the canonical text |
 
+### Closed since
+
+- **Error boundaries.** Mobile had none. Any render error took the whole app to
+  a blank screen with no way back short of force-quitting — worse on a phone
+  than in a browser, where there is at least an address bar to reload from.
+
+  `ErrorBoundary` mirrors web's, with recovery suited to the platform:
+  `window.location.reload()` has no equivalent, so it offers a retry for a
+  transient failure and a full reload through `expo-updates` when that is not
+  enough. It wraps the app *outside* ThemeProvider — a crash inside the provider
+  still has to render something, which is why the fallback reads static tokens
+  — and wraps every gated screen individually, so one broken screen leaves the
+  tab bar up and lets the person navigate away.
+- **16 unmapped icons.** The Phase 1 icon sweep was built from literal
+  `name="..."` props, so every name passed as an *expression* was silently
+  rendering nothing — including mic, camera and volume on the call screen, and
+  the checkbox glyphs. All 57 names now resolve; the check was rewritten to read
+  expressions too.
+
 ### Still open in Phase 8
 
-- Dark mode completion. The infrastructure shipped in Phase 1, but screens
-  reading the static `colors` export stay light until migrated to `useTheme()`.
-- Crash reporting, and the remaining partial screens from the gap matrix
-  (tasks, calendar, reports, chat depth, profile).
+- **Dark mode completion.** The infrastructure shipped in Phase 1 and works, but
+  **1,310 colour literals across 32 screens** still resolve statically, and
+  `StyleSheet.create` runs once at import so they cannot follow the scheme.
+  Finishing it means converting each screen to a `makeStyles(colors)` factory.
+
+  That is mechanical but large, and it is genuinely all-or-nothing: a half
+  converted app where some screens flip and others do not is worse than one that
+  stays light. It deserves its own focused pass rather than being folded into
+  another phase.
+- Crash reporting (a service, e.g. Sentry — the boundary above is the local
+  half), and the remaining partial screens from the gap matrix (tasks, calendar,
+  reports, chat depth, profile).
 
 ## Phase 7 — Admin depth 🟡
 
@@ -374,12 +401,23 @@ The store-blocking half is done.
 | `userService` additions | `createUserDeleteRequest`, `getAdminUserDeleteRequests`, `reviewUserDeleteRequest`, `updateChannelPartnerInventoryAccess`, `updateUserDesignation` |
 | `TeamManagerScreen` | **Fixed:** deleting a user is an approval workflow on web — admin deletes directly, a manager raises a request. Mobile blocked non-admins entirely, so the workflow was unreachable from a phone |
 
+### Closed since
+
+- **User delete requests are reviewable on mobile.** `NotificationsScreen` gained
+  a `USER_DELETE` kind alongside lead, inventory and payment requests — fetch,
+  filter chip, card, preview and approve/reject. The loop a manager can open from
+  Team Manager now closes without leaving the app.
+
+  Adding the kind made TypeScript reject two render branches that used `else` to
+  mean "inventory". Both are explicit now; without the type it would have
+  rendered a user request as a malformed inventory card.
+- **Custom roles are assignable from mobile.** `roleService` had no caller, so a
+  role created on web could never be given to anyone from a phone. Team Manager
+  now lists custom roles beside the built-ins, and an admin can add or delete
+  them inline.
+
 ### Still open in Phase 7
 
-- **Reviewing user delete requests on mobile.** A manager can now raise one, but
-  `NotificationsScreen` does not yet list them — an admin reviews on web. Not a
-  broken loop (admins work at a desk), but it is half the workflow. Left out
-  rather than patched blind into a 1,176-line screen.
 - `AdminCommandConsoleScreen` (505 lines) vs web's 3,830: the console's
   analytics, audit and workflow tooling. The plan calls for splitting it into
   sub-screens rather than one monolith.

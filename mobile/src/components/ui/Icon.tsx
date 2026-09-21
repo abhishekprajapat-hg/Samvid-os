@@ -8,6 +8,8 @@ import {
   MessageSquare, MoreHorizontal, Paperclip, Pencil, Phone, PieChart, Plus,
   RefreshCw, Search, Send, Settings, Share2, ShieldCheck, SwitchCamera, Target,
   Trash2, TrendingUp, Trophy, User, UserCheck, UserCircle2, Users, Video, X,
+  CheckSquare, CreditCard, Mic, MicOff, Pause, Play, Square, VideoOff,
+  Volume1, Volume2,
   XCircle, type LucideIcon,
 } from "lucide-react-native";
 import { palette } from "../../theme/tokens";
@@ -94,6 +96,27 @@ const ICONS: Record<string, LucideIcon> = {
   "time-outline": Clock,
   "trash-outline": Trash2,
   "videocam-outline": Video,
+
+  /*
+   * Names only ever passed as an expression - the call controls, the
+   * checkboxes, the request-kind glyphs. The first sweep of this map was built
+   * from literal name="..." props, so every one of these was silently
+   * rendering nothing.
+   */
+  mic: Mic,
+  "mic-off": MicOff,
+  videocam: Video,
+  "videocam-off": VideoOff,
+  "volume-high": Volume2,
+  "volume-medium": Volume1,
+  pause: Pause,
+  play: Play,
+  stop: Square,
+  checkbox: CheckSquare,
+  "square-outline": Square,
+  sync: RefreshCw,
+  card: CreditCard,
+  business: Building2,
 
   /* ---- tab-bar aliases, aligned to the web nav's own glyph choices ---- */
   speedometer: Home,

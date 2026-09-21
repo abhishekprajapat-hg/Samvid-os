@@ -8,6 +8,7 @@ import { RootNavigator } from "./src/navigation/RootNavigator";
 import { ThemeProvider, useTheme } from "./src/theme/ThemeContext";
 import { appFonts } from "./src/theme/fonts";
 import { applyGlobalFont } from "./src/theme/applyGlobalFont";
+import { ErrorBoundary } from "./src/components/common/ErrorBoundary";
 
 // Patches Text/TextInput to default to Inter. Runs once, at module scope, so it
 // is in place before the first render rather than after a flash of system face.
@@ -42,8 +43,15 @@ const Shell = () => {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <Shell />
-    </ThemeProvider>
+    /*
+     * Outermost, and outside ThemeProvider on purpose: a crash inside the
+     * provider itself still has to render something, and the fallback reads
+     * static tokens rather than the context for exactly that reason.
+     */
+    <ErrorBoundary label="app">
+      <ThemeProvider>
+        <Shell />
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }

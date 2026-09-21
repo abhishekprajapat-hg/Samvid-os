@@ -20,6 +20,7 @@ import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Screen } from "../../components/common/Screen";
 import { useAuth } from "../../context/AuthContext";
+import { createCustomRole, deleteCustomRole, getCustomRoles, type CustomRole } from "../../services/roleService";
 import {
   createUser,
   createUserDeleteRequest,
@@ -103,6 +104,16 @@ export const TeamManagerScreen = () => {
   const [saving, setSaving] = useState(false);
   const [rebalancing, setRebalancing] = useState(false);
   const [deletingId, setDeletingId] = useState("");
+
+  /*
+   * Custom roles: an admin-defined name a user can be given instead of one of
+   * the built-ins. A user carries `custom:<id>` as their role, the same value
+   * web assigns. The service existed but nothing called it, so a custom role
+   * could be created on web and then never assigned from a phone.
+   */
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
+  const [newRoleName, setNewRoleName] = useState("");
+  const [savingRole, setSavingRole] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -136,9 +147,15 @@ export const TeamManagerScreen = () => {
       if (silent) setRefreshing(true);
       else setLoading(true);
 
-      const [userPayload, leadRows] = await Promise.all([getUsers(), getAllLeads()]);
+      const [userPayload, leadRows, roleRows] = await Promise.all([
+        getUsers(),
+        getAllLeads(),
+        // Only an admin may list custom roles; everyone else just gets none.
+        getCustomRoles().catch(() => [] as CustomRole[]),
+      ]);
       setUsers((userPayload?.users || []) as TeamUser[]);
       setLeads((leadRows || []) as TeamLead[]);
+      setCustomRoles(roleRows);
       setError("");
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load team"));
@@ -393,6 +410,42 @@ export const TeamManagerScreen = () => {
     }
   };
 
+  const addCustomRole = async () => {
+    const name = newRoleName.trim();
+    if (!name) return;
+
+    setSavingRole(true);
+    try {
+      await createCustomRole({ name });
+      setNewRoleName("");
+      setCustomRoles(await getCustomRoles());
+      setSuccess(`Role "${name}" created`);
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to create role"));
+    } finally {
+      setSavingRole(false);
+    }
+  };
+
+  const removeCustomRole = (role: CustomRole) => {
+    Alert.alert("Delete role", `Delete the role "${role.name}"?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteCustomRole(String(role._id || ""));
+            setCustomRoles(await getCustomRoles());
+            setSuccess("Role deleted");
+          } catch (e) {
+            setError(toErrorMessage(e, "Failed to delete role"));
+          }
+        },
+      },
+    ]);
+  };
+
   const remove = async (userId: string, userName: string) => {
     // Web lets a manager raise a delete request even though only an admin can
     // carry it out; mobile blocked them entirely, so the workflow was
@@ -517,7 +570,51 @@ export const TeamManagerScreen = () => {
                     }}
                   />
                 ))}
+                {customRoles.map((role) => {
+                  const value = `custom:${role._id}`;
+                  return (
+                    <AppChip
+                      key={value}
+                      label={String(role.name || "Role")}
+                      active={roleDraft === value}
+                      onPress={() => {
+                        setRoleDraft(value);
+                        setManagerId("");
+                      }}
+                    />
+                  );
+                })}
               </View>
+
+              {isAdmin ? (
+                <View style={styles.customRoleBlock}>
+                  <Text style={styles.label}>Custom roles</Text>
+                  <View style={styles.customRoleRow}>
+                    <AppInput
+                      style={styles.customRoleInput as object}
+                      value={newRoleName}
+                      onChangeText={setNewRoleName}
+                      placeholder="New role name"
+                    />
+                    <AppButton
+                      title={savingRole ? "Adding..." : "Add"}
+                      onPress={addCustomRole}
+                      disabled={savingRole || !newRoleName.trim()}
+                    />
+                  </View>
+                  {customRoles.length > 0 ? (
+                    <View style={styles.roleRow}>
+                      {customRoles.map((role) => (
+                        <AppChip
+                          key={`manage-${role._id}`}
+                          label={`${role.name}  ×`}
+                          onPress={() => removeCustomRole(role)}
+                        />
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
 
             {(REPORTING_PARENT_ROLES[roleDraft] || []).length > 0 ? (
               <>
@@ -791,6 +888,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   input: { marginBottom: 8 },
+  customRoleBlock: {
+    marginTop: 12,
+  },
+  customRoleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  customRoleInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
   roleRow: {
     flexDirection: "row",
     flexWrap: "wrap",

@@ -5,6 +5,7 @@ import { Platform, Pressable, Text } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../components/ui/Icon";
 import { PageAccessGate, CoworkingPermissionGate } from "../components/auth/PageAccessGate";
+import { ErrorBoundary } from "../components/common/ErrorBoundary";
 import { useAuth } from "../context/AuthContext";
 import { usePermissions } from "../context/PermissionContext";
 import { useRealtimeAlerts } from "../context/RealtimeAlertsContext";
@@ -106,11 +107,13 @@ const TAB_COMPONENTS: Record<string, React.ComponentType<any>> = {
  */
 const coworkingGated = (Component: React.ComponentType<any>, page: string, permission: string) => {
   const Gated = (props: any) => (
-    <PageAccessGate page={page}>
-      <CoworkingPermissionGate permission={permission}>
-        <Component {...props} />
-      </CoworkingPermissionGate>
-    </PageAccessGate>
+    <ErrorBoundary label={page}>
+      <PageAccessGate page={page}>
+        <CoworkingPermissionGate permission={permission}>
+          <Component {...props} />
+        </CoworkingPermissionGate>
+      </PageAccessGate>
+    </ErrorBoundary>
   );
   Gated.displayName = `CoworkingGated(${page})`;
   return Gated;
@@ -119,9 +122,11 @@ const coworkingGated = (Component: React.ComponentType<any>, page: string, permi
 /** Wraps a tab's screen in its page gate, so a deep link cannot bypass it. */
 const gated = (Component: React.ComponentType<any>, page: string) => {
   const Gated = (props: any) => (
-    <PageAccessGate page={page}>
-      <Component {...props} />
-    </PageAccessGate>
+    <ErrorBoundary label={page}>
+      <PageAccessGate page={page}>
+        <Component {...props} />
+      </PageAccessGate>
+    </ErrorBoundary>
   );
   Gated.displayName = `Gated(${page})`;
   return Gated;
