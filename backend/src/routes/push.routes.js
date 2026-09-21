@@ -44,10 +44,47 @@ router.get("/status", async (req, res) => {
 
 router.post("/subscribe", writeLimiter, async (req, res) => {
   try {
+    const { endpoint, keys, kind, token } = req.body || {};
+
+    /*
+     * A native device registering through Expo.
+     *
+     * Expo's push service needs no server credentials, so this path must NOT be
+     * gated on VAPID being configured the way the browser path is - a server
+     * with no VAPID keys can still reach a phone through Expo.
+     *
+     * The token is the address, so it goes in `endpoint` and keeps the
+     * one-row-per-device key that already prevents duplicate deliveries.
+     */
+    if (String(kind || "").toUpperCase() === "EXPO") {
+      const expoToken = String(token || endpoint || "").trim();
+      if (!/^Expo(nent)?PushToken\[/.test(expoToken)) {
+        return res.status(400).json({ message: "A valid Expo push token is required" });
+      }
+
+      const savedExpo = await Subscription.findOneAndUpdate(
+        { endpoint: expoToken },
+        {
+          $set: {
+            kind: "EXPO",
+            userId: req.user._id,
+            companyId: req.user.companyId,
+            userAgent: String(req.headers["user-agent"] || "").slice(0, 400),
+            failureCount: 0,
+          },
+          $unset: { keys: "" },
+        },
+        { upsert: true, returnDocument: "after", runValidators: true },
+      );
+      return res.json({
+        message: "This device will now receive notifications",
+        subscriptionId: savedExpo._id,
+      });
+    }
+
     if (!isPushConfigured()) {
       return res.status(503).json({ message: "Push notifications are not configured on the server" });
     }
-    const { endpoint, keys } = req.body || {};
     if (!endpoint || typeof endpoint !== "string" || !keys?.p256dh || !keys?.auth) {
       return res.status(400).json({ message: "A push subscription with endpoint and keys is required" });
     }
@@ -61,6 +98,7 @@ router.post("/subscribe", writeLimiter, async (req, res) => {
       { endpoint },
       {
         $set: {
+          kind: "WEB",
           userId: req.user._id,
           companyId: req.user.companyId,
           keys: { p256dh: String(keys.p256dh), auth: String(keys.auth) },
@@ -68,7 +106,7 @@ router.post("/subscribe", writeLimiter, async (req, res) => {
           failureCount: 0,
         },
       },
-      { upsert: true, new: true, runValidators: true },
+      { upsert: true, returnDocument: "after", runValidators: true },
     );
     res.json({ message: "This device will now receive notifications", subscriptionId: saved._id });
   } catch (error) {
