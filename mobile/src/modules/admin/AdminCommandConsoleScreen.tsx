@@ -7,6 +7,7 @@ import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets, getPendingInventoryRequests } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const MAX_PREVIEW_ROWS = 6;
 const COUNT_INTENT_TERMS = ["how many", "count", "number of", "total", "kitne", "kitni", "kitna"];
@@ -439,7 +440,7 @@ export const AdminCommandConsoleScreen = () => {
           value={input}
           onChangeText={setInput}
           placeholder="Ask about users, leads, inventory, approvals, navigation..."
-          placeholderTextColor="#98a3b5"
+          placeholderTextColor={themeColor("#98a3b5")}
           style={styles.input}
           editable={!running}
           onSubmitEditing={() => handleAsk(input)}
@@ -461,32 +462,32 @@ export const AdminCommandConsoleScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   headerCard: { marginBottom: 10 },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  metaLabel: { color: "#4e5867", fontSize: 11, fontWeight: "600", flex: 1 },
-  chatPanel: { flex: 1, borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 12, backgroundColor: "#f5f7fa" },
+  metaLabel: { color: c.slate[600], fontSize: 11, fontWeight: "600", flex: 1 },
+  chatPanel: { flex: 1, borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.bg },
   chatContent: { padding: 10, gap: 8 },
   bubbleWrap: { flexDirection: "row" },
   bubbleLeft: { justifyContent: "flex-start" },
   bubbleRight: { justifyContent: "flex-end" },
   bubble: { maxWidth: "92%", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1 },
-  assistantBubble: { borderColor: "#e0e5ed", backgroundColor: "#fff" },
-  userBubble: { borderColor: "#161c24", backgroundColor: "#161c24" },
+  assistantBubble: { borderColor: c.border, backgroundColor: c.surface },
+  userBubble: { borderColor: c.text, backgroundColor: c.text },
   roleText: { fontSize: 10, fontWeight: "700", marginBottom: 4 },
-  assistantRoleText: { color: "#161c24" },
-  userRoleText: { color: "#c8d0dd" },
+  assistantRoleText: { color: c.text },
+  userRoleText: { color: c.borderStrong },
   messageText: { fontSize: 12, lineHeight: 18 },
-  assistantMessageText: { color: "#39424f" },
-  userMessageText: { color: "#fff" },
-  thinking: { color: "#6c7789", fontSize: 12, marginTop: 4 },
+  assistantMessageText: { color: c.slate[700] },
+  userMessageText: { color: c.surface },
+  thinking: { color: c.textMuted, fontSize: 12, marginTop: 4 },
   inputPanel: { marginTop: 10, marginBottom: 8 },
   input: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
-    color: "#161c24",
+    backgroundColor: c.surface,
+    color: c.text,
     minHeight: 44,
     paddingHorizontal: 12,
     marginBottom: 8,
@@ -495,11 +496,11 @@ const styles = StyleSheet.create({
   suggestionRow: { gap: 8, paddingBottom: 2 },
   suggestionChip: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 999,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  suggestionText: { color: "#39424f", fontSize: 11, fontWeight: "600" },
-});
+  suggestionText: { color: c.slate[700], fontSize: 11, fontWeight: "600" },
+}));

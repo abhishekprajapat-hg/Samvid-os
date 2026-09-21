@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { colors, palette, radii, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Compatibility shim.
@@ -46,27 +47,27 @@ export const AppChip = ({
   </Pressable>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   chip: {
     height: 32,
     justifyContent: "center",
     alignSelf: "flex-start",
     borderWidth: 1,
-    borderColor: palette.slate[300],
+    borderColor: themePalette.slate[300],
     borderRadius: radii.pill,
     backgroundColor: colors.surface,
     paddingHorizontal: 12,
   },
   chipActive: {
-    borderColor: palette.blue[600],
-    backgroundColor: palette.blue[600],
+    borderColor: themePalette.blue[600],
+    backgroundColor: themePalette.blue[600],
   },
   chipText: {
     fontSize: typography.label,
     fontWeight: "600",
-    color: palette.slate[700],
+    color: themePalette.slate[700],
   },
   chipTextActive: {
-    color: "#ffffff",
+    color: c.surface,
   },
-});
+}));

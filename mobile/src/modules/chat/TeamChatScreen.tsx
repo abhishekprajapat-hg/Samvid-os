@@ -21,6 +21,7 @@ import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { updateCallLog } from "../../services/chatService";
 import type { ChatContact, ChatConversation } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const initials = (name: string) =>
   (name || "")
@@ -244,11 +245,11 @@ export const TeamChatScreen = () => {
       >
         <View style={styles.quickTop}>
           <Pressable style={styles.quickBtn} onPress={goBack}>
-            <Icon name="arrow-back" size={16} color="#39424f" />
+            <Icon name="arrow-back" size={16} color={themeColor("#39424f")} />
           </Pressable>
           <View style={styles.quickTopRight}>
             <Pressable style={styles.quickBtn} onPress={() => load(true)}>
-              <Icon name="refresh" size={15} color="#6c7789" />
+              <Icon name="refresh" size={15} color={themeColor("#6c7789")} />
             </Pressable>
             <Pressable style={styles.quickBtn} onPress={() => setProfileVisible(true)}>
               {renderAvatar({ name: user?.name || "Me", avatarUrl: user?.profileImageUrl || "" }, 24)}
@@ -263,7 +264,7 @@ export const TeamChatScreen = () => {
           </View>
 
           <View style={styles.searchRow}>
-            <Icon name="search" size={14} color="#98a3b5" />
+            <Icon name="search" size={14} color={themeColor("#98a3b5")} />
             <TextInput
               style={styles.searchInput}
               value={search}
@@ -392,7 +393,7 @@ export const TeamChatScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   quickTop: {
     marginBottom: 10,
     flexDirection: "row",
@@ -409,16 +410,16 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
-    backgroundColor: "#fff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   profileCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 10,
   },
@@ -434,13 +435,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileTitle: {
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
     fontSize: 13,
   },
   profileSubtitle: {
     marginTop: 2,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
   },
   profileActions: {
@@ -450,31 +451,31 @@ const styles = StyleSheet.create({
   },
   smallBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 10,
     height: 34,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   smallBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
   smallBtnDanger: {
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 8,
     paddingHorizontal: 10,
     height: 34,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fdedec",
+    backgroundColor: c.errorBg,
   },
   smallBtnDangerText: {
-    color: "#942626",
+    color: c.rose[700],
     fontSize: 12,
     fontWeight: "700",
   },
@@ -483,9 +484,9 @@ const styles = StyleSheet.create({
   },
   searchCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 10,
   },
@@ -496,29 +497,29 @@ const styles = StyleSheet.create({
   },
   searchTitle: {
     fontSize: 13,
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
   },
   iconBtn: {
     width: 28,
     height: 28,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   searchMeta: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
   },
   searchRow: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -527,13 +528,13 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    color: "#161c24",
+    color: c.text,
     fontSize: 12,
   },
   tabRow: {
     marginTop: 10,
     flexDirection: "row",
-    backgroundColor: "#edf0f5",
+    backgroundColor: c.surfaceMuted,
     borderRadius: 10,
     padding: 2,
     gap: 4,
@@ -546,17 +547,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   tabBtnActive: {
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
   },
   tabText: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
   tabTextActive: {
-    color: "#161c24",
+    color: c.text,
   },
   connection: {
     marginTop: 8,
@@ -570,24 +571,24 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   connectionOn: {
-    backgroundColor: "#cdeee0",
-    color: "#084f36",
+    backgroundColor: c.emerald[100],
+    color: c.emerald[800],
   },
   connectionOff: {
-    backgroundColor: "#fbe9c4",
-    color: "#614304",
+    backgroundColor: c.amber[100],
+    color: c.amber[800],
   },
   listCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 10,
   },
   panelLabel: {
     fontSize: 11,
-    color: "#6c7789",
+    color: c.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.7,
     fontWeight: "700",
@@ -597,20 +598,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
     padding: 8,
     marginBottom: 6,
     gap: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   avatar: {
-    backgroundColor: "#e0e5ed",
+    backgroundColor: c.border,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 10,
     fontWeight: "700",
   },
@@ -618,20 +619,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   userName: {
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
     fontSize: 13,
   },
   userSub: {
     marginTop: 2,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
   },
   roleBadge: {
     marginTop: 3,
     alignSelf: "flex-start",
-    backgroundColor: "#cdeee0",
-    color: "#084f36",
+    backgroundColor: c.emerald[100],
+    color: c.emerald[800],
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -640,13 +641,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   rowTime: {
-    color: "#98a3b5",
+    color: c.textTertiary,
     fontSize: 10,
     marginLeft: 6,
   },
   empty: {
     textAlign: "center",
-    color: "#98a3b5",
+    color: c.textTertiary,
     fontSize: 12,
     marginVertical: 10,
   },
@@ -659,26 +660,26 @@ const styles = StyleSheet.create({
   },
   callCard: {
     width: "100%",
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     padding: 16,
     alignItems: "center",
     gap: 6,
   },
   callTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 18,
     fontWeight: "700",
   },
   callPeer: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 15,
     fontWeight: "600",
   },
   callSub: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
   },
   callActions: {
@@ -695,20 +696,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   callReject: {
-    borderColor: "#f6b8b5",
-    backgroundColor: "#fdedec",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
   },
   callAccept: {
-    borderColor: "#6ecdaa",
-    backgroundColor: "#cdeee0",
+    borderColor: c.emerald[300],
+    backgroundColor: c.emerald[100],
   },
   callRejectText: {
-    color: "#942626",
+    color: c.rose[700],
     fontWeight: "700",
     fontSize: 13,
   },
   callAcceptText: {
-    color: "#084f36",
+    color: c.emerald[800],
     fontWeight: "700",
     fontSize: 13,
   },
@@ -721,15 +722,15 @@ const styles = StyleSheet.create({
   },
   profileModal: {
     width: "100%",
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     padding: 14,
     gap: 10,
   },
   profileModalTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 18,
     fontWeight: "700",
     marginBottom: 4,
@@ -740,12 +741,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   profileKey: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
   profileVal: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 13,
     fontWeight: "700",
     flex: 1,
@@ -753,7 +754,7 @@ const styles = StyleSheet.create({
   },
   profileHint: {
     marginTop: 4,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
   },
   profileCloseBtn: {
@@ -761,13 +762,13 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     alignItems: "center",
     justifyContent: "center",
   },
   profileCloseText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "700",
     fontSize: 13,
   },
-});
+}));

@@ -12,6 +12,7 @@ import * as ExpoLinking from "expo-linking";
 import { ensureNotificationSetup, registerNotificationTapListener } from "../services/pushNotifications";
 import { RealtimePopupOverlay } from "../components/common/RealtimePopupOverlay";
 import { palette } from "../theme/tokens";
+import { themePalette } from "../theme/themedStyles";
 
 const AppShell = () => {
   const { loading, isLoggedIn, role } = useAuth();
@@ -50,7 +51,7 @@ const AppShell = () => {
   if (loading) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator size="large" color={palette.blue[600]} />
+        <ActivityIndicator size="large" color={themePalette.blue[600]} />
       </View>
     );
   }

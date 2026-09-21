@@ -10,6 +10,7 @@ import {
   TERMS_SECTIONS as CANONICAL_TERMS,
   type LegalSection,
 } from "../legal/legalContent";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 type Portal = "GENERAL" | "ADMIN";
 type LegalDoc = "TERMS" | "PRIVACY" | null;
@@ -66,7 +67,7 @@ export const LoginScreen = () => {
     <View style={styles.root}>
       <View style={styles.card}>
         <View style={styles.logoWrap}>
-          <Hexagon size={28} color="#161c24" strokeWidth={2.2} />
+          <Hexagon size={28} color={themeColor("#161c24")} strokeWidth={2.2} />
         </View>
 
         <Text style={styles.title}>{portal === "GENERAL" ? "GENERAL LOGIN" : "ADMIN LOGIN"}</Text>
@@ -156,23 +157,23 @@ export const LoginScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   root: {
     flex: 1,
     padding: 24,
-    backgroundColor: "#edf0f5",
+    backgroundColor: c.surfaceMuted,
     justifyContent: "center",
   },
   card: {
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     padding: 20,
     ...(Platform.OS === "web"
       ? { boxShadow: "0px 8px 20px rgba(15, 23, 42, 0.08)" }
       : {
-        shadowColor: "#161c24",
+        shadowColor: c.text,
         shadowOpacity: 0.08,
         shadowRadius: 20,
         shadowOffset: { width: 0, height: 8 },
@@ -189,7 +190,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     fontSize: 32,
     fontWeight: "800",
-    color: "#161c24",
+    color: c.text,
     letterSpacing: 0.6,
   },
   portalRow: {
@@ -205,8 +206,8 @@ const styles = StyleSheet.create({
     height: 50,
     marginBottom: 12,
     borderRadius: 14,
-    backgroundColor: "#ffffff",
-    borderColor: "#c8d0dd",
+    backgroundColor: c.surface,
+    borderColor: c.borderStrong,
   },
   submitButton: {
     marginTop: 4,
@@ -215,22 +216,22 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: "#c8d0dd",
+    backgroundColor: c.borderStrong,
     marginTop: 18,
     marginBottom: 12,
   },
   terms: {
     textAlign: "center",
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
     lineHeight: 18,
   },
   termsLink: {
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
   },
   error: {
-    color: "#942626",
+    color: c.rose[700],
     marginBottom: 10,
     textAlign: "center",
   },
@@ -241,10 +242,10 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   modalCard: {
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     maxHeight: "92%",
     padding: 12,
   },
@@ -259,24 +260,24 @@ const styles = StyleSheet.create({
   modalKicker: {
     fontSize: 10,
     letterSpacing: 1.8,
-    color: "#6c7789",
+    color: c.textMuted,
     fontWeight: "700",
   },
   modalTitle: {
     fontSize: 34,
     lineHeight: 36,
     fontWeight: "700",
-    color: "#161c24",
+    color: c.text,
   },
   closeBtn: {
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
     borderRadius: 10,
     paddingVertical: 7,
     paddingHorizontal: 12,
     alignSelf: "flex-end",
   },
   closeBtnText: {
-    color: "#ffffff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
@@ -285,22 +286,22 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   sectionCard: {
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 8,
     padding: 10,
   },
   sectionHeading: {
     fontSize: 12,
     letterSpacing: 1.5,
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "800",
     marginBottom: 6,
   },
   sectionBody: {
     fontSize: 13,
     lineHeight: 19,
-    color: "#4e5867",
+    color: c.slate[600],
   },
-});
+}));

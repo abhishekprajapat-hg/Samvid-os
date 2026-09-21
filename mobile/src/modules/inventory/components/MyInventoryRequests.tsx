@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp } from "lucide-react-native";
 import { AppBadge, AppCard } from "../../../components/ui";
 import { palette, spacing, typography } from "../../../theme/tokens";
 import { getMyInventoryRequests } from "../../../services/inventoryService";
+import { themedStyles, themePalette } from "../../../theme/themedStyles";
 
 /*
  * What happened to the requests this user raised.
@@ -82,9 +83,9 @@ export const MyInventoryRequests = ({ refreshKey = 0 }: { refreshKey?: number })
         {pending.length > 0 ? <AppBadge variant="amber">{pending.length} pending</AppBadge> : null}
         <View style={styles.spacer} />
         {expanded ? (
-          <ChevronUp size={16} color={palette.slate[500]} />
+          <ChevronUp size={16} color={themePalette.slate[500]} />
         ) : (
-          <ChevronDown size={16} color={palette.slate[500]} />
+          <ChevronDown size={16} color={themePalette.slate[500]} />
         )}
       </Pressable>
 
@@ -115,10 +116,10 @@ export const MyInventoryRequests = ({ refreshKey = 0 }: { refreshKey?: number })
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   card: { marginBottom: spacing.lg },
   header: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  title: { fontSize: typography.cardTitle, fontWeight: "600", color: palette.slate[900] },
+  title: { fontSize: typography.cardTitle, fontWeight: "600", color: themePalette.slate[900] },
   spacer: { flex: 1 },
   row: {
     flexDirection: "row",
@@ -127,21 +128,21 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
     marginTop: spacing.lg,
     borderTopWidth: 1,
-    borderTopColor: palette.slate[200],
+    borderTopColor: themePalette.slate[200],
   },
   rowText: { flex: 1 },
-  rowTitle: { fontSize: typography.body, fontWeight: "600", color: palette.slate[800] },
+  rowTitle: { fontSize: typography.body, fontWeight: "600", color: themePalette.slate[800] },
   rowMeta: {
     marginTop: 2,
     fontSize: typography.caption,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     textTransform: "capitalize",
   },
-  reason: { marginTop: 4, fontSize: typography.caption, color: palette.rose[700] },
+  reason: { marginTop: 4, fontSize: typography.caption, color: themePalette.rose[700] },
   more: {
     marginTop: spacing.lg,
     fontSize: typography.caption,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     textAlign: "center",
   },
-});
+}));

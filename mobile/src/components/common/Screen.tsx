@@ -2,6 +2,7 @@ import React from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * The page shell. Plays the part of the web app's page header inside
@@ -48,7 +49,7 @@ export const Screen = ({
 
       {loading ? (
         <View style={styles.centred}>
-          <ActivityIndicator size="large" color={palette.blue[600]} />
+          <ActivityIndicator size="large" color={themePalette.blue[600]} />
         </View>
       ) : (
         <View
@@ -79,7 +80,7 @@ export const Screen = ({
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -104,7 +105,7 @@ const styles = StyleSheet.create({
   eyebrow: {
     fontSize: typography.caption,
     fontWeight: "600",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     textTransform: "uppercase",
     letterSpacing: 0.8,
     marginBottom: 3,
@@ -112,7 +113,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typography.displayMd,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     letterSpacing: -0.25,
   },
   body: {
@@ -126,9 +127,9 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     borderWidth: 1,
-    borderColor: palette.rose[200],
+    borderColor: themePalette.rose[200],
     borderRadius: radii.md,
-    backgroundColor: palette.rose[50],
+    backgroundColor: themePalette.rose[50],
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     marginBottom: spacing.lg,
@@ -136,12 +137,12 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: typography.label,
     lineHeight: 18,
-    color: palette.rose[700],
+    color: themePalette.rose[700],
   },
   errorRetry: {
     marginTop: 2,
     fontSize: typography.caption,
     fontWeight: "600",
-    color: palette.rose[700],
+    color: themePalette.rose[700],
   },
-});
+}));

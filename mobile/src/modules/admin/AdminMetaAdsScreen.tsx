@@ -10,6 +10,7 @@ import {
   updateMyTenantMetaIntegration,
   type MetaIntegration,
 } from "../../services/saasService";
+import { themedStyles } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/admin/AdminMetaAdsPanel.jsx - the Meta lead-ads integration
@@ -211,7 +212,7 @@ export const AdminMetaAdsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   card: {
     marginBottom: spacing.md,
   },
@@ -302,4 +303,4 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.error,
   },
-});
+}));

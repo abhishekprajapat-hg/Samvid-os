@@ -10,6 +10,7 @@ import {
   type LeaveBalance,
   type LeaveRequest,
 } from "../../../services/attendanceService";
+import { themedStyles, themePalette } from "../../../theme/themedStyles";
 
 /*
  * The employee half of leave: balance, history, and a new request.
@@ -184,30 +185,30 @@ export const LeaveSection = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: { paddingBottom: spacing.xxl },
   card: { marginBottom: spacing.md },
   cta: { marginBottom: spacing.xl },
   cardTitle: {
     fontSize: typography.cardTitle,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     marginBottom: spacing.lg,
   },
   heading: {
     fontSize: typography.caption,
     fontWeight: "700",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     letterSpacing: 0.8,
     marginBottom: spacing.md,
   },
   metricRow: { flexDirection: "row" },
   metric: { flex: 1, alignItems: "center" },
-  metricValue: { fontSize: typography.title, fontWeight: "700", color: palette.slate[900] },
+  metricValue: { fontSize: typography.title, fontWeight: "700", color: themePalette.slate[900] },
   metricLabel: {
     marginTop: 2,
     fontSize: typography.caption,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -217,11 +218,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
-  dates: { flex: 1, fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
-  meta: { marginTop: 4, fontSize: typography.label, color: palette.slate[500] },
-  reason: { marginTop: spacing.md, fontSize: typography.body, color: palette.slate[600] },
-  reviewNote: { marginTop: spacing.md, fontSize: typography.label, color: palette.slate[500], fontStyle: "italic" },
-  error: { marginBottom: spacing.lg, fontSize: typography.label, color: palette.rose[700] },
+  dates: { flex: 1, fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
+  meta: { marginTop: 4, fontSize: typography.label, color: themePalette.slate[500] },
+  reason: { marginTop: spacing.md, fontSize: typography.body, color: themePalette.slate[600] },
+  reviewNote: { marginTop: spacing.md, fontSize: typography.label, color: themePalette.slate[500], fontStyle: "italic" },
+  error: { marginBottom: spacing.lg, fontSize: typography.label, color: themePalette.rose[700] },
   sheetActions: { flexDirection: "row", gap: spacing.md },
   sheetButton: { flex: 1 },
-});
+}));

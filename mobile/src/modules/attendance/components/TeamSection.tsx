@@ -10,6 +10,7 @@ import {
   type AttendanceRecord,
   type LeaveRequest,
 } from "../../../services/attendanceService";
+import { themedStyles, themePalette } from "../../../theme/themedStyles";
 
 /*
  * Management's view: today's roster plus the leave queue.
@@ -197,7 +198,7 @@ export const TeamSection = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: { paddingBottom: spacing.xxl },
   card: { marginBottom: spacing.md },
   stepper: {
@@ -206,30 +207,30 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: spacing.lg,
   },
-  stepperLabel: { fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
+  stepperLabel: { fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
   heading: {
     fontSize: typography.caption,
     fontWeight: "700",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     letterSpacing: 0.8,
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },
   summaryWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   summaryChip: { minWidth: 72 },
-  summaryValue: { fontSize: typography.title, fontWeight: "700", color: palette.slate[900] },
+  summaryValue: { fontSize: typography.title, fontWeight: "700", color: themePalette.slate[900] },
   summaryLabel: {
     fontSize: typography.caption,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     textTransform: "capitalize",
   },
   rowHead: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   identity: { flex: 1 },
-  name: { fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
+  name: { fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
   role: {
     marginTop: 1,
     fontSize: typography.caption,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -240,9 +241,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
-  meta: { fontSize: typography.label, color: palette.slate[500] },
-  reason: { marginTop: spacing.md, fontSize: typography.body, color: palette.slate[600] },
+  meta: { fontSize: typography.label, color: themePalette.slate[500] },
+  reason: { marginTop: spacing.md, fontSize: typography.body, color: themePalette.slate[600] },
   actions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
   action: { flex: 1 },
-  error: { marginBottom: spacing.lg, fontSize: typography.label, color: palette.rose[700] },
-});
+  error: { marginBottom: spacing.lg, fontSize: typography.label, color: themePalette.rose[700] },
+}));

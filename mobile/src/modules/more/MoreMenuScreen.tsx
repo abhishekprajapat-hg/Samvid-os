@@ -6,11 +6,13 @@ import { AppCard, AppEmptyState } from "../../components/ui";
 import { Icon } from "../../components/ui/Icon";
 import { useAuth } from "../../context/AuthContext";
 import { usePermissions } from "../../context/PermissionContext";
-import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
+import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
+import { useTheme, type ThemeMode } from "../../theme/ThemeContext";
 import { getMoreGroups, getTabItems, canSeeItem } from "../../navigation/access";
 import { PROFILE_ITEM } from "../../navigation/navigationCatalogue";
 import { isScreenBuilt } from "../../navigation/RoleTabs";
 import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Everything the role can reach that is not already a bottom tab, grouped the
@@ -21,6 +23,13 @@ import { colors, palette, radii, spacing, typography } from "../../theme/tokens"
  * and its own colours. Both are gone: the rows come from the shared visibility
  * algorithm, so this screen and the web sidebar cannot drift.
  */
+
+/* "System" follows the phone's own setting, which is what most people expect. */
+const THEME_MODES: Array<{ value: ThemeMode; label: string }> = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
 
 const Row = ({
   label,
@@ -38,7 +47,7 @@ const Row = ({
     accessibilityRole="button"
     style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
   >
-    <Icon name={icon} size={18} color={palette.slate[500]} />
+    <Icon name={icon} size={18} color={themePalette.slate[500]} />
     <Text style={styles.rowLabel} numberOfLines={1}>
       {label}
     </Text>
@@ -47,7 +56,7 @@ const Row = ({
         <Text style={styles.badgeText}>{badge > 99 ? "99+" : badge}</Text>
       </View>
     ) : null}
-    <ChevronRight size={16} color={palette.slate[400]} />
+    <ChevronRight size={16} color={themePalette.slate[400]} />
   </Pressable>
 );
 
@@ -55,6 +64,7 @@ export const MoreMenuScreen = ({ navigation }: any) => {
   const { role, user, logout } = useAuth();
   const { permissions, enforcePageAccess } = usePermissions();
   const { chatUnreadTotal, notificationUnreadTotal, markAllChatRead } = useRealtimeAlerts();
+  const { mode, setMode } = useTheme();
 
   const accessUser = useMemo(
     () => ({ permissions, enforcePageAccess, canViewInventory: user?.canViewInventory }),
@@ -121,6 +131,29 @@ export const MoreMenuScreen = ({ navigation }: any) => {
         )}
 
         <View style={styles.group}>
+          <Text style={styles.groupLabel}>APPEARANCE</Text>
+          <AppCard style={styles.card}>
+            <View style={styles.themeRow}>
+              {THEME_MODES.map((option) => (
+                <Pressable
+                  key={option.value}
+                  onPress={() => setMode(option.value)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: mode === option.value }}
+                  style={[styles.themeChip, mode === option.value && styles.themeChipActive]}
+                >
+                  <Text
+                    style={[styles.themeLabel, mode === option.value && styles.themeLabelActive]}
+                  >
+                    {option.label}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </AppCard>
+        </View>
+
+        <View style={styles.group}>
           <Text style={styles.groupLabel}>ACCOUNT</Text>
           <AppCard style={styles.card}>
             <Row label="Office Assistant" icon="chat" onPress={() => open("Office Assistant")} />
@@ -134,7 +167,7 @@ export const MoreMenuScreen = ({ navigation }: any) => {
               accessibilityRole="button"
               style={({ pressed }) => [styles.row, styles.rowLast, pressed && styles.rowPressed]}
             >
-              <LogOut size={18} color={palette.rose[600]} />
+              <LogOut size={18} color={themePalette.rose[600]} />
               <Text style={[styles.rowLabel, styles.logoutLabel]}>Log out</Text>
             </Pressable>
           </AppCard>
@@ -144,9 +177,36 @@ export const MoreMenuScreen = ({ navigation }: any) => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: {
     paddingBottom: spacing.xxl,
+  },
+  themeRow: {
+    flexDirection: "row",
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  themeChip: {
+    flex: 1,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: c.border,
+    backgroundColor: c.surface,
+  },
+  themeChipActive: {
+    borderColor: c.primary,
+    backgroundColor: c.blue[50],
+  },
+  themeLabel: {
+    fontSize: typography.label,
+    fontWeight: "600",
+    color: c.slate[700],
+  },
+  themeLabelActive: {
+    color: c.blue[700],
   },
   group: {
     marginBottom: spacing.xl,
@@ -154,7 +214,7 @@ const styles = StyleSheet.create({
   groupLabel: {
     fontSize: typography.caption,
     fontWeight: "700",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     letterSpacing: 0.8,
     marginBottom: spacing.md,
   },
@@ -176,16 +236,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
   },
   rowPressed: {
-    backgroundColor: palette.slate[50],
+    backgroundColor: themePalette.slate[50],
   },
   rowLabel: {
     flex: 1,
     fontSize: typography.body,
     fontWeight: "600",
-    color: palette.slate[800],
+    color: themePalette.slate[800],
   },
   logoutLabel: {
-    color: palette.rose[600],
+    color: themePalette.rose[600],
   },
   badge: {
     minWidth: 18,
@@ -194,11 +254,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: palette.blue[600],
+    backgroundColor: themePalette.blue[600],
   },
   badgeText: {
     fontSize: 10,
     fontWeight: "700",
-    color: "#ffffff",
+    color: c.surface,
   },
-});
+}));

@@ -10,6 +10,7 @@ import {
   type ViolationAction,
   type ViolationSummary,
 } from "../../../services/attendanceService";
+import { themedStyles, themePalette } from "../../../theme/themedStyles";
 
 /*
  * Mirrors modules/attendance/AttendanceViolations.jsx.
@@ -220,7 +221,7 @@ export const ViolationsSection = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: { paddingBottom: spacing.xxl },
   card: { marginBottom: spacing.md },
   stepper: {
@@ -229,30 +230,30 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: spacing.lg,
   },
-  stepperLabel: { fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
+  stepperLabel: { fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
   heading: {
     fontSize: typography.caption,
     fontWeight: "700",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     letterSpacing: 0.8,
     marginTop: spacing.md,
     marginBottom: spacing.md,
   },
   rowHead: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
-  meta: { marginTop: 4, fontSize: typography.label, color: palette.slate[500], textTransform: "capitalize" },
+  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
+  meta: { marginTop: 4, fontSize: typography.label, color: themePalette.slate[500], textTransform: "capitalize" },
   reviewButton: { marginTop: spacing.lg, alignSelf: "flex-start" },
   excused: { marginTop: spacing.lg },
   policyNote: {
     marginTop: spacing.xl,
     fontSize: typography.caption,
     lineHeight: 17,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     fontStyle: "italic",
   },
-  error: { marginBottom: spacing.lg, fontSize: typography.label, color: palette.rose[700] },
+  error: { marginBottom: spacing.lg, fontSize: typography.label, color: themePalette.rose[700] },
   actionRow: { flexDirection: "row", gap: spacing.md },
   actionChip: { flex: 1 },
   sheetActions: { flexDirection: "row", gap: spacing.md },
   sheetButton: { flex: 1 },
-});
+}));

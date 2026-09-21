@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors frontend/src/components/ui/Tabs.jsx: a 2px bottom border on the
@@ -52,7 +53,7 @@ export const AppTabs = ({
   </View>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   row: {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
@@ -72,15 +73,15 @@ const styles = StyleSheet.create({
     marginBottom: -1,
   },
   triggerActive: {
-    borderBottomColor: palette.blue[600],
+    borderBottomColor: themePalette.blue[600],
   },
   label: {
     fontSize: 12.5,
     fontWeight: "600",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
   },
   labelActive: {
-    color: palette.slate[900],
+    color: themePalette.slate[900],
   },
   badge: {
     minWidth: 18,
@@ -89,13 +90,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: palette.slate[100],
+    backgroundColor: themePalette.slate[100],
   },
   badgeText: {
     fontSize: 10,
     fontWeight: "700",
-    color: palette.slate[600],
+    color: themePalette.slate[600],
   },
-});
+}));
 
 export default AppTabs;

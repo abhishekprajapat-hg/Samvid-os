@@ -7,6 +7,7 @@ import { palette, spacing, typography } from "../../theme/tokens";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { getSharedInventory } from "../../services/publicInventoryService";
 import { toAbsoluteUrl } from "../../services/uploadService";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/inventory/SharedInventoryView.jsx.
@@ -118,7 +119,7 @@ export const SharedInventoryViewScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: { paddingBottom: spacing.xxl },
   gallery: { marginBottom: spacing.lg },
   image: { width: 260, height: 170, borderRadius: 14, marginRight: spacing.md },
@@ -129,19 +130,19 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
-  title: { flex: 1, fontSize: typography.title, fontWeight: "600", color: palette.slate[900] },
-  price: { marginTop: spacing.sm, fontSize: typography.displayMd, fontWeight: "700", color: palette.blue[600] },
-  meta: { marginTop: 3, fontSize: typography.label, color: palette.slate[500] },
+  title: { flex: 1, fontSize: typography.title, fontWeight: "600", color: themePalette.slate[900] },
+  price: { marginTop: spacing.sm, fontSize: typography.displayMd, fontWeight: "700", color: themePalette.blue[600] },
+  meta: { marginTop: 3, fontSize: typography.label, color: themePalette.slate[500] },
   description: {
     marginTop: spacing.lg,
     fontSize: typography.body,
     lineHeight: 20,
-    color: palette.slate[600],
+    color: themePalette.slate[600],
   },
   sectionTitle: {
     fontSize: typography.cardTitle,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     marginBottom: spacing.md,
   },
   amenities: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
@@ -149,6 +150,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     textAlign: "center",
     fontSize: typography.caption,
-    color: palette.slate[400],
+    color: themePalette.slate[400],
   },
-});
+}));

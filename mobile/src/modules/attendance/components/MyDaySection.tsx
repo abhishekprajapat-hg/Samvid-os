@@ -15,6 +15,7 @@ import {
   type LeaveBalance,
 } from "../../../services/attendanceService";
 import { getAttendanceLocation } from "../../../utils/location";
+import { themedStyles } from "../../../theme/themedStyles";
 
 /*
  * Attendance, phone-first.
@@ -307,7 +308,7 @@ export const MyDaySection = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   card: {
     marginBottom: spacing.md,
   },
@@ -479,4 +480,4 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingVertical: spacing.lg,
   },
-});
+}));

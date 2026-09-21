@@ -8,6 +8,7 @@ import { useAuth } from "../../context/AuthContext";
 import { canAccessPage } from "../../navigation/access";
 import { palette, spacing } from "../../theme/tokens";
 import type { UserRole } from "../../types";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors frontend/src/components/auth/PageAccessGate.jsx.
@@ -84,19 +85,19 @@ export const CoworkingPermissionGate = ({
 const AccessDenied = () => (
   <View style={styles.wrap}>
     <AppEmptyState
-      icon={<Lock size={20} color={palette.slate[500]} />}
+      icon={<Lock size={20} color={themePalette.slate[500]} />}
       title="You do not have access to this page"
       description="Your account does not include this page. Ask an admin to update your page access."
     />
   </View>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   wrap: {
     flex: 1,
     padding: spacing.xl,
     gap: spacing.lg,
   },
-});
+}));
 
 export default PageAccessGate;

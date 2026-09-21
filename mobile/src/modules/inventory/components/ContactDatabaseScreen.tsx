@@ -25,6 +25,7 @@ import {
   type ContactKind,
   type CrmContact,
 } from "../../../services/crmContactService";
+import { themedStyles, themeColor, themePalette } from "../../../theme/themedStyles";
 
 /*
  * One implementation behind both the Owner and the Broker screen, the way
@@ -165,7 +166,7 @@ export const ContactDatabaseScreen = ({
         <AppButton
           title={`Add ${isBroker ? "broker" : "owner"}`}
           onPress={() => setEditing({ ...EMPTY_CONTACT })}
-          leftIcon={<Plus size={16} color="#ffffff" />}
+          leftIcon={<Plus size={16} color={themeColor("#ffffff")} />}
           fullWidth
           style={styles.addButton}
         />
@@ -224,7 +225,7 @@ export const ContactDatabaseScreen = ({
 
               {canWrite ? (
                 <Pressable onPress={() => remove(item)} hitSlop={8} style={styles.deleteButton}>
-                  <Trash2 size={15} color={palette.rose[600]} />
+                  <Trash2 size={15} color={themePalette.rose[600]} />
                   <Text style={styles.deleteLabel}>Remove</Text>
                 </Pressable>
               ) : null}
@@ -289,14 +290,14 @@ export const ContactDatabaseScreen = ({
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   search: { marginBottom: spacing.md },
   addButton: { marginBottom: spacing.lg },
   list: { paddingBottom: spacing.xxl },
   blurb: {
     fontSize: typography.label,
     lineHeight: 18,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     marginBottom: spacing.lg,
   },
   card: { marginBottom: spacing.md },
@@ -306,9 +307,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
-  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
-  phone: { marginTop: 2, fontSize: typography.body, color: palette.slate[700] },
-  meta: { marginTop: 2, fontSize: typography.label, color: palette.slate[500] },
+  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
+  phone: { marginTop: 2, fontSize: typography.body, color: themePalette.slate[700] },
+  meta: { marginTop: 2, fontSize: typography.label, color: themePalette.slate[500] },
   deleteButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -316,15 +317,15 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     paddingTop: spacing.md,
     borderTopWidth: 1,
-    borderTopColor: palette.slate[200],
+    borderTopColor: themePalette.slate[200],
   },
-  deleteLabel: { fontSize: typography.label, fontWeight: "600", color: palette.rose[600] },
+  deleteLabel: { fontSize: typography.label, fontWeight: "600", color: themePalette.rose[600] },
   blockedRow: {
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: palette.slate[200],
+    borderBottomColor: themePalette.slate[200],
   },
-  blockedName: { fontSize: typography.body, fontWeight: "600", color: palette.slate[800] },
+  blockedName: { fontSize: typography.body, fontWeight: "600", color: themePalette.slate[800] },
   sheetActions: { flexDirection: "row", gap: spacing.md },
   sheetButton: { flex: 1 },
-});
+}));

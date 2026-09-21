@@ -18,6 +18,7 @@ import {
   getClients,
   type CoworkingClient,
 } from "../../services/coworkingService";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/coworking/clients/ClientsPage.jsx and ClientProfile.jsx.
@@ -244,7 +245,7 @@ export const CoworkingClientsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   search: { marginBottom: spacing.md },
   list: { paddingBottom: spacing.xxl },
   card: { marginBottom: spacing.md },
@@ -255,8 +256,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
-  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
-  meta: { marginTop: 3, fontSize: typography.label, color: palette.slate[500] },
+  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
+  meta: { marginTop: 3, fontSize: typography.label, color: themePalette.slate[500] },
   detailRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -264,12 +265,12 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     paddingVertical: spacing.md,
   },
-  detailLabel: { fontSize: typography.label, color: palette.slate[500] },
+  detailLabel: { fontSize: typography.label, color: themePalette.slate[500] },
   detailValue: {
     flex: 1,
     fontSize: typography.label,
     fontWeight: "600",
-    color: palette.slate[800],
+    color: themePalette.slate[800],
     textAlign: "right",
   },
   sectionTitle: {
@@ -277,17 +278,17 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     fontSize: typography.caption,
     fontWeight: "700",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     letterSpacing: 0.8,
     textTransform: "uppercase",
   },
-  assignmentCode: { fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
-  empty: { fontSize: typography.label, color: palette.slate[500] },
+  assignmentCode: { fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
+  empty: { fontSize: typography.label, color: themePalette.slate[500] },
   activityRow: {
     paddingVertical: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: palette.slate[200],
+    borderBottomColor: themePalette.slate[200],
   },
-  activityText: { fontSize: typography.label, color: palette.slate[700] },
-  activityWhen: { marginTop: 2, fontSize: typography.caption, color: palette.slate[500] },
-});
+  activityText: { fontSize: typography.label, color: themePalette.slate[700] },
+  activityWhen: { marginTop: 2, fontSize: typography.caption, color: themePalette.slate[500] },
+}));

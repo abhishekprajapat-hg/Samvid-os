@@ -39,6 +39,7 @@ import { usePermissions } from "../../context/PermissionContext";
 import { resolveInventoryAccess } from "./inventoryAccess";
 import { MyInventoryRequests } from "./components/MyInventoryRequests";
 import type { InventoryAsset } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const STATUS_OPTIONS = ["Available", "Blocked", "Sold"];
 const STATUS_MODAL_OPTIONS = new Set(["Available", "Blocked", "Sold"]);
@@ -51,7 +52,7 @@ const SOLD_PAYMENT_MODE_LABEL: Record<string, string> = {
 };
 const SOLD_TRANSFER_TYPES = ["NEFT", "RTGS", "IMPS"];
 type SoldDateField = "remainingDueDate" | "paymentDate" | "chequeDate";
-const INPUT_PLACEHOLDER = "#98a3b5";
+const INPUT_PLACEHOLDER = themeColor("#98a3b5");
 const DEAL_TYPE_OPTIONS = ["PURCHASE", "RENT", "LEASE"];
 
 const formatDateOnly = (value: Date) =>
@@ -1074,7 +1075,7 @@ export const AssetVaultScreen = () => {
                           removeAsset(item._id);
                         }}
                       >
-                        <Icon name="trash-outline" size={14} color="#d64545" />
+                        <Icon name="trash-outline" size={14} color={themeColor("#d64545")} />
                       </Pressable>
                     ) : (
                       <View />
@@ -1088,7 +1089,7 @@ export const AssetVaultScreen = () => {
                             openEditModal(item);
                           }}
                         >
-                          <Icon name="create-outline" size={14} color="#6c7789" />
+                          <Icon name="create-outline" size={14} color={themeColor("#6c7789")} />
                         </Pressable>
                       ) : null}
                       <Pressable
@@ -1098,7 +1099,7 @@ export const AssetVaultScreen = () => {
                           void handleShareAsset(item);
                         }}
                       >
-                        <Icon name="share-social-outline" size={14} color="#1f6499" />
+                        <Icon name="share-social-outline" size={14} color={themeColor("#1f6499")} />
                       </Pressable>
                     </View>
                   </View>
@@ -1314,7 +1315,7 @@ export const AssetVaultScreen = () => {
               <Text style={styles.sectionLabel}>Property Date</Text>
               <View style={styles.dateFieldActionRow}>
                 <Pressable style={styles.dateFieldBtn} onPress={openPropertyDatePicker}>
-                  <Icon name="calendar-outline" size={14} color="#39424f" />
+                  <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                   <Text style={styles.dateFieldBtnText}>{form.propertyDate || "Pick property date"}</Text>
                 </Pressable>
               </View>
@@ -1401,7 +1402,7 @@ export const AssetVaultScreen = () => {
                   <Text style={styles.modalActionGhostText}>Cancel</Text>
                 </Pressable>
                 <Pressable style={[styles.modalActionBtn, styles.modalActionPrimary]} onPress={editingAssetId ? updateAsset : createAsset} disabled={saving}>
-                  {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.modalActionPrimaryText}>{editingAssetId ? (canDirectInventoryEdit ? "Update" : "Send for Approval") : "Save"}</Text>}
+                  {saving ? <ActivityIndicator color={themeColor("#ffffff")} /> : <Text style={styles.modalActionPrimaryText}>{editingAssetId ? (canDirectInventoryEdit ? "Update" : "Send for Approval") : "Save"}</Text>}
                 </Pressable>
               </View>
             </ScrollView>
@@ -1505,7 +1506,7 @@ export const AssetVaultScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("remainingDueDate")}>
-                    <Icon name="calendar-outline" size={14} color="#39424f" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick due date</Text>
                   </Pressable>
                 </View>
@@ -1519,7 +1520,7 @@ export const AssetVaultScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Icon name="calendar-outline" size={14} color="#39424f" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -1541,7 +1542,7 @@ export const AssetVaultScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Icon name="calendar-outline" size={14} color="#39424f" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -1557,7 +1558,7 @@ export const AssetVaultScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("chequeDate")}>
-                        <Icon name="calendar-outline" size={14} color="#39424f" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
                       </Pressable>
                     </View>
@@ -1603,7 +1604,7 @@ export const AssetVaultScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Icon name="calendar-outline" size={14} color="#39424f" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -1632,7 +1633,7 @@ export const AssetVaultScreen = () => {
                       onPress={() => setStatusAttachment(null)}
                       disabled={saving}
                     >
-                      <Icon name="close" size={16} color="#741f1f" />
+                      <Icon name="close" size={16} color={themeColor("#741f1f")} />
                     </Pressable>
                   ) : null}
                 </View>
@@ -1788,25 +1789,25 @@ export const AssetVaultScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#e8f7f0",
-    color: "#084f36",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   search: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     height: 44,
     marginBottom: 10,
-    color: "#161c24",
+    color: c.text,
   },
   topRow: {
     marginBottom: 10,
@@ -1819,7 +1820,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#e0e5ed",
+    backgroundColor: c.border,
     borderRadius: 999,
     padding: 4,
   },
@@ -1829,33 +1830,33 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   modeBtnActive: {
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
   },
   modeBtnText: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
   },
   modeBtnTextActive: {
-    color: "#161c24",
+    color: c.text,
   },
   primaryBtn: {
     height: 40,
     borderRadius: 10,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 14,
   },
   primaryText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
   },
   card: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
@@ -1865,7 +1866,7 @@ const styles = StyleSheet.create({
     height: 140,
     borderRadius: 10,
     marginBottom: 10,
-    backgroundColor: "#e0e5ed",
+    backgroundColor: c.border,
   },
   cardImageWrap: {
     marginBottom: 10,
@@ -1893,13 +1894,13 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     backgroundColor: "rgba(255,255,255,0.96)",
     alignItems: "center",
     justifyContent: "center",
   },
   imageIconBtnDanger: {
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
   },
   cardNavBtn: {
     position: "absolute",
@@ -1919,23 +1920,23 @@ const styles = StyleSheet.create({
     right: 8,
   },
   cardNavText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
   },
   name: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#161c24",
+    color: c.text,
   },
   meta: {
     marginTop: 4,
     fontSize: 12,
-    color: "#4e5867",
+    color: c.slate[600],
   },
   reasonMeta: {
     marginTop: 5,
     fontSize: 12,
-    color: "#7d5605",
+    color: c.amber[700],
     fontWeight: "600",
   },
   row: {
@@ -1946,34 +1947,34 @@ const styles = StyleSheet.create({
   },
   statusChip: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   statusActive: {
-    backgroundColor: "#161c24",
-    borderColor: "#161c24",
+    backgroundColor: c.text,
+    borderColor: c.text,
   },
   chip: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   chipText: {
     fontSize: 12,
-    color: "#39424f",
+    color: c.slate[700],
   },
   activeText: {
-    color: "#fff",
+    color: c.surface,
   },
   empty: {
     textAlign: "center",
-    color: "#6c7789",
+    color: c.textMuted,
     marginVertical: 14,
   },
   modalWrap: {
@@ -1983,14 +1984,14 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(15,23,42,0.45)",
   },
   modalCard: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingTop: 14,
     maxHeight: "92%",
   },
   reasonModalCard: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     maxHeight: "90%",
     padding: 14,
@@ -2004,18 +2005,18 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#161c24",
+    color: c.text,
     marginBottom: 10,
   },
   input: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     paddingHorizontal: 12,
     height: 42,
     marginBottom: 10,
-    backgroundColor: "#fff",
-    color: "#161c24",
+    backgroundColor: c.surface,
+    color: c.text,
     textAlignVertical: "top",
   },
   reasonInput: {
@@ -2026,29 +2027,29 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#bcd0ff",
-    backgroundColor: "#eef3ff",
+    borderColor: c.blue[200],
+    backgroundColor: c.blue[50],
     alignItems: "center",
     justifyContent: "center",
     height: 32,
   },
   openDetailsText: {
-    color: "#1c37ab",
+    color: c.accentStrong,
     fontWeight: "700",
     fontSize: 11,
   },
   selectInput: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     minHeight: 40,
     paddingHorizontal: 12,
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     marginTop: 10,
   },
   selectInputText: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 13,
     fontWeight: "600",
   },
@@ -2060,9 +2061,9 @@ const styles = StyleSheet.create({
   dateFieldBtn: {
     height: 30,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
@@ -2070,16 +2071,16 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   dateFieldBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   selectMenu: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     maxHeight: 180,
     overflow: "hidden",
   },
@@ -2090,10 +2091,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#edf0f5",
+    borderBottomColor: c.surfaceMuted,
   },
   selectMenuItemText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -2106,16 +2107,16 @@ const styles = StyleSheet.create({
   },
   statusAttachBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 34,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   statusAttachBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -2123,15 +2124,15 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fdedec",
+    backgroundColor: c.errorBg,
     alignItems: "center",
     justifyContent: "center",
   },
   uploadStatusText: {
     marginBottom: 10,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
   },
   modalRow: {
@@ -2150,30 +2151,30 @@ const styles = StyleSheet.create({
   },
   modalActionGhost: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
-    backgroundColor: "#fff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
   },
   modalActionPrimary: {
     borderWidth: 1,
-    borderColor: "#161c24",
-    backgroundColor: "#161c24",
+    borderColor: c.text,
+    backgroundColor: c.text,
   },
   modalActionGhostText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "600",
   },
   modalActionPrimaryText: {
-    color: "#ffffff",
+    color: c.surface,
     fontWeight: "700",
   },
   section: {
     marginBottom: 8,
     fontWeight: "700",
-    color: "#39424f",
+    color: c.slate[700],
   },
   sectionLabel: {
     marginBottom: 6,
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "700",
     fontSize: 12,
   },
@@ -2190,7 +2191,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   photoCountText: {
-    color: "#ffffff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 11,
   },
@@ -2202,23 +2203,23 @@ const styles = StyleSheet.create({
   },
   amenityChip: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   amenityChipActive: {
-    backgroundColor: "#161c24",
-    borderColor: "#161c24",
+    backgroundColor: c.text,
+    borderColor: c.text,
   },
   amenityText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   amenityTextActive: {
-    color: "#fff",
+    color: c.surface,
   },
   uploadRow: {
     flexDirection: "row",
@@ -2229,21 +2230,21 @@ const styles = StyleSheet.create({
   ghostBtn: {
     minHeight: 34,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   ghostBtnText: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 13,
     fontWeight: "600",
   },
   uploadCount: {
     fontSize: 12,
-    color: "#6c7789",
+    color: c.textMuted,
   },
   previewRow: {
     gap: 8,
@@ -2252,31 +2253,31 @@ const styles = StyleSheet.create({
   previewPill: {
     maxWidth: 220,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
   },
   previewText: {
     fontSize: 11,
-    color: "#39424f",
+    color: c.slate[700],
     maxWidth: 160,
   },
   removeText: {
-    color: "#942626",
+    color: c.rose[700],
     fontSize: 11,
     fontWeight: "700",
   },
   fileList: {
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     padding: 8,
     gap: 6,
   },
@@ -2299,14 +2300,14 @@ const styles = StyleSheet.create({
     right: 16,
     zIndex: 2,
     borderRadius: 10,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
     borderWidth: 1,
-    borderColor: "#39424f",
+    borderColor: c.slate[700],
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   viewerCloseText: {
-    color: "#ffffff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
@@ -2330,14 +2331,14 @@ const styles = StyleSheet.create({
     right: 6,
   },
   viewerArrowText: {
-    color: "#ffffff",
+    color: c.surface,
     fontSize: 34,
     fontWeight: "700",
   },
   viewerCounter: {
     position: "absolute",
     bottom: 26,
-    color: "#e0e5ed",
+    color: c.border,
     fontSize: 13,
     fontWeight: "600",
   },
@@ -2349,9 +2350,9 @@ const styles = StyleSheet.create({
   },
   webDateModalCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 14,
   },
   webDateInput: {
@@ -2359,12 +2360,12 @@ const styles = StyleSheet.create({
     width: "100%",
     minHeight: 40,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 9,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
-    color: "#161c24",
-    backgroundColor: "#fff",
+    color: c.text,
+    backgroundColor: c.surface,
   },
-});
+}));

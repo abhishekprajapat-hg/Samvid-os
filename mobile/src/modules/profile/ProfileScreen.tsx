@@ -7,6 +7,7 @@ import { useAuth } from "../../context/AuthContext";
 import { uploadChatFile } from "../../services/chatService";
 import { getMyProfile, updateMyProfile } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles } from "../../theme/themedStyles";
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -320,24 +321,24 @@ export const ProfileScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   error: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fdedec",
-    color: "#942626",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#e8f7f0",
-    color: "#084f36",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   profileCard: {
     marginBottom: 10,
@@ -353,20 +354,20 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 32,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
   },
   avatarFallback: {
     width: 64,
     height: 64,
     borderRadius: 32,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
-    backgroundColor: "#edf0f5",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surfaceMuted,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarFallbackText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "700",
     fontSize: 20,
   },
@@ -384,23 +385,23 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   label: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
     textTransform: "uppercase",
     marginBottom: 4,
   },
   readonly: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     minHeight: 46,
     justifyContent: "center",
     paddingHorizontal: 12,
     marginBottom: 8,
   },
   readonlyText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 13,
     fontWeight: "600",
   },
@@ -416,7 +417,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   cardTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 12,
     fontWeight: "700",
     marginBottom: 6,
@@ -424,7 +425,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   meta: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
     marginTop: 3,
   },
@@ -437,20 +438,20 @@ const styles = StyleSheet.create({
   tile: {
     width: "48%",
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   tileLabel: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 1,
   },
   tileValue: {
     marginTop: 4,
-    color: "#161c24",
+    color: c.text,
     fontSize: 22,
     fontWeight: "700",
   },
@@ -469,10 +470,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#0b1220",
     borderWidth: 1,
-    borderColor: "#39424f",
+    borderColor: c.slate[700],
   },
   previewImage: {
     width: "100%",
     height: "100%",
   },
-});
+}));

@@ -6,6 +6,7 @@ import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppInput } from "../../components/common/ui";
 import { askOfficeAssistant } from "../../services/officeAssistantService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 type BotMessage = {
   id: string;
@@ -206,7 +207,7 @@ export const OfficeAssistantScreen = () => {
               onPress={toggleVoice}
               disabled={!isMicSupported || loading}
             >
-              <Icon name={isListening ? "mic" : "mic-outline"} size={18} color="#161c24" />
+              <Icon name={isListening ? "mic" : "mic-outline"} size={18} color={themeColor("#161c24")} />
             </Pressable>
           </View>
 
@@ -217,7 +218,7 @@ export const OfficeAssistantScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   card: {
     flex: 1,
     minHeight: 0,
@@ -248,30 +249,30 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   userBubble: {
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
   },
   botBubble: {
-    backgroundColor: "#edf0f5",
+    backgroundColor: c.surfaceMuted,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
   },
   bubbleText: {
     fontSize: 12,
     lineHeight: 18,
   },
   userBubbleText: {
-    color: "#f5f7fa",
+    color: c.bg,
   },
   botBubbleText: {
-    color: "#161c24",
+    color: c.text,
   },
   composer: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
     padding: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   inputRow: {
     flexDirection: "row",
@@ -290,12 +291,12 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   voiceBtnDisabled: {
     opacity: 0.45,
   },
-});
+}));

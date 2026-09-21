@@ -20,6 +20,7 @@ import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const RANGE_OPTIONS = ["ALL", "THIS_MONTH", "CUSTOM"] as const;
 type RangeKey = (typeof RANGE_OPTIONS)[number];
@@ -298,7 +299,7 @@ export const IntelligenceReportsScreen = () => {
           />
           <View style={{ flex: 1 }} />
           <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-            <Icon name="calendar-outline" size={14} color="#39424f" />
+            <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
           </Pressable>
           <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} disabled={refreshing} />
           <Pressable style={styles.exportBtn} onPress={shareReport}>
@@ -452,12 +453,12 @@ export const IntelligenceReportsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   sectionCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
     marginBottom: 10,
   },
@@ -469,9 +470,9 @@ const styles = StyleSheet.create({
   },
   calendarIconBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 9,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 36,
     width: 36,
     alignItems: "center",
@@ -479,7 +480,7 @@ const styles = StyleSheet.create({
   },
   periodText: {
     marginTop: 8,
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -491,26 +492,26 @@ const styles = StyleSheet.create({
   customDateBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   customDateText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   exportBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   exportText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -525,23 +526,23 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 420,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     padding: 14,
   },
   modalTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 14,
     fontWeight: "700",
     marginBottom: 10,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
-    color: "#161c24",
+    backgroundColor: c.surface,
+    color: c.text,
     height: 44,
     paddingHorizontal: 12,
     marginBottom: 8,
@@ -549,9 +550,9 @@ const styles = StyleSheet.create({
   },
   webInputWrap: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 44,
     marginBottom: 8,
     justifyContent: "center",
@@ -560,7 +561,7 @@ const styles = StyleSheet.create({
   webDateInput: {
     height: 30,
     fontSize: 13,
-    color: "#161c24",
+    color: c.text,
     backgroundColor: "transparent",
     borderWidth: 0,
     padding: 0,
@@ -573,66 +574,66 @@ const styles = StyleSheet.create({
   },
   modalCancelBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     minWidth: 90,
     height: 38,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   modalCancelText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "600",
     fontSize: 12,
   },
   modalApplyBtn: {
     borderWidth: 1,
-    borderColor: "#161c24",
+    borderColor: c.text,
     borderRadius: 10,
     minWidth: 90,
     height: 38,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
   },
   modalApplyText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
   card: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
     marginBottom: 8,
   },
   label: {
     textTransform: "uppercase",
     fontSize: 12,
-    color: "#6c7789",
+    color: c.textMuted,
   },
   value: {
     marginTop: 8,
     fontSize: 22,
     fontWeight: "700",
-    color: "#161c24",
+    color: c.text,
   },
   section: {
     marginTop: 12,
     marginBottom: 8,
     fontWeight: "700",
-    color: "#39424f",
+    color: c.slate[700],
   },
   rowCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
   },
@@ -642,27 +643,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   rowTitle: {
-    color: "#161c24",
+    color: c.text,
     fontWeight: "600",
   },
   rowMeta: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
   },
   barTrack: {
     marginTop: 8,
     height: 8,
     borderRadius: 6,
-    backgroundColor: "#e0e5ed",
+    backgroundColor: c.border,
     overflow: "hidden",
   },
   barFill: {
     height: "100%",
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
   },
   empty: {
     textAlign: "center",
-    color: "#6c7789",
+    color: c.textMuted,
     marginVertical: 10,
   },
-});
+}));

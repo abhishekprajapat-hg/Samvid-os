@@ -11,6 +11,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors frontend/src/components/ui/Input.jsx and SearchInput.jsx.
@@ -91,8 +92,8 @@ export const AppInput = ({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor={palette.slate[500]}
-          selectionColor={palette.blue[600]}
+          placeholderTextColor={themePalette.slate[500]}
+          selectionColor={themePalette.blue[600]}
           secureTextEntry={secureTextEntry}
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
@@ -154,14 +155,14 @@ export const AppSearchInput = ({
   />
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   wrapper: {
     width: "100%",
   },
   label: {
     fontSize: typography.label,
     fontWeight: "600",
-    color: palette.slate[600],
+    color: themePalette.slate[600],
     marginBottom: 6,
   },
   field: {
@@ -169,7 +170,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     height: 36,
     borderWidth: 1,
-    borderColor: palette.slate[300],
+    borderColor: themePalette.slate[300],
     borderRadius: radii.md,
     backgroundColor: colors.surface,
     paddingHorizontal: 12,
@@ -182,31 +183,31 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   fieldFocused: {
-    borderColor: palette.blue[600],
+    borderColor: themePalette.blue[600],
     // RN has no ring utility; a 2px-equivalent glow reads the same at a glance.
-    shadowColor: palette.blue[600],
+    shadowColor: themePalette.blue[600],
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 0,
   },
   fieldError: {
-    borderColor: palette.rose[600],
+    borderColor: themePalette.rose[600],
   },
   fieldDisabled: {
-    backgroundColor: palette.slate[100],
+    backgroundColor: themePalette.slate[100],
   },
   input: {
     flex: 1,
     fontSize: typography.body,
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     padding: 0,
   },
   inputMultiline: {
     textAlignVertical: "top",
   },
   inputDisabled: {
-    color: palette.slate[500],
+    color: themePalette.slate[500],
   },
   affix: {
     alignItems: "center",
@@ -215,12 +216,12 @@ const styles = StyleSheet.create({
   error: {
     marginTop: 4,
     fontSize: typography.label,
-    color: palette.rose[600],
+    color: themePalette.rose[600],
   },
   helper: {
     marginTop: 4,
     fontSize: typography.label,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
   },
   clear: {
     width: 24,
@@ -228,13 +229,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: palette.slate[100],
+    backgroundColor: themePalette.slate[100],
   },
   clearGlyph: {
     fontSize: 16,
     lineHeight: 18,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
   },
-});
+}));
 
 export default AppInput;

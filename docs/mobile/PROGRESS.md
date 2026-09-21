@@ -14,7 +14,7 @@ Living status for the phase plan in [04_MOBILE_IMPLEMENTATION_PHASES.md](04_MOBI
 | 5 | Missing sales modules | ✅ Done |
 | 6 | Coworking | ✅ Done |
 | 7 | Admin depth | 🟡 Partial |
-| 8 | Gaps, legal & polish | 🟡 Legal done |
+| 8 | Gaps, legal & polish | ✅ Done |
 | 9 | Push & native integration | ✅ Done |
 | 10 | Release | ⛔ Needs devices & store accounts |
 
@@ -378,17 +378,46 @@ The store-blocking half is done.
   the checkbox glyphs. All 57 names now resolve; the check was rewritten to read
   expressions too.
 
+### Dark mode — done
+
+The infrastructure shipped in Phase 1, but **1,310 colour literals across 57
+stylesheets** still resolved statically, and `StyleSheet.create` runs once at
+import so they could not follow the scheme. Converting each screen to take
+colours from a hook would have meant editing every component in every file —
+twenty-five of them define more than one.
+
+`theme/themedStyles.ts` takes a different route. A stylesheet is declared as a
+function of the scheme and wrapped in a proxy; property access happens during
+render, so `styles.card` resolves against whichever scheme is current. Each
+scheme's sheet is built once and cached. **No component changed.**
+
+Colours outside a stylesheet — icon tints, `ActivityIndicator`, a one-off
+`backgroundColor` in JSX — are not reachable by that proxy, so they go through
+`themeColor()` and `themePalette`, which resolve at call time for the same
+reason.
+
+| Pass | Converted |
+| --- | ---: |
+| Stylesheets (`themedStyles`) | 964 literals, 56 files |
+| Inline JSX and expressions | 307 literals + 259 `palette.*` refs |
+| `#fff` shorthand | 206 |
+| **Static colours remaining** | **0** |
+
+ThemeProvider remounts its subtree on a scheme change, keyed on the scheme. The
+proxy resolves per access, but nothing would make a screen read it again — a
+component that never consumes the theme context does not re-render when it
+changes. The cost is that in-progress screen state is lost on a theme switch;
+that is acceptable for a deliberate, rare action, and it is what avoids
+rewriting 57 stylesheets.
+
+A light / dark / system switch sits in More → Appearance.
+
+Left alone on purpose: the call screen's bespoke dark gradient (no counterpart
+in the scales, and already dark) and `#000` shadows, which stay black in both
+schemes.
+
 ### Still open in Phase 8
 
-- **Dark mode completion.** The infrastructure shipped in Phase 1 and works, but
-  **1,310 colour literals across 32 screens** still resolve statically, and
-  `StyleSheet.create` runs once at import so they cannot follow the scheme.
-  Finishing it means converting each screen to a `makeStyles(colors)` factory.
-
-  That is mechanical but large, and it is genuinely all-or-nothing: a half
-  converted app where some screens flip and others do not is worse than one that
-  stays light. It deserves its own focused pass rather than being folded into
-  another phase.
 - Crash reporting (a service, e.g. Sentry — the boundary above is the local
   half), and the remaining partial screens from the gap matrix (tasks, calendar,
   reports, chat depth, profile).

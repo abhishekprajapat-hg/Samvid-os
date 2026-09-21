@@ -1,248 +1,306 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import DateTimePicker from "@react-native-community/datetimepicker";
+import Svg, { Circle, Defs, G, LinearGradient, Path, Rect, Stop, Text as SvgText } from "react-native-svg";
 import { Icon } from "../../components/ui/Icon";
-import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from "react-native-svg";
 import { Screen } from "../../components/common/Screen";
 import { useAuth } from "../../context/AuthContext";
-import { getAllLeads, getCompanyPerformanceOverview } from "../../services/leadService";
+import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
+import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
-import type { Lead, InventoryAsset } from "../../types";
-import type { CompanyPerformanceOverview } from "../../services/leadService";
+import { colors, elevation, palette, radii, spacing, typography } from "../../theme/tokens";
+import type { InventoryAsset, Lead, User } from "../../types";
+import { themePalette } from "../../theme/themedStyles";
 
-const PIPELINE_STATUSES = new Set(["CONTACTED", "INTERESTED", "SITE_VISIT"]);
-const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
+/*
+ * The mobile cut of frontend/src/modules/manager/ManagerDashboard.jsx - the
+ * page ADMIN and MANAGER land on. Section for section it is the same page:
+ * greeting, five KPI tiles, occupancy area chart, inventory donut, today's
+ * follow-ups, pipeline snapshot, recent activity, revenue bars, upcoming
+ * visits, quick actions, team footer.
+ *
+ * What changes is only what has to. Web lays the page out in three wide rows;
+ * a phone has one column, so the rows stack and the tile grids go two-up. The
+ * hex literals the web file writes inline resolve to the nearest token here,
+ * per the rule in docs/mobile/01_MOBILE_DESIGN_SYSTEM.md - #f6f8fc is slate-50,
+ * #1747e8 is blue-600, and so on down the file.
+ */
+
 const REFRESH_INTERVAL_MS = 30000;
 
-const formatCurrency = (value: number) => `Rs ${Math.round(value).toLocaleString("en-IN")}`;
+type StageKey = "NEW" | "CONTACTED" | "INTERESTED" | "SITE_VISIT" | "REQUESTED" | "CLOSED";
 
-const toPercent = (value: number) => `${Math.round(value)}%`;
-const clampPercent = (value: number) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-const pad2 = (value: number) => String(value).padStart(2, "0");
-const toDateInputValue = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
-const toMonthParam = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}`;
-const getLeadDate = (lead: Lead) => {
-  const raw = lead.updatedAt || lead.createdAt || "";
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-const toWeekBuckets = (anchorDate: Date, weeks = 8) => {
-  const end = new Date(anchorDate);
-  end.setHours(23, 59, 59, 999);
-  const buckets: Array<{ label: string; start: Date; end: Date; created: number; closed: number; open: number }> = [];
-  for (let i = weeks - 1; i >= 0; i -= 1) {
-    const weekEnd = new Date(end);
-    weekEnd.setDate(end.getDate() - i * 7);
-    const weekStart = new Date(weekEnd);
-    weekStart.setDate(weekEnd.getDate() - 6);
-    weekStart.setHours(0, 0, 0, 0);
-    buckets.push({
-      label: `${weekStart.getDate()} ${weekStart.toLocaleString("en-IN", { month: "short" })}`,
-      start: weekStart,
-      end: weekEnd,
-      created: 0,
-      closed: 0,
-      open: 0,
-    });
-  }
-  return buckets;
-};
-const findBucketIndex = (dateValue: string | undefined, buckets: ReturnType<typeof toWeekBuckets>) => {
-  if (!dateValue) return -1;
-  const when = new Date(dateValue);
-  if (Number.isNaN(when.getTime())) return -1;
-  return buckets.findIndex((bucket) => when >= bucket.start && when <= bucket.end);
+type Stage = {
+  key: StageKey;
+  label: string;
+  icon: string;
+  color: string;
+  soft: string;
 };
 
-const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number; closed: number; open: number }> }) => {
-  const w = 330;
-  const h = 200;
-  const p = 18;
-  const preparedRows = useMemo(() => {
-    if (!Array.isArray(rows) || rows.length === 0) return [{ label: "-", created: 0, closed: 0, open: 0 }];
-    const firstActiveIdx = rows.findIndex((row) => Math.max(row.created, row.closed, row.open) > 0);
-    if (firstActiveIdx <= 0) return rows;
-    const start = Math.max(0, firstActiveIdx - 1);
-    const trimmed = rows.slice(start);
-    if (trimmed.length >= 4) return trimmed;
-    const needed = 4 - trimmed.length;
-    const prefix = rows.slice(Math.max(0, start - needed), start);
-    return [...prefix, ...trimmed];
-  }, [rows]);
-  const rawMax = Math.max(1, ...preparedRows.map((row) => Math.max(row.created, row.closed, row.open)));
-  const maxY = rawMax <= 5 ? rawMax + 1 : Math.ceil(rawMax * 1.15);
-  const yRange = Math.max(1, maxY);
-  const step = (w - p * 2) / Math.max(preparedRows.length - 1, 1);
-  const toPoints = (selector: (row: (typeof rows)[number]) => number) =>
-    preparedRows.map((row, idx) => ({
-      x: p + idx * step,
-      y: h - p - (selector(row) / yRange) * (h - p * 2),
-    }));
-  const toSmoothPath = (points: Array<{ x: number; y: number }>) => {
-    if (points.length <= 1) {
-      const first = points[0] || { x: p, y: h - p };
-      return `M ${first.x} ${first.y}`;
-    }
-    let path = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 0; i < points.length - 1; i += 1) {
-      const p0 = points[i - 1] || points[i];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[i + 2] || p2;
-      const cp1x = p1.x + (p2.x - p0.x) / 6;
-      const cp1y = p1.y + (p2.y - p0.y) / 6;
-      const cp2x = p2.x - (p3.x - p1.x) / 6;
-      const cp2y = p2.y - (p3.y - p1.y) / 6;
-      path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
-    }
-    return path;
-  };
-  const createdPoints = toPoints((r) => r.created);
-  const closedPoints = toPoints((r) => r.closed);
-  const openPoints = toPoints((r) => r.open);
-  const createdPath = toSmoothPath(createdPoints);
-  const closedPath = toSmoothPath(closedPoints);
-  const openPath = toSmoothPath(openPoints);
-  const latestActiveIdx = preparedRows.reduce((acc, row, idx) => (Math.max(row.created, row.closed, row.open) > 0 ? idx : acc), -1);
-  const latestBandX = latestActiveIdx >= 0 ? p + latestActiveIdx * step - step / 2 : -1;
-  const latestBandW = Math.max(16, step);
-  const barWidth = Math.min(18, Math.max(8, step * 0.34));
+const STAGES: Stage[] = [
+  { key: "NEW", label: "New", icon: "todo", color: themePalette.blue[500], soft: themePalette.blue[50] },
+  { key: "CONTACTED", label: "Contacted", icon: "call", color: themePalette.blue[400], soft: themePalette.blue[50] },
+  { key: "INTERESTED", label: "Interested", icon: "people", color: themePalette.emerald[500], soft: themePalette.emerald[50] },
+  { key: "SITE_VISIT", label: "Visit", icon: "calendarDays", color: themePalette.amber[400], soft: themePalette.amber[50] },
+  { key: "REQUESTED", label: "Requested", icon: "activity", color: themePalette.rose[500], soft: themePalette.rose[50] },
+  { key: "CLOSED", label: "Closed", icon: "checkmark-circle-outline", color: themePalette.emerald[400], soft: themePalette.emerald[50] },
+];
 
-  return (
-    <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
-      <Defs>
-        <LinearGradient id="createdBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#4c9dd3" stopOpacity="0.55" />
-          <Stop offset="1" stopColor="#4c9dd3" stopOpacity="0.12" />
-        </LinearGradient>
-        <LinearGradient id="closedAreaGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#12a06a" stopOpacity="0.35" />
-          <Stop offset="1" stopColor="#12a06a" stopOpacity="0.05" />
-        </LinearGradient>
-      </Defs>
-      <Rect x={0} y={0} width={w} height={h} fill="#fff" rx={10} />
-      {[0, 1, 2, 3, 4].map((idx) => {
-        const y = p + (idx / 4) * (h - p * 2);
-        return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke="#e0e5ed" strokeDasharray="4 4" />;
-      })}
-      {latestActiveIdx >= 0 ? (
-        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill="#4c9dd3" opacity={0.09} rx={8} />
-      ) : null}
-      {preparedRows.map((row, idx) => {
-        const x = p + idx * step;
-        const barBaseY = h - p;
-        const barHeight = (row.created / yRange) * (h - p * 2);
-        return <Rect key={`${row.label}-bar`} x={x - barWidth / 2} y={barBaseY - barHeight} width={barWidth} height={barHeight} fill="url(#createdBarGrad)" rx={5} />;
-      })}
-      {closedPoints.length > 1 ? (
+/* The page header strings web builds in resolveHomeHeader(). */
+const HOME_SCOPE: Record<string, string> = {
+  ADMIN: "Admin Command Center",
+  MANAGER: "Management Command Center",
+};
+
+/*
+ * Fields the API returns on a lead that the shared Lead type does not carry
+ * yet - the web dashboard reads all three straight off the raw payload.
+ */
+type DashboardLead = Lead & {
+  siteVisitDate?: string;
+  dealPayment?: { amount?: number } | null;
+  saleDetails?: { amount?: number } | null;
+};
+
+type DatedLead = DashboardLead & { when: Date | null };
+
+const money = (value: number) => {
+  const amount = Number(value || 0);
+  return amount >= 100000 ? `₹ ${(amount / 100000).toFixed(1)}L` : `₹ ${amount.toLocaleString("en-IN")}`;
+};
+
+const dateOf = (value?: string | null) => {
+  const parsed = value ? new Date(value) : null;
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
+};
+
+const initials = (name = "") =>
+  name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "NA";
+
+const timeOf = (value: Date) => value.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
+const statusLabel = (status?: string) => String(status || "").replace(/_/g, " ");
+
+/* ---------------------------------------------------------- building blocks -- */
+
+/*
+ * Web's local <Card>: a 48px header bar with a divider under it, the title on
+ * the left and an optional action on the right. Content sits flush, so each
+ * section pads itself the way it wants to.
+ */
+const DashCard = ({
+  title,
+  icon,
+  action,
+  children,
+}: {
+  title: string;
+  /*
+   * Web prefixes five of these titles with a glyph: 🏢 ♨ ▣ ⌁ ▥. Three of
+   * those live in Unicode blocks Android has no guaranteed font for, and a
+   * tofu box is a worse match for the design than the lucide mark that means
+   * the same thing. So the mark is an icon here rather than a character.
+   */
+  icon?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) => (
+  <View style={styles.card}>
+    <View style={styles.cardHeader}>
+      <View style={styles.cardTitleWrap}>
+        {icon ? <Icon name={icon} size={15} color={themePalette.slate[600]} /> : null}
+        <Text style={styles.cardTitle} numberOfLines={1}>
+          {title}
+        </Text>
+      </View>
+      {action}
+    </View>
+    {children}
+  </View>
+);
+
+const CardLink = ({ label = "View All", onPress }: { label?: string; onPress: () => void }) => (
+  <Pressable onPress={onPress} hitSlop={8} accessibilityRole="button">
+    <Text style={styles.cardLink}>{label} →</Text>
+  </Pressable>
+);
+
+/*
+ * Web's single-option <select>. It filters nothing there either, so it reads
+ * as the static label it is rather than pretending to be a picker.
+ */
+const RangePill = ({ label }: { label: string }) => (
+  <View style={styles.rangePill}>
+    <Text style={styles.rangePillText}>{label}</Text>
+    <Icon name="chevron-down" size={12} color={themePalette.slate[500]} />
+  </View>
+);
+
+const EmptyNote = ({ label, tall }: { label: string; tall?: boolean }) => (
+  <Text style={[styles.emptyNote, tall && styles.emptyNoteTall]}>{label}</Text>
+);
+
+/*
+ * The occupancy area chart. Web draws a fixed decorative path rather than
+ * charting anything, so this draws the same one, stretched the same way.
+ */
+const OccupancyChart = () => (
+  <View style={styles.occBox}>
+    <View style={styles.occGrid} pointerEvents="none">
+      {[0, 1, 2, 3].map((row) => (
+        <View key={row} style={styles.occGridRow} />
+      ))}
+    </View>
+    <View style={styles.occChartLayer} pointerEvents="none">
+      <Svg width="100%" height="100%" viewBox="0 0 600 190" preserveAspectRatio="none">
+        <Defs>
+          <LinearGradient id="occupancyFill" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={themePalette.blue[500]} stopOpacity="0.28" />
+            <Stop offset="1" stopColor={themePalette.blue[500]} stopOpacity="0" />
+          </LinearGradient>
+        </Defs>
         <Path
-          d={`${closedPath} L ${closedPoints[closedPoints.length - 1].x} ${h - p} L ${closedPoints[0].x} ${h - p} Z`}
-          fill="url(#closedAreaGrad)"
+          d="M15 145L120 115L225 86L330 57L435 57L540 36L585 24L585 178L15 178Z"
+          fill="url(#occupancyFill)"
         />
-      ) : null}
-      <Path d={createdPath} fill="none" stroke="#1f6499" strokeWidth={2.6} />
-      <Path d={closedPath} fill="none" stroke="#12a06a" strokeWidth={3} />
-      <Path d={openPath} fill="none" stroke="#1c37ab" strokeWidth={2.2} strokeDasharray="4 3" />
-      {createdPoints.map((point, idx) => (
-        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill="#1f6499" />
+        <Path
+          d="M15 145L120 115L225 86L330 57L435 57L540 36L585 24"
+          fill="none"
+          stroke={themePalette.blue[600]}
+          strokeWidth={2}
+        />
+      </Svg>
+    </View>
+    <View style={styles.occMonths} pointerEvents="none">
+      {["Apr", "May", "Jun", "Jul", "Aug", "Sep"].map((month) => (
+        <Text key={month} style={styles.occMonth}>
+          {month}
+        </Text>
       ))}
-      {closedPoints.map((point, idx) => (
-        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill="#12a06a" />
-      ))}
-      {openPoints.map((point, idx) => (
-        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill="#1c37ab" />
-      ))}
-      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill="#1f6499">Created</SvgText>
-      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill="#12a06a">Closed</SvgText>
-      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill="#1c37ab">Open</SvgText>
-      {preparedRows.map((row, idx) => {
-        const x = p + idx * step;
-        const showLabel = preparedRows.length <= 6 || idx === 0 || idx === preparedRows.length - 1 || idx % 2 === 0;
-        if (!showLabel) return null;
-        return (
-          <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill="#6c7789">
-            {row.label}
-          </SvgText>
-        );
-      })}
-    </Svg>
+    </View>
+  </View>
+);
+
+/*
+ * The inventory donut. Same trick web uses: r = 15.9155 makes the
+ * circumference 100, so each slice's dash array is just its percentage.
+ */
+const InventoryDonut = ({
+  total,
+  segments,
+}: {
+  total: number;
+  segments: Array<{ label: string; value: number; color: string }>;
+}) => {
+  let offset = 0;
+  return (
+    <View style={styles.donutWrap}>
+      <Svg width={128} height={128} viewBox="0 0 42 42">
+        <G rotation={-90} origin="21, 21">
+          <Circle cx="21" cy="21" r="15.9155" fill="none" stroke={colors.border} strokeWidth={6} />
+          {segments.map((segment) => {
+            const share = total ? (segment.value / total) * 100 : 0;
+            const slice = (
+              <Circle
+                key={segment.label}
+                cx="21"
+                cy="21"
+                r="15.9155"
+                fill="none"
+                stroke={segment.color}
+                strokeWidth={6}
+                strokeDasharray={[share, 100 - share]}
+                strokeDashoffset={-offset}
+              />
+            );
+            offset += share;
+            return slice;
+          })}
+        </G>
+      </Svg>
+      <View style={styles.donutCenter} pointerEvents="none">
+        <Text style={styles.donutTotal}>{total}</Text>
+        <Text style={styles.donutCaption}>Total Units</Text>
+      </View>
+    </View>
   );
 };
 
-const CircularScore = ({ percent }: { percent: number }) => {
-  const size = 86;
-  const stroke = 10;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const safe = clampPercent(percent);
-  const offset = circumference - (safe / 100) * circumference;
+/*
+ * Revenue bars. Web's nine bars are hardcoded percentages behind a mint
+ * gradient; both carry over as they are.
+ */
+const REVENUE_BARS = [18, 26, 38, 54, 59, 67, 78, 91, 100];
+const REVENUE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"];
+
+const RevenueChart = () => {
+  const width = 330;
+  const height = 176;
+  const padX = 14;
+  const plot = 130;
+  const baseline = 146;
+  const slot = (width - padX * 2) / REVENUE_BARS.length;
+  const barWidth = Math.min(20, slot * 0.6);
+  const barX = (index: number) => padX + index * slot + (slot - barWidth) / 2;
+
   return (
-    <Svg width={size} height={size}>
-      <Circle cx={size / 2} cy={size / 2} r={radius} stroke="#e0e5ed" strokeWidth={stroke} fill="none" />
-      <Circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        stroke="#2b7fbf"
-        strokeWidth={stroke}
-        strokeLinecap="round"
-        fill="none"
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-      />
-      <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="700" fill="#161c24">
-        {Math.round(safe)}%
-      </SvgText>
-    </Svg>
+    <View style={styles.revenueBox}>
+      <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+        <Defs>
+          <LinearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={themePalette.emerald[200]} />
+            <Stop offset="1" stopColor={themePalette.emerald[300]} />
+          </LinearGradient>
+        </Defs>
+        {REVENUE_BARS.map((percent, index) => {
+          const barHeight = (percent / 100) * plot;
+          return (
+            <Rect
+              key={`bar-${REVENUE_MONTHS[index]}`}
+              x={barX(index)}
+              y={baseline - barHeight}
+              width={barWidth}
+              height={barHeight}
+              rx={4}
+              fill="url(#revenueFill)"
+            />
+          );
+        })}
+        {REVENUE_MONTHS.map((month, index) => (
+          <SvgText
+            key={`label-${month}`}
+            x={barX(index) + barWidth / 2}
+            y={baseline + 16}
+            fontSize="9"
+            textAnchor="middle"
+            fill={themePalette.slate[500]}
+          >
+            {month}
+          </SvgText>
+        ))}
+      </Svg>
+    </View>
   );
 };
+
+/* ---------------------------------------------------------------- screen -- */
 
 export const ManagerDashboardScreen = () => {
   const navigation = useNavigation<any>();
   const { user } = useAuth();
-  const loggedInUserId = String(user?._id || user?.id || "");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [assets, setAssets] = useState<InventoryAsset[]>([]);
-  const [range, setRange] = useState<"ALL" | "THIS_MONTH" | "CUSTOM">("ALL");
-  const [selectedMonthDate, setSelectedMonthDate] = useState(new Date());
-  const [customFromDate, setCustomFromDate] = useState<Date | null>(null);
-  const [customToDate, setCustomToDate] = useState<Date | null>(null);
-  const [showMonthPicker, setShowMonthPicker] = useState(false);
-  const [showCustomFromPicker, setShowCustomFromPicker] = useState(false);
-  const [showCustomToPicker, setShowCustomToPicker] = useState(false);
-  const [webMonthPickerVisible, setWebMonthPickerVisible] = useState(false);
-  const [webMonthDateValue, setWebMonthDateValue] = useState(toDateInputValue(new Date()));
-  const [webCustomPickerVisible, setWebCustomPickerVisible] = useState(false);
-  const [webCustomFromValue, setWebCustomFromValue] = useState("");
-  const [webCustomToValue, setWebCustomToValue] = useState("");
-  const [companyPerformance, setCompanyPerformance] = useState<CompanyPerformanceOverview | null>(null);
-  const [showAllLeaderboard, setShowAllLeaderboard] = useState(false);
-
-  const performanceParams = useMemo(() => {
-    if (range === "THIS_MONTH") {
-      return {
-        range: "THIS_MONTH" as const,
-        month: toMonthParam(selectedMonthDate),
-      };
-    }
-    if (range === "CUSTOM") {
-      if (!customFromDate || !customToDate) return null;
-      return {
-        range: "CUSTOM" as const,
-        from: toDateInputValue(customFromDate),
-        to: toDateInputValue(customToDate),
-      };
-    }
-    return {
-      range: "ALL" as const,
-    };
-  }, [range, selectedMonthDate, customFromDate, customToDate]);
+  const [leads, setLeads] = useState<DashboardLead[]>([]);
+  const [inventory, setInventory] = useState<InventoryAsset[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
 
   const load = useCallback(async (silent = false) => {
     try {
@@ -250,23 +308,21 @@ export const ManagerDashboardScreen = () => {
       else setLoading(true);
       setError("");
 
-      const [leadRows, inventoryRows, performanceOverview] = await Promise.all([
+      const [leadRows, inventoryRows, userRows] = await Promise.all([
         getAllLeads(),
         getInventoryAssets(),
-        performanceParams
-          ? getCompanyPerformanceOverview(performanceParams).catch(() => null)
-          : Promise.resolve(null),
+        getUsers({ pagination: "false", fields: "_id,name,role,isActive" }),
       ]);
-      setLeads(Array.isArray(leadRows) ? leadRows : []);
-      setAssets(Array.isArray(inventoryRows) ? inventoryRows : []);
-      setCompanyPerformance(performanceOverview);
+      setLeads(Array.isArray(leadRows) ? (leadRows as DashboardLead[]) : []);
+      setInventory(Array.isArray(inventoryRows) ? inventoryRows : []);
+      setUsers(Array.isArray(userRows?.users) ? userRows.users : []);
     } catch (e) {
-      setError(toErrorMessage(e, "Failed to load manager dashboard"));
+      setError(toErrorMessage(e, "Failed to load dashboard"));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [performanceParams]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -278,948 +334,713 @@ export const ManagerDashboardScreen = () => {
   }, [load]);
 
   const summary = useMemo(() => {
-    const totalLeads = leads.length;
-    const closed = leads.filter((lead) => lead.status === "CLOSED").length;
-    const siteVisits = leads.filter((lead) => lead.status === "SITE_VISIT").length;
-    const negotiation = leads.filter((lead) => PIPELINE_STATUSES.has(String(lead.status || ""))).length;
-    const activePipeline = Math.max(totalLeads - closed, 0);
-    const conversion = totalLeads > 0 ? (closed / totalLeads) * 100 : 0;
-    const estimatedRevenue = closed * 75000;
-    const avgTicket = closed > 0 ? estimatedRevenue / closed : 0;
+    const count = (status: string) =>
+      inventory.filter((asset) => String(asset.status).toUpperCase() === status).length;
+
+    const total = inventory.length;
+    const available = count("AVAILABLE");
+    const blocked = count("BLOCKED");
+    const maintenance = count("MAINTENANCE");
+    const occupied = Math.max(total - available - blocked - maintenance, 0);
+
+    const closed = leads.filter((lead) => String(lead.status).toUpperCase() === "CLOSED");
+    const open = leads.filter((lead) => String(lead.status).toUpperCase() !== "CLOSED");
+    const revenue = closed.reduce(
+      (sum, lead) => sum + Number(lead?.dealPayment?.amount || lead?.saleDetails?.amount || 0),
+      0,
+    );
+
+    const now = new Date();
+    const follow = leads
+      .map((lead): DatedLead => ({ ...lead, when: dateOf(lead.nextFollowUp) }))
+      .filter((lead) => lead.when?.toDateString() === now.toDateString())
+      .sort((a, b) => (a.when?.getTime() || 0) - (b.when?.getTime() || 0))
+      .slice(0, 4);
+    const upcoming = leads
+      .map((lead): DatedLead => ({ ...lead, when: dateOf(lead.nextFollowUp || lead.siteVisitDate) }))
+      .filter((lead) => !!lead.when && lead.when >= now)
+      .sort((a, b) => (a.when?.getTime() || 0) - (b.when?.getTime() || 0))
+      .slice(0, 3);
+    const recent = [...leads]
+      .sort((a, b) => (dateOf(b.updatedAt)?.getTime() || 0) - (dateOf(a.updatedAt)?.getTime() || 0))
+      .slice(0, 4);
+
+    const stages = STAGES.map((stage) => ({
+      ...stage,
+      value: leads.filter((lead) => String(lead.status).toUpperCase() === stage.key).length,
+    }));
 
     return {
-      totalLeads,
+      total,
+      available,
+      blocked,
+      maintenance,
+      occupied,
+      occupancy: total ? Math.round((occupied / total) * 100) : 0,
       closed,
-      siteVisits,
-      negotiation,
-      activePipeline,
-      conversion,
-      estimatedRevenue,
-      avgTicket,
-      inventoryAssets: assets.length,
+      open,
+      revenue,
+      follow,
+      upcoming,
+      recent,
+      stages,
     };
-  }, [assets.length, leads]);
+  }, [inventory, leads]);
 
-  const funnelRows = useMemo(
-    () => [
-      {
-        label: "Negotiation",
-        value: summary.negotiation,
-        progress: summary.totalLeads > 0 ? (summary.negotiation / summary.totalLeads) * 100 : 0,
-      },
-      {
-        label: "Site Visits",
-        value: summary.siteVisits,
-        progress: summary.totalLeads > 0 ? (summary.siteVisits / summary.totalLeads) * 100 : 0,
-      },
-      {
-        label: "Closed Deals",
-        value: summary.closed,
-        progress: summary.conversion,
-      },
-    ],
-    [summary.closed, summary.conversion, summary.negotiation, summary.siteVisits, summary.totalLeads],
+  const go = useCallback(
+    (screen: string, params?: Record<string, unknown>) => () => navigation.navigate(screen, params),
+    [navigation],
   );
 
-  const scopedLeads = useMemo(() => {
-    if (range === "ALL") return leads;
-    if (range === "THIS_MONTH") {
-      return leads.filter((lead) => {
-        const d = getLeadDate(lead);
-        if (!d) return false;
-        return d.getFullYear() === selectedMonthDate.getFullYear() && d.getMonth() === selectedMonthDate.getMonth();
-      });
-    }
-    if (!customFromDate || !customToDate) return [];
-    const start = new Date(customFromDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(customToDate);
-    end.setHours(23, 59, 59, 999);
-    return leads.filter((lead) => {
-      const d = getLeadDate(lead);
-      if (!d) return false;
-      return d >= start && d <= end;
-    });
-  }, [range, leads, selectedMonthDate, customFromDate, customToDate]);
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
+  const stageMax = Math.max(...summary.stages.map((stage) => stage.value), 1);
+  const interested = summary.stages.find((stage) => stage.key === "INTERESTED")?.value || 0;
+  const activeTeam = users.filter((member) => member?.isActive !== false).length;
+  const scope = HOME_SCOPE[String(user?.role || "")] || "Workspace Command Center";
 
-  const periodLabel = useMemo(() => {
-    if (range === "ALL") return "All data";
-    if (range === "THIS_MONTH") return selectedMonthDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
-    if (customFromDate && customToDate) {
-      return `${customFromDate.toLocaleDateString("en-IN")} to ${customToDate.toLocaleDateString("en-IN")}`;
-    }
-    if (customFromDate) return `From ${customFromDate.toLocaleDateString("en-IN")}`;
-    return "Custom range";
-  }, [range, selectedMonthDate, customFromDate, customToDate]);
+  const segments = [
+    { label: "Available", value: summary.available, color: themePalette.emerald[500] },
+    { label: "Occupied", value: summary.occupied, color: themePalette.blue[500] },
+    { label: "Blocked", value: summary.blocked, color: themePalette.amber[400] },
+    { label: "Under Maintenance", value: summary.maintenance, color: themePalette.rose[500] },
+  ];
 
-  const performanceSnapshot = useMemo(() => {
-    const totalLeads = scopedLeads.length;
-    const closed = scopedLeads.filter((lead) => String(lead.status || "").toUpperCase() === "CLOSED").length;
-    const latestLeadDate = scopedLeads
-      .map((lead) => getLeadDate(lead))
-      .filter((d): d is Date => d instanceof Date)
-      .sort((a, b) => b.getTime() - a.getTime())[0];
-    const weekBuckets = toWeekBuckets(latestLeadDate || new Date(), 8);
+  const kpis = [
+    {
+      label: "Total Properties",
+      value: String(summary.total),
+      help: "Active in portfolio",
+      icon: "inventory",
+      color: themePalette.blue[600],
+      tint: themePalette.blue[50],
+      down: false,
+      onPress: go("Inventory"),
+    },
+    {
+      label: "Total Clients",
+      value: String(summary.closed.length),
+      help: "Across all locations",
+      icon: "people",
+      color: themePalette.blue[600],
+      tint: themePalette.blue[50],
+      down: false,
+      onPress: go("CoworkingClients"),
+    },
+    {
+      label: "Current Occupancy",
+      value: `${summary.occupancy}%`,
+      help: `${summary.occupied}/${summary.total || 0} units occupied`,
+      icon: "targets",
+      color: themePalette.blue[600],
+      tint: themePalette.blue[50],
+      down: false,
+      onPress: go("Inventory"),
+    },
+    {
+      label: "Open Leads",
+      value: String(summary.open.length),
+      help: `${interested} interested`,
+      icon: "activity",
+      color: themePalette.rose[500],
+      tint: themePalette.rose[50],
+      down: true,
+      onPress: go("Leads"),
+    },
+    {
+      label: "Monthly Revenue",
+      value: money(summary.revenue),
+      help: "Expected this month",
+      icon: "revenue",
+      color: themePalette.emerald[500],
+      tint: themePalette.emerald[50],
+      down: false,
+      onPress: go("Finance"),
+    },
+  ];
 
-    scopedLeads.forEach((lead) => {
-      const createdIdx = findBucketIndex(lead.createdAt, weekBuckets);
-      if (createdIdx >= 0) weekBuckets[createdIdx].created += 1;
-      if (String(lead.status || "").toUpperCase() === "CLOSED") {
-        const closedIdx = findBucketIndex(lead.updatedAt || lead.createdAt, weekBuckets);
-        if (closedIdx >= 0) weekBuckets[closedIdx].closed += 1;
-      }
-    });
-    weekBuckets.forEach((bucket) => {
-      bucket.open = Math.max(0, bucket.created - bucket.closed);
-    });
-
-    return {
-      totalLeads,
-      closed,
-      closeVelocity: totalLeads > 0 ? (closed / totalLeads) * 100 : 0,
-      weekly: weekBuckets.map((row) => ({ label: row.label, created: row.created, closed: row.closed, open: row.open })),
-    };
-  }, [scopedLeads]);
-
-  const leaderboard = useMemo(() => {
-    const rowMap = new Map<string, { id: string; name: string; role: string; assigned: number; closed: number; visits: number; scorePercent: number }>();
-
-    scopedLeads.forEach((lead) => {
-      const assigned = lead.assignedTo;
-      if (!assigned || typeof assigned !== "object") return;
-      const id = String((assigned as any)._id || (assigned as any).id || "");
-      if (!id) return;
-      const role = String((assigned as any).role || "-").toUpperCase();
-      if (role === "ADMIN") return;
-      const row = rowMap.get(id) || {
-        id,
-        name: String((assigned as any).name || "User"),
-        role,
-        assigned: 0,
-        closed: 0,
-        visits: 0,
-        scorePercent: 0,
-      };
-      row.assigned += 1;
-      const status = String(lead.status || "").toUpperCase();
-      if (status === "CLOSED") row.closed += 1;
-      if (status === "SITE_VISIT") row.visits += 1;
-      rowMap.set(id, row);
-    });
-
-    return Array.from(rowMap.values())
-      .map((row) => {
-        const closeRate = row.assigned > 0 ? (row.closed / row.assigned) * 100 : 0;
-        const visitRate = row.assigned > 0 ? (row.visits / row.assigned) * 100 : 0;
-        return {
-          ...row,
-          scorePercent: clampPercent(Math.round(closeRate * 0.8 + visitRate * 0.2)),
-        };
-      })
-      .sort((a, b) => b.scorePercent - a.scorePercent || b.closed - a.closed || b.assigned - a.assigned);
-  }, [scopedLeads]);
-
-  const resolvedPerformanceSnapshot = useMemo(
-    () =>
-      companyPerformance?.summary && Array.isArray(companyPerformance.weekly)
-        ? {
-          totalLeads: Number(companyPerformance.summary.totalLeads || 0),
-          closed: Number(companyPerformance.summary.closed || 0),
-          closeVelocity: Number(companyPerformance.summary.closeVelocity || 0),
-          weekly: companyPerformance.weekly.map((row) => ({
-            label: String(row.label || ""),
-            created: Number(row.created || 0),
-            closed: Number(row.closed || 0),
-            open: Number(row.open || 0),
-          })),
-        }
-        : performanceSnapshot,
-    [companyPerformance, performanceSnapshot],
-  );
-
-  const resolvedLeaderboard = useMemo(
-    () =>
-      Array.isArray(companyPerformance?.leaderboard)
-        ? companyPerformance.leaderboard.map((row) => ({
-          id: String(row.id || ""),
-          name: String(row.name || "User"),
-          role: String(row.role || "-"),
-          assigned: Number(row.assigned || 0),
-          closed: Number(row.closed || 0),
-          visits: Number(row.visits || 0),
-          scorePercent: clampPercent(Number(row.scorePercent || 0)),
-        }))
-        : leaderboard,
-    [companyPerformance, leaderboard],
-  );
-
-  const pinnedLeaderboard = useMemo(() => resolvedLeaderboard, [resolvedLeaderboard]);
-  const visibleLeaderboard = useMemo(
-    () => (showAllLeaderboard ? pinnedLeaderboard : pinnedLeaderboard.slice(0, 5)),
-    [pinnedLeaderboard, showAllLeaderboard],
-  );
-
-  const openLeads = ({ status, preset, query }: { status?: string; preset?: string; query?: string }) => {
-    navigation.navigate("Leads", {
-      initialStatus: status || "ALL",
-      filterPreset: preset || "",
-      initialQuery: query || "",
-    });
-  };
-
-  const openClosedDealsFromRevenue = () => {
-    navigation.navigate("Leads", {
-      initialStatus: "CLOSED",
-      filterPreset: "",
-      initialQuery: "",
-      highlightMetric: "ESTIMATED_REVENUE",
-      estimatedRevenue: summary.estimatedRevenue,
-      closedDeals: summary.closed,
-    });
-  };
-
-  const openInventory = () => {
-    navigation.navigate("Inventory");
-  };
-
-  const openMonthPicker = () => {
-    if (Platform.OS === "web") {
-      setWebMonthDateValue(toDateInputValue(selectedMonthDate));
-      setWebMonthPickerVisible(true);
-      return;
-    }
-    setShowMonthPicker(true);
-  };
-
-  const openCustomRangePicker = () => {
-    if (Platform.OS === "web") {
-      setWebCustomFromValue(customFromDate ? toDateInputValue(customFromDate) : "");
-      setWebCustomToValue(customToDate ? toDateInputValue(customToDate) : "");
-      setWebCustomPickerVisible(true);
-      return;
-    }
-    setShowCustomFromPicker(true);
-  };
-
-  const applyWebMonthPicker = () => {
-    if (!webMonthDateValue) {
-      setError("Please select date");
-      return;
-    }
-    const parsed = new Date(`${webMonthDateValue}T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-      setError("Please select valid date");
-      return;
-    }
-    setSelectedMonthDate(parsed);
-    setWebMonthPickerVisible(false);
-  };
-
-  const applyWebCustomRange = () => {
-    if (!webCustomFromValue || !webCustomToValue) {
-      setError("Please select from and to date");
-      return;
-    }
-    const parsedFrom = new Date(`${webCustomFromValue}T00:00:00`);
-    const parsedTo = new Date(`${webCustomToValue}T00:00:00`);
-    if (Number.isNaN(parsedFrom.getTime()) || Number.isNaN(parsedTo.getTime())) {
-      setError("Please select valid custom dates");
-      return;
-    }
-    if (parsedTo < parsedFrom) {
-      setError("To date cannot be before from date");
-      return;
-    }
-    setCustomFromDate(parsedFrom);
-    setCustomToDate(parsedTo);
-    setWebCustomPickerVisible(false);
-  };
+  const quickActions = [
+    { label: "Add Property", icon: "inventory", tint: themePalette.blue[50], color: themePalette.blue[700], onPress: go("Inventory") },
+    { label: "Add Client", icon: "addUser", tint: themePalette.emerald[50], color: themePalette.emerald[700], onPress: go("CoworkingClients") },
+    { label: "Schedule Visit", icon: "calendarDays", tint: themePalette.amber[50], color: themePalette.amber[700], onPress: go("Calendar") },
+    { label: "Create Task", icon: "quickAction", tint: themePalette.violet[50], color: themePalette.violet[700], onPress: go("Tasks") },
+  ];
 
   return (
-    <Screen title="Manager Dashboard" subtitle="Command Deck" loading={loading} error={error}>
+    <Screen title="Home" subtitle={scope} loading={loading} error={error} onRetry={() => load()}>
       <ScrollView
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
       >
-        <View style={styles.hero}>
-          <Text style={styles.heroLabel}>CONTROL HOME</Text>
-          <Text style={styles.heroTitle}>Live Snapshot</Text>
-          <View style={styles.heroRow}>
-            <HeroChip
-              label="Active Pipeline"
-              value={summary.activePipeline}
-              clickable={summary.activePipeline > 0}
-              onPress={() => openLeads({ preset: "PIPELINE" })}
-            />
-            <HeroChip
-              label="Conversion"
-              value={toPercent(summary.conversion)}
-              clickable={summary.totalLeads > 0}
-              onPress={() => openLeads({ status: "CLOSED" })}
-            />
-            <HeroChip
-              label="Avg Ticket"
-              value={formatCurrency(summary.avgTicket)}
-              clickable={summary.closed > 0}
-              onPress={() => openLeads({ status: "CLOSED" })}
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.filterRow}>
-            <Pressable style={[styles.filterChip, range === "ALL" && styles.filterChipActive]} onPress={() => setRange("ALL")}>
-              <Text style={[styles.filterChipText, range === "ALL" && styles.filterChipTextActive]}>All</Text>
-            </Pressable>
-            <Pressable style={[styles.filterChip, range === "THIS_MONTH" && styles.filterChipActive]} onPress={() => setRange("THIS_MONTH")}>
-              <Text style={[styles.filterChipText, range === "THIS_MONTH" && styles.filterChipTextActive]}>This Month</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.filterChip, range === "CUSTOM" && styles.filterChipActive]}
-              onPress={() => {
-                setRange("CUSTOM");
-                openCustomRangePicker();
-              }}
-            >
-              <Text style={[styles.filterChipText, range === "CUSTOM" && styles.filterChipTextActive]}>Custom</Text>
-            </Pressable>
-            <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-              <Icon name="calendar-outline" size={14} color="#39424f" />
-            </Pressable>
-            <Pressable style={styles.refreshBtn} onPress={() => load(true)} disabled={refreshing}>
-              <Icon name={refreshing ? "sync" : "refresh"} size={14} color="#39424f" />
-            </Pressable>
-          </View>
-          <Text style={styles.metricHelper}>Showing: {periodLabel}</Text>
-          {range === "CUSTOM" ? (
-            <View style={styles.customRangeRow}>
-              <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
-                <Text style={styles.customDateText}>From: {customFromDate ? customFromDate.toLocaleDateString("en-IN") : "Select"}</Text>
-              </Pressable>
-              <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
-                <Text style={styles.customDateText}>To: {customToDate ? customToDate.toLocaleDateString("en-IN") : "Select"}</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
-
-        {showMonthPicker ? (
-          <DateTimePicker
-            value={selectedMonthDate}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowMonthPicker(false);
-              if (next) setSelectedMonthDate(next);
-            }}
-          />
-        ) : null}
-        {showCustomFromPicker ? (
-          <DateTimePicker
-            value={customFromDate || new Date()}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowCustomFromPicker(false);
-              if (next) {
-                setCustomFromDate(next);
-                if (!customToDate || customToDate < next) setCustomToDate(next);
-                setTimeout(() => setShowCustomToPicker(true), 30);
-              }
-            }}
-          />
-        ) : null}
-        {showCustomToPicker ? (
-          <DateTimePicker
-            value={customToDate || customFromDate || new Date()}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowCustomToPicker(false);
-              if (next) {
-                if (customFromDate && next < customFromDate) {
-                  setCustomToDate(customFromDate);
-                  return;
-                }
-                setCustomToDate(next);
-              }
-            }}
-          />
-        ) : null}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Role Performance Graph</Text>
-          <Text style={styles.sectionSubTitle}>
-            {range === "ALL" ? "Weekly throughput across all data" : `Weekly throughput for ${String(companyPerformance?.periodLabel || periodLabel)}`}
+        <View style={styles.greeting}>
+          <Text style={styles.greetingTitle}>
+            {greeting}, {user?.name || "Admin"} 👋
           </Text>
-          <View style={styles.graphSplit}>
-            <View style={styles.velocityPanel}>
-              <Text style={styles.metricLabel}>Close Velocity</Text>
-              <View style={styles.velocityScoreRow}>
-                <CircularScore percent={resolvedPerformanceSnapshot.closeVelocity} />
-                <View style={styles.velocityTextWrap}>
-                  <Text style={styles.velocityPercent}>{Math.round(resolvedPerformanceSnapshot.closeVelocity)}%</Text>
-                  <Text style={styles.metricHelper}>Closed {resolvedPerformanceSnapshot.closed} / Created {resolvedPerformanceSnapshot.totalLeads}</Text>
-                </View>
+          <Text style={styles.greetingSub}>Here&apos;s what&apos;s happening with your workspace today.</Text>
+        </View>
+
+        <View style={styles.tileGrid}>
+          {kpis.map((kpi) => (
+            <Pressable key={kpi.label} style={styles.kpiCard} onPress={kpi.onPress} accessibilityRole="button">
+              <View style={[styles.kpiIcon, { backgroundColor: kpi.tint }]}>
+                <Icon name={kpi.icon} size={20} color={kpi.color} />
               </View>
-            </View>
-            <View style={styles.chartPanel}>
-              <MiniLineChart rows={resolvedPerformanceSnapshot.weekly} />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Live Leaderboard</Text>
-          <Text style={styles.sectionSubTitle}>Who is doing how much work (% score)</Text>
-          {visibleLeaderboard.length === 0 ? (
-            <Text style={styles.metricHelper}>No leaderboard data available.</Text>
-          ) : (
-            visibleLeaderboard.map((row, index) => (
-              <View key={`${row.id}-${index}`} style={styles.leaderRow}>
-                <View style={styles.leaderTopRow}>
-                  <View style={styles.leaderRank}>
-                    <Text style={styles.leaderRankText}>#{index + 1}</Text>
-                  </View>
-                  <View style={styles.leaderInfo}>
-                    <Text style={styles.progressLabel}>{row.name}</Text>
-                    <Text style={styles.metricHelper}>{row.role}</Text>
-                  </View>
-                  <View style={styles.leaderScoreWrap}>
-                    <CircularScore percent={row.scorePercent} />
-                  </View>
-                </View>
-                <Text style={styles.metricHelper}>Leads {row.assigned} | Visits {row.visits} | Closed {row.closed}</Text>
-                <View style={styles.leaderTrack}>
-                  <View style={[styles.leaderFill, { width: `${clampPercent(row.scorePercent)}%` }]} />
-                </View>
-              </View>
-            ))
-          )}
-          {pinnedLeaderboard.length > 5 ? (
-            <View style={styles.inlineActionRow}>
-              <View />
-              <Pressable onPress={() => setShowAllLeaderboard((prev) => !prev)}>
-                <Text style={styles.linkTextCompact}>{showAllLeaderboard ? "Show less" : "Show more"}</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.grid}>
-          <MetricCard
-            label="Estimated Revenue"
-            value={formatCurrency(summary.estimatedRevenue)}
-            helper={`${summary.closed} closed x 75,000`}
-            clickable
-            onPress={openClosedDealsFromRevenue}
-          />
-          <MetricCard
-            label="Total Leads"
-            value={summary.totalLeads}
-            helper={`${summary.activePipeline} in pipeline`}
-            clickable={summary.activePipeline > 0}
-            onPress={() => openLeads({ preset: "PIPELINE" })}
-          />
-          <MetricCard
-            label="Inventory Assets"
-            value={summary.inventoryAssets}
-            helper="Current stock visible"
-            clickable={summary.inventoryAssets > 0}
-            onPress={openInventory}
-          />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pipeline Snapshot</Text>
-          {funnelRows.map((row) => (
-            <Pressable
-              key={row.label}
-              style={[styles.progressCard, row.value > 0 && styles.cardClickable]}
-              disabled={row.value <= 0}
-              onPress={() => {
-                if (row.label === "Site Visits") {
-                  openLeads({ status: "SITE_VISIT" });
-                  return;
-                }
-                if (row.label === "Closed Deals") {
-                  openLeads({ status: "CLOSED" });
-                  return;
-                }
-                openLeads({ preset: "PIPELINE" });
-              }}
-            >
-              <View style={styles.progressHead}>
-                <Text style={styles.progressLabel}>{row.label}</Text>
-                <Text style={styles.progressMeta}>
-                  {row.value} ({toPercent(row.progress)})
+              <Text style={styles.kpiLabel} numberOfLines={1}>
+                {kpi.label}
+              </Text>
+              <View style={styles.kpiValueRow}>
+                <Text style={styles.kpiValue} numberOfLines={1}>
+                  {kpi.value}
                 </Text>
+                <View style={styles.kpiTrend}>
+                  <Icon
+                    name={kpi.down ? "trendDown" : "trend"}
+                    size={11}
+                    color={kpi.down ? themePalette.rose[500] : themePalette.emerald[600]}
+                  />
+                  <Text style={[styles.kpiTrendText, { color: kpi.down ? themePalette.rose[500] : themePalette.emerald[600] }]}>
+                    {kpi.down ? "6%" : "8%"}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${Math.max(4, Math.min(100, row.progress))}%` }]} />
-              </View>
+              <Text style={styles.kpiHelp} numberOfLines={1}>
+                {kpi.help}
+              </Text>
             </Pressable>
           ))}
         </View>
+
+        <DashCard title="Occupancy Overview" icon="inventory" action={<RangePill label="Last 6 Months" />}>
+          <OccupancyChart />
+        </DashCard>
+
+        <DashCard title="Inventory Status" icon="pieChart" action={<CardLink onPress={go("Inventory")} />}>
+          <View style={styles.donutRow}>
+            <InventoryDonut total={summary.total} segments={segments} />
+            <View style={styles.legend}>
+              {segments.map((segment) => (
+                <View key={segment.label} style={styles.legendRow}>
+                  <View style={[styles.legendDot, { backgroundColor: segment.color }]} />
+                  <Text style={styles.legendLabel} numberOfLines={1}>
+                    {segment.label}
+                  </Text>
+                  <Text style={styles.legendValue}>
+                    {segment.value} ({summary.total ? Math.round((segment.value / summary.total) * 100) : 0}%)
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        </DashCard>
+
+        <DashCard title="Today's Follow-ups" icon="list" action={<CardLink onPress={go("Leads")} />}>
+          <View style={styles.list}>
+            {summary.follow.length ? (
+              summary.follow.map((lead, index) => (
+                <Pressable key={lead._id} style={styles.listRow} onPress={go("Leads")} accessibilityRole="button">
+                  <View style={[styles.avatar, index % 2 ? styles.avatarAlt : null]}>
+                    <Text style={[styles.avatarText, index % 2 ? styles.avatarTextAlt : null]}>
+                      {initials(lead.name)}
+                    </Text>
+                  </View>
+                  <View style={styles.listBody}>
+                    <Text style={styles.listTitle} numberOfLines={1}>
+                      {lead.name || "Lead"}
+                    </Text>
+                    <Text style={styles.listSub} numberOfLines={1}>
+                      {statusLabel(lead.status)}
+                    </Text>
+                  </View>
+                  <Text style={styles.listTime}>{lead.when ? timeOf(lead.when) : ""}</Text>
+                </Pressable>
+              ))
+            ) : (
+              <EmptyNote label="No follow-ups today" tall />
+            )}
+          </View>
+        </DashCard>
+
+        <DashCard title="Pipeline Snapshot">
+          <View style={[styles.tileGrid, styles.stageGrid]}>
+            {summary.stages.map((stage) => (
+              <Pressable
+                key={stage.key}
+                style={[styles.stageCard, { backgroundColor: stage.soft }]}
+                onPress={go("Leads")}
+                accessibilityRole="button"
+              >
+                <View style={styles.stageHead}>
+                  <Icon name={stage.icon} size={14} color={stage.color} />
+                  <Text style={styles.stageLabel} numberOfLines={1}>
+                    {stage.label}
+                  </Text>
+                </View>
+                <View style={styles.stageValueRow}>
+                  <Text style={styles.stageValue}>{stage.value}</Text>
+                  <Text style={styles.stageShare}>
+                    {leads.length ? Math.round((stage.value / leads.length) * 100) : 0}%
+                  </Text>
+                </View>
+                <View style={styles.stageTrack}>
+                  <View
+                    style={[
+                      styles.stageFill,
+                      { width: `${(stage.value / stageMax) * 100}%`, backgroundColor: stage.color },
+                    ]}
+                  />
+                </View>
+              </Pressable>
+            ))}
+          </View>
+        </DashCard>
+
+        <DashCard title="Recent Activity" icon="activity" action={<CardLink onPress={go("Leads")} />}>
+          <View style={styles.list}>
+            {summary.recent.length ? (
+              summary.recent.map((lead, index) => (
+                <Pressable key={lead._id} style={styles.listRow} onPress={go("Leads")} accessibilityRole="button">
+                  <View style={styles.activityDot} />
+                  <View style={styles.listBody}>
+                    <Text style={styles.listTitle} numberOfLines={1}>
+                      {index ? statusLabel(lead.status) : "Lead updated"}
+                    </Text>
+                    <Text style={styles.listSub} numberOfLines={1}>
+                      {lead.name || lead.phone}
+                    </Text>
+                  </View>
+                  <Text style={styles.listTime}>
+                    {dateOf(lead.updatedAt)?.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) || ""}
+                  </Text>
+                </Pressable>
+              ))
+            ) : (
+              <EmptyNote label="No recent activity" />
+            )}
+          </View>
+        </DashCard>
+
+        <DashCard title="Revenue Overview" icon="barChart" action={<RangePill label="This Year" />}>
+          <RevenueChart />
+        </DashCard>
+
+        <DashCard title="Upcoming Visits" action={<CardLink label="View Calendar" onPress={go("Calendar")} />}>
+          <View style={styles.list}>
+            {summary.upcoming.length ? (
+              summary.upcoming.map((lead) => (
+                <Pressable key={lead._id} style={styles.listRow} onPress={go("Calendar")} accessibilityRole="button">
+                  <View style={styles.visitIcon}>
+                    <Icon name="location-outline" size={16} color={themePalette.blue[600]} />
+                  </View>
+                  <View style={styles.listBody}>
+                    <Text style={styles.listTitle} numberOfLines={1}>
+                      {lead.projectInterested || lead.name}
+                    </Text>
+                    <Text style={styles.listSub} numberOfLines={1}>
+                      {lead.name}
+                    </Text>
+                  </View>
+                  <Text style={styles.listTime}>{lead.when ? timeOf(lead.when) : ""}</Text>
+                </Pressable>
+              ))
+            ) : (
+              <EmptyNote label="No upcoming visits" />
+            )}
+          </View>
+        </DashCard>
+
+        <DashCard title="Quick Actions">
+          <View style={[styles.tileGrid, styles.actionGrid]}>
+            {quickActions.map((action) => (
+              <Pressable
+                key={action.label}
+                style={[styles.actionCard, { backgroundColor: action.tint }]}
+                onPress={action.onPress}
+                accessibilityRole="button"
+              >
+                <Icon name={action.icon} size={20} color={action.color} />
+                <Text style={[styles.actionLabel, { color: action.color }]}>{action.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </DashCard>
+
+        <Text style={styles.footerNote}>{activeTeam} active team members</Text>
       </ScrollView>
-
-      <Modal visible={webMonthPickerVisible} transparent animationType="fade" onRequestClose={() => setWebMonthPickerVisible(false)}>
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Month/Date</Text>
-            <View style={styles.webInputWrap}>
-              <input
-                value={webMonthDateValue}
-                onChange={(event) => setWebMonthDateValue((event.target as any).value)}
-                type="date"
-                style={styles.webDateInput as any}
-              />
-            </View>
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancelBtn} onPress={() => setWebMonthPickerVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.modalApplyBtn} onPress={applyWebMonthPicker}>
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={webCustomPickerVisible} transparent animationType="fade" onRequestClose={() => setWebCustomPickerVisible(false)}>
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Custom Range</Text>
-            <View style={styles.webInputWrap}>
-              <input
-                value={webCustomFromValue}
-                onChange={(event) => setWebCustomFromValue((event.target as any).value)}
-                type="date"
-                style={styles.webDateInput as any}
-              />
-            </View>
-            <View style={styles.webInputWrap}>
-              <input
-                value={webCustomToValue}
-                onChange={(event) => setWebCustomToValue((event.target as any).value)}
-                type="date"
-                style={styles.webDateInput as any}
-              />
-            </View>
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancelBtn} onPress={() => setWebCustomPickerVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.modalApplyBtn} onPress={applyWebCustomRange}>
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </Screen>
   );
 };
 
-const HeroChip = ({
-  label,
-  value,
-  clickable = false,
-  onPress,
-}: {
-  label: string;
-  value: string | number;
-  clickable?: boolean;
-  onPress?: () => void;
-}) => (
-  <Pressable
-    style={[styles.heroChip, clickable && styles.cardClickable]}
-    disabled={!clickable}
-    onPress={onPress}
-  >
-    <Text style={styles.heroChipLabel}>{label}</Text>
-    <Text style={styles.heroChipValue}>{value}</Text>
-  </Pressable>
-);
-
-const MetricCard = ({
-  label,
-  value,
-  helper,
-  clickable = false,
-  onPress,
-}: {
-  label: string;
-  value: string | number;
-  helper: string;
-  clickable?: boolean;
-  onPress?: () => void;
-}) => (
-  <Pressable
-    style={[styles.metricCard, clickable && styles.cardClickable]}
-    disabled={!clickable}
-    onPress={onPress}
-  >
-    <Text style={styles.metricLabel}>{label}</Text>
-    <Text style={styles.metricValue}>{value}</Text>
-    <Text style={styles.metricHelper}>{helper}</Text>
-  </Pressable>
-);
-
 const styles = StyleSheet.create({
   container: {
-    gap: 12,
-    paddingBottom: 14,
+    paddingBottom: spacing.xxl,
+    gap: spacing.xl,
   },
-  hero: {
-    borderWidth: 1,
-    borderColor: "#bcd0ff",
-    borderRadius: 16,
-    backgroundColor: "#eef3ff",
-    padding: 14,
+
+  /* ---- greeting ---- */
+  greeting: {
+    gap: 2,
   },
-  heroLabel: {
-    fontSize: 10,
-    color: "#1c37ab",
-    letterSpacing: 1,
+  greetingTitle: {
+    fontSize: typography.displayLg,
     fontWeight: "700",
+    letterSpacing: -0.4,
+    color: themePalette.slate[900],
   },
-  heroTitle: {
-    marginTop: 4,
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#161c24",
+  greetingSub: {
+    fontSize: typography.label,
+    color: themePalette.slate[500],
   },
-  heroRow: {
-    marginTop: 10,
+
+  /* ---- shared two-up grid ---- */
+  tileGrid: {
     flexDirection: "row",
-    gap: 8,
-  },
-  heroChip: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#bcd0ff",
-    borderRadius: 10,
-    backgroundColor: "#ffffff",
-    padding: 8,
-  },
-  heroChipLabel: {
-    fontSize: 10,
-    textTransform: "uppercase",
-    color: "#6c7789",
-  },
-  heroChipValue: {
-    marginTop: 4,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#161c24",
-  },
-  grid: {
-    gap: 10,
-  },
-  filterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
     flexWrap: "wrap",
-  },
-  filterChip: {
-    borderWidth: 1,
-    borderColor: "#c8d0dd",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: "#fff",
-  },
-  filterChipActive: {
-    borderColor: "#161c24",
-    backgroundColor: "#161c24",
-  },
-  filterChipText: {
-    color: "#39424f",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  filterChipTextActive: {
-    color: "#fff",
-  },
-  calendarIconBtn: {
-    width: 34,
-    height: 34,
-    borderWidth: 1,
-    borderColor: "#c8d0dd",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  refreshBtn: {
-    width: 34,
-    height: 34,
-    borderWidth: 1,
-    borderColor: "#c8d0dd",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  customRangeRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    gap: 8,
-  },
-  customDateBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#c8d0dd",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    minHeight: 36,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-  },
-  customDateText: {
-    color: "#39424f",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  metricCard: {
-    borderWidth: 1,
-    borderColor: "#e0e5ed",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-  },
-  metricLabel: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    color: "#6c7789",
-    fontWeight: "700",
-    letterSpacing: 0.8,
-  },
-  metricValue: {
-    marginTop: 8,
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#161c24",
-  },
-  metricHelper: {
-    marginTop: 4,
-    fontSize: 12,
-    color: "#6c7789",
-  },
-  section: {
-    borderWidth: 1,
-    borderColor: "#e0e5ed",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-    gap: 8,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#161c24",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  sectionSubTitle: {
-    marginTop: 2,
-    marginBottom: 8,
-    color: "#6c7789",
-    fontSize: 12,
-  },
-  graphSplit: {
-    gap: 10,
-  },
-  velocityPanel: {
-    borderWidth: 1,
-    borderColor: "#e0e5ed",
-    borderRadius: 10,
-    backgroundColor: "#f5f7fa",
-    padding: 10,
-  },
-  velocityScoreRow: {
-    marginTop: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  velocityTextWrap: {
-    flex: 1,
-  },
-  velocityPercent: {
-    fontSize: 30,
-    fontWeight: "800",
-    color: "#161c24",
-  },
-  chartPanel: {
-    borderWidth: 1,
-    borderColor: "#e0e5ed",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    padding: 6,
-  },
-  progressCard: {
-    borderWidth: 1,
-    borderColor: "#e0e5ed",
-    borderRadius: 10,
-    backgroundColor: "#f5f7fa",
-    padding: 10,
-  },
-  progressHead: {
-    flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    rowGap: spacing.lg,
   },
-  progressLabel: {
-    color: "#161c24",
-    fontWeight: "600",
-    fontSize: 12,
-  },
-  progressMeta: {
-    color: "#4e5867",
-    fontSize: 12,
-  },
-  progressTrack: {
-    marginTop: 8,
-    height: 8,
-    borderRadius: 6,
-    backgroundColor: "#dde6ff",
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: "#1c37ab",
-  },
-  leaderRow: {
+
+  /* ---- KPI tiles ---- */
+  kpiCard: {
+    width: "48%",
+    minHeight: 112,
     borderWidth: 1,
-    borderColor: "#bcd0ff",
-    borderRadius: 12,
-    backgroundColor: "#ffffff",
-    padding: 10,
-    marginBottom: 8,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    backgroundColor: colors.surface,
+    padding: spacing.lg,
+    gap: spacing.xs,
+    ...elevation.card,
   },
-  leaderTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  leaderRank: {
+  kpiIcon: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: "#e0e5ed",
+    borderRadius: radii.md,
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: spacing.xs,
   },
-  leaderRankText: {
-    fontSize: 14,
+  kpiLabel: {
+    fontSize: typography.label,
+    color: themePalette.slate[500],
+  },
+  kpiValueRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: spacing.sm,
+  },
+  kpiValue: {
+    flexShrink: 1,
+    fontSize: typography.displayMd,
     fontWeight: "700",
-    color: "#39424f",
+    letterSpacing: -0.4,
+    color: themePalette.slate[900],
   },
-  leaderInfo: {
-    flex: 1,
-  },
-  leaderScoreWrap: {
+  kpiTrend: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 2,
   },
-  leaderTrack: {
-    marginTop: 8,
-    height: 8,
-    borderRadius: 6,
-    backgroundColor: "#dde6ff",
+  kpiTrendText: {
+    fontSize: typography.caption,
+    fontWeight: "600",
+  },
+  kpiHelp: {
+    fontSize: typography.caption,
+    color: themePalette.slate[500],
+  },
+
+  /* ---- card shell ---- */
+  card: {
     overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.lg,
+    backgroundColor: colors.surface,
+    ...elevation.card,
   },
-  leaderFill: {
-    height: "100%",
-    backgroundColor: "#2b7fbf",
-  },
-  inlineActionRow: {
-    marginTop: 2,
+  cardHeader: {
+    height: 48,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  linkTextCompact: {
-    color: "#2549d6",
-    fontSize: 12,
+  cardTitleWrap: {
+    flexShrink: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  cardTitle: {
+    flexShrink: 1,
+    fontSize: typography.section,
+    fontWeight: "700",
+    color: themePalette.slate[900],
+  },
+  cardLink: {
+    fontSize: typography.caption,
+    fontWeight: "600",
+    color: colors.primary,
+  },
+  rangePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    height: 30,
+    paddingHorizontal: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.sm,
+    backgroundColor: colors.surface,
+  },
+  rangePillText: {
+    fontSize: typography.caption,
+    color: themePalette.slate[600],
+  },
+  emptyNote: {
+    paddingVertical: 28,
+    textAlign: "center",
+    fontSize: typography.label,
+    color: themePalette.slate[400],
+  },
+  emptyNoteTall: {
+    paddingVertical: 52,
+  },
+
+  /* ---- occupancy chart ---- */
+  occBox: {
+    height: 208,
+    padding: spacing.xl,
+  },
+  occGrid: {
+    position: "absolute",
+    left: spacing.xxl,
+    right: spacing.xl,
+    top: spacing.xl,
+    bottom: 30,
+    borderLeftWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+  },
+  occGridRow: {
+    flex: 1,
+    borderTopWidth: 1,
+    borderTopColor: themePalette.slate[100],
+  },
+  occChartLayer: {
+    position: "absolute",
+    left: spacing.xxl,
+    right: spacing.xl,
+    top: spacing.xl,
+    bottom: 30,
+  },
+  occMonths: {
+    position: "absolute",
+    left: spacing.xxl,
+    right: spacing.xl,
+    bottom: spacing.lg,
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  occMonth: {
+    fontSize: 10,
+    color: themePalette.slate[500],
+  },
+
+  /* ---- inventory donut ---- */
+  donutRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xl,
+    padding: spacing.xl,
+  },
+  donutWrap: {
+    width: 128,
+    height: 128,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donutCenter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  donutTotal: {
+    fontSize: typography.title,
+    fontWeight: "700",
+    color: themePalette.slate[900],
+  },
+  donutCaption: {
+    fontSize: 10,
+    color: themePalette.slate[500],
+  },
+  legend: {
+    flex: 1,
+    gap: spacing.lg,
+  },
+  legendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: radii.pill,
+  },
+  legendLabel: {
+    flex: 1,
+    fontSize: typography.caption,
+    color: themePalette.slate[500],
+  },
+  legendValue: {
+    fontSize: typography.caption,
+    fontWeight: "700",
+    color: themePalette.slate[900],
+  },
+
+  /* ---- list rows: follow-ups, activity, visits ---- */
+  list: {
+    paddingHorizontal: spacing.xl,
+  },
+  listRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.lg,
+    paddingVertical: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: themePalette.slate[100],
+  },
+  listBody: {
+    flex: 1,
+    gap: 1,
+  },
+  listTitle: {
+    fontSize: typography.label,
+    fontWeight: "700",
+    color: themePalette.slate[900],
+  },
+  listSub: {
+    fontSize: typography.caption,
+    color: themePalette.slate[500],
+  },
+  listTime: {
+    fontSize: 10,
+    color: themePalette.slate[600],
+  },
+  avatar: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: themePalette.blue[100],
+  },
+  avatarAlt: {
+    backgroundColor: themePalette.violet[100],
+  },
+  avatarText: {
+    fontSize: typography.caption,
+    fontWeight: "700",
+    color: themePalette.blue[700],
+  },
+  avatarTextAlt: {
+    color: themePalette.violet[700],
+  },
+  activityDot: {
+    width: 10,
+    height: 10,
+    borderRadius: radii.pill,
+    backgroundColor: themePalette.blue[500],
+  },
+  visitIcon: {
+    width: 44,
+    height: 36,
+    borderRadius: radii.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: themePalette.blue[50],
+  },
+
+  /* ---- pipeline snapshot ---- */
+  stageGrid: {
+    padding: spacing.lg,
+  },
+  stageCard: {
+    width: "48%",
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    gap: spacing.md,
+  },
+  stageHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  stageLabel: {
+    flexShrink: 1,
+    fontSize: typography.caption,
+    color: themePalette.slate[500],
+  },
+  stageValueRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+  },
+  stageValue: {
+    fontSize: typography.title,
+    fontWeight: "700",
+    color: themePalette.slate[900],
+  },
+  stageShare: {
+    fontSize: 10,
+    color: themePalette.slate[600],
+  },
+  stageTrack: {
+    height: 8,
+    borderRadius: radii.pill,
+    overflow: "hidden",
+    backgroundColor: colors.surface,
+  },
+  stageFill: {
+    height: "100%",
+    borderRadius: radii.pill,
+  },
+
+  /* ---- revenue ---- */
+  revenueBox: {
+    padding: spacing.lg,
+  },
+
+  /* ---- quick actions ---- */
+  actionGrid: {
+    padding: spacing.lg,
+  },
+  actionCard: {
+    width: "48%",
+    minHeight: 80,
+    borderRadius: radii.lg,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
+  },
+  actionLabel: {
+    fontSize: typography.caption,
     fontWeight: "600",
   },
-  cardClickable: {
-    opacity: 0.96,
-  },
-  modalWrap: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 16,
-    backgroundColor: "rgba(15,23,42,0.45)",
-  },
-  modalCard: {
-    borderWidth: 1,
-    borderColor: "#e0e5ed",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 14,
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#161c24",
-    marginBottom: 10,
-  },
-  webInputWrap: {
-    marginBottom: 8,
-  },
-  webDateInput: {
-    width: "100%",
-    minHeight: 40,
-    borderWidth: 1,
-    borderColor: "#c8d0dd",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: "#fff",
-    color: "#161c24",
-    fontSize: 13,
-  },
-  modalActions: {
-    marginTop: 10,
-    flexDirection: "row",
-    gap: 10,
-  },
-  modalCancelBtn: {
-    flex: 1,
-    minHeight: 38,
-    borderWidth: 1,
-    borderColor: "#c8d0dd",
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff",
-  },
-  modalCancelText: {
-    color: "#39424f",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  modalApplyBtn: {
-    flex: 1,
-    minHeight: 38,
-    borderWidth: 1,
-    borderColor: "#161c24",
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#161c24",
-  },
-  modalApplyText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
+
+  /* ---- footer ---- */
+  footerNote: {
+    textAlign: "right",
+    fontSize: 10,
+    color: themePalette.slate[400],
   },
 });
+
+export default ManagerDashboardScreen;

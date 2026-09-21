@@ -36,6 +36,7 @@ import {
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import type { ChatCallLog, ChatContact, ChatConversation, ChatMessage } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const mergeMessages = (prev: ChatMessage[], incoming: ChatMessage[]) => {
   const map = new Map<string, ChatMessage>();
@@ -108,8 +109,8 @@ const renderAvatar = (name: string, avatarUrl: string, size = 32) => {
   }
 
   return (
-    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: "#dde6ff", alignItems: "center", justifyContent: "center" }}>
-      <Text style={{ color: "#182a6d", fontSize: 10, fontWeight: "700" }}>{initials(name)}</Text>
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: themeColor("#dde6ff"), alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ color: themeColor("#182a6d"), fontSize: 10, fontWeight: "700" }}>{initials(name)}</Text>
     </View>
   );
 };
@@ -945,7 +946,7 @@ export const ChatConversationScreen = () => {
       >
         <View style={styles.header}>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Icon name="arrow-back" size={18} color="#39424f" />
+            <Icon name="arrow-back" size={18} color={themeColor("#39424f")} />
           </Pressable>
           {renderAvatar(contactName, contactAvatar, 32)}
           <View style={styles.titleWrap}>
@@ -953,13 +954,13 @@ export const ChatConversationScreen = () => {
             <Text style={styles.subTitle}>{contactRole || "Member"}</Text>
           </View>
           <Pressable style={styles.headerIconBtn} onPress={() => startCall("VOICE")}>
-            <Icon name="call-outline" size={16} color="#39424f" />
+            <Icon name="call-outline" size={16} color={themeColor("#39424f")} />
           </Pressable>
           <Pressable style={styles.headerIconBtn} onPress={() => startCall("VIDEO")}>
-            <Icon name="videocam-outline" size={16} color="#39424f" />
+            <Icon name="videocam-outline" size={16} color={themeColor("#39424f")} />
           </Pressable>
           <Pressable style={styles.headerIconBtn} onPress={() => setCallLogsVisible(true)}>
-            <Icon name="time-outline" size={16} color="#39424f" />
+            <Icon name="time-outline" size={16} color={themeColor("#39424f")} />
           </Pressable>
           <Text style={styles.messageCount}>{messageCountText}</Text>
         </View>
@@ -967,7 +968,7 @@ export const ChatConversationScreen = () => {
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         {loading ? (
-          <View style={styles.loadingWrap}><ActivityIndicator color="#161c24" /></View>
+          <View style={styles.loadingWrap}><ActivityIndicator color={themeColor("#161c24")} /></View>
         ) : (
           <View style={styles.chatArea}>
             <FlatList
@@ -985,7 +986,7 @@ export const ChatConversationScreen = () => {
               ListHeaderComponent={
                 loadingHistory ? (
                   <View style={styles.historyLoader}>
-                    <ActivityIndicator size="small" color="#6c7789" />
+                    <ActivityIndicator size="small" color={themeColor("#6c7789")} />
                     <Text style={styles.historyLoaderText}>Loading older messages...</Text>
                   </View>
                 ) : null
@@ -1010,7 +1011,7 @@ export const ChatConversationScreen = () => {
                         style={styles.forwardBtn}
                         onPress={() => openForwardPicker(item.messages.map((row) => ({ textInput: row.text || "", attachment: row.attachment || null })))}
                       >
-                        <Icon name="arrow-redo-outline" size={15} color="#4e5867" />
+                        <Icon name="arrow-redo-outline" size={15} color={themeColor("#4e5867")} />
                       </Pressable>
 
                       <View style={[styles.messageBubble, mine && styles.messageBubbleMine]}>
@@ -1056,7 +1057,7 @@ export const ChatConversationScreen = () => {
                       style={styles.forwardBtn}
                       onPress={() => openForwardPicker([{ textInput: message.text || "", attachment: message.attachment || null }])}
                     >
-                      <Icon name="arrow-redo-outline" size={15} color="#4e5867" />
+                      <Icon name="arrow-redo-outline" size={15} color={themeColor("#4e5867")} />
                     </Pressable>
 
                     <View style={[styles.messageBubble, mine && styles.messageBubbleMine]}>
@@ -1075,7 +1076,7 @@ export const ChatConversationScreen = () => {
                           <Icon
                             name={playingMessageId === message._id ? "pause" : "play"}
                             size={16}
-                            color={mine ? "#ffffff" : "#161c24"}
+                            color={mine ? themeColor("#ffffff") : themeColor("#161c24")}
                           />
                           <Text style={[styles.audioText, mine && styles.messageTextMine]}>
                             {playingMessageId === message._id ? "Playing..." : "Voice note"}
@@ -1083,7 +1084,7 @@ export const ChatConversationScreen = () => {
                         </Pressable>
                       ) : isPdfAttachment ? (
                         <Pressable style={[styles.pdfCard, mine && styles.pdfCardMine]} onPress={() => openAttachmentUrl(message.attachment?.fileUrl || "")}>
-                          <Icon name="document-text-outline" size={16} color={mine ? "#ffffff" : "#242b35"} />
+                          <Icon name="document-text-outline" size={16} color={mine ? themeColor("#ffffff") : themeColor("#242b35")} />
                           <Text style={[styles.pdfText, mine && styles.messageTextMine]} numberOfLines={1}>{message.attachment?.fileName || "Open PDF"}</Text>
                         </Pressable>
                       ) : (
@@ -1121,17 +1122,17 @@ export const ChatConversationScreen = () => {
                               playAudioAttachment(key, file.uri);
                             }}
                           >
-                            <Icon name={playingMessageId === `pending-${index}` ? "pause" : "play"} size={15} color="#39424f" />
+                            <Icon name={playingMessageId === `pending-${index}` ? "pause" : "play"} size={15} color={themeColor("#39424f")} />
                             <Text style={styles.pendingAudioPreviewText}>
                               {playingMessageId === `pending-${index}` ? "Stop" : "Preview"}
                             </Text>
                           </Pressable>
                         ) : (
-                          <View style={styles.pendingIconWrap}><Icon name="document-text-outline" size={16} color="#39424f" /></View>
+                          <View style={styles.pendingIconWrap}><Icon name="document-text-outline" size={16} color={themeColor("#39424f")} /></View>
                         )}
                         <Text numberOfLines={1} style={styles.pendingName}>{file.name}</Text>
                         <Pressable style={styles.pendingRemove} onPress={() => removePendingAttachment(index)}>
-                          <Icon name="close-circle" size={16} color="#d64545" />
+                          <Icon name="close-circle" size={16} color={themeColor("#d64545")} />
                         </Pressable>
                       </View>
                     );
@@ -1142,13 +1143,13 @@ export const ChatConversationScreen = () => {
 
             <View style={styles.composer}>
               <Pressable style={styles.attachBtn} onPress={sendFile} disabled={sending || pickingFile || isRecording}>
-                <Icon name="attach" size={16} color="#4e5867" />
+                <Icon name="attach" size={16} color={themeColor("#4e5867")} />
               </Pressable>
               <Pressable style={styles.attachBtn} onPress={sendCameraPhoto} disabled={sending || pickingFile || isRecording}>
-                <Icon name="camera-outline" size={16} color="#4e5867" />
+                <Icon name="camera-outline" size={16} color={themeColor("#4e5867")} />
               </Pressable>
               <Pressable style={[styles.micBtn, isRecording && styles.micBtnActive]} onPress={isRecording ? stopAudioRecording : startAudioRecording} disabled={sending || pickingFile}>
-                <Icon name={isRecording ? "stop" : "mic"} size={16} color={isRecording ? "#fff" : "#4e5867"} />
+                <Icon name={isRecording ? "stop" : "mic"} size={16} color={isRecording ? themeColor("#ffffff") : themeColor("#4e5867")} />
               </Pressable>
               <TextInput
                 style={styles.input}
@@ -1165,7 +1166,7 @@ export const ChatConversationScreen = () => {
                 onPress={sendQueuedMessage}
                 disabled={(!draft.trim() && pendingAttachments.length === 0) || pickingFile || isRecording}
               >
-                {sending ? <ActivityIndicator color="#fff" size="small" /> : <Icon name="paper-plane" size={15} color="#fff" />}
+                {sending ? <ActivityIndicator color={themeColor("#ffffff")} size="small" /> : <Icon name="paper-plane" size={15} color={themeColor("#ffffff")} />}
               </Pressable>
             </View>
           </View>
@@ -1175,7 +1176,7 @@ export const ChatConversationScreen = () => {
           <View style={styles.viewerBackdrop}>
             <View style={styles.viewerHeader}>
               <Text style={styles.viewerTitle}>{viewerUrls.length > 0 ? `${viewerIndex + 1}/${viewerUrls.length}` : "Image"}</Text>
-              <Pressable onPress={closeImageViewer} style={styles.viewerClose}><Icon name="close" size={18} color="#ffffff" /></Pressable>
+              <Pressable onPress={closeImageViewer} style={styles.viewerClose}><Icon name="close" size={18} color={themeColor("#ffffff")} /></Pressable>
             </View>
             <FlatList
               data={viewerUrls}
@@ -1216,7 +1217,7 @@ export const ChatConversationScreen = () => {
                       <Text style={styles.forwardName}>{item.name}</Text>
                       <Text style={styles.forwardRole}>{item.role}</Text>
                     </View>
-                    {forwarding ? <ActivityIndicator size="small" color="#161c24" /> : null}
+                    {forwarding ? <ActivityIndicator size="small" color={themeColor("#161c24")} /> : null}
                   </Pressable>
                 )}
                 ListEmptyComponent={<Text style={styles.empty}>No contacts</Text>}
@@ -1231,7 +1232,7 @@ export const ChatConversationScreen = () => {
         <Modal visible={Boolean(activeCall)} transparent animationType="fade" onRequestClose={endActiveCall}>
           <View style={styles.callBackdrop}>
             <View style={styles.callCard}>
-              <Icon name={activeCall?.callType === "VIDEO" ? "videocam" : "call"} size={24} color="#161c24" />
+              <Icon name={activeCall?.callType === "VIDEO" ? "videocam" : "call"} size={24} color={themeColor("#161c24")} />
               <Text style={styles.callTitle}>
                 {activeCall?.status === "INCOMING" ? "Incoming Call" : activeCall?.status === "OUTGOING" ? "Calling..." : "In Call"}
               </Text>
@@ -1280,7 +1281,7 @@ export const ChatConversationScreen = () => {
                       <Icon
                         name={item.callType === "VIDEO" ? "videocam-outline" : "call-outline"}
                         size={16}
-                        color="#39424f"
+                        color={themeColor("#39424f")}
                       />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.forwardName}>{peerName}</Text>
@@ -1303,63 +1304,63 @@ export const ChatConversationScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#edf0f5" },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#ffffff", borderBottomWidth: 1, borderBottomColor: "#e0e5ed", gap: 6 },
+const styles = themedStyles((c) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.surfaceMuted },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border, gap: 6 },
   backBtn: { width: 30, height: 30, borderRadius: 999, alignItems: "center", justifyContent: "center" },
   titleWrap: { flex: 1, marginLeft: 6 },
-  title: { color: "#161c24", fontSize: 14, fontWeight: "700" },
-  subTitle: { marginTop: 1, color: "#6c7789", fontSize: 11 },
-  messageCount: { color: "#98a3b5", fontSize: 11 },
+  title: { color: c.text, fontSize: 14, fontWeight: "700" },
+  subTitle: { marginTop: 1, color: c.textMuted, fontSize: 11 },
+  messageCount: { color: c.textTertiary, fontSize: 11 },
   headerIconBtn: {
     width: 30,
     height: 30,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
   },
-  error: { marginHorizontal: 12, marginTop: 8, borderWidth: 1, borderColor: "#f6b8b5", backgroundColor: "#fdedec", color: "#942626", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12 },
+  error: { marginHorizontal: 12, marginTop: 8, borderWidth: 1, borderColor: c.errorBorder, backgroundColor: c.errorBg, color: c.rose[700], borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   chatArea: { flex: 1 },
   messagesContent: { padding: 12, paddingBottom: 18, gap: 8 },
-  dayWrap: { alignSelf: "center", backgroundColor: "#e0e5ed", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginVertical: 6 },
-  dayText: { color: "#39424f", fontSize: 11, fontWeight: "700" },
+  dayWrap: { alignSelf: "center", backgroundColor: c.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginVertical: 6 },
+  dayText: { color: c.slate[700], fontSize: 11, fontWeight: "700" },
   messageWrap: { alignItems: "flex-start", flexDirection: "row", gap: 6 },
   messageWrapMine: { alignItems: "flex-end", alignSelf: "flex-end" },
-  forwardBtn: { width: 24, height: 24, borderRadius: 999, borderWidth: 1, borderColor: "#c8d0dd", alignItems: "center", justifyContent: "center", backgroundColor: "#fff", marginTop: 18 },
-  messageBubble: { maxWidth: "84%", backgroundColor: "#ffffff", borderRadius: 14, borderWidth: 1, borderColor: "#e0e5ed", paddingHorizontal: 10, paddingVertical: 8 },
+  forwardBtn: { width: 24, height: 24, borderRadius: 999, borderWidth: 1, borderColor: c.borderStrong, alignItems: "center", justifyContent: "center", backgroundColor: c.surface, marginTop: 18 },
+  messageBubble: { maxWidth: "84%", backgroundColor: c.surface, borderRadius: 14, borderWidth: 1, borderColor: c.border, paddingHorizontal: 10, paddingVertical: 8 },
   messageBubbleMine: { backgroundColor: "#67c3d6", borderColor: "#67c3d6" },
-  messageAuthor: { color: "#161c24", fontSize: 11, fontWeight: "700" },
-  messageText: { color: "#161c24", fontSize: 14, marginTop: 2 },
-  messageTime: { color: "#6c7789", fontSize: 10, marginTop: 4 },
-  messageTextMine: { color: "#ffffff" },
-  fileText: { marginTop: 3, color: "#161c24", fontSize: 13, textDecorationLine: "underline" },
-  attachmentImage: { marginTop: 6, width: 180, height: 180, borderRadius: 10, backgroundColor: "#e0e5ed" },
+  messageAuthor: { color: c.text, fontSize: 11, fontWeight: "700" },
+  messageText: { color: c.text, fontSize: 14, marginTop: 2 },
+  messageTime: { color: c.textMuted, fontSize: 10, marginTop: 4 },
+  messageTextMine: { color: c.surface },
+  fileText: { marginTop: 3, color: c.text, fontSize: 13, textDecorationLine: "underline" },
+  attachmentImage: { marginTop: 6, width: 180, height: 180, borderRadius: 10, backgroundColor: c.border },
   groupedImageWrap: { marginTop: 2 },
-  groupedGrid: { marginTop: 6, width: 180, height: 180, borderRadius: 10, overflow: "hidden", flexDirection: "row", flexWrap: "wrap", gap: 4, backgroundColor: "#e0e5ed" },
+  groupedGrid: { marginTop: 6, width: 180, height: 180, borderRadius: 10, overflow: "hidden", flexDirection: "row", flexWrap: "wrap", gap: 4, backgroundColor: c.border },
   groupedGridCompact: { height: 88 },
-  groupedTile: { width: 88, height: 88, backgroundColor: "#e0e5ed" },
+  groupedTile: { width: 88, height: 88, backgroundColor: c.border },
   groupedTileCompact: { flex: 1 },
   groupedTileImage: { width: "100%", height: "100%" },
   groupedTileOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.55)" },
-  groupedOverlayText: { color: "#ffffff", fontSize: 18, fontWeight: "700" },
-  pdfCard: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#f5f7fa", maxWidth: 220 },
+  groupedOverlayText: { color: c.surface, fontSize: 18, fontWeight: "700" },
+  pdfCard: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: c.bg, maxWidth: 220 },
   pdfCardMine: { borderColor: "rgba(255,255,255,0.45)", backgroundColor: "rgba(255,255,255,0.2)" },
-  pdfText: { flex: 1, color: "#161c24", fontSize: 12, fontWeight: "600" },
+  pdfText: { flex: 1, color: c.text, fontSize: 12, fontWeight: "600" },
   audioCard: {
     marginTop: 6,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     maxWidth: 220,
   },
   audioCardMine: {
@@ -1367,66 +1368,66 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.2)",
   },
   audioText: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 12,
     fontWeight: "600",
   },
-  pendingWrap: { borderTopWidth: 1, borderTopColor: "#e0e5ed", backgroundColor: "#ffffff", paddingTop: 8, paddingBottom: 6, paddingHorizontal: 12 },
-  pendingLabel: { fontSize: 11, fontWeight: "700", color: "#6c7789", marginBottom: 6 },
+  pendingWrap: { borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface, paddingTop: 8, paddingBottom: 6, paddingHorizontal: 12 },
+  pendingLabel: { fontSize: 11, fontWeight: "700", color: c.textMuted, marginBottom: 6 },
   pendingList: { paddingRight: 6, gap: 8 },
-  pendingItem: { width: 120, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, backgroundColor: "#fff", padding: 6 },
-  pendingThumb: { width: "100%", height: 60, borderRadius: 8, backgroundColor: "#e0e5ed" },
-  pendingIconWrap: { height: 60, borderRadius: 8, backgroundColor: "#edf0f5", alignItems: "center", justifyContent: "center" },
+  pendingItem: { width: 120, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, backgroundColor: c.surface, padding: 6 },
+  pendingThumb: { width: "100%", height: 60, borderRadius: 8, backgroundColor: c.border },
+  pendingIconWrap: { height: 60, borderRadius: 8, backgroundColor: c.surfaceMuted, alignItems: "center", justifyContent: "center" },
   pendingAudioPreview: {
     height: 60,
     borderRadius: 8,
-    backgroundColor: "#edf0f5",
+    backgroundColor: c.surfaceMuted,
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
   },
-  pendingAudioPreviewText: { fontSize: 10, color: "#39424f", fontWeight: "700" },
-  pendingName: { marginTop: 6, fontSize: 11, color: "#39424f" },
+  pendingAudioPreviewText: { fontSize: 10, color: c.slate[700], fontWeight: "700" },
+  pendingName: { marginTop: 6, fontSize: 11, color: c.slate[700] },
   pendingRemove: { position: "absolute", top: 4, right: 4 },
-  composer: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 20, borderTopWidth: 1, borderTopColor: "#e0e5ed", backgroundColor: "#ffffff" },
-  attachBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#c8d0dd", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  micBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#c8d0dd", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  micBtnActive: { backgroundColor: "#d64545", borderColor: "#d64545" },
-  input: { flex: 1, minHeight: 40, maxHeight: 120, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, color: "#161c24", backgroundColor: "#fff", textAlignVertical: "top" },
+  composer: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 20, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface },
+  attachBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: c.borderStrong, alignItems: "center", justifyContent: "center", backgroundColor: c.surface },
+  micBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: c.borderStrong, alignItems: "center", justifyContent: "center", backgroundColor: c.surface },
+  micBtnActive: { backgroundColor: c.rose[500], borderColor: c.rose[500] },
+  input: { flex: 1, minHeight: 40, maxHeight: 120, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, color: c.text, backgroundColor: c.surface, textAlignVertical: "top" },
   sendBtn: { width: 38, height: 38, borderRadius: 999, backgroundColor: "#67c3d6", alignItems: "center", justifyContent: "center" },
   sendDisabled: { opacity: 0.55 },
   viewerBackdrop: { flex: 1, backgroundColor: "rgba(2,6,23,0.95)" },
   viewerHeader: { paddingTop: 42, paddingHorizontal: 12, paddingBottom: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  viewerTitle: { color: "#ffffff", fontSize: 14, fontWeight: "700" },
+  viewerTitle: { color: c.surface, fontSize: 14, fontWeight: "700" },
   viewerClose: { width: 32, height: 32, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(148,163,184,0.25)" },
   viewerSlide: { width: Dimensions.get("window").width, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
   viewerImage: { width: "100%", height: "82%" },
   forwardBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 16 },
-  forwardCard: { maxHeight: "72%", backgroundColor: "#fff", borderRadius: 14, padding: 12 },
-  forwardTitle: { color: "#161c24", fontSize: 16, fontWeight: "700" },
-  forwardInput: { marginTop: 10, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, height: 40, paddingHorizontal: 12, color: "#161c24", backgroundColor: "#fff" },
+  forwardCard: { maxHeight: "72%", backgroundColor: c.surface, borderRadius: 14, padding: 12 },
+  forwardTitle: { color: c.text, fontSize: 16, fontWeight: "700" },
+  forwardInput: { marginTop: 10, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, height: 40, paddingHorizontal: 12, color: c.text, backgroundColor: c.surface },
   forwardList: { marginTop: 10 },
-  forwardRow: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 10, padding: 8, marginBottom: 6 },
-  forwardName: { color: "#161c24", fontSize: 13, fontWeight: "700" },
-  forwardRole: { color: "#6c7789", fontSize: 11, marginTop: 1 },
-  forwardCancel: { marginTop: 8, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, height: 38, alignItems: "center", justifyContent: "center" },
-  forwardCancelText: { color: "#39424f", fontWeight: "700", fontSize: 12 },
-  empty: { textAlign: "center", color: "#98a3b5", marginTop: 14, fontSize: 12 },
+  forwardRow: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: c.border, borderRadius: 10, padding: 8, marginBottom: 6 },
+  forwardName: { color: c.text, fontSize: 13, fontWeight: "700" },
+  forwardRole: { color: c.textMuted, fontSize: 11, marginTop: 1 },
+  forwardCancel: { marginTop: 8, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, height: 38, alignItems: "center", justifyContent: "center" },
+  forwardCancelText: { color: c.slate[700], fontWeight: "700", fontSize: 12 },
+  empty: { textAlign: "center", color: c.textTertiary, marginTop: 14, fontSize: 12 },
   callBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 16 },
   callCard: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     alignItems: "center",
     padding: 16,
     gap: 8,
   },
-  callTitle: { fontSize: 18, fontWeight: "700", color: "#161c24" },
-  callPeer: { fontSize: 14, fontWeight: "600", color: "#39424f" },
-  callSub: { fontSize: 12, color: "#6c7789" },
+  callTitle: { fontSize: 18, fontWeight: "700", color: c.text },
+  callPeer: { fontSize: 14, fontWeight: "600", color: c.slate[700] },
+  callSub: { fontSize: 12, color: c.textMuted },
   callActions: { marginTop: 8, flexDirection: "row", gap: 10 },
   callBtn: {
     minWidth: 110,
@@ -1437,17 +1438,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 12,
   },
-  callRejectBtn: { borderColor: "#f6b8b5", backgroundColor: "#fdedec" },
-  callAcceptBtn: { borderColor: "#6ecdaa", backgroundColor: "#cdeee0" },
-  callEndBtn: { borderColor: "#f6b8b5", backgroundColor: "#fbd9d7", marginTop: 8 },
-  callBtnText: { color: "#741f1f", fontSize: 13, fontWeight: "700" },
-  callAcceptText: { color: "#084f36" },
+  callRejectBtn: { borderColor: c.errorBorder, backgroundColor: c.errorBg },
+  callAcceptBtn: { borderColor: c.emerald[300], backgroundColor: c.emerald[100] },
+  callEndBtn: { borderColor: c.errorBorder, backgroundColor: c.rose[100], marginTop: 8 },
+  callBtnText: { color: c.rose[800], fontSize: 13, fontWeight: "700" },
+  callAcceptText: { color: c.emerald[800] },
   callLogRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
     padding: 8,
     marginBottom: 6,
@@ -1460,8 +1461,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   historyLoaderText: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
     fontWeight: "600",
   },
-});
+}));

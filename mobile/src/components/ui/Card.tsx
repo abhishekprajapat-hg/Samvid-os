@@ -1,6 +1,7 @@
 import React from "react";
 import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { colors, elevation, palette, radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors frontend/src/components/ui/Card.jsx, including the sub-components.
@@ -63,7 +64,7 @@ export const AppCardFooter = ({
   style?: StyleProp<ViewStyle>;
 }) => <View style={[styles.footer, style]}>{children}</View>;
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   card: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -86,12 +87,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typography.cardTitle,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
   },
   description: {
     fontSize: typography.label,
     lineHeight: 18,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
   },
   content: {
     gap: spacing.lg,
@@ -105,6 +106,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-});
+}));
 
 export default AppCard;

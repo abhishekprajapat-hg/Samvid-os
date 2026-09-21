@@ -51,6 +51,7 @@ import { BookingBoardScreen } from "../modules/coworking/BookingBoardScreen";
 import { CoworkingClientsScreen } from "../modules/coworking/CoworkingClientsScreen";
 import { DataUseNoticeScreen, ServiceTermsNoticeScreen } from "../modules/legal/LegalNoticeScreen";
 import { RealtimePopupOverlay } from "../components/common/RealtimePopupOverlay";
+import { themePalette } from "../theme/themedStyles";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -168,7 +169,7 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
       screenOptions={({ route }) => ({
         headerRight: () => (
           <Pressable onPress={logout} hitSlop={10} style={{ marginRight: 14 }}>
-            <Text style={{ color: palette.slate[700], fontWeight: "600", fontSize: typography.label }}>
+            <Text style={{ color: themePalette.slate[700], fontWeight: "600", fontSize: typography.label }}>
               Logout
             </Text>
           </Pressable>
@@ -179,10 +180,10 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
           height: 56 + bottomSpacing,
           paddingBottom: bottomSpacing,
           paddingTop: 6,
-          borderTopColor: palette.slate[200],
+          borderTopColor: themePalette.slate[200],
         },
-        tabBarActiveTintColor: palette.blue[600],
-        tabBarInactiveTintColor: palette.slate[500],
+        tabBarActiveTintColor: themePalette.blue[600],
+        tabBarInactiveTintColor: themePalette.slate[500],
         tabBarIcon: ({ focused, color, size }) => (
           <Icon
             name={route.name === "More" ? "more" : tabs.find((t) => t.screen === route.name)?.icon || "ellipse"}

@@ -28,6 +28,7 @@ import {
   summariseByStatus,
   wingOf,
 } from "./cabinData";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * The booking board.
@@ -358,7 +359,7 @@ export const BookingBoardScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: { paddingBottom: spacing.xxl },
   legend: {
     flexDirection: "row",
@@ -368,7 +369,7 @@ const styles = StyleSheet.create({
   },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendLabel: { fontSize: typography.caption, color: palette.slate[600] },
+  legendLabel: { fontSize: typography.caption, color: themePalette.slate[600] },
   search: { marginBottom: spacing.md },
   filterRow: { gap: spacing.md, paddingBottom: spacing.lg },
   filterChip: {
@@ -379,18 +380,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: palette.slate[300],
-    backgroundColor: "#ffffff",
+    borderColor: themePalette.slate[300],
+    backgroundColor: c.surface,
   },
-  filterChipActive: { borderColor: palette.blue[600], backgroundColor: palette.blue[50] },
-  filterLabel: { fontSize: typography.label, fontWeight: "600", color: palette.slate[700] },
-  filterLabelActive: { color: palette.blue[700] },
+  filterChipActive: { borderColor: themePalette.blue[600], backgroundColor: themePalette.blue[50] },
+  filterLabel: { fontSize: typography.label, fontWeight: "600", color: themePalette.slate[700] },
+  filterLabelActive: { color: themePalette.blue[700] },
   wing: { marginBottom: spacing.xl },
   wingHead: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md },
-  wingLabel: { fontSize: typography.cardTitle, fontWeight: "600", color: palette.slate[900] },
-  wingHint: { fontSize: typography.caption, color: palette.slate[500] },
+  wingLabel: { fontSize: typography.cardTitle, fontWeight: "600", color: themePalette.slate[900] },
+  wingHint: { fontSize: typography.caption, color: themePalette.slate[500] },
   spacer: { flex: 1 },
-  wingCount: { fontSize: typography.caption, fontWeight: "600", color: palette.slate[500] },
+  wingCount: { fontSize: typography.caption, fontWeight: "600", color: themePalette.slate[500] },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   tile: {
     width: 78,
@@ -411,12 +412,12 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     paddingVertical: spacing.md,
   },
-  detailLabel: { fontSize: typography.label, color: palette.slate[500] },
+  detailLabel: { fontSize: typography.label, color: themePalette.slate[500] },
   detailValue: {
     flex: 1,
     fontSize: typography.label,
     fontWeight: "600",
-    color: palette.slate[800],
+    color: themePalette.slate[800],
     textAlign: "right",
   },
-});
+}));

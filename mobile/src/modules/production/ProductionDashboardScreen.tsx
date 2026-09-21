@@ -8,6 +8,7 @@ import { palette, spacing, typography } from "../../theme/tokens";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { getTaskStats, getTasks, type Task } from "../../services/taskService";
 import { getMyAttendance, type AttendanceRecord } from "../../services/attendanceService";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/production/ProductionExecutiveDashboard.jsx - the home screen
@@ -170,23 +171,23 @@ export const ProductionDashboardScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: { paddingBottom: spacing.xxl },
   card: { marginBottom: spacing.md },
   cardTitle: {
     fontSize: typography.cardTitle,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     marginBottom: spacing.lg,
   },
   clockRow: { flexDirection: "row" },
   statRow: { flexDirection: "row", flexWrap: "wrap" },
   stat: { flex: 1, minWidth: 80, alignItems: "center" },
-  statValue: { fontSize: typography.title, fontWeight: "700", color: palette.slate[900] },
+  statValue: { fontSize: typography.title, fontWeight: "700", color: themePalette.slate[900] },
   statLabel: {
     marginTop: 2,
     fontSize: typography.caption,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     textTransform: "uppercase",
     letterSpacing: 0.5,
     textAlign: "center",
@@ -201,10 +202,10 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: typography.caption,
     fontWeight: "700",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     letterSpacing: 0.8,
   },
-  link: { fontSize: typography.label, fontWeight: "600", color: palette.blue[600] },
+  link: { fontSize: typography.label, fontWeight: "600", color: themePalette.blue[600] },
   taskCard: { marginBottom: spacing.md },
   taskHead: {
     flexDirection: "row",
@@ -212,6 +213,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
-  taskTitle: { flex: 1, fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
-  taskMeta: { marginTop: spacing.sm, fontSize: typography.label, color: palette.slate[500] },
-});
+  taskTitle: { flex: 1, fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
+  taskMeta: { marginTop: spacing.sm, fontSize: typography.label, color: themePalette.slate[500] },
+}));

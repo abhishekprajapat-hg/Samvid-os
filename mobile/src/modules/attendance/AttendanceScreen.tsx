@@ -9,6 +9,7 @@ import { MyDaySection } from "./components/MyDaySection";
 import { LeaveSection } from "./components/LeaveSection";
 import { TeamSection } from "./components/TeamSection";
 import { ViolationsSection } from "./components/ViolationsSection";
+import { themedStyles } from "../../theme/themedStyles";
 
 /*
  * Attendance hub, mirroring modules/attendance/AttendanceHub.jsx.
@@ -68,11 +69,11 @@ export const AttendanceScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   tabs: {
     marginBottom: spacing.lg,
   },
   section: {
     flex: 1,
   },
-});
+}));

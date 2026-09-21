@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useColorScheme } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { setActiveScheme } from "./themedStyles";
 import {
   darkColors,
   darkElevation,
@@ -71,6 +72,14 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
 
   const scheme: "light" | "dark" = mode === "system" ? (systemScheme === "dark" ? "dark" : "light") : mode;
 
+  /*
+   * Stylesheets are resolved by a module-level proxy, not by this context, so
+   * the active scheme has to be legible without a hook - see themedStyles.ts.
+   * Set during render rather than in an effect: the proxy is read while the
+   * tree below renders, which happens before any effect runs.
+   */
+  setActiveScheme(scheme);
+
   const value = useMemo<ThemeValue>(
     () => ({
       mode,
@@ -83,7 +92,23 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
     [mode, scheme, setMode, ready],
   );
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  /*
+   * Keyed on the scheme so the subtree remounts when it changes.
+   *
+   * The proxy resolves colours at property-access time, but nothing would make
+   * a screen read them again: a component that never consumes this context does
+   * not re-render when the context changes. Remounting repaints everything.
+   *
+   * The cost is that in-progress screen state - scroll position, an unsent form
+   * - is lost on a theme switch. That is acceptable for a deliberate, rare
+   * action, and it is the price of not having to touch 57 stylesheets and every
+   * component that reads one.
+   */
+  return (
+    <ThemeContext.Provider value={value}>
+      <React.Fragment key={scheme}>{children}</React.Fragment>
+    </ThemeContext.Provider>
+  );
 };
 
 export const useTheme = (): ThemeValue => {

@@ -9,6 +9,7 @@ import { getInventoryAssets } from "../../services/inventoryService";
 import { getFieldExecutiveLocations, getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { InventoryAsset, Lead } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
 const LOCATION_REFRESH_INTERVAL_MS = 30000;
@@ -151,7 +152,7 @@ const buildMapHtml = ({
     };
     (input.executives || []).forEach((row) => {
       const selected = String(row.id || "") === String(input.selectedExecutiveId || "");
-      const marker = L.circleMarker([row.lat, row.lng], { radius:selected ? 9 : 7, weight:selected ? 3 : 2, color:"#161c24", fillColor:selected ? "#161c24" : "#2b7fbf", fillOpacity:selected ? 0.95 : 0.78 }).addTo(map);
+      const marker = L.circleMarker([row.lat, row.lng], { radius:selected ? 9 : 7, weight:selected ? 3 : 2, color:themeColor("#161c24"), fillColor:selected ? themeColor("#161c24") : themeColor("#2b7fbf"), fillOpacity:selected ? 0.95 : 0.78 }).addTo(map);
       marker.on("click", () => postNative({ type:"select-executive", id: row.id }));
       bounds.push([row.lat, row.lng]);
     });
@@ -687,35 +688,35 @@ const Kpi = ({ label, value, onPress }: { label: string; value: number; onPress?
   </Pressable>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   kpis: { gap: 8, marginBottom: 10 },
-  kpiCard: { borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 12, backgroundColor: "#fff", padding: 10 },
-  value: { fontSize: 22, fontWeight: "700", color: "#161c24" },
-  sectionCard: { borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 12, backgroundColor: "#fff", padding: 10, marginBottom: 10 },
-  section: { marginBottom: 8, textTransform: "uppercase", fontSize: 12, letterSpacing: 1, fontWeight: "700", color: "#39424f" },
+  kpiCard: { borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.surface, padding: 10 },
+  value: { fontSize: 22, fontWeight: "700", color: c.text },
+  sectionCard: { borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.surface, padding: 10, marginBottom: 10 },
+  section: { marginBottom: 8, textTransform: "uppercase", fontSize: 12, letterSpacing: 1, fontWeight: "700", color: c.slate[700] },
   sectionRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 },
-  sectionMeta: { fontSize: 11, color: "#6c7789" },
-  mapContainer: { borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 12, overflow: "hidden", height: 320, backgroundColor: "#f5f7fa" },
-  mapView: { flex: 1, backgroundColor: "#f5f7fa" },
-  card: { borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 12, backgroundColor: "#fff", padding: 10, marginBottom: 8 },
+  sectionMeta: { fontSize: 11, color: c.textMuted },
+  mapContainer: { borderWidth: 1, borderColor: c.borderStrong, borderRadius: 12, overflow: "hidden", height: 320, backgroundColor: c.bg },
+  mapView: { flex: 1, backgroundColor: c.bg },
+  card: { borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.surface, padding: 10, marginBottom: 8 },
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  title: { fontWeight: "700", color: "#161c24", flex: 1 },
-  meta: { marginTop: 2, color: "#6c7789", fontSize: 12 },
+  title: { fontWeight: "700", color: c.text, flex: 1 },
+  meta: { marginTop: 2, color: c.textMuted, fontSize: 12 },
   badge: { fontSize: 10, textTransform: "uppercase", fontWeight: "700", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, overflow: "hidden" },
-  badgeDefault: { backgroundColor: "#edf0f5", color: "#39424f" },
-  badgeVisit: { backgroundColor: "#e6ddfd", color: "#4f31b0" },
-  badgeInterested: { backgroundColor: "#fbe9c4", color: "#614304" },
-  badgeContacted: { backgroundColor: "#d2e9f7", color: "#133e5f" },
-  badgeClosed: { backgroundColor: "#cdeee0", color: "#084f36" },
-  badgeLost: { backgroundColor: "#fbd9d7", color: "#942626" },
+  badgeDefault: { backgroundColor: c.surfaceMuted, color: c.slate[700] },
+  badgeVisit: { backgroundColor: c.violet[100], color: c.violet[700] },
+  badgeInterested: { backgroundColor: c.amber[100], color: c.amber[800] },
+  badgeContacted: { backgroundColor: c.cyan[100], color: c.cyan[800] },
+  badgeClosed: { backgroundColor: c.emerald[100], color: c.emerald[800] },
+  badgeLost: { backgroundColor: c.rose[100], color: c.rose[700] },
   actionRow: { marginTop: 8, flexDirection: "row", gap: 8, flexWrap: "wrap" },
   modalActionRow: { marginTop: 8, flexDirection: "row", gap: 8, flexWrap: "wrap" },
-  smallBtn: { borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: "#fff" },
-  smallBtnText: { color: "#39424f", fontSize: 11, fontWeight: "700" },
+  smallBtn: { borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: c.surface },
+  smallBtnText: { color: c.slate[700], fontSize: 11, fontWeight: "700" },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "flex-end", padding: 12 },
-  modalCard: { borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 14, backgroundColor: "#fff", padding: 12 },
-  modalCardLarge: { borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 14, backgroundColor: "#fff", padding: 12, maxHeight: "84%" },
+  modalCard: { borderWidth: 1, borderColor: c.border, borderRadius: 14, backgroundColor: c.surface, padding: 12 },
+  modalCardLarge: { borderWidth: 1, borderColor: c.border, borderRadius: 14, backgroundColor: c.surface, padding: 12, maxHeight: "84%" },
   modalCloseBtn: { marginTop: 10, alignSelf: "flex-end" },
   modalHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
   modalList: { maxHeight: 440 },
-});
+}));

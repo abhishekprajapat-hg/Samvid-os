@@ -47,6 +47,7 @@ import {
   type PipelineView,
 } from "./pipelineViews";
 import { colors } from "../../theme/tokens";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const LEAD_STATUSES = [
   "ALL",
@@ -68,20 +69,20 @@ const LEAD_STATUSES = [
 const EXECUTIVE_ROLES = new Set(["EXECUTIVE", "FIELD_EXECUTIVE"]);
 
 const statusPillStyles = {
-  NEW: { bg: "#eef3ff", border: "#bcd0ff", text: "#1c37ab" },
-  CONTACTED: { bg: "#fdf4e3", border: "#f6d68c", text: "#7d5605" },
-  INTERESTED: { bg: "#e8f7f0", border: "#a3e0c9", text: "#0a6544" },
-  SITE_VISIT_SCHEDULED: { bg: "#e9f4fb", border: "#a8d3ef", text: "#184f79" },
-  SITE_VISIT: { bg: "#f2eefe", border: "#cfbdfb", text: "#4f31b0" },
-  SITE_VISIT_OVERDUE: { bg: "#fdedec", border: "#f6b8b5", text: "#942626" },
-  MISSING_IN_ACTION: { bg: "#fdf4e3", border: "#f6d68c", text: "#614304" },
-  NOT_PICKING_CALLS: { bg: "#fdf4e3", border: "#f6d68c", text: "#614304" },
-  INVALID: { bg: "#edf0f5", border: "#c8d0dd", text: "#4e5867" },
-  OWNER: { bg: "#eef3ff", border: "#bcd0ff", text: "#1c37ab" },
-  BROKER: { bg: "#f2eefe", border: "#cfbdfb", text: "#4f31b0" },
-  REQUESTED: { bg: "#fdf4e3", border: "#f6d68c", text: "#7d5605" },
-  CLOSED: { bg: "#161c24", border: "#161c24", text: "#ffffff" },
-  LOST: { bg: "#fdedec", border: "#f6b8b5", text: "#942626" },
+  NEW: { bg: themeColor("#eef3ff"), border: themeColor("#bcd0ff"), text: themeColor("#1c37ab") },
+  CONTACTED: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#7d5605") },
+  INTERESTED: { bg: themeColor("#e8f7f0"), border: themeColor("#a3e0c9"), text: themeColor("#0a6544") },
+  SITE_VISIT_SCHEDULED: { bg: themeColor("#e9f4fb"), border: themeColor("#a8d3ef"), text: themeColor("#184f79") },
+  SITE_VISIT: { bg: themeColor("#f2eefe"), border: themeColor("#cfbdfb"), text: themeColor("#4f31b0") },
+  SITE_VISIT_OVERDUE: { bg: themeColor("#fdedec"), border: themeColor("#f6b8b5"), text: themeColor("#942626") },
+  MISSING_IN_ACTION: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#614304") },
+  NOT_PICKING_CALLS: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#614304") },
+  INVALID: { bg: themeColor("#edf0f5"), border: themeColor("#c8d0dd"), text: themeColor("#4e5867") },
+  OWNER: { bg: themeColor("#eef3ff"), border: themeColor("#bcd0ff"), text: themeColor("#1c37ab") },
+  BROKER: { bg: themeColor("#f2eefe"), border: themeColor("#cfbdfb"), text: themeColor("#4f31b0") },
+  REQUESTED: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#7d5605") },
+  CLOSED: { bg: themeColor("#161c24"), border: themeColor("#161c24"), text: themeColor("#ffffff") },
+  LOST: { bg: themeColor("#fdedec"), border: themeColor("#f6b8b5"), text: themeColor("#942626") },
 } as const;
 
 const toInputDateTime = (value?: string) => {
@@ -641,11 +642,11 @@ export const LeadsMatrixScreen = () => {
 
               <View style={styles.quickActionRow}>
                 <Pressable style={styles.quickActionBtn} onPress={() => openDialer(item.phone)}>
-                  <Icon name="call-outline" size={16} color="#161c24" />
+                  <Icon name="call-outline" size={16} color={themeColor("#161c24")} />
                   <Text style={styles.quickActionText}>Call</Text>
                 </Pressable>
                 <Pressable style={styles.quickActionBtn} onPress={() => openWhatsApp(item.phone)}>
-                  <Icon name="logo-whatsapp" size={16} color="#0d8055" />
+                  <Icon name="logo-whatsapp" size={16} color={themeColor("#0d8055")} />
                   <Text style={styles.quickActionText}>WhatsApp</Text>
                 </Pressable>
               </View>
@@ -688,7 +689,7 @@ export const LeadsMatrixScreen = () => {
                     ? "Loading inventory..."
                     : "Select Inventory (Optional)"}
               </Text>
-              <Icon name="chevron-down" size={16} color="#6c7789" />
+              <Icon name="chevron-down" size={16} color={themeColor("#6c7789")} />
             </Pressable>
             <View style={styles.modalRow}>
               <AppButton title="Cancel" variant="ghost" onPress={() => setAddOpen(false)} disabled={saving} />
@@ -766,15 +767,15 @@ const Metric = ({
   </Pressable>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#e8f7f0",
-    color: "#084f36",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   topActions: {
     flexDirection: "row",
@@ -824,16 +825,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
   },
   metricCardActive: {
-    borderColor: "#161c24",
-    backgroundColor: "#f5f7fa",
+    borderColor: c.text,
+    backgroundColor: c.bg,
   },
   metricLabel: {
     fontSize: 10,
-    color: "#6c7789",
+    color: c.textMuted,
     textTransform: "uppercase",
   },
   metricValue: {
@@ -875,12 +876,12 @@ const styles = StyleSheet.create({
   },
   meta: {
     marginTop: 4,
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 12,
   },
   empty: {
     textAlign: "center",
-    color: "#6c7789",
+    color: c.textMuted,
     marginVertical: 14,
   },
   modalWrap: {
@@ -893,7 +894,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#161c24",
+    color: c.text,
     marginBottom: 10,
   },
   input: { height: 42, marginBottom: 10 },
@@ -901,9 +902,9 @@ const styles = StyleSheet.create({
     minHeight: 42,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -911,12 +912,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   selectText: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 16,
     flex: 1,
   },
   selectPlaceholder: {
-    color: "#98a3b5",
+    color: c.textTertiary,
     fontSize: 16,
     flex: 1,
   },
@@ -934,28 +935,28 @@ const styles = StyleSheet.create({
   },
   pickerRow: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
     marginBottom: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   pickerRowText: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 14,
   },
   detailRoot: {
     flex: 1,
     padding: 14,
     paddingTop: 56,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
   },
   section: {
     marginTop: 14,
     marginBottom: 8,
     fontWeight: "700",
-    color: "#39424f",
+    color: c.slate[700],
   },
   statusRow: {
     flexDirection: "row",
@@ -966,9 +967,9 @@ const styles = StyleSheet.create({
   },
   statusChip: {},
   activityCard: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
     padding: 10,
     marginBottom: 8,
@@ -984,9 +985,9 @@ const styles = StyleSheet.create({
     width: "49%",
     height: 36,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
@@ -995,20 +996,20 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#39424f",
+    color: c.slate[700],
   },
   revenueCard: {
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     padding: 12,
   },
   revenueLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    color: "#6c7789",
+    color: c.textMuted,
     fontWeight: "700",
     letterSpacing: 0.8,
   },
@@ -1016,11 +1017,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 24,
     fontWeight: "800",
-    color: "#161c24",
+    color: c.text,
   },
   revenueHelper: {
     marginTop: 4,
     fontSize: 12,
-    color: "#6c7789",
+    color: c.textMuted,
   },
-});
+}));

@@ -9,6 +9,7 @@ import {
   TERMS_SECTIONS,
   type LegalSection,
 } from "./legalContent";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/legal/DataUseNotice.jsx and ServiceTermsNotice.jsx.
@@ -48,21 +49,21 @@ export const ServiceTermsNoticeScreen = () => (
   </Screen>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: { paddingBottom: spacing.xxl },
   updated: {
     fontSize: typography.caption,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     marginBottom: spacing.lg,
   },
   card: { marginBottom: spacing.md },
   title: {
     fontSize: typography.cardTitle,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     marginBottom: spacing.sm,
   },
-  text: { fontSize: typography.body, lineHeight: 20, color: palette.slate[600] },
+  text: { fontSize: typography.body, lineHeight: 20, color: themePalette.slate[600] },
   footer: { marginTop: spacing.lg, alignItems: "center" },
-  footerText: { fontSize: typography.caption, color: palette.slate[400] },
-});
+  footerText: { fontSize: typography.caption, color: themePalette.slate[400] },
+}));

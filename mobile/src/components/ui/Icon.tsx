@@ -1,7 +1,8 @@
 import React from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import {
-  AlertCircle, ArrowLeft, Bell, Building2, Calendar, Camera, Check, CheckCheck,
+  Activity, AlertCircle, ArrowLeft, BarChart3, Bell, Building2, Calendar,
+  CalendarDays, Camera, Check, CheckCheck,
   CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle,
   ClipboardList, Clock, Copy, CornerUpRight, Download, Eye, EyeOff, FileText,
   Filter, Home, LayoutGrid, List, Mail, Map, MapPin, Menu, MessageCircle,
@@ -9,10 +10,11 @@ import {
   RefreshCw, Search, Send, Settings, Share2, ShieldCheck, SwitchCamera, Target,
   Trash2, TrendingUp, Trophy, User, UserCheck, UserCircle2, Users, Video, X,
   CheckSquare, CreditCard, Mic, MicOff, Pause, Play, Square, VideoOff,
-  Volume1, Volume2,
+  Volume1, Volume2, IndianRupee, ListTodo, TrendingDown, UserPlus, Zap,
   XCircle, type LucideIcon,
 } from "lucide-react-native";
 import { palette } from "../../theme/tokens";
+import { themePalette } from "../../theme/themedStyles";
 
 /*
  * The single icon surface for the app.
@@ -51,6 +53,15 @@ const ICONS: Record<string, LucideIcon> = {
   more: Menu,
   fieldOps: Map,
   trend: TrendingUp,
+  trendDown: TrendingDown,
+  activity: Activity,
+  revenue: IndianRupee,
+  todo: ListTodo,
+  calendarDays: CalendarDays,
+  addUser: UserPlus,
+  quickAction: Zap,
+  pieChart: PieChart,
+  barChart: BarChart3,
 
   /* ---- Ionicons aliases, kept so existing screens keep working ---- */
   "alert-circle-outline": AlertCircle,
@@ -150,7 +161,7 @@ const resolve = (name: string): LucideIcon | null => {
 export const Icon = ({
   name,
   size = 18,
-  color = palette.slate[600],
+  color = themePalette.slate[600],
   strokeWidth = 2,
   style,
 }: {

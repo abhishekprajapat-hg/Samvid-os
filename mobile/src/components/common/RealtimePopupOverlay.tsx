@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Icon } from "../ui/Icon";
 import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const iconForKind = (kind: "CHAT" | "CALL" | "NOTIFICATION") => {
   if (kind === "CALL") return "call";
@@ -19,7 +20,7 @@ export const RealtimePopupOverlay = () => {
       {popupItems.map((item) => (
         <View key={item.id} style={styles.card}>
           <View style={styles.iconWrap}>
-            <Icon name={iconForKind(item.kind)} size={14} color="#161c24" />
+            <Icon name={iconForKind(item.kind)} size={14} color={themeColor("#161c24")} />
           </View>
           <View style={styles.body}>
             <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
@@ -40,7 +41,7 @@ export const RealtimePopupOverlay = () => {
             onPress={() => (item.kind === "CALL" ? rejectCallPopup(item.id) : dismissPopup(item.id))}
             hitSlop={8}
           >
-            <Icon name="close" size={14} color="#4e5867" />
+            <Icon name="close" size={14} color={themeColor("#4e5867")} />
           </Pressable>
         </View>
       ))}
@@ -48,7 +49,7 @@ export const RealtimePopupOverlay = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   wrap: {
     position: "absolute",
     top: 8,
@@ -62,12 +63,12 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: "#ffffff",
-    shadowColor: "#161c24",
+    backgroundColor: c.surface,
+    shadowColor: c.text,
     shadowOpacity: 0.08,
     shadowOffset: { width: 0, height: 3 },
     shadowRadius: 8,
@@ -80,7 +81,7 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e0e5ed",
+    backgroundColor: c.border,
   },
   body: {
     flex: 1,
@@ -88,12 +89,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   title: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 13,
     fontWeight: "700",
   },
   message: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     lineHeight: 16,
   },
@@ -112,20 +113,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   callReject: {
-    borderColor: "#f6b8b5",
-    backgroundColor: "#fdedec",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
   },
   callAccept: {
-    borderColor: "#6ecdaa",
-    backgroundColor: "#cdeee0",
+    borderColor: c.emerald[300],
+    backgroundColor: c.emerald[100],
   },
   callRejectText: {
-    color: "#942626",
+    color: c.rose[700],
     fontSize: 11,
     fontWeight: "700",
   },
   callAcceptText: {
-    color: "#084f36",
+    color: c.emerald[800],
     fontSize: 11,
     fontWeight: "700",
   },
@@ -135,8 +136,8 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
   },
-});
+}));

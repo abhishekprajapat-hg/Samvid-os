@@ -29,18 +29,19 @@ import {
 } from "../../services/taskService";
 import { getUsers } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const STATUS_OPTIONS = [
-  { id: "BACKLOG", label: "Backlog", color: "#6c7789", bg: "#edf0f5", border: "#c8d0dd" },
-  { id: "TODO", label: "To Do", color: "#1f6499", bg: "#d2e9f7", border: "#a8d3ef" },
-  { id: "IN_PROGRESS", label: "In Progress", color: "#a26f06", bg: "#fbe9c4", border: "#f6d68c" },
-  { id: "COMPLETED", label: "Completed", color: "#0d8055", bg: "#cdeee0", border: "#a3e0c9" },
+  { id: "BACKLOG", label: "Backlog", color: themeColor("#6c7789"), bg: themeColor("#edf0f5"), border: themeColor("#c8d0dd") },
+  { id: "TODO", label: "To Do", color: themeColor("#1f6499"), bg: themeColor("#d2e9f7"), border: themeColor("#a8d3ef") },
+  { id: "IN_PROGRESS", label: "In Progress", color: themeColor("#a26f06"), bg: themeColor("#fbe9c4"), border: themeColor("#f6d68c") },
+  { id: "COMPLETED", label: "Completed", color: themeColor("#0d8055"), bg: themeColor("#cdeee0"), border: themeColor("#a3e0c9") },
 ];
 
 const PRIORITY_OPTIONS = [
-  { id: "LOW", label: "Low", color: "#2549d6", bg: "#eef3ff", border: "#bcd0ff" },
-  { id: "MEDIUM", label: "Medium", color: "#a26f06", bg: "#fbe9c4", border: "#f6d68c" },
-  { id: "HIGH", label: "High", color: "#942626", bg: "#fdedec", border: "#f6b8b5" },
+  { id: "LOW", label: "Low", color: themeColor("#2549d6"), bg: themeColor("#eef3ff"), border: themeColor("#bcd0ff") },
+  { id: "MEDIUM", label: "Medium", color: themeColor("#a26f06"), bg: themeColor("#fbe9c4"), border: themeColor("#f6d68c") },
+  { id: "HIGH", label: "High", color: themeColor("#942626"), bg: themeColor("#fdedec"), border: themeColor("#f6b8b5") },
 ];
 
 const PREDEFINED_TAGS = ["Call", "Meeting", "Document", "Site Visit", "Urgent", "Follow-up"];
@@ -513,31 +514,31 @@ export const TaskManagerScreen = () => {
             {/* Quick Stats Grid */}
             <View style={styles.statsGrid}>
               <View style={styles.statsCard}>
-                <Icon name="list" size={16} color="#6c7789" />
+                <Icon name="list" size={16} color={themeColor("#6c7789")} />
                 <Text style={styles.statsLabel}>Total</Text>
                 <Text style={styles.statsValue}>{stats.total}</Text>
               </View>
-              <View style={[styles.statsCard, { borderColor: "#f6d68c" }]}>
-                <Icon name="time-outline" size={16} color="#a26f06" />
+              <View style={[styles.statsCard, { borderColor: themeColor("#f6d68c") }]}>
+                <Icon name="time-outline" size={16} color={themeColor("#a26f06")} />
                 <Text style={styles.statsLabel}>Pending</Text>
-                <Text style={[styles.statsValue, { color: "#a26f06" }]}>{stats.pending}</Text>
+                <Text style={[styles.statsValue, { color: themeColor("#a26f06") }]}>{stats.pending}</Text>
               </View>
-              <View style={[styles.statsCard, { borderColor: "#a3e0c9" }]}>
-                <Icon name="checkmark-circle-outline" size={16} color="#0d8055" />
+              <View style={[styles.statsCard, { borderColor: themeColor("#a3e0c9") }]}>
+                <Icon name="checkmark-circle-outline" size={16} color={themeColor("#0d8055")} />
                 <Text style={styles.statsLabel}>Done</Text>
-                <Text style={[styles.statsValue, { color: "#0d8055" }]}>{stats.COMPLETED}</Text>
+                <Text style={[styles.statsValue, { color: themeColor("#0d8055") }]}>{stats.COMPLETED}</Text>
               </View>
-              <View style={[styles.statsCard, { borderColor: "#f6b8b5" }]}>
-                <Icon name="alert-circle-outline" size={16} color="#942626" />
+              <View style={[styles.statsCard, { borderColor: themeColor("#f6b8b5") }]}>
+                <Icon name="alert-circle-outline" size={16} color={themeColor("#942626")} />
                 <Text style={styles.statsLabel}>Overdue</Text>
-                <Text style={[styles.statsValue, { color: "#942626" }]}>{stats.overdue}</Text>
+                <Text style={[styles.statsValue, { color: themeColor("#942626") }]}>{stats.overdue}</Text>
               </View>
             </View>
 
             {/* Controls Bar */}
             <View style={styles.toolbar}>
               <View style={styles.searchRow}>
-                <Icon name="search" size={16} color="#6c7789" style={styles.searchIcon} />
+                <Icon name="search" size={16} color={themeColor("#6c7789")} style={styles.searchIcon} />
                 <AppInput
                   style={styles.searchInput as object}
                   placeholder="Search title, description..."
@@ -555,7 +556,7 @@ export const TaskManagerScreen = () => {
                       void loadData(true);
                     }}
                   >
-                    <Icon name="close-circle" size={16} color="#6c7789" />
+                    <Icon name="close-circle" size={16} color={themeColor("#6c7789")} />
                   </Pressable>
                 ) : null}
               </View>
@@ -693,7 +694,7 @@ export const TaskManagerScreen = () => {
                   <Icon
                     name={isCollapsed ? "chevron-forward" : "chevron-down"}
                     size={16}
-                    color={colorStyles ? colorStyles.color : "#6c7789"}
+                    color={colorStyles ? colorStyles.color : themeColor("#6c7789")}
                   />
                   <Text
                     style={[
@@ -707,7 +708,7 @@ export const TaskManagerScreen = () => {
                     style={[
                       styles.groupBadge,
                       {
-                        backgroundColor: colorStyles ? colorStyles.color : "#6c7789",
+                        backgroundColor: colorStyles ? colorStyles.color : themeColor("#6c7789"),
                       },
                     ]}
                   >
@@ -730,7 +731,7 @@ export const TaskManagerScreen = () => {
                             style={[styles.checkbox, isCompleted && styles.checkboxCompleted]}
                             onPress={() => void handleToggleTaskStatus(task)}
                           >
-                            {isCompleted && <Icon name="checkmark" size={14} color="#fff" />}
+                            {isCompleted && <Icon name="checkmark" size={14} color={themeColor("#ffffff")} />}
                           </Pressable>
 
                           <Pressable style={{ flex: 1 }} onPress={() => openEditModal(task)}>
@@ -764,13 +765,13 @@ export const TaskManagerScreen = () => {
                                 <View
                                   style={[
                                     styles.badge,
-                                    dueInfo.overdue && { backgroundColor: "#fdedec", borderColor: "#f6b8b5" },
+                                    dueInfo.overdue && { backgroundColor: themeColor("#fdedec"), borderColor: themeColor("#f6b8b5") },
                                   ]}
                                 >
                                   <Text
                                     style={[
                                       styles.badgeText,
-                                      { color: dueInfo.overdue ? "#942626" : "#6c7789" },
+                                      { color: dueInfo.overdue ? themeColor("#942626") : themeColor("#6c7789") },
                                       dueInfo.overdue && { fontWeight: "700" },
                                     ]}
                                   >
@@ -790,8 +791,8 @@ export const TaskManagerScreen = () => {
 
                               {/* Lead Link */}
                               {!isProductionTaskRole && task.leadId ? (
-                                <View style={[styles.badge, { backgroundColor: "#e8f7f0", borderColor: "#a3e0c9" }]}>
-                                  <Text style={[styles.badgeText, { color: "#0a6544" }]}>
+                                <View style={[styles.badge, { backgroundColor: themeColor("#e8f7f0"), borderColor: themeColor("#a3e0c9") }]}>
+                                  <Text style={[styles.badgeText, { color: themeColor("#0a6544") }]}>
                                     Lead: {task.leadId && typeof task.leadId === "object" ? task.leadId.name : "Linked"}
                                   </Text>
                                 </View>
@@ -848,7 +849,7 @@ export const TaskManagerScreen = () => {
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitleText}>{editingTask ? "Update Task" : "Create Task"}</Text>
               <Pressable onPress={() => setIsModalOpen(false)}>
-                <Icon name="close" size={24} color="#161c24" />
+                <Icon name="close" size={24} color={themeColor("#161c24")} />
               </Pressable>
             </View>
 
@@ -873,7 +874,7 @@ export const TaskManagerScreen = () => {
                 <Text style={styles.selectRowText}>
                   {STATUS_OPTIONS.find((s) => s.id === formData.status)?.label || formData.status}
                 </Text>
-                <Icon name="chevron-down" size={16} color="#6c7789" />
+                <Icon name="chevron-down" size={16} color={themeColor("#6c7789")} />
               </Pressable>
               {statusDropdownOpen && (
                 <View style={styles.dropdownCard}>
@@ -898,7 +899,7 @@ export const TaskManagerScreen = () => {
                 <Text style={styles.selectRowText}>
                   {PRIORITY_OPTIONS.find((p) => p.id === formData.priority)?.label || formData.priority}
                 </Text>
-                <Icon name="chevron-down" size={16} color="#6c7789" />
+                <Icon name="chevron-down" size={16} color={themeColor("#6c7789")} />
               </Pressable>
               {priorityDropdownOpen && (
                 <View style={styles.dropdownCard}>
@@ -921,14 +922,14 @@ export const TaskManagerScreen = () => {
               <Text style={styles.formLabel}>Due Date</Text>
               <Pressable style={styles.selectRowField} onPress={triggerDatePicker}>
                 <Text style={styles.selectRowText}>{formData.dueDate || "Select due date (Optional)"}</Text>
-                <Icon name="calendar-outline" size={16} color="#6c7789" />
+                <Icon name="calendar-outline" size={16} color={themeColor("#6c7789")} />
               </Pressable>
 
               {/* Assignee Selector */}
               <Text style={styles.formLabel}>Assignee</Text>
               <Pressable style={styles.selectRowField} onPress={() => setAssigneeDropdownOpen(!assigneeDropdownOpen)}>
                 <Text style={styles.selectRowText}>{currentAssigneeName}</Text>
-                <Icon name="person-outline" size={16} color="#6c7789" />
+                <Icon name="person-outline" size={16} color={themeColor("#6c7789")} />
               </Pressable>
               {assigneeDropdownOpen && (
                 <View style={styles.dropdownCard}>
@@ -962,7 +963,7 @@ export const TaskManagerScreen = () => {
                   <Text style={styles.formLabel}>Associated Lead</Text>
                   <Pressable style={styles.selectRowField} onPress={() => setLeadDropdownOpen(!leadDropdownOpen)}>
                     <Text style={styles.selectRowText}>{currentLeadName}</Text>
-                    <Icon name="people-outline" size={16} color="#6c7789" />
+                    <Icon name="people-outline" size={16} color={themeColor("#6c7789")} />
                   </Pressable>
                   {leadDropdownOpen && (
                     <View style={styles.dropdownCard}>
@@ -1027,7 +1028,7 @@ export const TaskManagerScreen = () => {
                     <View key={`selected-${t}-${idx}`} style={styles.tagBadge}>
                       <Text style={styles.tagBadgeText}>#{t}</Text>
                       <Pressable style={{ marginLeft: 4 }} onPress={() => toggleTagSelection(t)}>
-                        <Icon name="close-circle" size={12} color="#6c7789" />
+                        <Icon name="close-circle" size={12} color={themeColor("#6c7789")} />
                       </Pressable>
                     </View>
                   ))}
@@ -1053,13 +1054,13 @@ export const TaskManagerScreen = () => {
                       style={[styles.checkbox, sub.isCompleted && styles.checkboxCompleted]}
                       onPress={() => toggleSubtaskInForm(idx)}
                     >
-                      {sub.isCompleted && <Icon name="checkmark" size={12} color="#fff" />}
+                      {sub.isCompleted && <Icon name="checkmark" size={12} color={themeColor("#ffffff")} />}
                     </Pressable>
                     <Text style={[styles.subtaskTitle, sub.isCompleted && styles.subtaskTitleCompleted]}>
                       {sub.title}
                     </Text>
                     <Pressable style={styles.deleteSubtaskBtn} onPress={() => deleteSubtask(idx)}>
-                      <Icon name="trash-outline" size={14} color="#942626" />
+                      <Icon name="trash-outline" size={14} color={themeColor("#942626")} />
                     </Pressable>
                   </View>
                 ))}
@@ -1095,7 +1096,7 @@ export const TaskManagerScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   success: {
     marginBottom: 10,
     padding: 10,
@@ -1115,7 +1116,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
     alignItems: "center",
   },
@@ -1135,7 +1136,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.lg,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
   },
@@ -1194,7 +1195,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   smallToggleBtnActive: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
@@ -1228,7 +1229,7 @@ const styles = StyleSheet.create({
     height: 26,
     paddingHorizontal: 8,
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   filterChipActive: {
     borderColor: colors.accent,
@@ -1240,7 +1241,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   filterChipTextActive: {
-    color: "#fff",
+    color: c.surface,
   },
   clearFiltersBtn: {
     paddingHorizontal: 8,
@@ -1261,7 +1262,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.md,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -1278,7 +1279,7 @@ const styles = StyleSheet.create({
   groupBadgeText: {
     fontSize: 9,
     fontWeight: "700",
-    color: "#fff",
+    color: c.surface,
   },
   groupList: {
     marginTop: 4,
@@ -1288,7 +1289,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.md,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 6,
     ...clay.shadowSmall,
@@ -1311,7 +1312,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginTop: 2,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   checkboxCompleted: {
     backgroundColor: colors.success,
@@ -1360,9 +1361,9 @@ const styles = StyleSheet.create({
   tagBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#d2e9f7",
+    backgroundColor: c.cyan[100],
     borderWidth: 1,
-    borderColor: "#a8d3ef",
+    borderColor: c.infoBorder,
     borderRadius: 4,
     paddingHorizontal: 4,
     paddingVertical: 1,
@@ -1370,7 +1371,7 @@ const styles = StyleSheet.create({
   tagBadgeText: {
     fontSize: 9,
     fontWeight: "600",
-    color: "#184f79",
+    color: c.cyan[700],
   },
   subtaskProgressBarContainer: {
     marginTop: 6,
@@ -1429,7 +1430,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderStrong,
     borderRadius: radii.md,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     flexDirection: "row",
     alignItems: "center",
@@ -1444,7 +1445,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radii.md,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingVertical: 4,
     marginBottom: 8,
     ...clay.shadowSmall,
@@ -1471,7 +1472,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.pill,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   tagSelectChipActive: {
     borderColor: colors.accent,
@@ -1483,7 +1484,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   tagSelectChipTextActive: {
-    color: "#fff",
+    color: c.surface,
   },
   customTagRow: {
     flexDirection: "row",
@@ -1544,4 +1545,4 @@ const styles = StyleSheet.create({
   modalDeleteBtn: {
     backgroundColor: colors.error,
   },
-});
+}));

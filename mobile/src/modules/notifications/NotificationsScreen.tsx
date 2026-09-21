@@ -21,6 +21,7 @@ import {
   rejectInventoryRequest,
 } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 type InventoryRequest = {
   _id: string;
@@ -427,7 +428,7 @@ export const NotificationsScreen = () => {
       <AppCard style={styles.heroCard as object}>
         <View style={styles.heroTopRow}>
           <View style={styles.heroIcon}>
-            <Icon name="notifications" size={22} color="#ffffff" />
+            <Icon name="notifications" size={22} color={themeColor("#ffffff")} />
           </View>
           <View style={styles.heroCopy}>
             <Text style={styles.heroEyebrow}>Approval Command Center</Text>
@@ -437,7 +438,7 @@ export const NotificationsScreen = () => {
             </Text>
           </View>
           <Pressable style={styles.refreshBtn} onPress={() => load(true)} disabled={refreshing}>
-            <Icon name={refreshing ? "sync" : "refresh"} size={18} color="#161c24" />
+            <Icon name={refreshing ? "sync" : "refresh"} size={18} color={themeColor("#161c24")} />
           </Pressable>
         </View>
         <View style={styles.summaryRow}>
@@ -466,7 +467,7 @@ export const NotificationsScreen = () => {
 
       <AppCard style={styles.controlCard as object}>
         <View style={styles.searchRow}>
-          <Icon name="search" size={15} color="#6c7789" />
+          <Icon name="search" size={15} color={themeColor("#6c7789")} />
           <AppInput
             value={query}
             onChangeText={setQuery}
@@ -475,7 +476,7 @@ export const NotificationsScreen = () => {
           />
           {query ? (
             <Pressable style={styles.clearSearchBtn} onPress={() => setQuery("")}>
-              <Icon name="close" size={14} color="#6c7789" />
+              <Icon name="close" size={14} color={themeColor("#6c7789")} />
             </Pressable>
           ) : null}
         </View>
@@ -504,7 +505,7 @@ export const NotificationsScreen = () => {
         {filteredItems.length === 0 ? (
           <AppCard style={styles.emptyCard as object}>
             <View style={styles.emptyIcon}>
-              <Icon name="checkmark-done" size={22} color="#0a6544" />
+              <Icon name="checkmark-done" size={22} color={themeColor("#0a6544")} />
             </View>
             <Text style={styles.emptyTitle}>{items.length === 0 ? "No pending approval requests" : "No request matches this view"}</Text>
             <Text style={styles.meta}>
@@ -524,7 +525,7 @@ export const NotificationsScreen = () => {
                     <Icon
                       name={item.kind === "PAYMENT" ? "card" : item.kind === "INVENTORY" ? "business" : item.kind === "USER_DELETE" ? "trash-outline" : "person"}
                       size={15}
-                      color="#ffffff"
+                      color={themeColor("#ffffff")}
                     />
                   </View>
                   <View style={styles.requestTitleWrap}>
@@ -826,32 +827,32 @@ export const NotificationsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   error: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fdedec",
-    color: "#942626",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#e8f7f0",
-    color: "#084f36",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   summaryCard: {
     marginBottom: 10,
   },
   heroCard: {
     marginBottom: 10,
-    backgroundColor: "#eef3ff",
-    borderColor: "#bcd0ff",
+    backgroundColor: c.blue[50],
+    borderColor: c.blue[200],
   },
   heroTopRow: {
     flexDirection: "row",
@@ -865,13 +866,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2549d6",
+    backgroundColor: c.primary,
   },
   heroCopy: {
     flex: 1,
   },
   heroEyebrow: {
-    color: "#1c37ab",
+    color: c.accentStrong,
     fontSize: 10,
     fontWeight: "800",
     textTransform: "uppercase",
@@ -879,13 +880,13 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     marginTop: 2,
-    color: "#161c24",
+    color: c.text,
     fontSize: 20,
     fontWeight: "800",
   },
   heroMeta: {
     marginTop: 3,
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 11,
     lineHeight: 15,
   },
@@ -896,11 +897,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#c8d0dd",
-    backgroundColor: "#ffffff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
   },
   summaryTitle: {
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
     fontSize: 13,
     marginBottom: 8,
@@ -913,42 +914,42 @@ const styles = StyleSheet.create({
   summaryBox: {
     width: "31%",
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   summaryBoxBlue: {
-    borderColor: "#bcd0ff",
-    backgroundColor: "#eef3ff",
+    borderColor: c.blue[200],
+    backgroundColor: c.blue[50],
   },
   summaryBoxSlate: {
-    borderColor: "#c8d0dd",
-    backgroundColor: "#f5f7fa",
+    borderColor: c.borderStrong,
+    backgroundColor: c.bg,
   },
   summaryBoxViolet: {
-    borderColor: "#cfbdfb",
-    backgroundColor: "#f2eefe",
+    borderColor: c.violet[200],
+    backgroundColor: c.violet[50],
   },
   summaryBoxGreen: {
-    borderColor: "#a3e0c9",
-    backgroundColor: "#e8f7f0",
+    borderColor: c.successBorder,
+    backgroundColor: c.successBg,
   },
   summaryBoxTeal: {
-    borderColor: "#a3e0c9",
-    backgroundColor: "#e9f4fb",
+    borderColor: c.successBorder,
+    backgroundColor: c.infoBg,
   },
   summaryBoxRed: {
-    borderColor: "#f6b8b5",
-    backgroundColor: "#fdedec",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
   },
   summaryLabel: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
   },
   summaryValue: {
     marginTop: 4,
-    color: "#161c24",
+    color: c.text,
     fontSize: 22,
     fontWeight: "700",
   },
@@ -959,9 +960,9 @@ const styles = StyleSheet.create({
   searchRow: {
     minHeight: 44,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 14,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
@@ -982,7 +983,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e0e5ed",
+    backgroundColor: c.border,
   },
   filterRow: {
     gap: 8,
@@ -997,17 +998,17 @@ const styles = StyleSheet.create({
   },
   historyRow: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginTop: 8,
   },
   historyApproved: {
-    color: "#084f36",
-    backgroundColor: "#e8f7f0",
+    color: c.emerald[800],
+    backgroundColor: c.successBg,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1016,10 +1017,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   historyRejected: {
-    color: "#942626",
-    backgroundColor: "#fdedec",
+    color: c.rose[700],
+    backgroundColor: c.errorBg,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1038,20 +1039,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e9f4fb",
+    backgroundColor: c.infoBg,
     borderWidth: 1,
-    borderColor: "#a3e0c9",
+    borderColor: c.successBorder,
     marginBottom: 8,
   },
   emptyTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 14,
     fontWeight: "800",
     marginBottom: 2,
   },
   requestCard: {
     marginBottom: 10,
-    borderColor: "#dde6ff",
+    borderColor: c.blue[100],
   },
   rowBetween: {
     flexDirection: "row",
@@ -1077,27 +1078,27 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2549d6",
+    backgroundColor: c.primary,
   },
   kindIconBlue: {
-    backgroundColor: "#2549d6",
+    backgroundColor: c.primary,
   },
   kindIconGreen: {
-    backgroundColor: "#0d8055",
+    backgroundColor: c.success,
   },
   kindIconViolet: {
-    backgroundColor: "#6440dd",
+    backgroundColor: c.violet[600],
   },
   kindIconRose: {
-    backgroundColor: "#b83232",
+    backgroundColor: c.error,
   },
   requestType: {
-    color: "#161c24",
+    color: c.text,
     fontWeight: "800",
     fontSize: 13,
   },
   requestSubtitle: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -1105,10 +1106,10 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   badge: {
-    color: "#0a6544",
-    backgroundColor: "#e9f4fb",
+    color: c.emerald[700],
+    backgroundColor: c.infoBg,
     borderWidth: 1,
-    borderColor: "#a3e0c9",
+    borderColor: c.successBorder,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1117,33 +1118,33 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   badgeAged: {
-    color: "#942626",
-    backgroundColor: "#fdedec",
-    borderColor: "#f6b8b5",
+    color: c.rose[700],
+    backgroundColor: c.errorBg,
+    borderColor: c.errorBorder,
   },
   metaGrid: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     padding: 9,
     marginTop: 8,
     marginBottom: 6,
   },
   meta: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
     marginTop: 3,
   },
   detailLine: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
     marginTop: 4,
     lineHeight: 17,
   },
   noteLine: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
     marginTop: 4,
     lineHeight: 16,
@@ -1168,22 +1169,22 @@ const styles = StyleSheet.create({
     maxWidth: 560,
     maxHeight: "80%",
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     padding: 14,
   },
   rejectCard: {
     width: "100%",
     maxWidth: 460,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     padding: 14,
   },
   modalTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 15,
     fontWeight: "700",
     marginBottom: 10,
@@ -1193,16 +1194,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   previewText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     marginBottom: 6,
   },
   previewData: {
     fontSize: 11,
-    color: "#161c24",
-    backgroundColor: "#f5f7fa",
+    color: c.text,
+    backgroundColor: c.bg,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 8,
     padding: 8,
   },
@@ -1214,16 +1215,16 @@ const styles = StyleSheet.create({
   },
   fileBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 28,
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
   },
   fileBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "700",
   },
@@ -1238,4 +1239,4 @@ const styles = StyleSheet.create({
   rejectInput: {
     marginBottom: 8,
   },
-});
+}));

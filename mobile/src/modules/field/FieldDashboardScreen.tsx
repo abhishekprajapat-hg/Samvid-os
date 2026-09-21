@@ -8,6 +8,7 @@ import { getAllLeads, getCompanyPerformanceOverview } from "../../services/leadS
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
 import type { CompanyPerformanceOverview } from "../../services/leadService";
+import { themedStyles } from "../../theme/themedStyles";
 
 type FieldTask = {
   id: string;
@@ -268,7 +269,7 @@ const QuickAction = ({
   </Pressable>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   container: {
     gap: 12,
     paddingBottom: 16,
@@ -278,41 +279,41 @@ const styles = StyleSheet.create({
   },
   statCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
   },
   statTitle: {
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
-    color: "#6c7789",
+    color: c.textMuted,
     letterSpacing: 0.7,
   },
   statValue: {
     marginTop: 6,
     fontSize: 26,
     fontWeight: "800",
-    color: "#161c24",
+    color: c.text,
   },
   statHelper: {
     marginTop: 2,
     fontSize: 12,
-    color: "#6c7789",
+    color: c.textMuted,
   },
   tasksCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
   },
   sectionTitle: {
     fontSize: 12,
     fontWeight: "700",
     textTransform: "uppercase",
-    color: "#39424f",
+    color: c.slate[700],
     letterSpacing: 0.8,
     marginBottom: 8,
   },
@@ -327,48 +328,48 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   taskPending: {
-    borderColor: "#e0e5ed",
-    backgroundColor: "#f5f7fa",
+    borderColor: c.border,
+    backgroundColor: c.bg,
   },
   taskDone: {
-    borderColor: "#a3e0c9",
-    backgroundColor: "#e8f7f0",
+    borderColor: c.successBorder,
+    backgroundColor: c.successBg,
   },
   taskTextWrap: {
     flex: 1,
   },
   taskTitle: {
     fontSize: 14,
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
   },
   taskDetail: {
     marginTop: 2,
     fontSize: 12,
-    color: "#6c7789",
+    color: c.textMuted,
   },
   checkBtn: {
     borderRadius: 8,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   checkBtnText: {
-    color: "#fff",
+    color: c.surface,
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
   },
   donePill: {
     borderRadius: 999,
-    backgroundColor: "#cdeee0",
+    backgroundColor: c.emerald[100],
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   doneText: {
-    color: "#084f36",
+    color: c.emerald[800],
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -378,20 +379,20 @@ const styles = StyleSheet.create({
   },
   quickCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
   },
   quickTitle: {
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
     fontSize: 14,
   },
   quickSubtitle: {
     marginTop: 3,
     fontSize: 12,
-    color: "#6c7789",
+    color: c.textMuted,
   },
   overlay: {
     flex: 1,
@@ -401,9 +402,9 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
     maxHeight: "84%",
   },
@@ -414,13 +415,13 @@ const styles = StyleSheet.create({
   closeBtn: {
     marginTop: 10,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingVertical: 8,
     alignItems: "center",
   },
   closeText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
@@ -431,9 +432,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   linkTextCompact: {
-    color: "#2549d6",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
   },
-});
+}));
 

@@ -33,6 +33,7 @@ import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { colors } from "../../theme/tokens";
+import { themedStyles } from "../../theme/themedStyles";
 
 type TeamUser = {
   _id?: string;
@@ -803,7 +804,7 @@ const Metric = ({
   </Pressable>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   contentWrap: {
     flex: 1,
   },
@@ -815,20 +816,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#e8f7f0",
-    color: "#084f36",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   accessCard: {
     borderWidth: 1,
-    borderColor: "#f6d68c",
+    borderColor: c.warningBorder,
     borderRadius: 12,
-    backgroundColor: "#fdf4e3",
+    backgroundColor: c.warningBg,
     padding: 12,
   },
   accessText: {
-    color: "#614304",
+    color: c.amber[800],
     fontWeight: "600",
   },
   topRow: {
@@ -846,17 +847,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
   },
   metricCardActive: {
-    borderColor: "#161c24",
-    backgroundColor: "#f5f7fa",
+    borderColor: c.text,
+    backgroundColor: c.bg,
   },
   metricLabel: {
     fontSize: 10,
     textTransform: "uppercase",
-    color: "#6c7789",
+    color: c.textMuted,
   },
   metricValue: {
     marginTop: 4,
@@ -865,10 +866,10 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   metricValueActive: {
-    color: "#161c24",
+    color: c.text,
   },
   activeMetricText: {
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 12,
     fontWeight: "600",
     marginBottom: 2,
@@ -876,14 +877,14 @@ const styles = StyleSheet.create({
   form: {},
   formTitle: {
     marginBottom: 10,
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
     fontSize: 14,
   },
   label: {
     marginBottom: 6,
     marginTop: 2,
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "600",
     fontSize: 12,
   },
@@ -914,17 +915,17 @@ const styles = StyleSheet.create({
   },
   meta: {
     marginTop: 3,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
   },
-  deleteBtn: { marginTop: 10, height: 36, borderColor: "#f6b8b5", backgroundColor: "#fdedec" },
+  deleteBtn: { marginTop: 10, height: 36, borderColor: c.errorBorder, backgroundColor: c.errorBg },
   editBtn: { marginTop: 10, height: 36 },
   deleteBtnDisabled: {
     opacity: 0.6,
   },
   emptyText: {
     marginTop: 4,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
   },
   sheetBackdrop: {
@@ -934,12 +935,12 @@ const styles = StyleSheet.create({
   sheetCard: {
     marginTop: "auto",
     maxHeight: "82%",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     gap: 6,
   },
   sheetWrap: {
@@ -951,7 +952,7 @@ const styles = StyleSheet.create({
   },
   sheetTitle: {
     fontWeight: "700",
-    color: "#161c24",
+    color: c.text,
     fontSize: 15,
     marginBottom: 6,
   },
@@ -966,4 +967,4 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 8,
   },
-});
+}));

@@ -20,6 +20,7 @@ import { AppButton, AppChip } from "../../components/common/ui";
 import { clearLeadFollowUp, getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const COMMISSION_PER_DEAL = 50000;
 const RANGE_OPTIONS = ["ALL", "THIS_MONTH", "CUSTOM"] as const;
@@ -477,7 +478,7 @@ export const FinancialCoreScreen = () => {
             />
             <View style={{ flex: 1 }} />
             <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-              <Icon name="calendar-outline" size={14} color="#39424f" />
+              <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
             </Pressable>
             <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} disabled={refreshing} />
           </View>
@@ -685,7 +686,7 @@ export const FinancialCoreScreen = () => {
                       }}
                       disabled={clearingFollowUpId === item._id}
                     >
-                      <Icon name="trash-outline" size={13} color="#942626" />
+                      <Icon name="trash-outline" size={13} color={themeColor("#942626")} />
                       <Text style={styles.followupDeleteText}>{clearingFollowUpId === item._id ? "..." : "Delete"}</Text>
                     </Pressable>
                   </View>
@@ -789,7 +790,7 @@ const SourceRow = ({
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   container: {
     gap: 12,
     paddingBottom: 16,
@@ -802,9 +803,9 @@ const styles = StyleSheet.create({
   },
   calendarIconBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 9,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 36,
     width: 36,
     alignItems: "center",
@@ -812,7 +813,7 @@ const styles = StyleSheet.create({
   },
   periodText: {
     marginTop: 8,
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -824,13 +825,13 @@ const styles = StyleSheet.create({
   customDateBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   customDateText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -839,15 +840,15 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
   },
   metricTitle: {
     fontSize: 11,
     textTransform: "uppercase",
-    color: "#6c7789",
+    color: c.textMuted,
     fontWeight: "700",
     letterSpacing: 0.7,
   },
@@ -855,33 +856,33 @@ const styles = StyleSheet.create({
     marginTop: 7,
     fontSize: 24,
     fontWeight: "800",
-    color: "#161c24",
+    color: c.text,
   },
   metricHelper: {
     marginTop: 3,
     fontSize: 12,
-    color: "#6c7789",
+    color: c.textMuted,
   },
   sectionCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
     gap: 8,
   },
   sectionTitle: {
     fontSize: 12,
     textTransform: "uppercase",
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "700",
     letterSpacing: 0.8,
   },
   progressBlock: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     padding: 8,
   },
   progressHead: {
@@ -891,39 +892,39 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   progressLabel: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 12,
     fontWeight: "600",
   },
   progressMeta: {
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 12,
   },
   progressTrack: {
     marginTop: 7,
     height: 8,
     borderRadius: 6,
-    backgroundColor: "#e0e5ed",
+    backgroundColor: c.border,
     overflow: "hidden",
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
   },
   progressFillDark: {
     height: "100%",
-    backgroundColor: "#39424f",
+    backgroundColor: c.slate[700],
   },
   sourceRow: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     padding: 8,
   },
   listRow: {
     borderTopWidth: 1,
-    borderTopColor: "#edf0f5",
+    borderTopColor: c.surfaceMuted,
     paddingVertical: 8,
     flexDirection: "row",
     justifyContent: "space-between",
@@ -933,13 +934,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listTitle: {
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
     fontSize: 13,
   },
   listMeta: {
     marginTop: 2,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
   },
   listRight: {
@@ -947,11 +948,11 @@ const styles = StyleSheet.create({
   },
   listDate: {
     marginTop: 2,
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 11,
   },
   empty: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
     marginTop: 4,
   },
@@ -961,27 +962,27 @@ const styles = StyleSheet.create({
   },
   badgeDanger: {
     borderWidth: 1,
-    borderColor: "#f6b8b5",
-    backgroundColor: "#fdedec",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   badgeDangerText: {
-    color: "#942626",
+    color: c.rose[700],
     fontSize: 11,
     fontWeight: "700",
   },
   badgeWarn: {
     borderWidth: 1,
-    borderColor: "#f6d68c",
-    backgroundColor: "#fdf4e3",
+    borderColor: c.warningBorder,
+    backgroundColor: c.warningBg,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   badgeWarnText: {
-    color: "#614304",
+    color: c.amber[800],
     fontSize: 11,
     fontWeight: "700",
   },
@@ -995,15 +996,15 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   watchOverdue: {
-    borderColor: "#f6b8b5",
-    backgroundColor: "#fdedec",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
   },
   watchNormal: {
-    borderColor: "#e0e5ed",
-    backgroundColor: "#f5f7fa",
+    borderColor: c.border,
+    backgroundColor: c.bg,
   },
   watchDate: {
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 11,
     fontWeight: "600",
     width: 126,
@@ -1015,12 +1016,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   watchDateOverdue: {
-    color: "#942626",
+    color: c.rose[700],
   },
   followupDeleteBtn: {
     borderWidth: 1,
-    borderColor: "#f6b8b5",
-    backgroundColor: "#fdedec",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
     borderRadius: 8,
     minHeight: 24,
     paddingHorizontal: 8,
@@ -1030,7 +1031,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   followupDeleteText: {
-    color: "#942626",
+    color: c.rose[700],
     fontSize: 10,
     fontWeight: "700",
   },
@@ -1041,15 +1042,15 @@ const styles = StyleSheet.create({
   actionBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 40,
     alignItems: "center",
     justifyContent: "center",
   },
   actionBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "700",
     fontSize: 12,
   },
@@ -1064,23 +1065,23 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 420,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     padding: 14,
   },
   modalTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 14,
     fontWeight: "700",
     marginBottom: 10,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
-    color: "#161c24",
+    backgroundColor: c.surface,
+    color: c.text,
     height: 44,
     paddingHorizontal: 12,
     marginBottom: 8,
@@ -1088,9 +1089,9 @@ const styles = StyleSheet.create({
   },
   webInputWrap: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 44,
     marginBottom: 8,
     justifyContent: "center",
@@ -1099,7 +1100,7 @@ const styles = StyleSheet.create({
   webDateInput: {
     height: 30,
     fontSize: 13,
-    color: "#161c24",
+    color: c.text,
     backgroundColor: "transparent",
     borderWidth: 0,
     padding: 0,
@@ -1112,34 +1113,34 @@ const styles = StyleSheet.create({
   },
   modalCancelBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     minWidth: 90,
     height: 38,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   modalCancelText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "600",
     fontSize: 12,
   },
   modalApplyBtn: {
     borderWidth: 1,
-    borderColor: "#161c24",
+    borderColor: c.text,
     borderRadius: 10,
     minWidth: 90,
     height: 38,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
   },
   modalApplyText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
-});
+}));

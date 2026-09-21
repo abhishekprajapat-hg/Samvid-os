@@ -5,6 +5,7 @@ import * as Updates from "expo-updates";
 import { AppButton } from "../ui";
 import { palette, spacing, typography } from "../../theme/tokens";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors frontend/src/components/ErrorBoundary.jsx.
@@ -72,7 +73,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       <View style={styles.root}>
         <View style={styles.card}>
           <View style={styles.heading}>
-            <AlertTriangle size={20} color={palette.amber[600]} />
+            <AlertTriangle size={20} color={themePalette.amber[600]} />
             <Text style={styles.title}>Something went wrong</Text>
           </View>
 
@@ -96,43 +97,43 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   root: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: spacing.xl,
-    backgroundColor: palette.slate[50],
+    backgroundColor: themePalette.slate[50],
   },
   card: {
     width: "100%",
     maxWidth: 480,
     borderWidth: 1,
-    borderColor: palette.slate[200],
+    borderColor: themePalette.slate[200],
     borderRadius: 14,
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     padding: spacing.xl,
   },
   heading: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  title: { fontSize: typography.title, fontWeight: "600", color: palette.slate[900] },
+  title: { fontSize: typography.title, fontWeight: "600", color: themePalette.slate[900] },
   message: {
     marginTop: spacing.lg,
     fontSize: typography.body,
     lineHeight: 20,
-    color: palette.slate[600],
+    color: themePalette.slate[600],
   },
   stackWrap: {
     marginTop: spacing.lg,
     maxHeight: 180,
     borderWidth: 1,
-    borderColor: palette.slate[200],
+    borderColor: themePalette.slate[200],
     borderRadius: 10,
-    backgroundColor: palette.slate[50],
+    backgroundColor: themePalette.slate[50],
     padding: spacing.md,
   },
-  stack: { fontSize: 11, lineHeight: 16, color: palette.slate[600] },
+  stack: { fontSize: 11, lineHeight: 16, color: themePalette.slate[600] },
   actions: { flexDirection: "row", gap: spacing.md, marginTop: spacing.xl },
   action: { flex: 1 },
-});
+}));
 
 export default ErrorBoundary;

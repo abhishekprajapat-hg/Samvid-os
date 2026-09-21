@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppButton, type ButtonVariant } from "./Button";
 import { colors, elevation, palette, radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors Modal.jsx and ConfirmDialog.jsx.
@@ -123,7 +124,7 @@ export const AppConfirmDialog = ({
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: "flex-end",
@@ -149,7 +150,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: palette.slate[300],
+    backgroundColor: themePalette.slate[300],
     marginBottom: spacing.lg,
   },
   header: {
@@ -162,13 +163,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typography.title,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     letterSpacing: -0.25,
   },
   subtitle: {
     fontSize: typography.label,
     lineHeight: 18,
-    color: palette.slate[500],
+    color: themePalette.slate[500],
   },
   body: {
     flexGrow: 0,
@@ -192,6 +193,6 @@ const styles = StyleSheet.create({
   message: {
     fontSize: typography.body,
     lineHeight: 20,
-    color: palette.slate[600],
+    color: themePalette.slate[600],
   },
-});
+}));

@@ -57,6 +57,7 @@ import { useAuth } from "../../context/AuthContext";
 import type { Lead } from "../../types";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { colors } from "../../theme/tokens";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const STATUSES = [
   "NEW",
@@ -2496,7 +2497,7 @@ export const LeadDetailsScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#161c24" size="large" />
+        <ActivityIndicator color={themeColor("#161c24")} size="large" />
       </View>
     );
   }
@@ -2568,19 +2569,19 @@ export const LeadDetailsScreen = () => {
 
         <View style={styles.quickActionRow}>
           <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openDialer(lead.phone)}>
-            <Icon name="call-outline" size={16} color="#161c24" />
+            <Icon name="call-outline" size={16} color={themeColor("#161c24")} />
             <Text style={styles.quickActionText}>Call</Text>
           </Pressable>
           <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openWhatsApp(lead.phone)}>
-            <Icon name="logo-whatsapp" size={16} color="#0d8055" />
+            <Icon name="logo-whatsapp" size={16} color={themeColor("#0d8055")} />
             <Text style={styles.quickActionText}>WhatsApp</Text>
           </Pressable>
           <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openMail(lead.email)}>
-            <Icon name="mail-outline" size={16} color="#2549d6" />
+            <Icon name="mail-outline" size={16} color={themeColor("#2549d6")} />
             <Text style={styles.quickActionText}>Mail</Text>
           </Pressable>
           <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={openMaps}>
-            <Icon name="location-outline" size={16} color="#2b7fbf" />
+            <Icon name="location-outline" size={16} color={themeColor("#2b7fbf")} />
             <Text style={styles.quickActionText}>Maps</Text>
           </Pressable>
         </View>
@@ -2706,7 +2707,7 @@ export const LeadDetailsScreen = () => {
         </View>
 
         {requirementsDraft?.inventoryType === "COMMERCIAL" ? (
-          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, backgroundColor: "#f5f7fa" }}>
+          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: themeColor("#c8d0dd"), borderRadius: 10, backgroundColor: themeColor("#f5f7fa") }}>
             <Text style={[styles.section, { fontSize: 13, marginBottom: 6 }]}>Commercial Preferences</Text>
             <View style={styles.twoColRow}>
               <View style={{ flex: 1 }}>
@@ -2749,7 +2750,7 @@ export const LeadDetailsScreen = () => {
                 <Icon
                   name={requirementsDraft?.commercial?.parkingAvailable ? "checkbox" : "square-outline"}
                   size={14}
-                  color={requirementsDraft?.commercial?.parkingAvailable ? "#12a06a" : "#4e5867"}
+                  color={requirementsDraft?.commercial?.parkingAvailable ? themeColor("#12a06a") : themeColor("#4e5867")}
                 />
                 <Text style={styles.checkboxLabel}>Parking Available</Text>
               </Pressable>
@@ -2761,7 +2762,7 @@ export const LeadDetailsScreen = () => {
                 <Icon
                   name={requirementsDraft?.commercial?.pantry ? "checkbox" : "square-outline"}
                   size={14}
-                  color={requirementsDraft?.commercial?.pantry ? "#12a06a" : "#4e5867"}
+                  color={requirementsDraft?.commercial?.pantry ? themeColor("#12a06a") : themeColor("#4e5867")}
                 />
                 <Text style={styles.checkboxLabel}>Pantry</Text>
               </Pressable>
@@ -2770,7 +2771,7 @@ export const LeadDetailsScreen = () => {
         ) : null}
 
         {requirementsDraft?.inventoryType === "RESIDENTIAL" ? (
-          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, backgroundColor: "#f5f7fa" }}>
+          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: themeColor("#c8d0dd"), borderRadius: 10, backgroundColor: themeColor("#f5f7fa") }}>
             <Text style={[styles.section, { fontSize: 13, marginBottom: 6 }]}>Residential Preferences</Text>
             
             <Text style={styles.metricLabel}>BHK Type</Text>
@@ -2808,7 +2809,7 @@ export const LeadDetailsScreen = () => {
                     <Icon
                       name={checked ? "checkbox" : "square-outline"}
                       size={14}
-                      color={checked ? "#12a06a" : "#4e5867"}
+                      color={checked ? themeColor("#12a06a") : themeColor("#4e5867")}
                     />
                     <Text style={styles.checkboxLabel}>{field.label}</Text>
                   </Pressable>
@@ -2842,7 +2843,7 @@ export const LeadDetailsScreen = () => {
                     onPress={() => onViewRelatedProperty(inventoryId)}
                     disabled={!inventoryId || propertyActionInventoryId === inventoryId}
                   >
-                    <Icon name="eye-outline" size={13} color="#39424f" />
+                    <Icon name="eye-outline" size={13} color={themeColor("#39424f")} />
                     <Text style={styles.propertyActionText}>View</Text>
                   </Pressable>
                   <Pressable
@@ -2850,8 +2851,8 @@ export const LeadDetailsScreen = () => {
                     onPress={() => onRemoveRelatedProperty(inventoryId)}
                     disabled={!inventoryId || propertyActionInventoryId === inventoryId}
                   >
-                    <Icon name="trash-outline" size={13} color="#942626" />
-                    <Text style={[styles.propertyActionText, { color: "#942626" }]}>Remove</Text>
+                    <Icon name="trash-outline" size={13} color={themeColor("#942626")} />
+                    <Text style={[styles.propertyActionText, { color: themeColor("#942626") }]}>Remove</Text>
                   </Pressable>
                 </View>
               </View>
@@ -2882,7 +2883,7 @@ export const LeadDetailsScreen = () => {
                   )
                   : "Select property to link"}
               </Text>
-              <Icon name={linkDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#4e5867" />
+              <Icon name={linkDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color={themeColor("#4e5867")} />
             </Pressable>
             <Pressable style={styles.linkAddBtn} onPress={onLinkPropertyToLead} disabled={linkingProperty || !relatedInventoryDraft}>
               <Text style={styles.linkAddBtnText}>{linkingProperty ? "Adding..." : "+ Add"}</Text>
@@ -2948,7 +2949,7 @@ export const LeadDetailsScreen = () => {
               onPress={() => toggleProposalProperty(inventoryId)}
               style={[styles.propertyCheckboxRow, selected && styles.propertyCheckboxRowActive]}
             >
-              <Icon name={selected ? "checkbox-outline" : "square-outline"} size={16} color={selected ? "#0a6544" : "#6c7789"} />
+              <Icon name={selected ? "checkbox-outline" : "square-outline"} size={16} color={selected ? themeColor("#0a6544") : themeColor("#6c7789")} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.propertyTitle}>{getInventoryLeadLabel(inventory) || "Property"}</Text>
                 <Text style={styles.meta}>{String(inventory?.status || "Available")} | {(Array.isArray(inventory?.images) ? inventory.images.length : 0)} image(s)</Text>
@@ -3007,25 +3008,25 @@ export const LeadDetailsScreen = () => {
         />
         <View style={styles.proposalActionGrid}>
           <Pressable style={styles.proposalBtn} onPress={copyProposalText}>
-            <Icon name="copy-outline" size={13} color="#39424f" />
+            <Icon name="copy-outline" size={13} color={themeColor("#39424f")} />
             <Text style={styles.proposalBtnText}>Copy</Text>
           </Pressable>
           <Pressable style={[styles.proposalBtn, styles.proposalBtnPrimary]} onPress={downloadProposalPdf} disabled={proposalBusy}>
-            <Icon name="download-outline" size={13} color="#0a6544" />
+            <Icon name="download-outline" size={13} color={themeColor("#0a6544")} />
             <Text style={[styles.proposalBtnText, styles.proposalBtnPrimaryText]}>
               {proposalBusy ? "Generating..." : "PDF"}
             </Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalWhatsApp}>
-            <Icon name="logo-whatsapp" size={13} color="#0d8055" />
+            <Icon name="logo-whatsapp" size={13} color={themeColor("#0d8055")} />
             <Text style={styles.proposalBtnText}>WhatsApp</Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalEmail}>
-            <Icon name="mail-outline" size={13} color="#39424f" />
+            <Icon name="mail-outline" size={13} color={themeColor("#39424f")} />
             <Text style={styles.proposalBtnText}>Email</Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalPdf} disabled={proposalBusy}>
-            <Icon name="paper-plane-outline" size={13} color="#39424f" />
+            <Icon name="paper-plane-outline" size={13} color={themeColor("#39424f")} />
             <Text style={styles.proposalBtnText}>Share PDF</Text>
           </Pressable>
         </View>
@@ -3051,10 +3052,10 @@ export const LeadDetailsScreen = () => {
                 <Text style={styles.meta}>{doc.kind || "file"} | {Math.max(0, Number(doc.size || 0))} bytes</Text>
               </View>
               <Pressable style={styles.docIconBtn} onPress={() => Linking.openURL(String(doc.url || "")).catch(() => setError("Unable to open document"))}>
-                <Icon name="eye-outline" size={14} color="#39424f" />
+                <Icon name="eye-outline" size={14} color={themeColor("#39424f")} />
               </Pressable>
               <Pressable style={styles.docIconBtn} onPress={() => removeClosureDocument(String(doc.url || ""))}>
-                <Icon name="trash-outline" size={14} color="#942626" />
+                <Icon name="trash-outline" size={14} color={themeColor("#942626")} />
               </Pressable>
             </View>
           ))
@@ -3084,7 +3085,7 @@ export const LeadDetailsScreen = () => {
             placeholder="dd-mm-yyyy hh:mm"
           />
           <Pressable style={styles.followUpCalendarBtn} onPress={openFollowUpPicker}>
-            <Icon name="calendar-outline" size={16} color="#39424f" />
+            <Icon name="calendar-outline" size={16} color={themeColor("#39424f")} />
           </Pressable>
         </View>
         {showFollowUpPicker && Platform.OS === "ios" ? (
@@ -3116,7 +3117,7 @@ export const LeadDetailsScreen = () => {
         <TextInput
           style={[styles.diaryInput, { height: 84 }]}
           placeholder="Add conversation notes, visit details, objections, or next steps..."
-          placeholderTextColor="#98a3b5"
+          placeholderTextColor={themeColor("#98a3b5")}
           value={diaryNoteDraft}
           onChangeText={setDiaryNoteDraft}
           multiline
@@ -3128,13 +3129,13 @@ export const LeadDetailsScreen = () => {
           <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
           <View style={styles.diaryActionRow}>
             <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={saving || !isDiaryMicSupported}>
-              <Icon name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#98a3b5" : "#39424f"} />
+              <Icon name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? themeColor("#98a3b5") : themeColor("#39424f")} />
               <Text style={[styles.voiceBtnText, (saving || !isDiaryMicSupported) && styles.voiceBtnTextDisabled]}>
                 {isDiaryListening ? "Stop" : "Voice"}
               </Text>
             </Pressable>
             <Pressable style={[styles.addNoteBtn, saving && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving}>
-              <Icon name="document-text-outline" size={14} color="#fff" />
+              <Icon name="document-text-outline" size={14} color={themeColor("#ffffff")} />
               <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
             </Pressable>
           </View>
@@ -3249,7 +3250,7 @@ export const LeadDetailsScreen = () => {
         <TextInput
           style={[styles.diaryInput, { height: 84 }]}
           placeholder="Add conversation notes, visit details, objections, or next step context..."
-          placeholderTextColor="#98a3b5"
+          placeholderTextColor={themeColor("#98a3b5")}
           value={diaryNoteDraft}
           onChangeText={setDiaryNoteDraft}
           multiline
@@ -3261,13 +3262,13 @@ export const LeadDetailsScreen = () => {
           <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
           <View style={styles.diaryActionRow}>
             <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={saving || !isDiaryMicSupported}>
-              <Icon name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#98a3b5" : "#39424f"} />
+              <Icon name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? themeColor("#98a3b5") : themeColor("#39424f")} />
               <Text style={[styles.voiceBtnText, (saving || !isDiaryMicSupported) && styles.voiceBtnTextDisabled]}>
                 {isDiaryListening ? "Stop" : "Voice"}
               </Text>
             </Pressable>
             <Pressable style={[styles.addNoteBtn, saving && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving}>
-              <Icon name="document-text-outline" size={14} color="#fff" />
+              <Icon name="document-text-outline" size={14} color={themeColor("#ffffff")} />
               <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
             </Pressable>
           </View>
@@ -3362,7 +3363,7 @@ export const LeadDetailsScreen = () => {
                   <Text style={styles.meta}>Reviewed at: {formatDateTime(request.reviewedAt)}</Text>
                 ) : null}
                 {request.rejectionReason ? (
-                  <Text style={[styles.meta, { color: "#942626" }]}>Reject reason: {request.rejectionReason}</Text>
+                  <Text style={[styles.meta, { color: themeColor("#942626") }]}>Reject reason: {request.rejectionReason}</Text>
                 ) : null}
                 {request.attachment?.fileUrl ? (
                   <Pressable
@@ -3499,10 +3500,10 @@ export const LeadDetailsScreen = () => {
                   paddingHorizontal: 10,
                   borderRadius: 10,
                   borderWidth: 1,
-                  borderColor: "#c8d0dd",
+                  borderColor: themeColor("#c8d0dd"),
                   fontSize: 12,
-                  backgroundColor: "#fff",
-                  color: "#39424f",
+                  backgroundColor: themeColor("#ffffff"),
+                  color: themeColor("#39424f"),
                   outlineStyle: "none"
                 } as any}
               />
@@ -3516,7 +3517,7 @@ export const LeadDetailsScreen = () => {
                   editable={false}
                 />
                 <Pressable style={styles.followUpCalendarBtn} onPress={openTaskDatePicker}>
-                  <Icon name="calendar-outline" size={16} color="#39424f" />
+                  <Icon name="calendar-outline" size={16} color={themeColor("#39424f")} />
                 </Pressable>
               </>
             )}
@@ -3540,7 +3541,7 @@ export const LeadDetailsScreen = () => {
         {/* Tasks list */}
         <View style={{ marginTop: 14 }}>
           {loadingTasks ? (
-            <ActivityIndicator color="#161c24" style={{ marginVertical: 12 }} />
+            <ActivityIndicator color={themeColor("#161c24")} style={{ marginVertical: 12 }} />
           ) : leadTasks.length === 0 ? (
             <Text style={styles.meta}>No tasks linked to this lead.</Text>
           ) : (
@@ -3568,7 +3569,7 @@ export const LeadDetailsScreen = () => {
                     onPress={() => handleToggleLeadTaskStatus(task)}
                   >
                     {isCompleted ? (
-                      <Icon name="checkmark" size={12} color="#fff" />
+                      <Icon name="checkmark" size={12} color={themeColor("#ffffff")} />
                     ) : null}
                   </Pressable>
 
@@ -3589,22 +3590,22 @@ export const LeadDetailsScreen = () => {
                           {
                             color:
                               task.priority === "HIGH"
-                                ? "#942626"
+                                ? themeColor("#942626")
                                 : task.priority === "MEDIUM"
-                                ? "#a26f06"
-                                : "#2549d6",
+                                ? themeColor("#a26f06")
+                                : themeColor("#2549d6"),
                             backgroundColor:
                               task.priority === "HIGH"
-                                ? "#fdedec"
+                                ? themeColor("#fdedec")
                                 : task.priority === "MEDIUM"
-                                ? "#fbe9c4"
-                                : "#eef3ff",
+                                ? themeColor("#fbe9c4")
+                                : themeColor("#eef3ff"),
                             borderColor:
                               task.priority === "HIGH"
-                                ? "#f6b8b5"
+                                ? themeColor("#f6b8b5")
                                 : task.priority === "MEDIUM"
-                                ? "#f6d68c"
-                                : "#bcd0ff",
+                                ? themeColor("#f6d68c")
+                                : themeColor("#bcd0ff"),
                           },
                         ]}
                       >
@@ -3616,9 +3617,9 @@ export const LeadDetailsScreen = () => {
                           style={[
                             styles.taskBadge,
                             {
-                              color: "#4e5867",
-                              backgroundColor: "#edf0f5",
-                              borderColor: "#c8d0dd",
+                              color: themeColor("#4e5867"),
+                              backgroundColor: themeColor("#edf0f5"),
+                              borderColor: themeColor("#c8d0dd"),
                             },
                           ]}
                         >
@@ -3631,9 +3632,9 @@ export const LeadDetailsScreen = () => {
                           style={[
                             styles.taskBadge,
                             {
-                              color: expired ? "#942626" : "#4e5867",
-                              backgroundColor: expired ? "#fdedec" : "#edf0f5",
-                              borderColor: expired ? "#f6b8b5" : "#c8d0dd",
+                              color: expired ? themeColor("#942626") : themeColor("#4e5867"),
+                              backgroundColor: expired ? themeColor("#fdedec") : themeColor("#edf0f5"),
+                              borderColor: expired ? themeColor("#f6b8b5") : themeColor("#c8d0dd"),
                               fontWeight: expired ? "700" : "600",
                             },
                           ]}
@@ -3649,7 +3650,7 @@ export const LeadDetailsScreen = () => {
                     style={styles.taskDeleteBtn}
                     onPress={() => handleDeleteLeadTask(task._id)}
                   >
-                    <Icon name="trash-outline" size={14} color="#942626" />
+                    <Icon name="trash-outline" size={14} color={themeColor("#942626")} />
                   </Pressable>
                 </View>
               );
@@ -3762,7 +3763,7 @@ export const LeadDetailsScreen = () => {
             />
             <View style={styles.dateFieldActionRow}>
               <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("remainingDueDate")}>
-                <Icon name="calendar-outline" size={14} color="#39424f" />
+                <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                 <Text style={styles.dateFieldBtnText}>Pick due date</Text>
               </Pressable>
             </View>
@@ -3777,7 +3778,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Icon name="calendar-outline" size={14} color="#39424f" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3800,7 +3801,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Icon name="calendar-outline" size={14} color="#39424f" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3817,7 +3818,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("chequeDate")}>
-                    <Icon name="calendar-outline" size={14} color="#39424f" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
                   </Pressable>
                 </View>
@@ -3864,7 +3865,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Icon name="calendar-outline" size={14} color="#39424f" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3894,7 +3895,7 @@ export const LeadDetailsScreen = () => {
                   onPress={() => setStatusRequestAttachment(null)}
                   disabled={saving}
                 >
-                  <Icon name="close" size={16} color="#741f1f" />
+                  <Icon name="close" size={16} color={themeColor("#741f1f")} />
                 </Pressable>
               ) : null}
             </View>
@@ -3940,10 +3941,10 @@ export const LeadDetailsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f5f7fa" },
+const styles = themedStyles((c) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg },
   content: { padding: 12, paddingBottom: 24 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f5f7fa" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: c.bg },
   commandCenterBar: {
     marginBottom: 10,
     borderRadius: 12,
@@ -3959,7 +3960,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   commandCenterTitle: {
-    color: "#f5f7fa",
+    color: c.bg,
     fontSize: 16,
     fontWeight: "700",
   },
@@ -3975,7 +3976,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#a8d3ef",
+    color: c.infoBorder,
     fontSize: 10,
     textTransform: "uppercase",
     fontWeight: "700",
@@ -3991,7 +3992,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   profileLabel: {
-    color: "#1f6499",
+    color: c.info,
     textTransform: "uppercase",
     letterSpacing: 1.1,
     fontSize: 10,
@@ -4008,15 +4009,15 @@ const styles = StyleSheet.create({
     minWidth: 54,
     height: 28,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   backBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -4031,26 +4032,26 @@ const styles = StyleSheet.create({
   },
   statusTag: {
     borderWidth: 1,
-    borderColor: "#79b9e3",
+    borderColor: c.cyan[300],
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#184f79",
+    color: c.cyan[700],
     fontSize: 10,
     fontWeight: "700",
-    backgroundColor: "#e9f4fb",
+    backgroundColor: c.infoBg,
     overflow: "hidden",
   },
   idTag: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 10,
     fontWeight: "600",
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     overflow: "hidden",
   },
   summaryGrid: {
@@ -4063,14 +4064,14 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     minWidth: 140,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   summaryLabel: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -4078,18 +4079,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   summaryValue: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 12,
     fontWeight: "600",
   },
-  section: { marginBottom: 8, color: "#39424f", fontWeight: "700" },
+  section: { marginBottom: 8, color: c.slate[700], fontWeight: "700" },
   sectionRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   linkText: {
-    color: "#2549d6",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
     marginBottom: 8,
@@ -4101,11 +4102,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   linkTextCompact: {
-    color: "#2549d6",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
   },
-  meta: { marginTop: 4, fontSize: 12, color: "#6c7789" },
+  meta: { marginTop: 4, fontSize: 12, color: c.textMuted },
   statusWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", alignContent: "flex-start" },
   assignRow: { flexDirection: "row", gap: 8, alignItems: "center", paddingBottom: 2 },
   chip: {},
@@ -4124,9 +4125,9 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -4138,39 +4139,39 @@ const styles = StyleSheet.create({
   dateFieldBtn: {
     height: 30,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
   dateFieldBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   selectInput: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 42,
     paddingHorizontal: 12,
     justifyContent: "center",
     marginBottom: 12,
   },
   selectInputText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 13,
   },
   selectMenu: {
     maxHeight: 170,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     marginBottom: 10,
   },
   selectMenuScroll: {
@@ -4180,14 +4181,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#e0e5ed",
+    borderBottomColor: c.border,
   },
   selectMenuItemText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 13,
   },
   emptySelectText: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
     padding: 12,
   },
@@ -4201,9 +4202,9 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
@@ -4215,22 +4216,22 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#39424f",
+    color: c.slate[700],
   },
   propertyRow: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
   },
   propertyRowActive: {
-    borderColor: "#6ecdaa",
-    backgroundColor: "#e8f7f0",
+    borderColor: c.emerald[300],
+    backgroundColor: c.successBg,
   },
   propertyTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4247,35 +4248,35 @@ const styles = StyleSheet.create({
   propertyStatusDropdown: {
     height: 32,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   propertyStatusText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
   propertyStatusMenu: {
     marginTop: 4,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     overflow: "hidden",
   },
   propertyStatusMenuItem: {
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#f2eefe",
+    borderBottomColor: c.violet[50],
   },
   propertyStatusMenuText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -4298,14 +4299,14 @@ const styles = StyleSheet.create({
     width: 74,
     height: 40,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   linkAddBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4315,24 +4316,24 @@ const styles = StyleSheet.create({
     height: 34,
     alignSelf: "flex-start",
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   docUploadBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
   docRow: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
     flexDirection: "row",
     alignItems: "center",
@@ -4342,9 +4343,9 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -4354,15 +4355,15 @@ const styles = StyleSheet.create({
     height: 32,
     alignSelf: "flex-start",
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   liveLocationBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4371,9 +4372,9 @@ const styles = StyleSheet.create({
   },
   propertyActionBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     height: 30,
     alignItems: "center",
@@ -4382,7 +4383,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   propertyActionText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -4393,24 +4394,24 @@ const styles = StyleSheet.create({
   },
   smallTextBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 8,
     height: 24,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   smallTextBtnText: {
-    color: "#4e5867",
+    color: c.slate[600],
     fontSize: 11,
     fontWeight: "700",
   },
   propertyCheckboxRow: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
     flexDirection: "row",
@@ -4418,8 +4419,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   propertyCheckboxRowActive: {
-    borderColor: "#6ecdaa",
-    backgroundColor: "#e8f7f0",
+    borderColor: c.emerald[300],
+    backgroundColor: c.successBg,
   },
   metricsRow: {
     flexDirection: "row",
@@ -4429,21 +4430,21 @@ const styles = StyleSheet.create({
   metricBox: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   metricLabel: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 10,
     marginBottom: 2,
     fontWeight: "700",
     textTransform: "uppercase",
   },
   metricValue: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 14,
     fontWeight: "700",
   },
@@ -4462,9 +4463,9 @@ const styles = StyleSheet.create({
   },
   proposalBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     minWidth: 102,
     height: 34,
     flexDirection: "row",
@@ -4474,16 +4475,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   proposalBtnPrimary: {
-    borderColor: "#6ecdaa",
-    backgroundColor: "#e9f4fb",
+    borderColor: c.emerald[300],
+    backgroundColor: c.infoBg,
   },
   proposalBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
   proposalBtnPrimaryText: {
-    color: "#0a6544",
+    color: c.emerald[700],
   },
   activityCard: {
     borderWidth: 1,
@@ -4495,13 +4496,13 @@ const styles = StyleSheet.create({
   },
   diaryInput: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 8,
-    color: "#161c24",
+    color: c.text,
     fontSize: 12,
     textAlignVertical: "top",
   },
@@ -4516,7 +4517,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   diaryCounterText: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
   },
   diaryActionRow: {
@@ -4527,9 +4528,9 @@ const styles = StyleSheet.create({
   voiceBtn: {
     height: 34,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
@@ -4539,15 +4540,15 @@ const styles = StyleSheet.create({
   voiceBtnText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#39424f",
+    color: c.slate[700],
   },
   voiceBtnTextDisabled: {
-    color: "#98a3b5",
+    color: c.textTertiary,
   },
   addNoteBtn: {
     height: 34,
     borderRadius: 10,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
@@ -4558,13 +4559,13 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   addNoteText: {
-    color: "#fff",
+    color: c.surface,
     fontSize: 12,
     fontWeight: "700",
   },
   diaryHint: {
     marginTop: 8,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 11,
   },
   diaryListWrap: {
@@ -4573,13 +4574,13 @@ const styles = StyleSheet.create({
   },
   diaryEntryCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     padding: 10,
   },
   diaryLine: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     marginBottom: 3,
   },
@@ -4591,14 +4592,14 @@ const styles = StyleSheet.create({
   },
   entryEditBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   entryEditText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "700",
   },
@@ -4610,37 +4611,37 @@ const styles = StyleSheet.create({
   },
   editCancelBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     height: 32,
     alignItems: "center",
     justifyContent: "center",
   },
   editCancelText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   editSaveBtn: {
     borderRadius: 8,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
     paddingHorizontal: 12,
     height: 32,
     alignItems: "center",
     justifyContent: "center",
   },
   editSaveText: {
-    color: "#fff",
+    color: c.surface,
     fontSize: 11,
     fontWeight: "700",
   },
   requestCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
     padding: 10,
     marginBottom: 8,
   },
@@ -4651,10 +4652,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   reqPending: {
-    color: "#0a6544",
-    backgroundColor: "#e9f4fb",
+    color: c.emerald[700],
+    backgroundColor: c.infoBg,
     borderWidth: 1,
-    borderColor: "#a3e0c9",
+    borderColor: c.successBorder,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4663,10 +4664,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   reqApproved: {
-    color: "#084f36",
-    backgroundColor: "#e8f7f0",
+    color: c.emerald[800],
+    backgroundColor: c.successBg,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4675,10 +4676,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   reqRejected: {
-    color: "#942626",
-    backgroundColor: "#fdedec",
+    color: c.rose[700],
+    backgroundColor: c.errorBg,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4689,15 +4690,15 @@ const styles = StyleSheet.create({
   reviewBtn: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 34,
     alignItems: "center",
     justifyContent: "center",
   },
   reviewBtnText: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4712,7 +4713,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   modalCard: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     padding: 14,
   },
@@ -4741,16 +4742,16 @@ const styles = StyleSheet.create({
   },
   statusAttachBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 34,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   statusAttachBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -4758,55 +4759,55 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fdedec",
+    backgroundColor: c.errorBg,
     alignItems: "center",
     justifyContent: "center",
   },
   uploadStatusText: {
     marginBottom: 10,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
   },
   attachmentLinkText: {
     marginTop: 6,
-    color: "#2549d6",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
   },
   reviewBox: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
     padding: 8,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
   },
   reviewTitle: {
     fontSize: 12,
-    color: "#161c24",
+    color: c.text,
     fontWeight: "700",
     marginBottom: 4,
   },
   reviewSubBox: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 8,
     padding: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   reviewSubTitle: {
     fontSize: 11,
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "700",
     marginBottom: 2,
   },
   modalTitle: {
     fontSize: 17,
     fontWeight: "700",
-    color: "#161c24",
+    color: c.text,
     marginBottom: 6,
   },
   modalRow: {
@@ -4823,29 +4824,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   modalCancelBtn: {
-    borderColor: "#c8d0dd",
-    backgroundColor: "#fff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
   },
   modalPrimaryBtn: {
-    borderColor: "#161c24",
-    backgroundColor: "#161c24",
+    borderColor: c.text,
+    backgroundColor: c.text,
   },
   modalDangerBtn: {
-    borderColor: "#f6b8b5",
-    backgroundColor: "#fdedec",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
   },
   modalPrimaryText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
   modalCancelText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "600",
     fontSize: 12,
   },
   modalDangerText: {
-    color: "#741f1f",
+    color: c.rose[800],
     fontWeight: "700",
     fontSize: 12,
   },
@@ -4853,25 +4854,25 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fdedec",
-    color: "#942626",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#e8f7f0",
-    color: "#084f36",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   taskRow: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
     flexDirection: "row",
@@ -4880,13 +4881,13 @@ const styles = StyleSheet.create({
   },
   taskRowCompleted: {
     opacity: 0.6,
-    backgroundColor: "#f5f7fa",
+    backgroundColor: c.bg,
   },
   taskCheckbox: {
     width: 20,
     height: 20,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
@@ -4894,17 +4895,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   taskCheckboxCompleted: {
-    backgroundColor: "#12a06a",
-    borderColor: "#12a06a",
+    backgroundColor: c.emerald[500],
+    borderColor: c.emerald[500],
   },
   taskTitle: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#161c24",
+    color: c.text,
   },
   taskTitleCompleted: {
     textDecorationLine: "line-through",
-    color: "#6c7789",
+    color: c.textMuted,
   },
   taskMetaRow: {
     flexDirection: "row",
@@ -4935,26 +4936,26 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 8,
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   taskFormSelectText: {
     fontSize: 11,
-    color: "#39424f",
+    color: c.slate[700],
   },
   taskAddBtn: {
     height: 36,
     borderRadius: 8,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
   },
   taskAddBtnText: {
-    color: "#fff",
+    color: c.surface,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4969,18 +4970,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 6,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   checkboxItemActive: {
-    borderColor: "#12a06a",
-    backgroundColor: "#e8f7f0",
+    borderColor: c.emerald[500],
+    backgroundColor: c.successBg,
   },
   checkboxLabel: {
     fontSize: 11,
-    color: "#39424f",
+    color: c.slate[700],
   },
-});
+}));

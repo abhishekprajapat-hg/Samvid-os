@@ -12,6 +12,7 @@ import {
 import { palette, spacing, typography } from "../../theme/tokens";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { getProjectsWithMeta, type Project } from "../../services/projectService";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/inventory/Projects.jsx.
@@ -133,7 +134,7 @@ export const ProjectsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   search: { marginBottom: spacing.md },
   list: { paddingBottom: spacing.xxl },
   card: { marginBottom: spacing.md },
@@ -143,7 +144,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
-  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: palette.slate[900] },
-  meta: { marginTop: 3, fontSize: typography.label, color: palette.slate[500] },
-  units: { marginTop: spacing.md, fontSize: typography.label, fontWeight: "600", color: palette.blue[600] },
-});
+  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
+  meta: { marginTop: 3, fontSize: typography.label, color: themePalette.slate[500] },
+  units: { marginTop: spacing.md, fontSize: typography.label, fontWeight: "600", color: themePalette.blue[600] },
+}));

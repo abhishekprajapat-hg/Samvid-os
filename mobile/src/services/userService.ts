@@ -2,8 +2,8 @@ import api from "./api";
 import { sessionStorage } from "../storage/sessionStorage";
 import type { User } from "../types";
 
-export const getUsers = async (): Promise<{ users: User[] }> => {
-  const res = await api.get("/users");
+export const getUsers = async (params: Record<string, unknown> = {}): Promise<{ users: User[] }> => {
+  const res = await api.get("/users", { params });
   return res.data;
 };
 

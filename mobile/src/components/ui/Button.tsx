@@ -9,6 +9,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import { colors, palette, radii, typography } from "../../theme/tokens";
+import { themedStyles, themeColor, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors frontend/src/components/ui/Button.jsx: the same five variants and
@@ -27,19 +28,19 @@ export type ButtonSize = "sm" | "md" | "lg";
 type Tone = { border: string; background: string; text: string };
 
 const VARIANTS: Record<ButtonVariant, Tone> = {
-  primary: { border: palette.blue[600], background: palette.blue[600], text: "#ffffff" },
-  secondary: { border: palette.slate[300], background: colors.surface, text: palette.slate[800] },
-  ghost: { border: "transparent", background: "transparent", text: palette.slate[600] },
-  danger: { border: palette.rose[600], background: palette.rose[600], text: "#ffffff" },
-  success: { border: palette.emerald[600], background: palette.emerald[600], text: "#ffffff" },
+  primary: { border: themePalette.blue[600], background: themePalette.blue[600], text: themeColor("#ffffff") },
+  secondary: { border: themePalette.slate[300], background: colors.surface, text: themePalette.slate[800] },
+  ghost: { border: "transparent", background: "transparent", text: themePalette.slate[600] },
+  danger: { border: themePalette.rose[600], background: themePalette.rose[600], text: themeColor("#ffffff") },
+  success: { border: themePalette.emerald[600], background: themePalette.emerald[600], text: themeColor("#ffffff") },
 };
 
 const PRESSED: Record<ButtonVariant, string> = {
-  primary: palette.blue[700],
-  secondary: palette.slate[50],
-  ghost: palette.slate[100],
-  danger: palette.rose[700],
-  success: palette.emerald[700],
+  primary: themePalette.blue[700],
+  secondary: themePalette.slate[50],
+  ghost: themePalette.slate[100],
+  danger: themePalette.rose[700],
+  success: themePalette.emerald[700],
 };
 
 const SIZES: Record<ButtonSize, { height: number; paddingHorizontal: number; fontSize: number }> = {
@@ -121,7 +122,7 @@ export const AppButton = ({
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   base: {
     flexDirection: "row",
     alignItems: "center",
@@ -146,6 +147,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-});
+}));
 
 export default AppButton;

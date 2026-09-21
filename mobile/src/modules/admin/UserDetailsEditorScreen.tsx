@@ -6,6 +6,7 @@ import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/u
 import { useAuth } from "../../context/AuthContext";
 import { getUserProfileById, getUsers, updateUserByAdmin } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles } from "../../theme/themedStyles";
 
 const ROLE_OPTIONS = [
   { label: "Manager", value: "MANAGER" },
@@ -323,24 +324,24 @@ export const UserDetailsEditorScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   success: {
     marginVertical: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#e8f7f0",
-    color: "#084f36",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   warningCard: {
     marginTop: 10,
     marginBottom: 10,
-    borderColor: "#f6d68c",
-    backgroundColor: "#fdf4e3",
+    borderColor: c.warningBorder,
+    backgroundColor: c.warningBg,
   },
   warningText: {
-    color: "#614304",
+    color: c.amber[800],
     fontWeight: "600",
     fontSize: 12,
   },
@@ -349,20 +350,20 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sectionTitle: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 15,
     fontWeight: "700",
     marginBottom: 6,
   },
   label: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
     marginBottom: 6,
     marginTop: 2,
   },
   meta: {
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
     marginBottom: 4,
   },
@@ -378,4 +379,4 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-});
+}));

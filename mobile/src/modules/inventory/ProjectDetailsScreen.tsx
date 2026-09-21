@@ -6,6 +6,7 @@ import { AppBadge, AppCard, AppEmptyState, AppSkeletonList } from "../../compone
 import { palette, spacing, typography } from "../../theme/tokens";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { getProjectById, type Project } from "../../services/projectService";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/inventory/ProjectDetails.jsx.
@@ -124,7 +125,7 @@ export const ProjectDetailsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   body: { paddingBottom: spacing.xxl },
   card: { marginBottom: spacing.md },
   head: {
@@ -133,18 +134,18 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: spacing.md,
   },
-  title: { flex: 1, fontSize: typography.title, fontWeight: "600", color: palette.slate[900] },
-  meta: { marginTop: 3, fontSize: typography.label, color: palette.slate[500] },
+  title: { flex: 1, fontSize: typography.title, fontWeight: "600", color: themePalette.slate[900] },
+  meta: { marginTop: 3, fontSize: typography.label, color: themePalette.slate[500] },
   description: {
     marginTop: spacing.lg,
     fontSize: typography.body,
     lineHeight: 20,
-    color: palette.slate[600],
+    color: themePalette.slate[600],
   },
   sectionTitle: {
     fontSize: typography.cardTitle,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     marginBottom: spacing.md,
   },
   row: {
@@ -153,14 +154,14 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     paddingVertical: spacing.md,
     borderTopWidth: 1,
-    borderTopColor: palette.slate[200],
+    borderTopColor: themePalette.slate[200],
   },
-  rowLabel: { flex: 1, fontSize: typography.label, color: palette.slate[500] },
+  rowLabel: { flex: 1, fontSize: typography.label, color: themePalette.slate[500] },
   rowValue: {
     flex: 1,
     fontSize: typography.label,
     fontWeight: "600",
-    color: palette.slate[800],
+    color: themePalette.slate[800],
     textAlign: "right",
   },
-});
+}));

@@ -8,6 +8,7 @@ import { useAuth } from "../../context/AuthContext";
 import { addLeadDiaryEntry, clearLeadFollowUp, getAllLeads, getLeadDiary, updateLeadStatus, type LeadDiaryEntry } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const WEEK = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 const toDate = (v?: string | null) => { const d = v ? new Date(v) : null; return d && !Number.isNaN(d.getTime()) ? d : null; };
@@ -451,8 +452,8 @@ export const MasterScheduleScreen = () => {
               <View style={styles.monthHead}>
                 <Text style={styles.h1}>{month.toLocaleString("en-IN", { month: "long", year: "numeric" })}</Text>
                 <View style={styles.navRow}>
-                  <Pressable style={styles.navBtn} onPress={() => setMonth((p) => new Date(p.getFullYear(), p.getMonth() - 1, 1))}><Icon name="chevron-back" size={15} color="#39424f" /></Pressable>
-                  <Pressable style={styles.navBtn} onPress={() => setMonth((p) => new Date(p.getFullYear(), p.getMonth() + 1, 1))}><Icon name="chevron-forward" size={15} color="#39424f" /></Pressable>
+                  <Pressable style={styles.navBtn} onPress={() => setMonth((p) => new Date(p.getFullYear(), p.getMonth() - 1, 1))}><Icon name="chevron-back" size={15} color={themeColor("#39424f")} /></Pressable>
+                  <Pressable style={styles.navBtn} onPress={() => setMonth((p) => new Date(p.getFullYear(), p.getMonth() + 1, 1))}><Icon name="chevron-forward" size={15} color={themeColor("#39424f")} /></Pressable>
                 </View>
               </View>
               <View style={styles.week}>{WEEK.map((d) => <Text key={d} style={styles.weekText}>{d}</Text>)}</View>
@@ -483,28 +484,28 @@ export const MasterScheduleScreen = () => {
               </View>
               <Pressable style={styles.inputBtn} onPress={() => setLeadPicker(true)}>
                 <Text style={styles.inputBtnText}>{selectedLead ? `${selectedLead.name} (${selectedLead.phone || "-"})` : "Select lead for follow-up"}</Text>
-                <Icon name="chevron-down" size={14} color="#39424f" />
+                <Icon name="chevron-down" size={14} color={themeColor("#39424f")} />
               </Pressable>
               <Pressable style={styles.inputBtn} onPress={openDatePicker}>
                 <Text style={styles.inputBtnText}>{fmtFollowUpInput(scheduleAt)}</Text>
-                <Icon name="calendar-outline" size={14} color="#39424f" />
+                <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
               </Pressable>
-              <TextInput style={styles.textarea} placeholder="Lead diary note while scheduling (optional)" placeholderTextColor="#98a3b5" value={scheduleNote} onChangeText={setScheduleNote} multiline />
+              <TextInput style={styles.textarea} placeholder="Lead diary note while scheduling (optional)" placeholderTextColor={themeColor("#98a3b5")} value={scheduleNote} onChangeText={setScheduleNote} multiline />
               <View style={styles.scheduleDiaryActionRow}>
                 <Pressable
                   style={[styles.voiceBtn, (!isScheduleMicSupported || (!scheduleSpeechPermissionGranted && Platform.OS !== "web")) && styles.disabled]}
                   onPress={() => { void handleScheduleVoiceToggle(); }}
                   disabled={!isScheduleMicSupported}
                 >
-                  <Icon name={isScheduleListening ? "mic" : "mic-outline"} size={14} color={isScheduleListening ? "#2549d6" : "#39424f"} />
+                  <Icon name={isScheduleListening ? "mic" : "mic-outline"} size={14} color={isScheduleListening ? themeColor("#2549d6") : themeColor("#39424f")} />
                   <Text style={styles.voiceBtnText}>{isScheduleListening ? "Listening..." : "Voice"}</Text>
                 </Pressable>
                 <Pressable style={[styles.addDiary, scheduleNoteSaving && styles.disabled]} onPress={() => { void saveScheduleDiaryNote(); }} disabled={scheduleNoteSaving}>
-                  {scheduleNoteSaving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.addDiaryText}>Add Note</Text>}
+                  {scheduleNoteSaving ? <ActivityIndicator color={themeColor("#ffffff")} size="small" /> : <Text style={styles.addDiaryText}>Add Note</Text>}
                 </Pressable>
               </View>
               <Pressable style={[styles.save, saving && styles.disabled]} onPress={saveFollowUp} disabled={saving}>
-                {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveText}>Save Follow-up</Text>}
+                {saving ? <ActivityIndicator color={themeColor("#ffffff")} size="small" /> : <Text style={styles.saveText}>Save Follow-up</Text>}
               </Pressable>
             </View>
 
@@ -516,8 +517,8 @@ export const MasterScheduleScreen = () => {
                   <View style={styles.fuHead}>
                     <Text style={styles.fuName}>{lead.name}</Text>
                     <View style={styles.act}>
-                      <Pressable style={styles.icon} onPress={() => { setDetailsLead(lead); loadDiary(lead._id, true); }}><Icon name="document-text-outline" size={12} color="#39424f" /></Pressable>
-                      <Pressable style={styles.icon} onPress={() => deleteFollowUp(lead)} disabled={deletingId === lead._id}>{deletingId === lead._id ? <ActivityIndicator size="small" color="#b83232" /> : <Icon name="trash-outline" size={12} color="#b83232" />}</Pressable>
+                      <Pressable style={styles.icon} onPress={() => { setDetailsLead(lead); loadDiary(lead._id, true); }}><Icon name="document-text-outline" size={12} color={themeColor("#39424f")} /></Pressable>
+                      <Pressable style={styles.icon} onPress={() => deleteFollowUp(lead)} disabled={deletingId === lead._id}>{deletingId === lead._id ? <ActivityIndicator size="small" color={themeColor("#b83232")} /> : <Icon name="trash-outline" size={12} color={themeColor("#b83232")} />}</Pressable>
                     </View>
                   </View>
                   <Text style={styles.meta}>• {fmt(lead.nextFollowUp)}</Text>
@@ -526,11 +527,11 @@ export const MasterScheduleScreen = () => {
                   <Text style={styles.meta}>• {lead.status || "NEW"}</Text>
                   <View style={styles.diaryBox}>
                     <Text style={styles.diaryTitle}>Lead Diary</Text>
-                    <TextInput style={styles.diaryInput} placeholder={`Add diary note for ${lead.name}`} placeholderTextColor="#98a3b5" value={diaryDraft[lead._id] || ""} onChangeText={(v) => setDiaryDraft((p) => ({ ...p, [lead._id]: v }))} multiline />
+                    <TextInput style={styles.diaryInput} placeholder={`Add diary note for ${lead.name}`} placeholderTextColor={themeColor("#98a3b5")} value={diaryDraft[lead._id] || ""} onChangeText={(v) => setDiaryDraft((p) => ({ ...p, [lead._id]: v }))} multiline />
                     <Pressable style={[styles.addDiary, diarySavingLead === lead._id && styles.disabled]} onPress={() => saveDiary(lead)} disabled={diarySavingLead === lead._id}>
-                      {diarySavingLead === lead._id ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.addDiaryText}>Add Note</Text>}
+                      {diarySavingLead === lead._id ? <ActivityIndicator color={themeColor("#ffffff")} size="small" /> : <Text style={styles.addDiaryText}>Add Note</Text>}
                     </Pressable>
-                    {diaryLoading[lead._id] ? <ActivityIndicator size="small" color="#39424f" /> : (diary[lead._id] || []).length === 0 ? <Text style={styles.emptyInline}>No diary notes yet</Text> : (
+                    {diaryLoading[lead._id] ? <ActivityIndicator size="small" color={themeColor("#39424f")} /> : (diary[lead._id] || []).length === 0 ? <Text style={styles.emptyInline}>No diary notes yet</Text> : (
                       <View style={styles.diaryList}>{(diary[lead._id] || []).map((e) => <View key={e._id} style={styles.diaryItem}><Text style={styles.diaryItemText}>{String(e.note || "-")}</Text><Text style={styles.diaryItemMeta}>{fmt(e.createdAt)} {e.createdBy?.name ? `| ${e.createdBy.name}` : ""}</Text></View>)}</View>
                     )}
                   </View>
@@ -548,7 +549,7 @@ export const MasterScheduleScreen = () => {
             <View style={styles.headRow}>
               <Text style={styles.h2}>Select Follow-up</Text>
               <Pressable style={styles.icon} onPress={() => setWebCalendarPickerVisible(false)}>
-                <Icon name="close" size={14} color="#39424f" />
+                <Icon name="close" size={14} color={themeColor("#39424f")} />
               </Pressable>
             </View>
             <input
@@ -571,17 +572,17 @@ export const MasterScheduleScreen = () => {
         </View>
       </Modal>
       <Modal visible={leadPicker} transparent animationType="fade" onRequestClose={() => setLeadPicker(false)}>
-        <View style={styles.modal}><View style={styles.modalCard}><Text style={styles.h2}>Select Lead</Text><TextInput style={styles.modalInput} value={leadSearch} onChangeText={setLeadSearch} placeholder="Search lead" placeholderTextColor="#98a3b5" /><ScrollView style={{ maxHeight: 340, marginTop: 8 }}>{leadRows.map((lead) => <Pressable key={lead._id} style={[styles.leadRow, String(selectedLeadId) === String(lead._id) && styles.leadRowA]} onPress={() => { setSelectedLeadId(lead._id); setLeadPicker(false); }}><Text style={styles.leadName}>{lead.name}</Text><Text style={styles.leadMeta}>{lead.phone || "-"} | {lead.city || "-"}</Text></Pressable>)}{leadRows.length === 0 ? <Text style={styles.empty}>No lead found</Text> : null}</ScrollView><Pressable style={styles.modalBtn} onPress={() => setLeadPicker(false)}><Text style={styles.modalBtnText}>Close</Text></Pressable></View></View>
+        <View style={styles.modal}><View style={styles.modalCard}><Text style={styles.h2}>Select Lead</Text><TextInput style={styles.modalInput} value={leadSearch} onChangeText={setLeadSearch} placeholder="Search lead" placeholderTextColor={themeColor("#98a3b5")} /><ScrollView style={{ maxHeight: 340, marginTop: 8 }}>{leadRows.map((lead) => <Pressable key={lead._id} style={[styles.leadRow, String(selectedLeadId) === String(lead._id) && styles.leadRowA]} onPress={() => { setSelectedLeadId(lead._id); setLeadPicker(false); }}><Text style={styles.leadName}>{lead.name}</Text><Text style={styles.leadMeta}>{lead.phone || "-"} | {lead.city || "-"}</Text></Pressable>)}{leadRows.length === 0 ? <Text style={styles.empty}>No lead found</Text> : null}</ScrollView><Pressable style={styles.modalBtn} onPress={() => setLeadPicker(false)}><Text style={styles.modalBtnText}>Close</Text></Pressable></View></View>
       </Modal>
       <Modal visible={Boolean(detailsLead)} transparent animationType="slide" onRequestClose={() => setDetailsLead(null)}>
-        <View style={styles.modal}><View style={styles.modalCard}><View style={styles.headRow}><Text style={styles.h2}>Follow-up Details</Text><Pressable style={styles.icon} onPress={() => setDetailsLead(null)}><Icon name="close" size={14} color="#39424f" /></Pressable></View>
+        <View style={styles.modal}><View style={styles.modalCard}><View style={styles.headRow}><Text style={styles.h2}>Follow-up Details</Text><Pressable style={styles.icon} onPress={() => setDetailsLead(null)}><Icon name="close" size={14} color={themeColor("#39424f")} /></Pressable></View>
           <ScrollView style={styles.detailsScroll} contentContainerStyle={styles.detailsContent} showsVerticalScrollIndicator={false}>
           {detailsLead ? <>
             <Pressable style={styles.del} onPress={() => deleteFollowUp(detailsLead)}><Text style={styles.delText}>Delete Follow-up</Text></Pressable>
             <View style={styles.block}><Text style={styles.blockTitle}>Schedule</Text><Text style={styles.blockText}>Follow-up: {fmt(detailsLead.nextFollowUp)}</Text><Text style={styles.blockText}>Status: {detailsLead.status || "NEW"}</Text><Text style={styles.blockText}>Assigned: {detailsLead.assignedTo?.name || "-"}</Text></View>
             <View style={styles.block}><Text style={styles.blockTitle}>Lead Info</Text><Text style={styles.blockText}>Phone: {detailsLead.phone || "-"}</Text><Text style={styles.blockText}>Email: {(detailsLead as any)?.email || "-"}</Text><Text style={styles.blockText}>City: {detailsLead.city || "-"}</Text><Text style={styles.blockText}>Project: {detailsLead.projectInterested || "-"}</Text></View>
-            <View style={styles.block}><Text style={styles.blockTitle}>Contact Actions</Text><View style={styles.contact}><Pressable style={styles.contactActionItem} onPress={() => doCall(detailsLead.phone)}><View style={styles.contactIconBtn}><Icon name="call-outline" size={18} color="#39424f" /></View><Text style={styles.contactActionLabel}>Call</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doWhatsApp(detailsLead.phone)}><View style={styles.contactIconBtn}><Icon name="logo-whatsapp" size={18} color="#0d8055" /></View><Text style={styles.contactActionLabel}>WhatsApp</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doEmail((detailsLead as any)?.email)}><View style={styles.contactIconBtn}><Icon name="mail-outline" size={18} color="#39424f" /></View><Text style={styles.contactActionLabel}>Email</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doMap(detailsLead)}><View style={styles.contactIconBtn}><Icon name="location-outline" size={18} color="#39424f" /></View><Text style={styles.contactActionLabel}>Maps</Text></Pressable></View></View>
-            <View style={styles.block}><Text style={styles.blockTitle}>Lead Diary Activity</Text>{diaryLoading[detailsLead._id] ? <ActivityIndicator size="small" color="#39424f" /> : (diary[detailsLead._id] || []).length === 0 ? <Text style={styles.emptyInline}>No diary notes yet</Text> : <ScrollView style={{ maxHeight: 170 }}>{(diary[detailsLead._id] || []).map((e) => <View key={e._id} style={styles.diaryItem}><Text style={styles.diaryItemText}>{String(e.note || "-")}</Text><Text style={styles.diaryItemMeta}>{fmt(e.createdAt)} {e.createdBy?.name ? `| ${e.createdBy.name}` : ""}</Text></View>)}</ScrollView>}</View>
+            <View style={styles.block}><Text style={styles.blockTitle}>Contact Actions</Text><View style={styles.contact}><Pressable style={styles.contactActionItem} onPress={() => doCall(detailsLead.phone)}><View style={styles.contactIconBtn}><Icon name="call-outline" size={18} color={themeColor("#39424f")} /></View><Text style={styles.contactActionLabel}>Call</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doWhatsApp(detailsLead.phone)}><View style={styles.contactIconBtn}><Icon name="logo-whatsapp" size={18} color={themeColor("#0d8055")} /></View><Text style={styles.contactActionLabel}>WhatsApp</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doEmail((detailsLead as any)?.email)}><View style={styles.contactIconBtn}><Icon name="mail-outline" size={18} color={themeColor("#39424f")} /></View><Text style={styles.contactActionLabel}>Email</Text></Pressable><Pressable style={styles.contactActionItem} onPress={() => doMap(detailsLead)}><View style={styles.contactIconBtn}><Icon name="location-outline" size={18} color={themeColor("#39424f")} /></View><Text style={styles.contactActionLabel}>Maps</Text></Pressable></View></View>
+            <View style={styles.block}><Text style={styles.blockTitle}>Lead Diary Activity</Text>{diaryLoading[detailsLead._id] ? <ActivityIndicator size="small" color={themeColor("#39424f")} /> : (diary[detailsLead._id] || []).length === 0 ? <Text style={styles.emptyInline}>No diary notes yet</Text> : <ScrollView style={{ maxHeight: 170 }}>{(diary[detailsLead._id] || []).map((e) => <View key={e._id} style={styles.diaryItem}><Text style={styles.diaryItemText}>{String(e.note || "-")}</Text><Text style={styles.diaryItemMeta}>{fmt(e.createdAt)} {e.createdBy?.name ? `| ${e.createdBy.name}` : ""}</Text></View>)}</ScrollView>}</View>
           </> : null}
           </ScrollView>
         </View></View>
@@ -590,33 +591,33 @@ export const MasterScheduleScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  wrap: { gap: 8, paddingBottom: 12 }, ok: { marginBottom: 8, borderWidth: 1, borderColor: "#6ecdaa", borderRadius: 10, backgroundColor: "#e8f7f0", color: "#084f36", padding: 8, fontSize: 12, fontWeight: "700" },
+const styles = themedStyles((c) => StyleSheet.create({
+  wrap: { gap: 8, paddingBottom: 12 }, ok: { marginBottom: 8, borderWidth: 1, borderColor: c.emerald[300], borderRadius: 10, backgroundColor: c.successBg, color: c.emerald[800], padding: 8, fontSize: 12, fontWeight: "700" },
   top: { borderWidth: 1, borderColor: "#0f3c5a", borderRadius: 12, backgroundColor: "#144766", padding: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" },
-  topTitle: { color: "#fff", fontSize: 20, fontWeight: "800" }, topMeta: { color: "#d2e9f7", fontSize: 11, fontWeight: "700" },
+  topTitle: { color: c.surface, fontSize: 20, fontWeight: "800" }, topMeta: { color: c.cyan[100], fontSize: 11, fontWeight: "700" },
   row: { flexDirection: "row", gap: 10, alignItems: "flex-start" }, rowCompact: { flexDirection: "column", gap: 8 }, left: { flex: 1.2, minWidth: 0 }, right: { flex: 0.8, minWidth: 0, gap: 10 }, colCompact: { width: "100%", flexGrow: 0, flexShrink: 0, flexBasis: "auto" },
-  card: { borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 12, backgroundColor: "#fff", padding: 10 },
-  monthHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, h1: { fontSize: 20, fontWeight: "800", color: "#161c24" }, h2: { fontSize: 16, fontWeight: "800", color: "#161c24" },
-  navRow: { flexDirection: "row", gap: 6 }, navBtn: { width: 30, height: 30, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  week: { marginTop: 8, flexDirection: "row", borderTopWidth: 1, borderBottomWidth: 1, borderColor: "#e0e5ed", paddingVertical: 6 }, weekText: { flex: 1, textAlign: "center", color: "#6c7789", fontSize: 10, fontWeight: "700" },
-  grid: { flexDirection: "row", flexWrap: "wrap" }, day: { width: "14.285%", minHeight: 68, borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#e0e5ed", padding: 6, backgroundColor: "#fff" }, dayMuted: { backgroundColor: "#f5f7fa" }, daySel: { backgroundColor: "#d2e9f7" }, dayText: { color: "#161c24", fontSize: 12, fontWeight: "700" }, dayTextMuted: { color: "#98a3b5" }, badge: { marginTop: 4, alignSelf: "flex-end", color: "#1f6499", fontSize: 11, fontWeight: "800" },
-  headRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, tools: { flexDirection: "row", gap: 8 }, tool: { borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 8, paddingHorizontal: 10, minHeight: 30, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, toolText: { color: "#39424f", fontSize: 12, fontWeight: "700" },
-  inputBtn: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }, inputBtnText: { color: "#161c24", fontSize: 13, fontWeight: "600", flex: 1 },
-  textarea: { marginTop: 8, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, backgroundColor: "#fff", paddingHorizontal: 10, paddingVertical: 8, minHeight: 62, textAlignVertical: "top", color: "#161c24" },
+  card: { borderWidth: 1, borderColor: c.borderStrong, borderRadius: 12, backgroundColor: c.surface, padding: 10 },
+  monthHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }, h1: { fontSize: 20, fontWeight: "800", color: c.text }, h2: { fontSize: 16, fontWeight: "800", color: c.text },
+  navRow: { flexDirection: "row", gap: 6 }, navBtn: { width: 30, height: 30, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.surface },
+  week: { marginTop: 8, flexDirection: "row", borderTopWidth: 1, borderBottomWidth: 1, borderColor: c.border, paddingVertical: 6 }, weekText: { flex: 1, textAlign: "center", color: c.textMuted, fontSize: 10, fontWeight: "700" },
+  grid: { flexDirection: "row", flexWrap: "wrap" }, day: { width: "14.285%", minHeight: 68, borderRightWidth: 1, borderBottomWidth: 1, borderColor: c.border, padding: 6, backgroundColor: c.surface }, dayMuted: { backgroundColor: c.bg }, daySel: { backgroundColor: c.cyan[100] }, dayText: { color: c.text, fontSize: 12, fontWeight: "700" }, dayTextMuted: { color: c.textTertiary }, badge: { marginTop: 4, alignSelf: "flex-end", color: c.info, fontSize: 11, fontWeight: "800" },
+  headRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, tools: { flexDirection: "row", gap: 8 }, tool: { borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, paddingHorizontal: 10, minHeight: 30, alignItems: "center", justifyContent: "center", backgroundColor: c.surface }, toolText: { color: c.slate[700], fontSize: 12, fontWeight: "700" },
+  inputBtn: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, backgroundColor: c.surface, paddingHorizontal: 10, paddingVertical: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }, inputBtnText: { color: c.text, fontSize: 13, fontWeight: "600", flex: 1 },
+  textarea: { marginTop: 8, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, backgroundColor: c.surface, paddingHorizontal: 10, paddingVertical: 8, minHeight: 62, textAlignVertical: "top", color: c.text },
   scheduleDiaryActionRow: { marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  voiceBtn: { minWidth: 96, height: 32, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 8, backgroundColor: "#fff", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, paddingHorizontal: 10 },
-  voiceBtnText: { color: "#39424f", fontSize: 12, fontWeight: "700" },
-  save: { marginTop: 8, minHeight: 38, borderRadius: 10, backgroundColor: "#1f6499", alignItems: "center", justifyContent: "center" }, saveText: { color: "#fff", fontSize: 13, fontWeight: "800" }, disabled: { opacity: 0.6 },
-  meta: { marginTop: 3, color: "#6c7789", fontSize: 12 }, empty: { textAlign: "center", color: "#6c7789", marginTop: 10, fontSize: 12 },
-  fu: { marginTop: 8, borderWidth: 1, borderColor: "#79b9e3", borderRadius: 10, backgroundColor: "#e9f4fb", padding: 8 }, fuHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, fuName: { flex: 1, color: "#161c24", fontSize: 15, fontWeight: "700" }, act: { flexDirection: "row", gap: 6 }, icon: { width: 26, height: 26, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  diaryBox: { marginTop: 8, borderWidth: 1, borderColor: "#bcd0ff", borderRadius: 10, backgroundColor: "#fff", padding: 8 }, diaryTitle: { color: "#161c24", fontSize: 13, fontWeight: "700" }, diaryInput: { marginTop: 6, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 8, minHeight: 52, paddingHorizontal: 8, paddingVertical: 6, textAlignVertical: "top", color: "#161c24" },
-  addDiary: { marginTop: 6, alignSelf: "flex-end", minWidth: 90, height: 30, borderRadius: 8, backgroundColor: "#4c9dd3", alignItems: "center", justifyContent: "center" }, addDiaryText: { color: "#fff", fontSize: 12, fontWeight: "700" }, emptyInline: { color: "#6c7789", fontSize: 12, marginTop: 8 },
-  diaryList: { marginTop: 8, gap: 6 }, diaryItem: { borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 8, backgroundColor: "#f5f7fa", padding: 8 }, diaryItemText: { color: "#39424f", fontSize: 12 }, diaryItemMeta: { marginTop: 3, color: "#6c7789", fontSize: 10 },
-  modal: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 12 }, modalCard: { borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 12, backgroundColor: "#fff", padding: 12, maxHeight: "88%" }, modalInput: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 9, paddingHorizontal: 10, backgroundColor: "#fff", color: "#161c24" }, detailsScroll: { marginTop: 8, maxHeight: "88%" }, detailsContent: { paddingBottom: 6 },
-  webNativeDateTimeInput: { marginTop: 10, width: "100%", minHeight: 40, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 9, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14, color: "#161c24", backgroundColor: "#fff" },
-  modalRow: { marginTop: 10, flexDirection: "row", justifyContent: "flex-end", gap: 8 }, modalBtn: { minWidth: 88, height: 34, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, modalBtnText: { color: "#39424f", fontSize: 12, fontWeight: "700" },
-  leadRow: { borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 10, backgroundColor: "#fff", padding: 10, marginBottom: 6 }, leadRowA: { borderColor: "#4c9dd3", backgroundColor: "#e9f4fb" }, leadName: { color: "#161c24", fontSize: 14, fontWeight: "700" }, leadMeta: { marginTop: 3, color: "#6c7789", fontSize: 11 },
-  del: { marginTop: 8, alignSelf: "flex-end", minWidth: 120, height: 34, borderWidth: 1, borderColor: "#ee908c", borderRadius: 9, backgroundColor: "#fdedec", alignItems: "center", justifyContent: "center" }, delText: { color: "#b83232", fontSize: 12, fontWeight: "700" },
-  block: { marginTop: 10, borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 10, backgroundColor: "#f5f7fa", padding: 10 }, blockTitle: { color: "#161c24", fontSize: 13, fontWeight: "800", marginBottom: 6 }, blockText: { color: "#39424f", fontSize: 12, marginTop: 2 },
-  contact: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, contactActionItem: { alignItems: "center", minWidth: 68, gap: 4 }, contactIconBtn: { width: 44, height: 44, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, contactActionLabel: { color: "#39424f", fontSize: 11, fontWeight: "700" }, contactBtn: { flexGrow: 1, minWidth: 110, height: 36, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: "#fff" }, contactText: { color: "#39424f", fontSize: 12, fontWeight: "700" },
-});
+  voiceBtn: { minWidth: 96, height: 32, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, backgroundColor: c.surface, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, paddingHorizontal: 10 },
+  voiceBtnText: { color: c.slate[700], fontSize: 12, fontWeight: "700" },
+  save: { marginTop: 8, minHeight: 38, borderRadius: 10, backgroundColor: c.info, alignItems: "center", justifyContent: "center" }, saveText: { color: c.surface, fontSize: 13, fontWeight: "800" }, disabled: { opacity: 0.6 },
+  meta: { marginTop: 3, color: c.textMuted, fontSize: 12 }, empty: { textAlign: "center", color: c.textMuted, marginTop: 10, fontSize: 12 },
+  fu: { marginTop: 8, borderWidth: 1, borderColor: c.cyan[300], borderRadius: 10, backgroundColor: c.infoBg, padding: 8 }, fuHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 }, fuName: { flex: 1, color: c.text, fontSize: 15, fontWeight: "700" }, act: { flexDirection: "row", gap: 6 }, icon: { width: 26, height: 26, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.surface },
+  diaryBox: { marginTop: 8, borderWidth: 1, borderColor: c.blue[200], borderRadius: 10, backgroundColor: c.surface, padding: 8 }, diaryTitle: { color: c.text, fontSize: 13, fontWeight: "700" }, diaryInput: { marginTop: 6, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, minHeight: 52, paddingHorizontal: 8, paddingVertical: 6, textAlignVertical: "top", color: c.text },
+  addDiary: { marginTop: 6, alignSelf: "flex-end", minWidth: 90, height: 30, borderRadius: 8, backgroundColor: c.cyan[400], alignItems: "center", justifyContent: "center" }, addDiaryText: { color: c.surface, fontSize: 12, fontWeight: "700" }, emptyInline: { color: c.textMuted, fontSize: 12, marginTop: 8 },
+  diaryList: { marginTop: 8, gap: 6 }, diaryItem: { borderWidth: 1, borderColor: c.border, borderRadius: 8, backgroundColor: c.bg, padding: 8 }, diaryItemText: { color: c.slate[700], fontSize: 12 }, diaryItemMeta: { marginTop: 3, color: c.textMuted, fontSize: 10 },
+  modal: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 12 }, modalCard: { borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.surface, padding: 12, maxHeight: "88%" }, modalInput: { marginTop: 8, minHeight: 38, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 9, paddingHorizontal: 10, backgroundColor: c.surface, color: c.text }, detailsScroll: { marginTop: 8, maxHeight: "88%" }, detailsContent: { paddingBottom: 6 },
+  webNativeDateTimeInput: { marginTop: 10, width: "100%", minHeight: 40, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 9, paddingVertical: 8, paddingHorizontal: 10, fontSize: 14, color: c.text, backgroundColor: c.surface },
+  modalRow: { marginTop: 10, flexDirection: "row", justifyContent: "flex-end", gap: 8 }, modalBtn: { minWidth: 88, height: 34, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: c.surface }, modalBtnText: { color: c.slate[700], fontSize: 12, fontWeight: "700" },
+  leadRow: { borderWidth: 1, borderColor: c.border, borderRadius: 10, backgroundColor: c.surface, padding: 10, marginBottom: 6 }, leadRowA: { borderColor: c.cyan[400], backgroundColor: c.infoBg }, leadName: { color: c.text, fontSize: 14, fontWeight: "700" }, leadMeta: { marginTop: 3, color: c.textMuted, fontSize: 11 },
+  del: { marginTop: 8, alignSelf: "flex-end", minWidth: 120, height: 34, borderWidth: 1, borderColor: c.rose[300], borderRadius: 9, backgroundColor: c.errorBg, alignItems: "center", justifyContent: "center" }, delText: { color: c.error, fontSize: 12, fontWeight: "700" },
+  block: { marginTop: 10, borderWidth: 1, borderColor: c.border, borderRadius: 10, backgroundColor: c.bg, padding: 10 }, blockTitle: { color: c.text, fontSize: 13, fontWeight: "800", marginBottom: 6 }, blockText: { color: c.slate[700], fontSize: 12, marginTop: 2 },
+  contact: { flexDirection: "row", flexWrap: "wrap", gap: 10 }, contactActionItem: { alignItems: "center", minWidth: 68, gap: 4 }, contactIconBtn: { width: 44, height: 44, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: c.surface }, contactActionLabel: { color: c.slate[700], fontSize: 11, fontWeight: "700" }, contactBtn: { flexGrow: 1, minWidth: 110, height: 36, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: c.surface }, contactText: { color: c.slate[700], fontSize: 12, fontWeight: "700" },
+}));

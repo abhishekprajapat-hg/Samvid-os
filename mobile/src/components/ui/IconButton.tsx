@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 import { colors, palette, radii } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Mirrors frontend/src/components/ui/IconButton.jsx - 32/36/40 square, radius
@@ -53,7 +54,7 @@ export const AppIconButton = ({
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   base: {
     alignItems: "center",
     justifyContent: "center",
@@ -63,11 +64,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   pressed: {
-    backgroundColor: palette.slate[50],
+    backgroundColor: themePalette.slate[50],
   },
   disabled: {
     opacity: 0.6,
   },
-});
+}));
 
 export default AppIconButton;

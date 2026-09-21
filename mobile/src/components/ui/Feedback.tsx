@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { Animated, Platform, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { AppButton } from "./Button";
 import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
  * Empty, error and loading states.
@@ -97,7 +98,7 @@ export const AppSkeleton = ({
           width: (width as number) ?? "100%",
           height,
           borderRadius: radius,
-          backgroundColor: palette.slate[100],
+          backgroundColor: themePalette.slate[100],
           opacity: pulse,
         },
         style,
@@ -119,11 +120,11 @@ export const AppSkeletonList = ({ rows = 4 }: { rows?: number }) => (
   </View>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   empty: {
     borderWidth: 1,
     borderStyle: Platform.OS === "ios" ? "dashed" : "solid",
-    borderColor: palette.slate[300],
+    borderColor: themePalette.slate[300],
     borderRadius: radii.lg,
     backgroundColor: colors.surface,
     paddingHorizontal: 20,
@@ -134,7 +135,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: radii.lg,
-    backgroundColor: palette.slate[100],
+    backgroundColor: themePalette.slate[100],
     alignItems: "center",
     justifyContent: "center",
     marginBottom: spacing.lg,
@@ -142,14 +143,14 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 14.5,
     fontWeight: "600",
-    color: palette.slate[900],
+    color: themePalette.slate[900],
     textAlign: "center",
   },
   emptyBody: {
     marginTop: 6,
     fontSize: typography.body,
     lineHeight: 20,
-    color: palette.slate[600],
+    color: themePalette.slate[600],
     textAlign: "center",
     maxWidth: 320,
   },
@@ -158,23 +159,23 @@ const styles = StyleSheet.create({
   },
   error: {
     borderWidth: 1,
-    borderColor: palette.rose[200],
+    borderColor: themePalette.rose[200],
     borderRadius: radii.lg,
-    backgroundColor: palette.rose[50],
+    backgroundColor: themePalette.rose[50],
     padding: 20,
     alignItems: "center",
   },
   errorTitle: {
     fontSize: 14.5,
     fontWeight: "600",
-    color: palette.rose[700],
+    color: themePalette.rose[700],
     textAlign: "center",
   },
   errorBody: {
     marginTop: 6,
     fontSize: typography.body,
     lineHeight: 20,
-    color: palette.rose[700],
+    color: themePalette.rose[700],
     textAlign: "center",
   },
   skeletonList: {
@@ -188,4 +189,4 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.md,
   },
-});
+}));

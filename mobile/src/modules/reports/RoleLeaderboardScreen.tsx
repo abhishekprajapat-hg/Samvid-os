@@ -6,6 +6,7 @@ import { colors, radii, spacing, typography } from "../../theme/tokens";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { getRoleLeaderboard, type LeaderboardEntry } from "../../services/userService";
 import { useAuth } from "../../context/AuthContext";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/reports/RoleLeaderboard.jsx. The web version renders a ranked
@@ -14,9 +15,9 @@ import { useAuth } from "../../context/AuthContext";
  */
 
 const RANK_TONE = [
-  { bg: "#fdf4e3", border: "#eebf51", text: "#7d5605" }, // 1st
-  { bg: "#edf0f5", border: "#c8d0dd", text: "#39424f" }, // 2nd
-  { bg: "#fdedec", border: "#ee908c", text: "#942626" }, // 3rd
+  { bg: themeColor("#fdf4e3"), border: themeColor("#eebf51"), text: themeColor("#7d5605") }, // 1st
+  { bg: themeColor("#edf0f5"), border: themeColor("#c8d0dd"), text: themeColor("#39424f") }, // 2nd
+  { bg: themeColor("#fdedec"), border: themeColor("#ee908c"), text: themeColor("#942626") }, // 3rd
 ];
 
 const formatNumber = (value: unknown) => {
@@ -174,7 +175,7 @@ export const RoleLeaderboardScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   filterRow: {
     gap: spacing.sm,
     paddingBottom: spacing.md,
@@ -250,4 +251,4 @@ const styles = StyleSheet.create({
     textAlign: "center",
     paddingVertical: spacing.lg,
   },
-});
+}));

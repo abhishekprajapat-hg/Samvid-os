@@ -13,6 +13,7 @@ import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { useAuth } from "../../context/AuthContext";
 import type { InventoryActivity, InventoryAsset } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const STATUS_OPTIONS = ["Available", "Blocked", "Sold"];
 const STATUS_MODAL_OPTIONS = new Set(["Available", "Blocked", "Sold"]);
@@ -672,7 +673,7 @@ export const InventoryDetailsScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#161c24" size="large" />
+        <ActivityIndicator color={themeColor("#161c24")} size="large" />
       </View>
     );
   }
@@ -696,15 +697,15 @@ export const InventoryDetailsScreen = () => {
           <View style={styles.detailActions}>
             {canEditAsset ? (
               <Pressable style={styles.detailIconBtn} onPress={handleEditAsset}>
-                <Icon name="create-outline" size={15} color="#6c7789" />
+                <Icon name="create-outline" size={15} color={themeColor("#6c7789")} />
               </Pressable>
             ) : null}
             <Pressable style={styles.detailIconBtn} onPress={() => void handleShareAsset()}>
-              <Icon name="share-social-outline" size={15} color="#1f6499" />
+              <Icon name="share-social-outline" size={15} color={themeColor("#1f6499")} />
             </Pressable>
             {isAdmin ? (
               <Pressable style={[styles.detailIconBtn, styles.detailIconDanger]} onPress={() => void handleDeleteAsset()}>
-                <Icon name="trash-outline" size={15} color="#d64545" />
+                <Icon name="trash-outline" size={15} color={themeColor("#d64545")} />
               </Pressable>
             ) : null}
           </View>
@@ -914,7 +915,7 @@ export const InventoryDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("remainingDueDate")}>
-                    <Icon name="calendar-outline" size={14} color="#39424f" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick due date</Text>
                   </Pressable>
                 </View>
@@ -928,7 +929,7 @@ export const InventoryDetailsScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Icon name="calendar-outline" size={14} color="#39424f" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -950,7 +951,7 @@ export const InventoryDetailsScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Icon name="calendar-outline" size={14} color="#39424f" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -966,7 +967,7 @@ export const InventoryDetailsScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("chequeDate")}>
-                        <Icon name="calendar-outline" size={14} color="#39424f" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
                       </Pressable>
                     </View>
@@ -1012,7 +1013,7 @@ export const InventoryDetailsScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Icon name="calendar-outline" size={14} color="#39424f" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -1041,7 +1042,7 @@ export const InventoryDetailsScreen = () => {
                       onPress={() => setStatusAttachment(null)}
                       disabled={saving}
                     >
-                      <Icon name="close" size={16} color="#741f1f" />
+                      <Icon name="close" size={16} color={themeColor("#741f1f")} />
                     </Pressable>
                   ) : null}
                 </View>
@@ -1189,14 +1190,14 @@ export const InventoryDetailsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f5f7fa", padding: 12 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f5f7fa" },
+const styles = themedStyles((c) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg, padding: 12 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: c.bg },
   card: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
     marginBottom: 10,
   },
@@ -1206,7 +1207,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10,
   },
-  name: { flex: 1, fontSize: 18, fontWeight: "700", color: "#161c24" },
+  name: { flex: 1, fontSize: 18, fontWeight: "700", color: c.text },
   detailActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -1217,23 +1218,23 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: "#e0e5ed",
-    backgroundColor: "#ffffff",
+    borderColor: c.border,
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   detailIconDanger: {
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
   },
-  section: { marginBottom: 8, color: "#39424f", fontWeight: "700" },
-  meta: { marginTop: 4, fontSize: 12, color: "#6c7789" },
-  reasonMeta: { marginTop: 5, fontSize: 12, color: "#7d5605", fontWeight: "600" },
+  section: { marginBottom: 8, color: c.slate[700], fontWeight: "700" },
+  meta: { marginTop: 4, fontSize: 12, color: c.textMuted },
+  reasonMeta: { marginTop: 5, fontSize: 12, color: c.amber[700], fontWeight: "600" },
   rowWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sectionInline: {
     marginTop: 10,
     fontSize: 12,
     fontWeight: "700",
-    color: "#39424f",
+    color: c.slate[700],
   },
   amenityWrap: {
     marginTop: 6,
@@ -1243,14 +1244,14 @@ const styles = StyleSheet.create({
   },
   amenityChip: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   amenityText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -1262,51 +1263,51 @@ const styles = StyleSheet.create({
     width: 120,
     height: 90,
     borderRadius: 8,
-    backgroundColor: "#e0e5ed",
+    backgroundColor: c.border,
   },
   docLink: {
     marginTop: 6,
     borderWidth: 1,
-    borderColor: "#bcd0ff",
+    borderColor: c.blue[200],
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: "#eef3ff",
+    backgroundColor: c.blue[50],
   },
   docLinkText: {
-    color: "#1c37ab",
+    color: c.accentStrong,
     fontWeight: "600",
     fontSize: 12,
   },
   chip: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
-  chipActive: { borderColor: "#161c24", backgroundColor: "#161c24" },
-  chipText: { color: "#39424f", fontSize: 12 },
-  chipTextActive: { color: "#fff" },
+  chipActive: { borderColor: c.text, backgroundColor: c.text },
+  chipText: { color: c.slate[700], fontSize: 12 },
+  chipTextActive: { color: c.surface },
   activityCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
   },
   actionText: {
     fontSize: 13,
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "600",
   },
   reasonModalCard: {
     width: "100%",
     maxHeight: "88%",
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 14,
   },
   reasonModalContent: {
@@ -1315,26 +1316,26 @@ const styles = StyleSheet.create({
   reasonInput: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     minHeight: 92,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     textAlignVertical: "top",
   },
   selectInput: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     minHeight: 40,
     paddingHorizontal: 12,
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     marginTop: 10,
   },
   selectInputText: {
-    color: "#161c24",
+    color: c.text,
     fontSize: 13,
     fontWeight: "600",
   },
@@ -1346,9 +1347,9 @@ const styles = StyleSheet.create({
   dateFieldBtn: {
     height: 30,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
@@ -1356,16 +1357,16 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   dateFieldBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   selectMenu: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     maxHeight: 180,
     overflow: "hidden",
   },
@@ -1376,10 +1377,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#edf0f5",
+    borderBottomColor: c.surfaceMuted,
   },
   selectMenuItemText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -1392,16 +1393,16 @@ const styles = StyleSheet.create({
   },
   statusAttachBtn: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 34,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   statusAttachBtnText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -1409,15 +1410,15 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fdedec",
+    backgroundColor: c.errorBg,
     alignItems: "center",
     justifyContent: "center",
   },
   uploadStatusText: {
     marginBottom: 10,
-    color: "#6c7789",
+    color: c.textMuted,
     fontSize: 12,
   },
   modalActionRow: {
@@ -1436,21 +1437,21 @@ const styles = StyleSheet.create({
   },
   modalActionGhost: {
     borderWidth: 1,
-    borderColor: "#c8d0dd",
-    backgroundColor: "#fff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
   },
   modalActionPrimary: {
     borderWidth: 1,
-    borderColor: "#161c24",
-    backgroundColor: "#161c24",
+    borderColor: c.text,
+    backgroundColor: c.text,
   },
   modalActionGhostText: {
-    color: "#39424f",
+    color: c.slate[700],
     fontWeight: "600",
     fontSize: 12,
   },
   modalActionPrimaryText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
@@ -1462,7 +1463,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   timelineToggleText: {
-    color: "#1c37ab",
+    color: c.accentStrong,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -1482,14 +1483,14 @@ const styles = StyleSheet.create({
     right: 16,
     zIndex: 2,
     borderRadius: 10,
-    backgroundColor: "#161c24",
+    backgroundColor: c.text,
     borderWidth: 1,
-    borderColor: "#39424f",
+    borderColor: c.slate[700],
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   viewerCloseText: {
-    color: "#ffffff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
@@ -1513,7 +1514,7 @@ const styles = StyleSheet.create({
   viewerCounter: {
     position: "absolute",
     bottom: 24,
-    color: "#e0e5ed",
+    color: c.border,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -1525,9 +1526,9 @@ const styles = StyleSheet.create({
   },
   webDateModalCard: {
     borderWidth: 1,
-    borderColor: "#e0e5ed",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 14,
   },
   webDateInput: {
@@ -1535,30 +1536,30 @@ const styles = StyleSheet.create({
     width: "100%",
     minHeight: 40,
     borderWidth: 1,
-    borderColor: "#c8d0dd",
+    borderColor: c.borderStrong,
     borderRadius: 9,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
-    color: "#161c24",
-    backgroundColor: "#fff",
+    color: c.text,
+    backgroundColor: c.surface,
   },
   error: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#f6b8b5",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fdedec",
-    color: "#942626",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#6ecdaa",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#e8f7f0",
-    color: "#084f36",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
-});
+}));

@@ -11,6 +11,7 @@ import {
   type LeadFilterState,
   type QuickFilterKey,
 } from "../leadFilters";
+import { themedStyles, themePalette } from "../../../theme/themedStyles";
 
 /*
  * The mobile counterpart of LeadFiltersFlyout.jsx. Web slides a panel in from
@@ -181,12 +182,12 @@ export const LeadFiltersSheet = ({
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   section: { marginBottom: spacing.lg },
   sectionTitle: {
     fontSize: typography.caption,
     fontWeight: "700",
-    color: palette.slate[500],
+    color: themePalette.slate[500],
     letterSpacing: 0.8,
     textTransform: "uppercase",
     marginBottom: spacing.md,
@@ -197,4 +198,4 @@ const styles = StyleSheet.create({
   dateField: { flex: 1 },
   actions: { flexDirection: "row", gap: spacing.md },
   action: { flex: 1 },
-});
+}));
