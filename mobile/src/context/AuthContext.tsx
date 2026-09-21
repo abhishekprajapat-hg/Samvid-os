@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import { AppState } from "react-native";
 import { getCurrentUser, loginUser } from "../services/authService";
 import { setUnauthorizedHandler } from "../services/api";
+import { removeNotificationRegistration } from "../services/pushNotifications";
 import { sessionStorage } from "../storage/sessionStorage";
 import type { User, UserRole } from "../types";
 import { getSessionTimeoutMs, readSystemSettings } from "../utils/systemSettings";
@@ -160,6 +161,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const logout = async () => {
+    /*
+     * Deregister the device first. A shared phone that a second person signs in
+     * on would otherwise keep delivering the first person's alerts, which is the
+     * same reason the server keys subscriptions on the device rather than the
+     * user. Best-effort: a failure here must not block signing out.
+     */
+    await removeNotificationRegistration().catch(() => {});
     await sessionStorage.clearSession();
     setToken(null);
     setUser(null);

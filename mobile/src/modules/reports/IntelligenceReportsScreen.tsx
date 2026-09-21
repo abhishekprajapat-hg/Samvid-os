@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppChip } from "../../components/common/ui";
@@ -298,7 +298,7 @@ export const IntelligenceReportsScreen = () => {
           />
           <View style={{ flex: 1 }} />
           <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-            <Ionicons name="calendar-outline" size={14} color="#334155" />
+            <Icon name="calendar-outline" size={14} color="#39424f" />
           </Pressable>
           <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} disabled={refreshing} />
           <Pressable style={styles.exportBtn} onPress={shareReport}>
@@ -455,7 +455,7 @@ export const IntelligenceReportsScreen = () => {
 const styles = StyleSheet.create({
   sectionCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 12,
@@ -469,7 +469,7 @@ const styles = StyleSheet.create({
   },
   calendarIconBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 9,
     backgroundColor: "#fff",
     height: 36,
@@ -479,7 +479,7 @@ const styles = StyleSheet.create({
   },
   periodText: {
     marginTop: 8,
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 11,
     fontWeight: "600",
   },
@@ -491,26 +491,26 @@ const styles = StyleSheet.create({
   customDateBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     padding: 10,
   },
   customDateText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "600",
   },
   exportBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 6,
     backgroundColor: "#fff",
   },
   exportText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -527,21 +527,21 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     padding: 14,
   },
   modalTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 14,
     fontWeight: "700",
     marginBottom: 10,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
-    color: "#0f172a",
+    color: "#161c24",
     height: 44,
     paddingHorizontal: 12,
     marginBottom: 8,
@@ -549,7 +549,7 @@ const styles = StyleSheet.create({
   },
   webInputWrap: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     height: 44,
@@ -560,7 +560,7 @@ const styles = StyleSheet.create({
   webDateInput: {
     height: 30,
     fontSize: 13,
-    color: "#0f172a",
+    color: "#161c24",
     backgroundColor: "transparent",
     borderWidth: 0,
     padding: 0,
@@ -573,7 +573,7 @@ const styles = StyleSheet.create({
   },
   modalCancelBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     minWidth: 90,
     height: 38,
@@ -583,20 +583,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   modalCancelText: {
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "600",
     fontSize: 12,
   },
   modalApplyBtn: {
     borderWidth: 1,
-    borderColor: "#0f172a",
+    borderColor: "#161c24",
     borderRadius: 10,
     minWidth: 90,
     height: 38,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
   },
   modalApplyText: {
     color: "#fff",
@@ -605,7 +605,7 @@ const styles = StyleSheet.create({
   },
   card: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 12,
@@ -614,23 +614,23 @@ const styles = StyleSheet.create({
   label: {
     textTransform: "uppercase",
     fontSize: 12,
-    color: "#64748b",
+    color: "#6c7789",
   },
   value: {
     marginTop: 8,
     fontSize: 22,
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
   },
   section: {
     marginTop: 12,
     marginBottom: 8,
     fontWeight: "700",
-    color: "#334155",
+    color: "#39424f",
   },
   rowCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
     backgroundColor: "#fff",
     padding: 10,
@@ -642,27 +642,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   rowTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "600",
   },
   rowMeta: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
   },
   barTrack: {
     marginTop: 8,
     height: 8,
     borderRadius: 6,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#e0e5ed",
     overflow: "hidden",
   },
   barFill: {
     height: "100%",
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
   },
   empty: {
     textAlign: "center",
-    color: "#64748b",
+    color: "#6c7789",
     marginVertical: 10,
   },
 });

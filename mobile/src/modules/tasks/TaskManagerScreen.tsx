@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
@@ -31,16 +31,16 @@ import { getUsers } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
 
 const STATUS_OPTIONS = [
-  { id: "BACKLOG", label: "Backlog", color: "#64748b", bg: "#f1f5f9", border: "#cbd5e1" },
-  { id: "TODO", label: "To Do", color: "#0284c7", bg: "#e0f2fe", border: "#bae6fd" },
-  { id: "IN_PROGRESS", label: "In Progress", color: "#d97706", bg: "#fef3c7", border: "#fde68a" },
-  { id: "COMPLETED", label: "Completed", color: "#059669", bg: "#d1fae5", border: "#a7f3d0" },
+  { id: "BACKLOG", label: "Backlog", color: "#6c7789", bg: "#edf0f5", border: "#c8d0dd" },
+  { id: "TODO", label: "To Do", color: "#1f6499", bg: "#d2e9f7", border: "#a8d3ef" },
+  { id: "IN_PROGRESS", label: "In Progress", color: "#a26f06", bg: "#fbe9c4", border: "#f6d68c" },
+  { id: "COMPLETED", label: "Completed", color: "#0d8055", bg: "#cdeee0", border: "#a3e0c9" },
 ];
 
 const PRIORITY_OPTIONS = [
-  { id: "LOW", label: "Low", color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe" },
-  { id: "MEDIUM", label: "Medium", color: "#d97706", bg: "#fef3c7", border: "#fde68a" },
-  { id: "HIGH", label: "High", color: "#b91c1c", bg: "#fef2f2", border: "#fecaca" },
+  { id: "LOW", label: "Low", color: "#2549d6", bg: "#eef3ff", border: "#bcd0ff" },
+  { id: "MEDIUM", label: "Medium", color: "#a26f06", bg: "#fbe9c4", border: "#f6d68c" },
+  { id: "HIGH", label: "High", color: "#942626", bg: "#fdedec", border: "#f6b8b5" },
 ];
 
 const PREDEFINED_TAGS = ["Call", "Meeting", "Document", "Site Visit", "Urgent", "Follow-up"];
@@ -513,31 +513,31 @@ export const TaskManagerScreen = () => {
             {/* Quick Stats Grid */}
             <View style={styles.statsGrid}>
               <View style={styles.statsCard}>
-                <Ionicons name="list" size={16} color="#64748b" />
+                <Icon name="list" size={16} color="#6c7789" />
                 <Text style={styles.statsLabel}>Total</Text>
                 <Text style={styles.statsValue}>{stats.total}</Text>
               </View>
-              <View style={[styles.statsCard, { borderColor: "#fde68a" }]}>
-                <Ionicons name="time-outline" size={16} color="#d97706" />
+              <View style={[styles.statsCard, { borderColor: "#f6d68c" }]}>
+                <Icon name="time-outline" size={16} color="#a26f06" />
                 <Text style={styles.statsLabel}>Pending</Text>
-                <Text style={[styles.statsValue, { color: "#d97706" }]}>{stats.pending}</Text>
+                <Text style={[styles.statsValue, { color: "#a26f06" }]}>{stats.pending}</Text>
               </View>
-              <View style={[styles.statsCard, { borderColor: "#a7f3d0" }]}>
-                <Ionicons name="checkmark-circle-outline" size={16} color="#059669" />
+              <View style={[styles.statsCard, { borderColor: "#a3e0c9" }]}>
+                <Icon name="checkmark-circle-outline" size={16} color="#0d8055" />
                 <Text style={styles.statsLabel}>Done</Text>
-                <Text style={[styles.statsValue, { color: "#059669" }]}>{stats.COMPLETED}</Text>
+                <Text style={[styles.statsValue, { color: "#0d8055" }]}>{stats.COMPLETED}</Text>
               </View>
-              <View style={[styles.statsCard, { borderColor: "#fecaca" }]}>
-                <Ionicons name="alert-circle-outline" size={16} color="#b91c1c" />
+              <View style={[styles.statsCard, { borderColor: "#f6b8b5" }]}>
+                <Icon name="alert-circle-outline" size={16} color="#942626" />
                 <Text style={styles.statsLabel}>Overdue</Text>
-                <Text style={[styles.statsValue, { color: "#b91c1c" }]}>{stats.overdue}</Text>
+                <Text style={[styles.statsValue, { color: "#942626" }]}>{stats.overdue}</Text>
               </View>
             </View>
 
             {/* Controls Bar */}
             <View style={styles.toolbar}>
               <View style={styles.searchRow}>
-                <Ionicons name="search" size={16} color="#64748b" style={styles.searchIcon} />
+                <Icon name="search" size={16} color="#6c7789" style={styles.searchIcon} />
                 <AppInput
                   style={styles.searchInput as object}
                   placeholder="Search title, description..."
@@ -555,7 +555,7 @@ export const TaskManagerScreen = () => {
                       void loadData(true);
                     }}
                   >
-                    <Ionicons name="close-circle" size={16} color="#64748b" />
+                    <Icon name="close-circle" size={16} color="#6c7789" />
                   </Pressable>
                 ) : null}
               </View>
@@ -690,10 +690,10 @@ export const TaskManagerScreen = () => {
                 onPress={() => toggleGroup(item.key)}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Ionicons
+                  <Icon
                     name={isCollapsed ? "chevron-forward" : "chevron-down"}
                     size={16}
-                    color={colorStyles ? colorStyles.color : "#64748b"}
+                    color={colorStyles ? colorStyles.color : "#6c7789"}
                   />
                   <Text
                     style={[
@@ -707,7 +707,7 @@ export const TaskManagerScreen = () => {
                     style={[
                       styles.groupBadge,
                       {
-                        backgroundColor: colorStyles ? colorStyles.color : "#64748b",
+                        backgroundColor: colorStyles ? colorStyles.color : "#6c7789",
                       },
                     ]}
                   >
@@ -730,7 +730,7 @@ export const TaskManagerScreen = () => {
                             style={[styles.checkbox, isCompleted && styles.checkboxCompleted]}
                             onPress={() => void handleToggleTaskStatus(task)}
                           >
-                            {isCompleted && <Ionicons name="checkmark" size={14} color="#fff" />}
+                            {isCompleted && <Icon name="checkmark" size={14} color="#fff" />}
                           </Pressable>
 
                           <Pressable style={{ flex: 1 }} onPress={() => openEditModal(task)}>
@@ -764,13 +764,13 @@ export const TaskManagerScreen = () => {
                                 <View
                                   style={[
                                     styles.badge,
-                                    dueInfo.overdue && { backgroundColor: "#fef2f2", borderColor: "#fecaca" },
+                                    dueInfo.overdue && { backgroundColor: "#fdedec", borderColor: "#f6b8b5" },
                                   ]}
                                 >
                                   <Text
                                     style={[
                                       styles.badgeText,
-                                      { color: dueInfo.overdue ? "#b91c1c" : "#64748b" },
+                                      { color: dueInfo.overdue ? "#942626" : "#6c7789" },
                                       dueInfo.overdue && { fontWeight: "700" },
                                     ]}
                                   >
@@ -790,8 +790,8 @@ export const TaskManagerScreen = () => {
 
                               {/* Lead Link */}
                               {!isProductionTaskRole && task.leadId ? (
-                                <View style={[styles.badge, { backgroundColor: "#f0fdf4", borderColor: "#bbf7d0" }]}>
-                                  <Text style={[styles.badgeText, { color: "#15803d" }]}>
+                                <View style={[styles.badge, { backgroundColor: "#e8f7f0", borderColor: "#a3e0c9" }]}>
+                                  <Text style={[styles.badgeText, { color: "#0a6544" }]}>
                                     Lead: {task.leadId && typeof task.leadId === "object" ? task.leadId.name : "Linked"}
                                   </Text>
                                 </View>
@@ -848,7 +848,7 @@ export const TaskManagerScreen = () => {
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalTitleText}>{editingTask ? "Update Task" : "Create Task"}</Text>
               <Pressable onPress={() => setIsModalOpen(false)}>
-                <Ionicons name="close" size={24} color="#0f172a" />
+                <Icon name="close" size={24} color="#161c24" />
               </Pressable>
             </View>
 
@@ -873,7 +873,7 @@ export const TaskManagerScreen = () => {
                 <Text style={styles.selectRowText}>
                   {STATUS_OPTIONS.find((s) => s.id === formData.status)?.label || formData.status}
                 </Text>
-                <Ionicons name="chevron-down" size={16} color="#64748b" />
+                <Icon name="chevron-down" size={16} color="#6c7789" />
               </Pressable>
               {statusDropdownOpen && (
                 <View style={styles.dropdownCard}>
@@ -898,7 +898,7 @@ export const TaskManagerScreen = () => {
                 <Text style={styles.selectRowText}>
                   {PRIORITY_OPTIONS.find((p) => p.id === formData.priority)?.label || formData.priority}
                 </Text>
-                <Ionicons name="chevron-down" size={16} color="#64748b" />
+                <Icon name="chevron-down" size={16} color="#6c7789" />
               </Pressable>
               {priorityDropdownOpen && (
                 <View style={styles.dropdownCard}>
@@ -921,14 +921,14 @@ export const TaskManagerScreen = () => {
               <Text style={styles.formLabel}>Due Date</Text>
               <Pressable style={styles.selectRowField} onPress={triggerDatePicker}>
                 <Text style={styles.selectRowText}>{formData.dueDate || "Select due date (Optional)"}</Text>
-                <Ionicons name="calendar-outline" size={16} color="#64748b" />
+                <Icon name="calendar-outline" size={16} color="#6c7789" />
               </Pressable>
 
               {/* Assignee Selector */}
               <Text style={styles.formLabel}>Assignee</Text>
               <Pressable style={styles.selectRowField} onPress={() => setAssigneeDropdownOpen(!assigneeDropdownOpen)}>
                 <Text style={styles.selectRowText}>{currentAssigneeName}</Text>
-                <Ionicons name="person-outline" size={16} color="#64748b" />
+                <Icon name="person-outline" size={16} color="#6c7789" />
               </Pressable>
               {assigneeDropdownOpen && (
                 <View style={styles.dropdownCard}>
@@ -962,7 +962,7 @@ export const TaskManagerScreen = () => {
                   <Text style={styles.formLabel}>Associated Lead</Text>
                   <Pressable style={styles.selectRowField} onPress={() => setLeadDropdownOpen(!leadDropdownOpen)}>
                     <Text style={styles.selectRowText}>{currentLeadName}</Text>
-                    <Ionicons name="people-outline" size={16} color="#64748b" />
+                    <Icon name="people-outline" size={16} color="#6c7789" />
                   </Pressable>
                   {leadDropdownOpen && (
                     <View style={styles.dropdownCard}>
@@ -1027,7 +1027,7 @@ export const TaskManagerScreen = () => {
                     <View key={`selected-${t}-${idx}`} style={styles.tagBadge}>
                       <Text style={styles.tagBadgeText}>#{t}</Text>
                       <Pressable style={{ marginLeft: 4 }} onPress={() => toggleTagSelection(t)}>
-                        <Ionicons name="close-circle" size={12} color="#64748b" />
+                        <Icon name="close-circle" size={12} color="#6c7789" />
                       </Pressable>
                     </View>
                   ))}
@@ -1053,13 +1053,13 @@ export const TaskManagerScreen = () => {
                       style={[styles.checkbox, sub.isCompleted && styles.checkboxCompleted]}
                       onPress={() => toggleSubtaskInForm(idx)}
                     >
-                      {sub.isCompleted && <Ionicons name="checkmark" size={12} color="#fff" />}
+                      {sub.isCompleted && <Icon name="checkmark" size={12} color="#fff" />}
                     </Pressable>
                     <Text style={[styles.subtaskTitle, sub.isCompleted && styles.subtaskTitleCompleted]}>
                       {sub.title}
                     </Text>
                     <Pressable style={styles.deleteSubtaskBtn} onPress={() => deleteSubtask(idx)}>
-                      <Ionicons name="trash-outline" size={14} color="#b91c1c" />
+                      <Icon name="trash-outline" size={14} color="#942626" />
                     </Pressable>
                   </View>
                 ))}
@@ -1360,9 +1360,9 @@ const styles = StyleSheet.create({
   tagBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#e0f2fe",
+    backgroundColor: "#d2e9f7",
     borderWidth: 1,
-    borderColor: "#bae6fd",
+    borderColor: "#a8d3ef",
     borderRadius: 4,
     paddingHorizontal: 4,
     paddingVertical: 1,
@@ -1370,7 +1370,7 @@ const styles = StyleSheet.create({
   tagBadgeText: {
     fontSize: 9,
     fontWeight: "600",
-    color: "#0369a1",
+    color: "#184f79",
   },
   subtaskProgressBarContainer: {
     marginTop: 6,

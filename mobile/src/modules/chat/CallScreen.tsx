@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { Audio } from "expo-av";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { createChatSocket } from "../../services/chatSocket";
 import { updateCallLog } from "../../services/chatService";
@@ -552,7 +552,7 @@ export const CallScreen = () => {
         ) : (
           <View style={styles.placeholder}>
             {loading ? <ActivityIndicator color="#ffffff" /> : null}
-            <Ionicons name={callType === "VIDEO" ? "videocam" : "call"} size={42} color="#cbd5e1" />
+            <Icon name={callType === "VIDEO" ? "videocam" : "call"} size={42} color="#c8d0dd" />
             <Text style={styles.placeholderText}>{connected ? "Connected" : "Waiting for peer..."}</Text>
           </View>
         )}
@@ -569,30 +569,30 @@ export const CallScreen = () => {
 
       <View style={styles.actions}>
         <Pressable style={styles.actionBtn} onPress={toggleMic}>
-          <Ionicons name={micMuted ? "mic-off" : "mic"} size={20} color="#0f172a" />
+          <Icon name={micMuted ? "mic-off" : "mic"} size={20} color="#161c24" />
           <Text style={styles.actionText}>{micMuted ? "Unmute" : "Mute"}</Text>
         </Pressable>
 
         {callType === "VIDEO" ? (
           <>
             <Pressable style={styles.actionBtn} onPress={toggleCamera}>
-              <Ionicons name={cameraMuted ? "videocam-off" : "videocam"} size={20} color="#0f172a" />
+              <Icon name={cameraMuted ? "videocam-off" : "videocam"} size={20} color="#161c24" />
               <Text style={styles.actionText}>{cameraMuted ? "Camera On" : "Camera Off"}</Text>
             </Pressable>
             <Pressable style={styles.actionBtn} onPress={switchCamera}>
-              <Ionicons name="camera-reverse-outline" size={20} color="#0f172a" />
+              <Icon name="camera-reverse-outline" size={20} color="#161c24" />
               <Text style={styles.actionText}>Switch</Text>
             </Pressable>
           </>
         ) : (
           <Pressable style={[styles.actionBtn, speakerOn && styles.actionBtnActive]} onPress={toggleSpeaker}>
-            <Ionicons name={speakerOn ? "volume-high" : "volume-medium"} size={20} color={speakerOn ? "#ffffff" : "#0f172a"} />
+            <Icon name={speakerOn ? "volume-high" : "volume-medium"} size={20} color={speakerOn ? "#ffffff" : "#161c24"} />
             <Text style={[styles.actionText, speakerOn && styles.actionTextActive]}>{speakerOn ? "Speaker On" : "Speaker Off"}</Text>
           </Pressable>
         )}
 
         <Pressable style={[styles.actionBtn, styles.endBtn]} onPress={() => endCall("ENDED")}>
-          <Ionicons name="call" size={20} color="#ffffff" />
+          <Icon name="call" size={20} color="#ffffff" />
           <Text style={styles.endText}>End</Text>
         </Pressable>
       </View>
@@ -601,24 +601,24 @@ export const CallScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0f172a" },
+  root: { flex: 1, backgroundColor: "#161c24" },
   header: { alignItems: "center", paddingHorizontal: 16, paddingTop: 10, paddingBottom: 8 },
   title: { color: "#ffffff", fontSize: 18, fontWeight: "700" },
-  peer: { marginTop: 4, color: "#e2e8f0", fontSize: 14, fontWeight: "600" },
-  sub: { marginTop: 2, color: "#94a3b8", fontSize: 12 },
+  peer: { marginTop: 4, color: "#e0e5ed", fontSize: 14, fontWeight: "600" },
+  sub: { marginTop: 2, color: "#98a3b5", fontSize: 12 },
   error: {
     marginHorizontal: 12,
     marginBottom: 6,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    borderColor: "#f6b8b5",
+    backgroundColor: "#fdedec",
+    color: "#942626",
     paddingHorizontal: 10,
     paddingVertical: 8,
     textAlign: "center",
   },
-  stage: { flex: 1, margin: 12, borderRadius: 14, overflow: "hidden", backgroundColor: "#020617" },
+  stage: { flex: 1, margin: 12, borderRadius: 14, overflow: "hidden", backgroundColor: "#0d1219" },
   remoteVideo: { flex: 1, backgroundColor: "#000" },
   localVideo: {
     position: "absolute",
@@ -629,11 +629,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.45)",
-    backgroundColor: "#111827",
+    backgroundColor: "#161c24",
     zIndex: 5,
   },
   placeholder: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
-  placeholderText: { color: "#94a3b8", fontSize: 12 },
+  placeholderText: { color: "#98a3b5", fontSize: 12 },
   actions: {
     paddingHorizontal: 12,
     paddingVertical: 12,
@@ -646,7 +646,7 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: "#39424f",
     backgroundColor: "#ffffff",
     alignItems: "center",
     justifyContent: "center",
@@ -654,14 +654,14 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
   },
-  actionText: { color: "#0f172a", fontSize: 12, fontWeight: "700" },
+  actionText: { color: "#161c24", fontSize: 12, fontWeight: "700" },
   actionBtnActive: {
-    backgroundColor: "#0f172a",
-    borderColor: "#0f172a",
+    backgroundColor: "#161c24",
+    borderColor: "#161c24",
   },
   actionTextActive: {
     color: "#ffffff",
   },
-  endBtn: { backgroundColor: "#ef4444", borderColor: "#ef4444" },
+  endBtn: { backgroundColor: "#d64545", borderColor: "#d64545" },
   endText: { color: "#ffffff", fontSize: 12, fontWeight: "700" },
 });

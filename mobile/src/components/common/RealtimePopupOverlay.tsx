@@ -1,6 +1,6 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../ui/Icon";
 import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
 
 const iconForKind = (kind: "CHAT" | "CALL" | "NOTIFICATION") => {
@@ -19,7 +19,7 @@ export const RealtimePopupOverlay = () => {
       {popupItems.map((item) => (
         <View key={item.id} style={styles.card}>
           <View style={styles.iconWrap}>
-            <Ionicons name={iconForKind(item.kind)} size={14} color="#0f172a" />
+            <Icon name={iconForKind(item.kind)} size={14} color="#161c24" />
           </View>
           <View style={styles.body}>
             <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
@@ -40,7 +40,7 @@ export const RealtimePopupOverlay = () => {
             onPress={() => (item.kind === "CALL" ? rejectCallPopup(item.id) : dismissPopup(item.id))}
             hitSlop={8}
           >
-            <Ionicons name="close" size={14} color="#475569" />
+            <Icon name="close" size={14} color="#4e5867" />
           </Pressable>
         </View>
       ))}
@@ -62,12 +62,12 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 12,
     paddingHorizontal: 10,
     paddingVertical: 8,
     backgroundColor: "#ffffff",
-    shadowColor: "#0f172a",
+    shadowColor: "#161c24",
     shadowOpacity: 0.08,
     shadowOffset: { width: 0, height: 3 },
     shadowRadius: 8,
@@ -80,7 +80,7 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#e0e5ed",
   },
   body: {
     flex: 1,
@@ -88,12 +88,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   title: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 13,
     fontWeight: "700",
   },
   message: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     lineHeight: 16,
   },
@@ -112,20 +112,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
   },
   callReject: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fff1f2",
+    borderColor: "#f6b8b5",
+    backgroundColor: "#fdedec",
   },
   callAccept: {
-    borderColor: "#86efac",
-    backgroundColor: "#dcfce7",
+    borderColor: "#6ecdaa",
+    backgroundColor: "#cdeee0",
   },
   callRejectText: {
-    color: "#b91c1c",
+    color: "#942626",
     fontSize: 11,
     fontWeight: "700",
   },
   callAcceptText: {
-    color: "#166534",
+    color: "#084f36",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -135,8 +135,8 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
   },
 });

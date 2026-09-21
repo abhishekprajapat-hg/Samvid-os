@@ -45,3 +45,6 @@ yarn-error.*
 dist-android/
 expo.log
 expo-modules-core-*.tgz
+
+# Emitted by `npm test` to run the pure-TS nav modules under plain Node.
+.test-build/

@@ -16,7 +16,7 @@ import {
   View,
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -29,6 +29,7 @@ import {
   addLeadRelatedProperty,
   assignLead,
   getAllLeads,
+  getLeadById,
   getLeadActivity,
   getLeadDiary,
   getLeadStatusRequests,
@@ -691,11 +692,27 @@ export const LeadDetailsScreen = () => {
       setLoading(true);
       setError("");
 
-      const leadRowsResult = await getAllLeads();
-      const [usersResult, inventoryRowsResult] = await Promise.allSettled([
-        canManage ? getUsers() : Promise.resolve({ users: [] }),
-        getInventoryAssets({ page: 1, limit: 200 }),
-      ]);
+      /*
+       * The lead itself comes from GET /leads/:id, not from filtering the full
+       * list. That endpoint scopes through findAccessibleLeadById and 404s a
+       * lead this user is not entitled to, so it is both the cheap answer and
+       * the correct one - fetching every lead to render one was a real cost on
+       * mobile data, and the "not found" path used to fall through to showing
+       * somebody else's record.
+       *
+       * The list is still fetched, but only to populate the sale-lead picker,
+       * and a failure there must not stop the lead from rendering.
+       */
+      const [leadResult, leadRowsResultSettled, usersResult, inventoryRowsResult] =
+        await Promise.allSettled([
+          getLeadById(leadId || fallbackRouteLeadId),
+          getAllLeads(),
+          canManage ? getUsers() : Promise.resolve({ users: [] }),
+          getInventoryAssets({ page: 1, limit: 200 }),
+        ]);
+
+      const leadRowsResult =
+        leadRowsResultSettled.status === "fulfilled" ? leadRowsResultSettled.value : [];
       let resolvedInventoryRows: any[] =
         inventoryRowsResult.status === "fulfilled" && Array.isArray(inventoryRowsResult.value)
           ? inventoryRowsResult.value
@@ -711,13 +728,21 @@ export const LeadDetailsScreen = () => {
       }
 
       const leadRows = Array.isArray(leadRowsResult) ? leadRowsResult : [];
-      let currentLead = leadRows.find((row) => String((row as any)?._id || "") === leadId) || null;
-      if (!currentLead && fallbackRouteLeadId) {
-        currentLead = leadRows.find((row) => String((row as any)?._id || "") === fallbackRouteLeadId) || null;
+
+      let currentLead =
+        leadResult.status === "fulfilled" && leadResult.value ? (leadResult.value as any) : null;
+
+      /*
+       * The route can carry the lead object itself (pushed from the pipeline
+       * list), which is a legitimate fallback if the fetch failed. The list is
+       * the last resort - and only ever matched by id.
+       */
+      if (!currentLead && initialRouteLead) currentLead = initialRouteLead;
+      if (!currentLead) {
+        const wanted = leadId || fallbackRouteLeadId;
+        currentLead = leadRows.find((row) => String((row as any)?._id || "") === wanted) || null;
       }
-      if (!currentLead && leadRows.length > 0) {
-        currentLead = leadRows[0];
-      }
+
       if (!currentLead) {
         setError("Lead not found");
         setLead(null);
@@ -1476,11 +1501,11 @@ export const LeadDetailsScreen = () => {
         <head>
           <meta charset="utf-8" />
           <style>
-            body { font-family: Arial, sans-serif; color: #0f172a; padding: 24px; line-height: 1.5; }
+            body { font-family: Arial, sans-serif; color: #161c24; padding: 24px; line-height: 1.5; }
             pre { white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 12px; }
             h1 { margin: 0 0 12px; font-size: 20px; }
             .imageGrid { margin-top: 16px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-            .imageGrid img { width: 100%; max-height: 220px; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 6px; }
+            .imageGrid img { width: 100%; max-height: 220px; object-fit: cover; border: 1px solid #e0e5ed; border-radius: 6px; }
           </style>
         </head>
         <body>
@@ -2471,7 +2496,7 @@ export const LeadDetailsScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#0f172a" size="large" />
+        <ActivityIndicator color="#161c24" size="large" />
       </View>
     );
   }
@@ -2543,19 +2568,19 @@ export const LeadDetailsScreen = () => {
 
         <View style={styles.quickActionRow}>
           <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openDialer(lead.phone)}>
-            <Ionicons name="call-outline" size={16} color="#0f172a" />
+            <Icon name="call-outline" size={16} color="#161c24" />
             <Text style={styles.quickActionText}>Call</Text>
           </Pressable>
           <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openWhatsApp(lead.phone)}>
-            <Ionicons name="logo-whatsapp" size={16} color="#16a34a" />
+            <Icon name="logo-whatsapp" size={16} color="#0d8055" />
             <Text style={styles.quickActionText}>WhatsApp</Text>
           </Pressable>
           <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openMail(lead.email)}>
-            <Ionicons name="mail-outline" size={16} color="#2563eb" />
+            <Icon name="mail-outline" size={16} color="#2549d6" />
             <Text style={styles.quickActionText}>Mail</Text>
           </Pressable>
           <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={openMaps}>
-            <Ionicons name="location-outline" size={16} color="#0ea5e9" />
+            <Icon name="location-outline" size={16} color="#2b7fbf" />
             <Text style={styles.quickActionText}>Maps</Text>
           </Pressable>
         </View>
@@ -2681,7 +2706,7 @@ export const LeadDetailsScreen = () => {
         </View>
 
         {requirementsDraft?.inventoryType === "COMMERCIAL" ? (
-          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#f8fafc" }}>
+          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, backgroundColor: "#f5f7fa" }}>
             <Text style={[styles.section, { fontSize: 13, marginBottom: 6 }]}>Commercial Preferences</Text>
             <View style={styles.twoColRow}>
               <View style={{ flex: 1 }}>
@@ -2721,10 +2746,10 @@ export const LeadDetailsScreen = () => {
                 style={[styles.checkboxItem, requirementsDraft?.commercial?.parkingAvailable && styles.checkboxItemActive]}
                 onPress={() => updateRequirementCommercialField("parkingAvailable", !requirementsDraft?.commercial?.parkingAvailable)}
               >
-                <Ionicons
+                <Icon
                   name={requirementsDraft?.commercial?.parkingAvailable ? "checkbox" : "square-outline"}
                   size={14}
-                  color={requirementsDraft?.commercial?.parkingAvailable ? "#10b981" : "#475569"}
+                  color={requirementsDraft?.commercial?.parkingAvailable ? "#12a06a" : "#4e5867"}
                 />
                 <Text style={styles.checkboxLabel}>Parking Available</Text>
               </Pressable>
@@ -2733,10 +2758,10 @@ export const LeadDetailsScreen = () => {
                 style={[styles.checkboxItem, requirementsDraft?.commercial?.pantry && styles.checkboxItemActive]}
                 onPress={() => updateRequirementCommercialField("pantry", !requirementsDraft?.commercial?.pantry)}
               >
-                <Ionicons
+                <Icon
                   name={requirementsDraft?.commercial?.pantry ? "checkbox" : "square-outline"}
                   size={14}
-                  color={requirementsDraft?.commercial?.pantry ? "#10b981" : "#475569"}
+                  color={requirementsDraft?.commercial?.pantry ? "#12a06a" : "#4e5867"}
                 />
                 <Text style={styles.checkboxLabel}>Pantry</Text>
               </Pressable>
@@ -2745,7 +2770,7 @@ export const LeadDetailsScreen = () => {
         ) : null}
 
         {requirementsDraft?.inventoryType === "RESIDENTIAL" ? (
-          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#f8fafc" }}>
+          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, backgroundColor: "#f5f7fa" }}>
             <Text style={[styles.section, { fontSize: 13, marginBottom: 6 }]}>Residential Preferences</Text>
             
             <Text style={styles.metricLabel}>BHK Type</Text>
@@ -2780,10 +2805,10 @@ export const LeadDetailsScreen = () => {
                     style={[styles.checkboxItem, checked && styles.checkboxItemActive]}
                     onPress={() => updateRequirementResidentialAmenity(field.key, !checked)}
                   >
-                    <Ionicons
+                    <Icon
                       name={checked ? "checkbox" : "square-outline"}
                       size={14}
-                      color={checked ? "#10b981" : "#475569"}
+                      color={checked ? "#12a06a" : "#4e5867"}
                     />
                     <Text style={styles.checkboxLabel}>{field.label}</Text>
                   </Pressable>
@@ -2817,7 +2842,7 @@ export const LeadDetailsScreen = () => {
                     onPress={() => onViewRelatedProperty(inventoryId)}
                     disabled={!inventoryId || propertyActionInventoryId === inventoryId}
                   >
-                    <Ionicons name="eye-outline" size={13} color="#334155" />
+                    <Icon name="eye-outline" size={13} color="#39424f" />
                     <Text style={styles.propertyActionText}>View</Text>
                   </Pressable>
                   <Pressable
@@ -2825,8 +2850,8 @@ export const LeadDetailsScreen = () => {
                     onPress={() => onRemoveRelatedProperty(inventoryId)}
                     disabled={!inventoryId || propertyActionInventoryId === inventoryId}
                   >
-                    <Ionicons name="trash-outline" size={13} color="#b91c1c" />
-                    <Text style={[styles.propertyActionText, { color: "#b91c1c" }]}>Remove</Text>
+                    <Icon name="trash-outline" size={13} color="#942626" />
+                    <Text style={[styles.propertyActionText, { color: "#942626" }]}>Remove</Text>
                   </Pressable>
                 </View>
               </View>
@@ -2857,7 +2882,7 @@ export const LeadDetailsScreen = () => {
                   )
                   : "Select property to link"}
               </Text>
-              <Ionicons name={linkDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#475569" />
+              <Icon name={linkDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#4e5867" />
             </Pressable>
             <Pressable style={styles.linkAddBtn} onPress={onLinkPropertyToLead} disabled={linkingProperty || !relatedInventoryDraft}>
               <Text style={styles.linkAddBtnText}>{linkingProperty ? "Adding..." : "+ Add"}</Text>
@@ -2923,7 +2948,7 @@ export const LeadDetailsScreen = () => {
               onPress={() => toggleProposalProperty(inventoryId)}
               style={[styles.propertyCheckboxRow, selected && styles.propertyCheckboxRowActive]}
             >
-              <Ionicons name={selected ? "checkbox-outline" : "square-outline"} size={16} color={selected ? "#0f766e" : "#64748b"} />
+              <Icon name={selected ? "checkbox-outline" : "square-outline"} size={16} color={selected ? "#0a6544" : "#6c7789"} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.propertyTitle}>{getInventoryLeadLabel(inventory) || "Property"}</Text>
                 <Text style={styles.meta}>{String(inventory?.status || "Available")} | {(Array.isArray(inventory?.images) ? inventory.images.length : 0)} image(s)</Text>
@@ -2982,25 +3007,25 @@ export const LeadDetailsScreen = () => {
         />
         <View style={styles.proposalActionGrid}>
           <Pressable style={styles.proposalBtn} onPress={copyProposalText}>
-            <Ionicons name="copy-outline" size={13} color="#334155" />
+            <Icon name="copy-outline" size={13} color="#39424f" />
             <Text style={styles.proposalBtnText}>Copy</Text>
           </Pressable>
           <Pressable style={[styles.proposalBtn, styles.proposalBtnPrimary]} onPress={downloadProposalPdf} disabled={proposalBusy}>
-            <Ionicons name="download-outline" size={13} color="#0f766e" />
+            <Icon name="download-outline" size={13} color="#0a6544" />
             <Text style={[styles.proposalBtnText, styles.proposalBtnPrimaryText]}>
               {proposalBusy ? "Generating..." : "PDF"}
             </Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalWhatsApp}>
-            <Ionicons name="logo-whatsapp" size={13} color="#16a34a" />
+            <Icon name="logo-whatsapp" size={13} color="#0d8055" />
             <Text style={styles.proposalBtnText}>WhatsApp</Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalEmail}>
-            <Ionicons name="mail-outline" size={13} color="#334155" />
+            <Icon name="mail-outline" size={13} color="#39424f" />
             <Text style={styles.proposalBtnText}>Email</Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalPdf} disabled={proposalBusy}>
-            <Ionicons name="paper-plane-outline" size={13} color="#334155" />
+            <Icon name="paper-plane-outline" size={13} color="#39424f" />
             <Text style={styles.proposalBtnText}>Share PDF</Text>
           </Pressable>
         </View>
@@ -3026,10 +3051,10 @@ export const LeadDetailsScreen = () => {
                 <Text style={styles.meta}>{doc.kind || "file"} | {Math.max(0, Number(doc.size || 0))} bytes</Text>
               </View>
               <Pressable style={styles.docIconBtn} onPress={() => Linking.openURL(String(doc.url || "")).catch(() => setError("Unable to open document"))}>
-                <Ionicons name="eye-outline" size={14} color="#334155" />
+                <Icon name="eye-outline" size={14} color="#39424f" />
               </Pressable>
               <Pressable style={styles.docIconBtn} onPress={() => removeClosureDocument(String(doc.url || ""))}>
-                <Ionicons name="trash-outline" size={14} color="#b91c1c" />
+                <Icon name="trash-outline" size={14} color="#942626" />
               </Pressable>
             </View>
           ))
@@ -3059,7 +3084,7 @@ export const LeadDetailsScreen = () => {
             placeholder="dd-mm-yyyy hh:mm"
           />
           <Pressable style={styles.followUpCalendarBtn} onPress={openFollowUpPicker}>
-            <Ionicons name="calendar-outline" size={16} color="#334155" />
+            <Icon name="calendar-outline" size={16} color="#39424f" />
           </Pressable>
         </View>
         {showFollowUpPicker && Platform.OS === "ios" ? (
@@ -3091,7 +3116,7 @@ export const LeadDetailsScreen = () => {
         <TextInput
           style={[styles.diaryInput, { height: 84 }]}
           placeholder="Add conversation notes, visit details, objections, or next steps..."
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor="#98a3b5"
           value={diaryNoteDraft}
           onChangeText={setDiaryNoteDraft}
           multiline
@@ -3103,13 +3128,13 @@ export const LeadDetailsScreen = () => {
           <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
           <View style={styles.diaryActionRow}>
             <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={saving || !isDiaryMicSupported}>
-              <Ionicons name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#94a3b8" : "#334155"} />
+              <Icon name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#98a3b5" : "#39424f"} />
               <Text style={[styles.voiceBtnText, (saving || !isDiaryMicSupported) && styles.voiceBtnTextDisabled]}>
                 {isDiaryListening ? "Stop" : "Voice"}
               </Text>
             </Pressable>
             <Pressable style={[styles.addNoteBtn, saving && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving}>
-              <Ionicons name="document-text-outline" size={14} color="#fff" />
+              <Icon name="document-text-outline" size={14} color="#fff" />
               <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
             </Pressable>
           </View>
@@ -3224,7 +3249,7 @@ export const LeadDetailsScreen = () => {
         <TextInput
           style={[styles.diaryInput, { height: 84 }]}
           placeholder="Add conversation notes, visit details, objections, or next step context..."
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor="#98a3b5"
           value={diaryNoteDraft}
           onChangeText={setDiaryNoteDraft}
           multiline
@@ -3236,13 +3261,13 @@ export const LeadDetailsScreen = () => {
           <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
           <View style={styles.diaryActionRow}>
             <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={saving || !isDiaryMicSupported}>
-              <Ionicons name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#94a3b8" : "#334155"} />
+              <Icon name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#98a3b5" : "#39424f"} />
               <Text style={[styles.voiceBtnText, (saving || !isDiaryMicSupported) && styles.voiceBtnTextDisabled]}>
                 {isDiaryListening ? "Stop" : "Voice"}
               </Text>
             </Pressable>
             <Pressable style={[styles.addNoteBtn, saving && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving}>
-              <Ionicons name="document-text-outline" size={14} color="#fff" />
+              <Icon name="document-text-outline" size={14} color="#fff" />
               <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
             </Pressable>
           </View>
@@ -3337,7 +3362,7 @@ export const LeadDetailsScreen = () => {
                   <Text style={styles.meta}>Reviewed at: {formatDateTime(request.reviewedAt)}</Text>
                 ) : null}
                 {request.rejectionReason ? (
-                  <Text style={[styles.meta, { color: "#b91c1c" }]}>Reject reason: {request.rejectionReason}</Text>
+                  <Text style={[styles.meta, { color: "#942626" }]}>Reject reason: {request.rejectionReason}</Text>
                 ) : null}
                 {request.attachment?.fileUrl ? (
                   <Pressable
@@ -3474,10 +3499,10 @@ export const LeadDetailsScreen = () => {
                   paddingHorizontal: 10,
                   borderRadius: 10,
                   borderWidth: 1,
-                  borderColor: "#cbd5e1",
+                  borderColor: "#c8d0dd",
                   fontSize: 12,
                   backgroundColor: "#fff",
-                  color: "#334155",
+                  color: "#39424f",
                   outlineStyle: "none"
                 } as any}
               />
@@ -3491,7 +3516,7 @@ export const LeadDetailsScreen = () => {
                   editable={false}
                 />
                 <Pressable style={styles.followUpCalendarBtn} onPress={openTaskDatePicker}>
-                  <Ionicons name="calendar-outline" size={16} color="#334155" />
+                  <Icon name="calendar-outline" size={16} color="#39424f" />
                 </Pressable>
               </>
             )}
@@ -3515,7 +3540,7 @@ export const LeadDetailsScreen = () => {
         {/* Tasks list */}
         <View style={{ marginTop: 14 }}>
           {loadingTasks ? (
-            <ActivityIndicator color="#0f172a" style={{ marginVertical: 12 }} />
+            <ActivityIndicator color="#161c24" style={{ marginVertical: 12 }} />
           ) : leadTasks.length === 0 ? (
             <Text style={styles.meta}>No tasks linked to this lead.</Text>
           ) : (
@@ -3543,7 +3568,7 @@ export const LeadDetailsScreen = () => {
                     onPress={() => handleToggleLeadTaskStatus(task)}
                   >
                     {isCompleted ? (
-                      <Ionicons name="checkmark" size={12} color="#fff" />
+                      <Icon name="checkmark" size={12} color="#fff" />
                     ) : null}
                   </Pressable>
 
@@ -3564,22 +3589,22 @@ export const LeadDetailsScreen = () => {
                           {
                             color:
                               task.priority === "HIGH"
-                                ? "#b91c1c"
+                                ? "#942626"
                                 : task.priority === "MEDIUM"
-                                ? "#d97706"
-                                : "#2563eb",
+                                ? "#a26f06"
+                                : "#2549d6",
                             backgroundColor:
                               task.priority === "HIGH"
-                                ? "#fef2f2"
+                                ? "#fdedec"
                                 : task.priority === "MEDIUM"
-                                ? "#fef3c7"
-                                : "#eff6ff",
+                                ? "#fbe9c4"
+                                : "#eef3ff",
                             borderColor:
                               task.priority === "HIGH"
-                                ? "#fecaca"
+                                ? "#f6b8b5"
                                 : task.priority === "MEDIUM"
-                                ? "#fde68a"
-                                : "#bfdbfe",
+                                ? "#f6d68c"
+                                : "#bcd0ff",
                           },
                         ]}
                       >
@@ -3591,9 +3616,9 @@ export const LeadDetailsScreen = () => {
                           style={[
                             styles.taskBadge,
                             {
-                              color: "#475569",
-                              backgroundColor: "#f1f5f9",
-                              borderColor: "#cbd5e1",
+                              color: "#4e5867",
+                              backgroundColor: "#edf0f5",
+                              borderColor: "#c8d0dd",
                             },
                           ]}
                         >
@@ -3606,9 +3631,9 @@ export const LeadDetailsScreen = () => {
                           style={[
                             styles.taskBadge,
                             {
-                              color: expired ? "#b91c1c" : "#475569",
-                              backgroundColor: expired ? "#fef2f2" : "#f1f5f9",
-                              borderColor: expired ? "#fecaca" : "#cbd5e1",
+                              color: expired ? "#942626" : "#4e5867",
+                              backgroundColor: expired ? "#fdedec" : "#edf0f5",
+                              borderColor: expired ? "#f6b8b5" : "#c8d0dd",
                               fontWeight: expired ? "700" : "600",
                             },
                           ]}
@@ -3624,7 +3649,7 @@ export const LeadDetailsScreen = () => {
                     style={styles.taskDeleteBtn}
                     onPress={() => handleDeleteLeadTask(task._id)}
                   >
-                    <Ionicons name="trash-outline" size={14} color="#b91c1c" />
+                    <Icon name="trash-outline" size={14} color="#942626" />
                   </Pressable>
                 </View>
               );
@@ -3737,7 +3762,7 @@ export const LeadDetailsScreen = () => {
             />
             <View style={styles.dateFieldActionRow}>
               <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("remainingDueDate")}>
-                <Ionicons name="calendar-outline" size={14} color="#334155" />
+                <Icon name="calendar-outline" size={14} color="#39424f" />
                 <Text style={styles.dateFieldBtnText}>Pick due date</Text>
               </Pressable>
             </View>
@@ -3752,7 +3777,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color="#39424f" />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3775,7 +3800,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color="#39424f" />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3792,7 +3817,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("chequeDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color="#39424f" />
                     <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
                   </Pressable>
                 </View>
@@ -3839,7 +3864,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color="#39424f" />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3869,7 +3894,7 @@ export const LeadDetailsScreen = () => {
                   onPress={() => setStatusRequestAttachment(null)}
                   disabled={saving}
                 >
-                  <Ionicons name="close" size={16} color="#991b1b" />
+                  <Icon name="close" size={16} color="#741f1f" />
                 </Pressable>
               ) : null}
             </View>
@@ -3916,9 +3941,9 @@ export const LeadDetailsScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f8fafc" },
+  root: { flex: 1, backgroundColor: "#f5f7fa" },
   content: { padding: 12, paddingBottom: 24 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f5f7fa" },
   commandCenterBar: {
     marginBottom: 10,
     borderRadius: 12,
@@ -3934,7 +3959,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   commandCenterTitle: {
-    color: "#f8fafc",
+    color: "#f5f7fa",
     fontSize: 16,
     fontWeight: "700",
   },
@@ -3950,7 +3975,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#bae6fd",
+    color: "#a8d3ef",
     fontSize: 10,
     textTransform: "uppercase",
     fontWeight: "700",
@@ -3966,7 +3991,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   profileLabel: {
-    color: "#0891b2",
+    color: "#1f6499",
     textTransform: "uppercase",
     letterSpacing: 1.1,
     fontSize: 10,
@@ -3983,7 +4008,7 @@ const styles = StyleSheet.create({
     minWidth: 54,
     height: 28,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     paddingHorizontal: 10,
     alignItems: "center",
@@ -3991,7 +4016,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   backBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -4006,26 +4031,26 @@ const styles = StyleSheet.create({
   },
   statusTag: {
     borderWidth: 1,
-    borderColor: "#67e8f9",
+    borderColor: "#79b9e3",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#0e7490",
+    color: "#184f79",
     fontSize: 10,
     fontWeight: "700",
-    backgroundColor: "#ecfeff",
+    backgroundColor: "#e9f4fb",
     overflow: "hidden",
   },
   idTag: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 10,
     fontWeight: "600",
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     overflow: "hidden",
   },
   summaryGrid: {
@@ -4038,14 +4063,14 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     minWidth: 140,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   summaryLabel: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -4053,18 +4078,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   summaryValue: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 12,
     fontWeight: "600",
   },
-  section: { marginBottom: 8, color: "#334155", fontWeight: "700" },
+  section: { marginBottom: 8, color: "#39424f", fontWeight: "700" },
   sectionRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   linkText: {
-    color: "#2563eb",
+    color: "#2549d6",
     fontSize: 12,
     fontWeight: "600",
     marginBottom: 8,
@@ -4076,11 +4101,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   linkTextCompact: {
-    color: "#2563eb",
+    color: "#2549d6",
     fontSize: 12,
     fontWeight: "600",
   },
-  meta: { marginTop: 4, fontSize: 12, color: "#64748b" },
+  meta: { marginTop: 4, fontSize: 12, color: "#6c7789" },
   statusWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", alignContent: "flex-start" },
   assignRow: { flexDirection: "row", gap: 8, alignItems: "center", paddingBottom: 2 },
   chip: {},
@@ -4099,7 +4124,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     alignItems: "center",
@@ -4113,7 +4138,7 @@ const styles = StyleSheet.create({
   dateFieldBtn: {
     height: 30,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     paddingHorizontal: 10,
@@ -4122,13 +4147,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   dateFieldBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "600",
   },
   selectInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     height: 42,
@@ -4137,13 +4162,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   selectInputText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 13,
   },
   selectMenu: {
     maxHeight: 170,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     marginBottom: 10,
@@ -4155,14 +4180,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
+    borderBottomColor: "#e0e5ed",
   },
   selectMenuItemText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 13,
   },
   emptySelectText: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
     padding: 12,
   },
@@ -4176,7 +4201,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     alignItems: "center",
@@ -4190,22 +4215,22 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#334155",
+    color: "#39424f",
   },
   propertyRow: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#ffffff",
     padding: 10,
     marginBottom: 8,
   },
   propertyRowActive: {
-    borderColor: "#86efac",
-    backgroundColor: "#f0fdf4",
+    borderColor: "#6ecdaa",
+    backgroundColor: "#e8f7f0",
   },
   propertyTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4222,7 +4247,7 @@ const styles = StyleSheet.create({
   propertyStatusDropdown: {
     height: 32,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     paddingHorizontal: 10,
@@ -4231,14 +4256,14 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   propertyStatusText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "600",
   },
   propertyStatusMenu: {
     marginTop: 4,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     overflow: "hidden",
@@ -4247,10 +4272,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eef2ff",
+    borderBottomColor: "#f2eefe",
   },
   propertyStatusMenuText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -4273,14 +4298,14 @@ const styles = StyleSheet.create({
     width: 74,
     height: 40,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
   },
   linkAddBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4290,7 +4315,7 @@ const styles = StyleSheet.create({
     height: 34,
     alignSelf: "flex-start",
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     paddingHorizontal: 12,
@@ -4298,14 +4323,14 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   docUploadBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "700",
   },
   docRow: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     padding: 8,
@@ -4317,7 +4342,7 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     alignItems: "center",
@@ -4329,7 +4354,7 @@ const styles = StyleSheet.create({
     height: 32,
     alignSelf: "flex-start",
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     paddingHorizontal: 12,
@@ -4337,7 +4362,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   liveLocationBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4346,7 +4371,7 @@ const styles = StyleSheet.create({
   },
   propertyActionBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     paddingHorizontal: 10,
@@ -4357,7 +4382,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   propertyActionText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "600",
   },
@@ -4368,7 +4393,7 @@ const styles = StyleSheet.create({
   },
   smallTextBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     paddingHorizontal: 8,
     height: 24,
@@ -4377,13 +4402,13 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   smallTextBtnText: {
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 11,
     fontWeight: "700",
   },
   propertyCheckboxRow: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     padding: 10,
@@ -4393,8 +4418,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   propertyCheckboxRowActive: {
-    borderColor: "#86efac",
-    backgroundColor: "#f0fdf4",
+    borderColor: "#6ecdaa",
+    backgroundColor: "#e8f7f0",
   },
   metricsRow: {
     flexDirection: "row",
@@ -4404,21 +4429,21 @@ const styles = StyleSheet.create({
   metricBox: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   metricLabel: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 10,
     marginBottom: 2,
     fontWeight: "700",
     textTransform: "uppercase",
   },
   metricValue: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 14,
     fontWeight: "700",
   },
@@ -4437,7 +4462,7 @@ const styles = StyleSheet.create({
   },
   proposalBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     minWidth: 102,
@@ -4449,16 +4474,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   proposalBtnPrimary: {
-    borderColor: "#5eead4",
-    backgroundColor: "#ecfeff",
+    borderColor: "#6ecdaa",
+    backgroundColor: "#e9f4fb",
   },
   proposalBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "700",
   },
   proposalBtnPrimaryText: {
-    color: "#0f766e",
+    color: "#0a6544",
   },
   activityCard: {
     borderWidth: 1,
@@ -4470,13 +4495,13 @@ const styles = StyleSheet.create({
   },
   diaryInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 8,
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 12,
     textAlignVertical: "top",
   },
@@ -4491,7 +4516,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   diaryCounterText: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
   },
   diaryActionRow: {
@@ -4502,7 +4527,7 @@ const styles = StyleSheet.create({
   voiceBtn: {
     height: 34,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     alignItems: "center",
@@ -4514,15 +4539,15 @@ const styles = StyleSheet.create({
   voiceBtnText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#334155",
+    color: "#39424f",
   },
   voiceBtnTextDisabled: {
-    color: "#94a3b8",
+    color: "#98a3b5",
   },
   addNoteBtn: {
     height: 34,
     borderRadius: 10,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
@@ -4539,7 +4564,7 @@ const styles = StyleSheet.create({
   },
   diaryHint: {
     marginTop: 8,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
   },
   diaryListWrap: {
@@ -4548,13 +4573,13 @@ const styles = StyleSheet.create({
   },
   diaryEntryCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     padding: 10,
   },
   diaryLine: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     marginBottom: 3,
   },
@@ -4566,14 +4591,14 @@ const styles = StyleSheet.create({
   },
   entryEditBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   entryEditText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -4585,7 +4610,7 @@ const styles = StyleSheet.create({
   },
   editCancelBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     paddingHorizontal: 12,
@@ -4594,13 +4619,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   editCancelText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "600",
   },
   editSaveBtn: {
     borderRadius: 8,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
     paddingHorizontal: 12,
     height: 32,
     alignItems: "center",
@@ -4613,9 +4638,9 @@ const styles = StyleSheet.create({
   },
   requestCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     padding: 10,
     marginBottom: 8,
   },
@@ -4626,10 +4651,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   reqPending: {
-    color: "#0f766e",
-    backgroundColor: "#ecfeff",
+    color: "#0a6544",
+    backgroundColor: "#e9f4fb",
     borderWidth: 1,
-    borderColor: "#99f6e4",
+    borderColor: "#a3e0c9",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4638,10 +4663,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   reqApproved: {
-    color: "#166534",
-    backgroundColor: "#f0fdf4",
+    color: "#084f36",
+    backgroundColor: "#e8f7f0",
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: "#6ecdaa",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4650,10 +4675,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   reqRejected: {
-    color: "#b91c1c",
-    backgroundColor: "#fef2f2",
+    color: "#942626",
+    backgroundColor: "#fdedec",
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: "#f6b8b5",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4664,7 +4689,7 @@ const styles = StyleSheet.create({
   reviewBtn: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     height: 34,
@@ -4672,7 +4697,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   reviewBtnText: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4716,7 +4741,7 @@ const styles = StyleSheet.create({
   },
   statusAttachBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     height: 34,
@@ -4725,7 +4750,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   statusAttachBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -4733,55 +4758,55 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: "#f6b8b5",
     borderRadius: 10,
-    backgroundColor: "#fff1f2",
+    backgroundColor: "#fdedec",
     alignItems: "center",
     justifyContent: "center",
   },
   uploadStatusText: {
     marginBottom: 10,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
   },
   attachmentLinkText: {
     marginTop: 6,
-    color: "#2563eb",
+    color: "#2549d6",
     fontSize: 12,
     fontWeight: "600",
   },
   reviewBox: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
     padding: 8,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
   },
   reviewTitle: {
     fontSize: 12,
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "700",
     marginBottom: 4,
   },
   reviewSubBox: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 8,
     padding: 8,
     backgroundColor: "#fff",
   },
   reviewSubTitle: {
     fontSize: 11,
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "700",
     marginBottom: 2,
   },
   modalTitle: {
     fontSize: 17,
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
     marginBottom: 6,
   },
   modalRow: {
@@ -4798,16 +4823,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   modalCancelBtn: {
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     backgroundColor: "#fff",
   },
   modalPrimaryBtn: {
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
+    borderColor: "#161c24",
+    backgroundColor: "#161c24",
   },
   modalDangerBtn: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fff1f2",
+    borderColor: "#f6b8b5",
+    backgroundColor: "#fdedec",
   },
   modalPrimaryText: {
     color: "#fff",
@@ -4815,12 +4840,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   modalCancelText: {
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "600",
     fontSize: 12,
   },
   modalDangerText: {
-    color: "#991b1b",
+    color: "#741f1f",
     fontWeight: "700",
     fontSize: 12,
   },
@@ -4828,23 +4853,23 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: "#f6b8b5",
     borderRadius: 10,
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    backgroundColor: "#fdedec",
+    color: "#942626",
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: "#6ecdaa",
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: "#e8f7f0",
+    color: "#084f36",
   },
   taskRow: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     padding: 10,
@@ -4855,13 +4880,13 @@ const styles = StyleSheet.create({
   },
   taskRowCompleted: {
     opacity: 0.6,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
   },
   taskCheckbox: {
     width: 20,
     height: 20,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
@@ -4869,17 +4894,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   taskCheckboxCompleted: {
-    backgroundColor: "#10b981",
-    borderColor: "#10b981",
+    backgroundColor: "#12a06a",
+    borderColor: "#12a06a",
   },
   taskTitle: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#0f172a",
+    color: "#161c24",
   },
   taskTitleCompleted: {
     textDecorationLine: "line-through",
-    color: "#64748b",
+    color: "#6c7789",
   },
   taskMetaRow: {
     flexDirection: "row",
@@ -4910,7 +4935,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     paddingHorizontal: 8,
     justifyContent: "center",
@@ -4918,12 +4943,12 @@ const styles = StyleSheet.create({
   },
   taskFormSelectText: {
     fontSize: 11,
-    color: "#334155",
+    color: "#39424f",
   },
   taskAddBtn: {
     height: 36,
     borderRadius: 8,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
@@ -4944,18 +4969,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 6,
     backgroundColor: "#fff",
   },
   checkboxItemActive: {
-    borderColor: "#10b981",
-    backgroundColor: "#f0fdf4",
+    borderColor: "#12a06a",
+    backgroundColor: "#e8f7f0",
   },
   checkboxLabel: {
     fontSize: 11,
-    color: "#334155",
+    color: "#39424f",
   },
 });

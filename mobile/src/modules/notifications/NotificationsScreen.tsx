@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Alert, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
@@ -380,7 +380,7 @@ export const NotificationsScreen = () => {
       <AppCard style={styles.heroCard as object}>
         <View style={styles.heroTopRow}>
           <View style={styles.heroIcon}>
-            <Ionicons name="notifications" size={22} color="#ffffff" />
+            <Icon name="notifications" size={22} color="#ffffff" />
           </View>
           <View style={styles.heroCopy}>
             <Text style={styles.heroEyebrow}>Approval Command Center</Text>
@@ -390,7 +390,7 @@ export const NotificationsScreen = () => {
             </Text>
           </View>
           <Pressable style={styles.refreshBtn} onPress={() => load(true)} disabled={refreshing}>
-            <Ionicons name={refreshing ? "sync" : "refresh"} size={18} color="#0f172a" />
+            <Icon name={refreshing ? "sync" : "refresh"} size={18} color="#161c24" />
           </Pressable>
         </View>
         <View style={styles.summaryRow}>
@@ -419,7 +419,7 @@ export const NotificationsScreen = () => {
 
       <AppCard style={styles.controlCard as object}>
         <View style={styles.searchRow}>
-          <Ionicons name="search" size={15} color="#64748b" />
+          <Icon name="search" size={15} color="#6c7789" />
           <AppInput
             value={query}
             onChangeText={setQuery}
@@ -428,7 +428,7 @@ export const NotificationsScreen = () => {
           />
           {query ? (
             <Pressable style={styles.clearSearchBtn} onPress={() => setQuery("")}>
-              <Ionicons name="close" size={14} color="#64748b" />
+              <Icon name="close" size={14} color="#6c7789" />
             </Pressable>
           ) : null}
         </View>
@@ -457,7 +457,7 @@ export const NotificationsScreen = () => {
         {filteredItems.length === 0 ? (
           <AppCard style={styles.emptyCard as object}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="checkmark-done" size={22} color="#0f766e" />
+              <Icon name="checkmark-done" size={22} color="#0a6544" />
             </View>
             <Text style={styles.emptyTitle}>{items.length === 0 ? "No pending approval requests" : "No request matches this view"}</Text>
             <Text style={styles.meta}>
@@ -474,7 +474,7 @@ export const NotificationsScreen = () => {
               <View style={styles.rowBetween}>
                 <View style={styles.requestHeading}>
                   <View style={[styles.kindIcon, item.kind === "PAYMENT" ? styles.kindIconGreen : item.kind === "INVENTORY" ? styles.kindIconViolet : styles.kindIconBlue]}>
-                    <Ionicons
+                    <Icon
                       name={item.kind === "PAYMENT" ? "card" : item.kind === "INVENTORY" ? "business" : "person"}
                       size={15}
                       color="#ffffff"
@@ -769,27 +769,27 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: "#f6b8b5",
     borderRadius: 10,
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    backgroundColor: "#fdedec",
+    color: "#942626",
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: "#6ecdaa",
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: "#e8f7f0",
+    color: "#084f36",
   },
   summaryCard: {
     marginBottom: 10,
   },
   heroCard: {
     marginBottom: 10,
-    backgroundColor: "#eef6ff",
-    borderColor: "#bfdbfe",
+    backgroundColor: "#eef3ff",
+    borderColor: "#bcd0ff",
   },
   heroTopRow: {
     flexDirection: "row",
@@ -803,13 +803,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2563eb",
+    backgroundColor: "#2549d6",
   },
   heroCopy: {
     flex: 1,
   },
   heroEyebrow: {
-    color: "#1d4ed8",
+    color: "#1c37ab",
     fontSize: 10,
     fontWeight: "800",
     textTransform: "uppercase",
@@ -817,13 +817,13 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     marginTop: 2,
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 20,
     fontWeight: "800",
   },
   heroMeta: {
     marginTop: 3,
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 11,
     lineHeight: 15,
   },
@@ -834,11 +834,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     backgroundColor: "#ffffff",
   },
   summaryTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "700",
     fontSize: 13,
     marginBottom: 8,
@@ -851,42 +851,42 @@ const styles = StyleSheet.create({
   summaryBox: {
     width: "31%",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 14,
     backgroundColor: "#fff",
     padding: 10,
   },
   summaryBoxBlue: {
-    borderColor: "#bfdbfe",
-    backgroundColor: "#eff6ff",
+    borderColor: "#bcd0ff",
+    backgroundColor: "#eef3ff",
   },
   summaryBoxSlate: {
-    borderColor: "#cbd5e1",
-    backgroundColor: "#f8fafc",
+    borderColor: "#c8d0dd",
+    backgroundColor: "#f5f7fa",
   },
   summaryBoxViolet: {
-    borderColor: "#ddd6fe",
-    backgroundColor: "#f5f3ff",
+    borderColor: "#cfbdfb",
+    backgroundColor: "#f2eefe",
   },
   summaryBoxGreen: {
-    borderColor: "#bbf7d0",
-    backgroundColor: "#ecfdf5",
+    borderColor: "#a3e0c9",
+    backgroundColor: "#e8f7f0",
   },
   summaryBoxTeal: {
-    borderColor: "#99f6e4",
-    backgroundColor: "#ecfeff",
+    borderColor: "#a3e0c9",
+    backgroundColor: "#e9f4fb",
   },
   summaryBoxRed: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
+    borderColor: "#f6b8b5",
+    backgroundColor: "#fdedec",
   },
   summaryLabel: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
   },
   summaryValue: {
     marginTop: 4,
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 22,
     fontWeight: "700",
   },
@@ -897,9 +897,9 @@ const styles = StyleSheet.create({
   searchRow: {
     minHeight: 44,
     borderWidth: 1,
-    borderColor: "#dbe4f0",
+    borderColor: "#e0e5ed",
     borderRadius: 14,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
@@ -920,7 +920,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#e0e5ed",
   },
   filterRow: {
     gap: 8,
@@ -935,17 +935,17 @@ const styles = StyleSheet.create({
   },
   historyRow: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
     backgroundColor: "#fff",
     padding: 10,
     marginTop: 8,
   },
   historyApproved: {
-    color: "#166534",
-    backgroundColor: "#f0fdf4",
+    color: "#084f36",
+    backgroundColor: "#e8f7f0",
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: "#6ecdaa",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -954,10 +954,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   historyRejected: {
-    color: "#b91c1c",
-    backgroundColor: "#fef2f2",
+    color: "#942626",
+    backgroundColor: "#fdedec",
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: "#f6b8b5",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -976,20 +976,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#ecfeff",
+    backgroundColor: "#e9f4fb",
     borderWidth: 1,
-    borderColor: "#99f6e4",
+    borderColor: "#a3e0c9",
     marginBottom: 8,
   },
   emptyTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 14,
     fontWeight: "800",
     marginBottom: 2,
   },
   requestCard: {
     marginBottom: 10,
-    borderColor: "#dbeafe",
+    borderColor: "#dde6ff",
   },
   rowBetween: {
     flexDirection: "row",
@@ -1015,24 +1015,24 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2563eb",
+    backgroundColor: "#2549d6",
   },
   kindIconBlue: {
-    backgroundColor: "#2563eb",
+    backgroundColor: "#2549d6",
   },
   kindIconGreen: {
-    backgroundColor: "#059669",
+    backgroundColor: "#0d8055",
   },
   kindIconViolet: {
-    backgroundColor: "#7c3aed",
+    backgroundColor: "#6440dd",
   },
   requestType: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "800",
     fontSize: 13,
   },
   requestSubtitle: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -1040,10 +1040,10 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   badge: {
-    color: "#0f766e",
-    backgroundColor: "#ecfeff",
+    color: "#0a6544",
+    backgroundColor: "#e9f4fb",
     borderWidth: 1,
-    borderColor: "#99f6e4",
+    borderColor: "#a3e0c9",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1052,33 +1052,33 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   badgeAged: {
-    color: "#b91c1c",
-    backgroundColor: "#fef2f2",
-    borderColor: "#fecaca",
+    color: "#942626",
+    backgroundColor: "#fdedec",
+    borderColor: "#f6b8b5",
   },
   metaGrid: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     padding: 9,
     marginTop: 8,
     marginBottom: 6,
   },
   meta: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
     marginTop: 3,
   },
   detailLine: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "700",
     marginTop: 4,
     lineHeight: 17,
   },
   noteLine: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
     marginTop: 4,
     lineHeight: 16,
@@ -1105,7 +1105,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     padding: 14,
   },
   rejectCard: {
@@ -1114,11 +1114,11 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     padding: 14,
   },
   modalTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 15,
     fontWeight: "700",
     marginBottom: 10,
@@ -1128,16 +1128,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   previewText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     marginBottom: 6,
   },
   previewData: {
     fontSize: 11,
-    color: "#0f172a",
-    backgroundColor: "#f8fafc",
+    color: "#161c24",
+    backgroundColor: "#f5f7fa",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 8,
     padding: 8,
   },
@@ -1149,7 +1149,7 @@ const styles = StyleSheet.create({
   },
   fileBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     height: 28,
@@ -1158,7 +1158,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   fileBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "700",
   },

@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { Screen } from "../../components/common/Screen";
 import { getMessengerContacts, getMessengerConversations } from "../../services/chatService";
 import { createChatSocket } from "../../services/chatSocket";
@@ -244,11 +244,11 @@ export const TeamChatScreen = () => {
       >
         <View style={styles.quickTop}>
           <Pressable style={styles.quickBtn} onPress={goBack}>
-            <Ionicons name="arrow-back" size={16} color="#334155" />
+            <Icon name="arrow-back" size={16} color="#39424f" />
           </Pressable>
           <View style={styles.quickTopRight}>
             <Pressable style={styles.quickBtn} onPress={() => load(true)}>
-              <Ionicons name="refresh" size={15} color="#64748b" />
+              <Icon name="refresh" size={15} color="#6c7789" />
             </Pressable>
             <Pressable style={styles.quickBtn} onPress={() => setProfileVisible(true)}>
               {renderAvatar({ name: user?.name || "Me", avatarUrl: user?.profileImageUrl || "" }, 24)}
@@ -263,7 +263,7 @@ export const TeamChatScreen = () => {
           </View>
 
           <View style={styles.searchRow}>
-            <Ionicons name="search" size={14} color="#94a3b8" />
+            <Icon name="search" size={14} color="#98a3b5" />
             <TextInput
               style={styles.searchInput}
               value={search}
@@ -409,14 +409,14 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#d1d5db",
+    borderColor: "#c8d0dd",
     backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
   },
   profileCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 10,
@@ -434,13 +434,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "700",
     fontSize: 13,
   },
   profileSubtitle: {
     marginTop: 2,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
   },
   profileActions: {
@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
   },
   smallBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     paddingHorizontal: 10,
     height: 34,
@@ -459,22 +459,22 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   smallBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "600",
   },
   smallBtnDanger: {
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: "#f6b8b5",
     borderRadius: 8,
     paddingHorizontal: 10,
     height: 34,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff1f2",
+    backgroundColor: "#fdedec",
   },
   smallBtnDangerText: {
-    color: "#b91c1c",
+    color: "#942626",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -483,7 +483,7 @@ const styles = StyleSheet.create({
   },
   searchCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 10,
@@ -496,27 +496,27 @@ const styles = StyleSheet.create({
   },
   searchTitle: {
     fontSize: 13,
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "700",
   },
   iconBtn: {
     width: 28,
     height: 28,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#fff",
   },
   searchMeta: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
   },
   searchRow: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     flexDirection: "row",
@@ -527,13 +527,13 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 12,
   },
   tabRow: {
     marginTop: 10,
     flexDirection: "row",
-    backgroundColor: "#f1f5f9",
+    backgroundColor: "#edf0f5",
     borderRadius: 10,
     padding: 2,
     gap: 4,
@@ -548,15 +548,15 @@ const styles = StyleSheet.create({
   tabBtnActive: {
     backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
   },
   tabText: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
     fontWeight: "600",
   },
   tabTextActive: {
-    color: "#0f172a",
+    color: "#161c24",
   },
   connection: {
     marginTop: 8,
@@ -570,16 +570,16 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   connectionOn: {
-    backgroundColor: "#dcfce7",
-    color: "#166534",
+    backgroundColor: "#cdeee0",
+    color: "#084f36",
   },
   connectionOff: {
-    backgroundColor: "#fef3c7",
-    color: "#92400e",
+    backgroundColor: "#fbe9c4",
+    color: "#614304",
   },
   listCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 10,
@@ -587,7 +587,7 @@ const styles = StyleSheet.create({
   },
   panelLabel: {
     fontSize: 11,
-    color: "#64748b",
+    color: "#6c7789",
     textTransform: "uppercase",
     letterSpacing: 0.7,
     fontWeight: "700",
@@ -597,7 +597,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     padding: 8,
     marginBottom: 6,
@@ -605,12 +605,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   avatar: {
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#e0e5ed",
     alignItems: "center",
     justifyContent: "center",
   },
   avatarText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 10,
     fontWeight: "700",
   },
@@ -618,20 +618,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   userName: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "700",
     fontSize: 13,
   },
   userSub: {
     marginTop: 2,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
   },
   roleBadge: {
     marginTop: 3,
     alignSelf: "flex-start",
-    backgroundColor: "#dcfce7",
-    color: "#166534",
+    backgroundColor: "#cdeee0",
+    color: "#084f36",
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -640,13 +640,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   rowTime: {
-    color: "#94a3b8",
+    color: "#98a3b5",
     fontSize: 10,
     marginLeft: 6,
   },
   empty: {
     textAlign: "center",
-    color: "#94a3b8",
+    color: "#98a3b5",
     fontSize: 12,
     marginVertical: 10,
   },
@@ -662,23 +662,23 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     padding: 16,
     alignItems: "center",
     gap: 6,
   },
   callTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 18,
     fontWeight: "700",
   },
   callPeer: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 15,
     fontWeight: "600",
   },
   callSub: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
   },
   callActions: {
@@ -695,20 +695,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   callReject: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fff1f2",
+    borderColor: "#f6b8b5",
+    backgroundColor: "#fdedec",
   },
   callAccept: {
-    borderColor: "#86efac",
-    backgroundColor: "#dcfce7",
+    borderColor: "#6ecdaa",
+    backgroundColor: "#cdeee0",
   },
   callRejectText: {
-    color: "#b91c1c",
+    color: "#942626",
     fontWeight: "700",
     fontSize: 13,
   },
   callAcceptText: {
-    color: "#166534",
+    color: "#084f36",
     fontWeight: "700",
     fontSize: 13,
   },
@@ -724,12 +724,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     padding: 14,
     gap: 10,
   },
   profileModalTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 18,
     fontWeight: "700",
     marginBottom: 4,
@@ -740,12 +740,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   profileKey: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
     fontWeight: "600",
   },
   profileVal: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 13,
     fontWeight: "700",
     flex: 1,
@@ -753,7 +753,7 @@ const styles = StyleSheet.create({
   },
   profileHint: {
     marginTop: 4,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
   },
   profileCloseBtn: {
@@ -761,12 +761,12 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     alignItems: "center",
     justifyContent: "center",
   },
   profileCloseText: {
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "700",
     fontSize: 13,
   },

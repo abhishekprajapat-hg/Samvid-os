@@ -15,7 +15,7 @@ import {
 import { useNavigation } from "@react-navigation/native";
 import { useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { Screen } from "../../components/common/Screen";
 import {
   assignLead,
@@ -31,6 +31,21 @@ import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import type { InventoryAsset, Lead } from "../../types";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
+import { AppTabs } from "../../components/ui";
+import { LeadFiltersSheet } from "./components/LeadFiltersSheet";
+import {
+  EMPTY_LEAD_FILTERS,
+  countActiveFilters,
+  toLeadQueryParams,
+  type LeadFilterState,
+} from "./leadFilters";
+import {
+  PIPELINE_VIEWS,
+  VIEW_LABELS,
+  countNeedsAction,
+  matchesView,
+  type PipelineView,
+} from "./pipelineViews";
 import { colors } from "../../theme/tokens";
 
 const LEAD_STATUSES = [
@@ -53,20 +68,20 @@ const LEAD_STATUSES = [
 const EXECUTIVE_ROLES = new Set(["EXECUTIVE", "FIELD_EXECUTIVE"]);
 
 const statusPillStyles = {
-  NEW: { bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" },
-  CONTACTED: { bg: "#fffbeb", border: "#fde68a", text: "#a16207" },
-  INTERESTED: { bg: "#ecfdf5", border: "#bbf7d0", text: "#15803d" },
-  SITE_VISIT_SCHEDULED: { bg: "#ecfeff", border: "#a5f3fc", text: "#0e7490" },
-  SITE_VISIT: { bg: "#f5f3ff", border: "#ddd6fe", text: "#6d28d9" },
-  SITE_VISIT_OVERDUE: { bg: "#fef2f2", border: "#fecaca", text: "#b91c1c" },
-  MISSING_IN_ACTION: { bg: "#fefce8", border: "#fde68a", text: "#854d0e" },
-  NOT_PICKING_CALLS: { bg: "#fefce8", border: "#fde68a", text: "#854d0e" },
-  INVALID: { bg: "#f4f4f5", border: "#d4d4d8", text: "#52525b" },
-  OWNER: { bg: "#eff6ff", border: "#bfdbfe", text: "#1d4ed8" },
-  BROKER: { bg: "#faf5ff", border: "#e9d5ff", text: "#7e22ce" },
-  REQUESTED: { bg: "#fff7ed", border: "#fed7aa", text: "#c2410c" },
-  CLOSED: { bg: "#0f172a", border: "#0f172a", text: "#ffffff" },
-  LOST: { bg: "#fff1f2", border: "#fecdd3", text: "#be123c" },
+  NEW: { bg: "#eef3ff", border: "#bcd0ff", text: "#1c37ab" },
+  CONTACTED: { bg: "#fdf4e3", border: "#f6d68c", text: "#7d5605" },
+  INTERESTED: { bg: "#e8f7f0", border: "#a3e0c9", text: "#0a6544" },
+  SITE_VISIT_SCHEDULED: { bg: "#e9f4fb", border: "#a8d3ef", text: "#184f79" },
+  SITE_VISIT: { bg: "#f2eefe", border: "#cfbdfb", text: "#4f31b0" },
+  SITE_VISIT_OVERDUE: { bg: "#fdedec", border: "#f6b8b5", text: "#942626" },
+  MISSING_IN_ACTION: { bg: "#fdf4e3", border: "#f6d68c", text: "#614304" },
+  NOT_PICKING_CALLS: { bg: "#fdf4e3", border: "#f6d68c", text: "#614304" },
+  INVALID: { bg: "#edf0f5", border: "#c8d0dd", text: "#4e5867" },
+  OWNER: { bg: "#eef3ff", border: "#bcd0ff", text: "#1c37ab" },
+  BROKER: { bg: "#f2eefe", border: "#cfbdfb", text: "#4f31b0" },
+  REQUESTED: { bg: "#fdf4e3", border: "#f6d68c", text: "#7d5605" },
+  CLOSED: { bg: "#161c24", border: "#161c24", text: "#ffffff" },
+  LOST: { bg: "#fdedec", border: "#f6b8b5", text: "#942626" },
 } as const;
 
 const toInputDateTime = (value?: string) => {
@@ -157,7 +172,23 @@ export const LeadsMatrixScreen = () => {
   const [success, setSuccess] = useState("");
 
   const [query, setQuery] = useState("");
+  // The Team view only means something to someone with reports beneath them.
+  const canManage = role === "ADMIN" || role === "MANAGER";
+
   const [statusFilter, setStatusFilter] = useState("ALL");
+  /*
+   * The pipeline view, ported from web. It opens on "Needs action" because
+   * that is the day's work - the same default the web pipeline uses, and the
+   * reason a field executive opens this screen at all.
+   */
+  const [view, setView] = useState<PipelineView>(PIPELINE_VIEWS.NEEDS_ACTION);
+
+  /*
+   * Filters are applied by the server, as they are on web - filtering the rows
+   * already downloaded would only ever filter a subset.
+   */
+  const [filters, setFilters] = useState<LeadFilterState>(EMPTY_LEAD_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [users, setUsers] = useState<Array<{ _id?: string; name: string; role?: string; isActive?: boolean }>>([]);
 
@@ -188,7 +219,10 @@ export const LeadsMatrixScreen = () => {
       }
 
       setError("");
-      const [leadRows, userPayload] = await Promise.all([getAllLeads(), getUsers()]);
+      const [leadRows, userPayload] = await Promise.all([
+        getAllLeads(toLeadQueryParams(filters)),
+        getUsers(),
+      ]);
       setLeads(Array.isArray(leadRows) ? leadRows : []);
       setUsers(userPayload?.users || []);
     } catch (e) {
@@ -197,7 +231,7 @@ export const LeadsMatrixScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [filters]);
 
   useEffect(() => {
     load();
@@ -236,7 +270,9 @@ export const LeadsMatrixScreen = () => {
 
   const filtered = useMemo(() => {
     const key = query.trim().toLowerCase();
+    const nowMs = Date.now();
     return leads.filter((lead) => {
+      if (!matchesView(lead, view, nowMs)) return false;
       const status = String(lead.status || "");
       const dueFollowUp =
         !!lead.nextFollowUp && !Number.isNaN(new Date(lead.nextFollowUp).getTime()) && new Date(lead.nextFollowUp) <= new Date();
@@ -256,7 +292,23 @@ export const LeadsMatrixScreen = () => {
 
       return statusMatch && textMatch;
     });
-  }, [leads, query, statusFilter]);
+  }, [leads, query, statusFilter, view]);
+
+  const needsActionCount = useMemo(() => countNeedsAction(leads, Date.now()), [leads]);
+
+  const viewTabs = useMemo(
+    () =>
+      VIEW_LABELS
+        .filter((entry) => entry.key !== PIPELINE_VIEWS.TEAM || canManage)
+        .map((entry) => ({
+          key: entry.key,
+          label: entry.label,
+          badge: entry.key === PIPELINE_VIEWS.NEEDS_ACTION ? needsActionCount : undefined,
+        })),
+    [canManage, needsActionCount],
+  );
+
+  const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
 
   const metrics = useMemo(() => {
     const total = leads.length;
@@ -511,6 +563,30 @@ export const LeadsMatrixScreen = () => {
               onChangeText={setQuery}
             />
 
+            <View style={styles.filterBar}>
+              <AppButton
+                title={activeFilterCount ? `Filters · ${activeFilterCount}` : "Filters"}
+                variant={activeFilterCount ? "primary" : "secondary"}
+                size="sm"
+                onPress={() => setFiltersOpen(true)}
+              />
+              {activeFilterCount ? (
+                <AppButton
+                  title="Clear"
+                  variant="ghost"
+                  size="sm"
+                  onPress={() => setFilters(EMPTY_LEAD_FILTERS)}
+                />
+              ) : null}
+            </View>
+
+            <AppTabs
+              tabs={viewTabs}
+              activeKey={view}
+              onChange={(key) => setView(key as PipelineView)}
+              style={styles.viewTabs}
+            />
+
             <View style={styles.filtersWrap}>
               <ScrollView
                 style={styles.filtersScroll}
@@ -565,11 +641,11 @@ export const LeadsMatrixScreen = () => {
 
               <View style={styles.quickActionRow}>
                 <Pressable style={styles.quickActionBtn} onPress={() => openDialer(item.phone)}>
-                  <Ionicons name="call-outline" size={16} color="#0f172a" />
+                  <Icon name="call-outline" size={16} color="#161c24" />
                   <Text style={styles.quickActionText}>Call</Text>
                 </Pressable>
                 <Pressable style={styles.quickActionBtn} onPress={() => openWhatsApp(item.phone)}>
-                  <Ionicons name="logo-whatsapp" size={16} color="#16a34a" />
+                  <Icon name="logo-whatsapp" size={16} color="#0d8055" />
                   <Text style={styles.quickActionText}>WhatsApp</Text>
                 </Pressable>
               </View>
@@ -612,7 +688,7 @@ export const LeadsMatrixScreen = () => {
                     ? "Loading inventory..."
                     : "Select Inventory (Optional)"}
               </Text>
-              <Ionicons name="chevron-down" size={16} color="#64748b" />
+              <Icon name="chevron-down" size={16} color="#6c7789" />
             </Pressable>
             <View style={styles.modalRow}>
               <AppButton title="Cancel" variant="ghost" onPress={() => setAddOpen(false)} disabled={saving} />
@@ -657,6 +733,18 @@ export const LeadsMatrixScreen = () => {
         </View>
       </Modal>
 
+
+      <LeadFiltersSheet
+        visible={filtersOpen}
+        filters={filters}
+        statuses={LEAD_STATUSES}
+        assignees={executiveUsers.map((person) => ({ _id: person._id, name: person.name }))}
+        onApply={(next) => {
+          setFilters(next);
+          setFiltersOpen(false);
+        }}
+        onClose={() => setFiltersOpen(false)}
+      />
     </Screen>
   );
 };
@@ -683,10 +771,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: "#6ecdaa",
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: "#e8f7f0",
+    color: "#084f36",
   },
   topActions: {
     flexDirection: "row",
@@ -706,6 +794,15 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingBottom: 2,
     alignItems: "center",
+  },
+  filterBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+  },
+  viewTabs: {
+    marginBottom: 10,
   },
   filtersWrap: {
     height: 44,
@@ -731,12 +828,12 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   metricCardActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#f8fafc",
+    borderColor: "#161c24",
+    backgroundColor: "#f5f7fa",
   },
   metricLabel: {
     fontSize: 10,
-    color: "#64748b",
+    color: "#6c7789",
     textTransform: "uppercase",
   },
   metricValue: {
@@ -778,12 +875,12 @@ const styles = StyleSheet.create({
   },
   meta: {
     marginTop: 4,
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 12,
   },
   empty: {
     textAlign: "center",
-    color: "#64748b",
+    color: "#6c7789",
     marginVertical: 14,
   },
   modalWrap: {
@@ -796,7 +893,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
     marginBottom: 10,
   },
   input: { height: 42, marginBottom: 10 },
@@ -804,7 +901,7 @@ const styles = StyleSheet.create({
     minHeight: 42,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     paddingHorizontal: 12,
@@ -814,12 +911,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   selectText: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 16,
     flex: 1,
   },
   selectPlaceholder: {
-    color: "#94a3b8",
+    color: "#98a3b5",
     fontSize: 16,
     flex: 1,
   },
@@ -837,7 +934,7 @@ const styles = StyleSheet.create({
   },
   pickerRow: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -845,20 +942,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   pickerRowText: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 14,
   },
   detailRoot: {
     flex: 1,
     padding: 14,
     paddingTop: 56,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
   },
   section: {
     marginTop: 14,
     marginBottom: 8,
     fontWeight: "700",
-    color: "#334155",
+    color: "#39424f",
   },
   statusRow: {
     flexDirection: "row",
@@ -871,7 +968,7 @@ const styles = StyleSheet.create({
   activityCard: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
     padding: 10,
     marginBottom: 8,
@@ -887,7 +984,7 @@ const styles = StyleSheet.create({
     width: "49%",
     height: 36,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     alignItems: "center",
@@ -898,12 +995,12 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#334155",
+    color: "#39424f",
   },
   revenueCard: {
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#ffffff",
     padding: 12,
@@ -911,7 +1008,7 @@ const styles = StyleSheet.create({
   revenueLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    color: "#64748b",
+    color: "#6c7789",
     fontWeight: "700",
     letterSpacing: 0.8,
   },
@@ -919,11 +1016,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 24,
     fontWeight: "800",
-    color: "#0f172a",
+    color: "#161c24",
   },
   revenueHelper: {
     marginTop: 4,
     fontSize: 12,
-    color: "#64748b",
+    color: "#6c7789",
   },
 });

@@ -439,7 +439,7 @@ export const AdminCommandConsoleScreen = () => {
           value={input}
           onChangeText={setInput}
           placeholder="Ask about users, leads, inventory, approvals, navigation..."
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor="#98a3b5"
           style={styles.input}
           editable={!running}
           onSubmitEditing={() => handleAsk(input)}
@@ -464,29 +464,29 @@ export const AdminCommandConsoleScreen = () => {
 const styles = StyleSheet.create({
   headerCard: { marginBottom: 10 },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  metaLabel: { color: "#475569", fontSize: 11, fontWeight: "600", flex: 1 },
-  chatPanel: { flex: 1, borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 12, backgroundColor: "#f8fafc" },
+  metaLabel: { color: "#4e5867", fontSize: 11, fontWeight: "600", flex: 1 },
+  chatPanel: { flex: 1, borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 12, backgroundColor: "#f5f7fa" },
   chatContent: { padding: 10, gap: 8 },
   bubbleWrap: { flexDirection: "row" },
   bubbleLeft: { justifyContent: "flex-start" },
   bubbleRight: { justifyContent: "flex-end" },
   bubble: { maxWidth: "92%", borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1 },
-  assistantBubble: { borderColor: "#e2e8f0", backgroundColor: "#fff" },
-  userBubble: { borderColor: "#0f172a", backgroundColor: "#0f172a" },
+  assistantBubble: { borderColor: "#e0e5ed", backgroundColor: "#fff" },
+  userBubble: { borderColor: "#161c24", backgroundColor: "#161c24" },
   roleText: { fontSize: 10, fontWeight: "700", marginBottom: 4 },
-  assistantRoleText: { color: "#0f172a" },
-  userRoleText: { color: "#cbd5e1" },
+  assistantRoleText: { color: "#161c24" },
+  userRoleText: { color: "#c8d0dd" },
   messageText: { fontSize: 12, lineHeight: 18 },
-  assistantMessageText: { color: "#334155" },
+  assistantMessageText: { color: "#39424f" },
   userMessageText: { color: "#fff" },
-  thinking: { color: "#64748b", fontSize: 12, marginTop: 4 },
+  thinking: { color: "#6c7789", fontSize: 12, marginTop: 4 },
   inputPanel: { marginTop: 10, marginBottom: 8 },
   input: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
-    color: "#0f172a",
+    color: "#161c24",
     minHeight: 44,
     paddingHorizontal: 12,
     marginBottom: 8,
@@ -495,11 +495,11 @@ const styles = StyleSheet.create({
   suggestionRow: { gap: 8, paddingBottom: 2 },
   suggestionChip: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 999,
     backgroundColor: "#fff",
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  suggestionText: { color: "#334155", fontSize: 11, fontWeight: "600" },
+  suggestionText: { color: "#39424f", fontSize: 11, fontWeight: "600" },
 });

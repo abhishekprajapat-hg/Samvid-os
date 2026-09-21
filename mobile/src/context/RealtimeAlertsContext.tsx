@@ -13,7 +13,6 @@ import { createChatSocket } from "../services/chatSocket";
 import { getMessengerConversations, updateCallLog } from "../services/chatService";
 import { getLeadPaymentRequests, getPendingLeadStatusRequests } from "../services/leadService";
 import { getPendingInventoryRequests } from "../services/inventoryService";
-import { notifyChatMessage } from "../services/pushNotifications";
 import { useAuth } from "./AuthContext";
 import type { ChatConversation } from "../types";
 import { navigateFromAnywhere } from "../navigation/navigationRef";
@@ -398,14 +397,14 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
 
       if (conversationId && activeConversationIdRef.current === conversationId) return;
 
-      void notifyChatMessage({
-        conversationId,
-        contactId: conversationContactId,
-        contactName: conversationContactName,
-        contactRole: conversationContactRole,
-        contactAvatar: conversationContactAvatar,
-        message: getMessagePreview(message),
-      }).catch(() => {});
+      /*
+       * No local notification here.
+       *
+       * The server already pushes chat messages - chat.controller.js calls
+       * notify() for the recipient - so raising one here as well would ring
+       * twice for the same message now that mobile push is real rather than a
+       * stub. The in-app toast below still covers the foreground case.
+       */
     };
 
     const onRoomRead = (payload: any) => {

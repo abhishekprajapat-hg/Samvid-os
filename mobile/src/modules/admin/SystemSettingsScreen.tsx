@@ -85,7 +85,7 @@ export const SystemSettingsScreen = () => {
     return (
       <Screen title="System Settings" subtitle="Access Denied">
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-          <Text style={{ color: "#ef4444", fontWeight: "600" }}>Access denied. Only ADMIN/MANAGER can configure system settings.</Text>
+          <Text style={{ color: "#d64545", fontWeight: "600" }}>Access denied. Only ADMIN/MANAGER can configure system settings.</Text>
         </View>
       </Screen>
     );
@@ -192,7 +192,7 @@ const SettingRow = ({
 const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 12,
@@ -204,7 +204,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "700",
   },
   badge: {
@@ -218,20 +218,20 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   badgeOk: {
-    color: "#166534",
-    borderColor: "#86efac",
-    backgroundColor: "#f0fdf4",
+    color: "#084f36",
+    borderColor: "#6ecdaa",
+    backgroundColor: "#e8f7f0",
   },
   badgeWarn: {
-    color: "#92400e",
-    borderColor: "#fcd34d",
-    backgroundColor: "#fffbeb",
+    color: "#614304",
+    borderColor: "#eebf51",
+    backgroundColor: "#fdf4e3",
   },
   section: {
     marginTop: 10,
     marginBottom: 4,
     fontWeight: "700",
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     textTransform: "uppercase",
     letterSpacing: 0.9,
@@ -242,10 +242,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
+    borderBottomColor: "#edf0f5",
   },
   label: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "600",
   },
   timeoutWrap: {
@@ -256,18 +256,18 @@ const styles = StyleSheet.create({
   },
   timeoutChip: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
     backgroundColor: "#fff",
   },
   timeoutChipActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
+    borderColor: "#161c24",
+    backgroundColor: "#161c24",
   },
   timeoutChipText: {
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "600",
     fontSize: 11,
   },
@@ -276,7 +276,7 @@ const styles = StyleSheet.create({
   },
   savedText: {
     marginTop: 10,
-    color: "#166534",
+    color: "#084f36",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -289,17 +289,17 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 42,
     borderRadius: 10,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
     alignItems: "center",
     justifyContent: "center",
   },
   ghostBtn: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
   },
   ghostBtnText: {
-    color: "#334155",
+    color: "#39424f",
   },
   buttonDisabled: {
     opacity: 0.6,

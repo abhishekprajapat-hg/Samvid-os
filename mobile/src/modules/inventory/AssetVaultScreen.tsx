@@ -16,7 +16,7 @@ import {
   Platform,
 } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { useNavigation } from "@react-navigation/native";
 import { useRoute } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
@@ -25,6 +25,7 @@ import { Screen } from "../../components/common/Screen";
 import {
   createInventoryAsset,
   deleteInventoryAsset,
+  requestInventoryDelete,
   getInventoryAssets,
   requestInventoryUpdate,
   requestInventoryStatusChange,
@@ -34,6 +35,9 @@ import { addLeadDiaryEntry, getAllLeads } from "../../services/leadService";
 import { uploadChatFile } from "../../services/chatService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { useAuth } from "../../context/AuthContext";
+import { usePermissions } from "../../context/PermissionContext";
+import { resolveInventoryAccess } from "./inventoryAccess";
+import { MyInventoryRequests } from "./components/MyInventoryRequests";
 import type { InventoryAsset } from "../../types";
 
 const STATUS_OPTIONS = ["Available", "Blocked", "Sold"];
@@ -47,7 +51,7 @@ const SOLD_PAYMENT_MODE_LABEL: Record<string, string> = {
 };
 const SOLD_TRANSFER_TYPES = ["NEFT", "RTGS", "IMPS"];
 type SoldDateField = "remainingDueDate" | "paymentDate" | "chequeDate";
-const INPUT_PLACEHOLDER = "#94a3b8";
+const INPUT_PLACEHOLDER = "#98a3b5";
 const DEAL_TYPE_OPTIONS = ["PURCHASE", "RENT", "LEASE"];
 
 const formatDateOnly = (value: Date) =>
@@ -154,11 +158,29 @@ export const AssetVaultScreen = () => {
   const { role } = useAuth();
   const normalizedRole = String(role || "").toUpperCase();
   const isAdmin = normalizedRole === "ADMIN";
-  const canManage = ["ADMIN", "MANAGER", "CHANNEL_PARTNER"].includes(normalizedRole);
-  const canCreateInventory = ["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"].includes(normalizedRole);
-  const canRequestStatusChange = ["FIELD_EXECUTIVE", "EXECUTIVE"].includes(normalizedRole);
+  /*
+   * Capabilities come from the shared rules now, not from role lists inlined
+   * here. The old lists disagreed with web in three ways: they let a MANAGER
+   * and a CHANNEL_PARTNER delete outright (web allows only ADMIN), they left
+   * ADMIN and MANAGER out of the status-change request roles, and they ignored
+   * page-access grants entirely.
+   */
+  const { enforcePageAccess, canPageAction } = usePermissions();
+  const {
+    canManage,
+    canCreateInventory,
+    canRequestStatusChange,
+    canDeleteDirect,
+    canRequestDelete,
+    canReviewInventoryRequests,
+    canOpenEditModal,
+  } = resolveInventoryAccess({ role: normalizedRole, enforcePageAccess, canPageAction });
+
   const canDirectInventoryEdit = canManage;
-  const canEditInventory = canManage || canRequestStatusChange;
+  const canEditInventory = canOpenEditModal;
+
+  // Bumped whenever a request is raised, so the panel re-reads immediately.
+  const [requestsRefreshKey, setRequestsRefreshKey] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -673,6 +695,7 @@ export const AssetVaultScreen = () => {
           updatePayload,
           `Inventory edit requested by ${String(role || "USER").replace(/_/g, " ")}`,
         );
+        setRequestsRefreshKey((key) => key + 1);
         setSuccess("Edit request sent for admin approval");
       }
 
@@ -942,11 +965,28 @@ export const AssetVaultScreen = () => {
   const removeAsset = async (assetId: string) => {
     const proceed = async () => {
       try {
-        await deleteInventoryAsset(assetId);
-        setAssets((prev) => prev.filter((asset) => asset._id !== assetId));
-        setSuccess("Asset deleted");
+        /*
+         * Only ADMIN (or an explicit delete grant) removes an asset outright.
+         * Everyone else raises a request - previously this called delete for
+         * every role and simply collected a 403 from the API.
+         */
+        if (canDeleteDirect) {
+          await deleteInventoryAsset(assetId);
+          setAssets((prev) => prev.filter((asset) => asset._id !== assetId));
+          setSuccess("Asset deleted");
+          return;
+        }
+
+        if (!canRequestDelete) {
+          setError("You do not have permission to delete inventory.");
+          return;
+        }
+
+        await requestInventoryDelete(assetId, "Delete requested from inventory workspace");
+        setRequestsRefreshKey((key) => key + 1);
+        setSuccess("Delete request submitted for admin approval");
       } catch (e) {
-        setError(toErrorMessage(e, "Failed to delete asset"));
+        setError(toErrorMessage(e, "Failed to delete or request delete"));
       }
     };
 
@@ -1010,6 +1050,11 @@ export const AssetVaultScreen = () => {
         data={filtered}
         keyExtractor={(item) => item._id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+        // Reviewers approve from Notifications; everyone else needs to see what
+        // became of the requests they raised.
+        ListHeaderComponent={
+          canReviewInventoryRequests ? null : <MyInventoryRequests refreshKey={requestsRefreshKey} />
+        }
         ListEmptyComponent={<Text style={styles.empty}>No assets found</Text>}
         renderItem={({ item }) => {
           const displayImages = item.images?.length ? item.images : buildDefaultImageSet(item.title || item._id);
@@ -1029,7 +1074,7 @@ export const AssetVaultScreen = () => {
                           removeAsset(item._id);
                         }}
                       >
-                        <Ionicons name="trash-outline" size={14} color="#ef4444" />
+                        <Icon name="trash-outline" size={14} color="#d64545" />
                       </Pressable>
                     ) : (
                       <View />
@@ -1043,7 +1088,7 @@ export const AssetVaultScreen = () => {
                             openEditModal(item);
                           }}
                         >
-                          <Ionicons name="create-outline" size={14} color="#64748b" />
+                          <Icon name="create-outline" size={14} color="#6c7789" />
                         </Pressable>
                       ) : null}
                       <Pressable
@@ -1053,7 +1098,7 @@ export const AssetVaultScreen = () => {
                           void handleShareAsset(item);
                         }}
                       >
-                        <Ionicons name="share-social-outline" size={14} color="#0891b2" />
+                        <Icon name="share-social-outline" size={14} color="#1f6499" />
                       </Pressable>
                     </View>
                   </View>
@@ -1269,7 +1314,7 @@ export const AssetVaultScreen = () => {
               <Text style={styles.sectionLabel}>Property Date</Text>
               <View style={styles.dateFieldActionRow}>
                 <Pressable style={styles.dateFieldBtn} onPress={openPropertyDatePicker}>
-                  <Ionicons name="calendar-outline" size={14} color="#334155" />
+                  <Icon name="calendar-outline" size={14} color="#39424f" />
                   <Text style={styles.dateFieldBtnText}>{form.propertyDate || "Pick property date"}</Text>
                 </Pressable>
               </View>
@@ -1460,7 +1505,7 @@ export const AssetVaultScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("remainingDueDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color="#39424f" />
                     <Text style={styles.dateFieldBtnText}>Pick due date</Text>
                   </Pressable>
                 </View>
@@ -1474,7 +1519,7 @@ export const AssetVaultScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Icon name="calendar-outline" size={14} color="#39424f" />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -1496,7 +1541,7 @@ export const AssetVaultScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Icon name="calendar-outline" size={14} color="#39424f" />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -1512,7 +1557,7 @@ export const AssetVaultScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("chequeDate")}>
-                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Icon name="calendar-outline" size={14} color="#39424f" />
                         <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
                       </Pressable>
                     </View>
@@ -1558,7 +1603,7 @@ export const AssetVaultScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Icon name="calendar-outline" size={14} color="#39424f" />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -1587,7 +1632,7 @@ export const AssetVaultScreen = () => {
                       onPress={() => setStatusAttachment(null)}
                       disabled={saving}
                     >
-                      <Ionicons name="close" size={16} color="#991b1b" />
+                      <Icon name="close" size={16} color="#741f1f" />
                     </Pressable>
                   ) : null}
                 </View>
@@ -1748,20 +1793,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: "#6ecdaa",
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: "#e8f7f0",
+    color: "#084f36",
   },
   search: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     paddingHorizontal: 12,
     height: 44,
     marginBottom: 10,
-    color: "#0f172a",
+    color: "#161c24",
   },
   topRow: {
     marginBottom: 10,
@@ -1774,7 +1819,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#e0e5ed",
     borderRadius: 999,
     padding: 4,
   },
@@ -1787,18 +1832,18 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
   },
   modeBtnText: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
   },
   modeBtnTextActive: {
-    color: "#0f172a",
+    color: "#161c24",
   },
   primaryBtn: {
     height: 40,
     borderRadius: 10,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 14,
@@ -1810,7 +1855,7 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
@@ -1820,7 +1865,7 @@ const styles = StyleSheet.create({
     height: 140,
     borderRadius: 10,
     marginBottom: 10,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#e0e5ed",
   },
   cardImageWrap: {
     marginBottom: 10,
@@ -1848,13 +1893,13 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     backgroundColor: "rgba(255,255,255,0.96)",
     alignItems: "center",
     justifyContent: "center",
   },
   imageIconBtnDanger: {
-    borderColor: "#fecaca",
+    borderColor: "#f6b8b5",
   },
   cardNavBtn: {
     position: "absolute",
@@ -1880,17 +1925,17 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
   },
   meta: {
     marginTop: 4,
     fontSize: 12,
-    color: "#475569",
+    color: "#4e5867",
   },
   reasonMeta: {
     marginTop: 5,
     fontSize: 12,
-    color: "#b45309",
+    color: "#7d5605",
     fontWeight: "600",
   },
   row: {
@@ -1901,19 +1946,19 @@ const styles = StyleSheet.create({
   },
   statusChip: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 6,
     backgroundColor: "#fff",
   },
   statusActive: {
-    backgroundColor: "#0f172a",
-    borderColor: "#0f172a",
+    backgroundColor: "#161c24",
+    borderColor: "#161c24",
   },
   chip: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -1921,14 +1966,14 @@ const styles = StyleSheet.create({
   },
   chipText: {
     fontSize: 12,
-    color: "#334155",
+    color: "#39424f",
   },
   activeText: {
     color: "#fff",
   },
   empty: {
     textAlign: "center",
-    color: "#64748b",
+    color: "#6c7789",
     marginVertical: 14,
   },
   modalWrap: {
@@ -1959,18 +2004,18 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
     marginBottom: 10,
   },
   input: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     paddingHorizontal: 12,
     height: 42,
     marginBottom: 10,
     backgroundColor: "#fff",
-    color: "#0f172a",
+    color: "#161c24",
     textAlignVertical: "top",
   },
   reasonInput: {
@@ -1981,20 +2026,20 @@ const styles = StyleSheet.create({
     marginTop: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
-    backgroundColor: "#eff6ff",
+    borderColor: "#bcd0ff",
+    backgroundColor: "#eef3ff",
     alignItems: "center",
     justifyContent: "center",
     height: 32,
   },
   openDetailsText: {
-    color: "#1d4ed8",
+    color: "#1c37ab",
     fontWeight: "700",
     fontSize: 11,
   },
   selectInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     minHeight: 40,
     paddingHorizontal: 12,
@@ -2003,7 +2048,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   selectInputText: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 13,
     fontWeight: "600",
   },
@@ -2015,7 +2060,7 @@ const styles = StyleSheet.create({
   dateFieldBtn: {
     height: 30,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     paddingHorizontal: 10,
@@ -2025,14 +2070,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   dateFieldBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "600",
   },
   selectMenu: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     maxHeight: 180,
@@ -2045,10 +2090,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
+    borderBottomColor: "#edf0f5",
   },
   selectMenuItemText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -2061,7 +2106,7 @@ const styles = StyleSheet.create({
   },
   statusAttachBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     height: 34,
@@ -2070,7 +2115,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   statusAttachBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -2078,15 +2123,15 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: "#f6b8b5",
     borderRadius: 10,
-    backgroundColor: "#fff1f2",
+    backgroundColor: "#fdedec",
     alignItems: "center",
     justifyContent: "center",
   },
   uploadStatusText: {
     marginBottom: 10,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
   },
   modalRow: {
@@ -2105,16 +2150,16 @@ const styles = StyleSheet.create({
   },
   modalActionGhost: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     backgroundColor: "#fff",
   },
   modalActionPrimary: {
     borderWidth: 1,
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
+    borderColor: "#161c24",
+    backgroundColor: "#161c24",
   },
   modalActionGhostText: {
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "600",
   },
   modalActionPrimaryText: {
@@ -2124,11 +2169,11 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 8,
     fontWeight: "700",
-    color: "#334155",
+    color: "#39424f",
   },
   sectionLabel: {
     marginBottom: 6,
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "700",
     fontSize: 12,
   },
@@ -2157,18 +2202,18 @@ const styles = StyleSheet.create({
   },
   amenityChip: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 4,
     backgroundColor: "#fff",
   },
   amenityChipActive: {
-    backgroundColor: "#0f172a",
-    borderColor: "#0f172a",
+    backgroundColor: "#161c24",
+    borderColor: "#161c24",
   },
   amenityText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "600",
   },
@@ -2184,7 +2229,7 @@ const styles = StyleSheet.create({
   ghostBtn: {
     minHeight: 34,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     paddingHorizontal: 12,
@@ -2192,13 +2237,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   ghostBtnText: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 13,
     fontWeight: "600",
   },
   uploadCount: {
     fontSize: 12,
-    color: "#64748b",
+    color: "#6c7789",
   },
   previewRow: {
     gap: 8,
@@ -2207,31 +2252,31 @@ const styles = StyleSheet.create({
   previewPill: {
     maxWidth: 220,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 5,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
   },
   previewText: {
     fontSize: 11,
-    color: "#334155",
+    color: "#39424f",
     maxWidth: 160,
   },
   removeText: {
-    color: "#b91c1c",
+    color: "#942626",
     fontSize: 11,
     fontWeight: "700",
   },
   fileList: {
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     padding: 8,
     gap: 6,
   },
@@ -2254,9 +2299,9 @@ const styles = StyleSheet.create({
     right: 16,
     zIndex: 2,
     borderRadius: 10,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: "#39424f",
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
@@ -2292,7 +2337,7 @@ const styles = StyleSheet.create({
   viewerCounter: {
     position: "absolute",
     bottom: 26,
-    color: "#e2e8f0",
+    color: "#e0e5ed",
     fontSize: 13,
     fontWeight: "600",
   },
@@ -2304,7 +2349,7 @@ const styles = StyleSheet.create({
   },
   webDateModalCard: {
     borderWidth: 1,
-    borderColor: "#dbe3ee",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 14,
@@ -2314,12 +2359,12 @@ const styles = StyleSheet.create({
     width: "100%",
     minHeight: 40,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 9,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
-    color: "#0f172a",
+    color: "#161c24",
     backgroundColor: "#fff",
   },
 });

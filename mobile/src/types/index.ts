@@ -28,9 +28,21 @@ export interface AuthPayload {
 }
 
 export interface LeadRequirements {
-  inventoryType?: "COMMERCIAL" | "RESIDENTIAL" | "";
+  // COWORKING was added to the backend enum and to web; mobile had not
+  // followed, so a coworking enquiry could not be typed at all.
+  inventoryType?: "COMMERCIAL" | "RESIDENTIAL" | "COWORKING" | "";
   transactionType?: "SALE" | "LEASE" | "RENT" | "";
   furnishingStatus?: string;
+  /*
+   * The current requirements model: a subtype key plus a free-form bag of
+   * whatever fields that subtype defines. See
+   * src/config/propertyRequirementConfig.ts for the field sets, and
+   * backend/src/models/Lead.js for the schema. The commercial/residential
+   * objects below predate it and are still written by the backend, so both
+   * shapes coexist.
+   */
+  propertySubtype?: string;
+  subtypeData?: Record<string, unknown>;
   budgetMin?: number | null;
   budgetMax?: number | null;
   areaMin?: number | null;
@@ -40,8 +52,15 @@ export interface LeadRequirements {
     seats?: number | null;
     cabins?: number | null;
     conferenceRooms?: number | null;
+    conferenceSeats?: number | null;
     parkingAvailable?: boolean;
     pantry?: boolean;
+    receptionArea?: boolean;
+    waitingArea?: boolean;
+    cafeteria?: boolean;
+    serverRoom?: boolean;
+    storageRoom?: boolean;
+    breakoutArea?: boolean;
   };
   residential?: {
     bhkType?: string;

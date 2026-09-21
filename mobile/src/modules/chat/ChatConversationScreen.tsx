@@ -19,7 +19,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { Audio } from "expo-av";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
@@ -108,8 +108,8 @@ const renderAvatar = (name: string, avatarUrl: string, size = 32) => {
   }
 
   return (
-    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: "#dbeafe", alignItems: "center", justifyContent: "center" }}>
-      <Text style={{ color: "#1e3a8a", fontSize: 10, fontWeight: "700" }}>{initials(name)}</Text>
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: "#dde6ff", alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ color: "#182a6d", fontSize: 10, fontWeight: "700" }}>{initials(name)}</Text>
     </View>
   );
 };
@@ -945,7 +945,7 @@ export const ChatConversationScreen = () => {
       >
         <View style={styles.header}>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={18} color="#334155" />
+            <Icon name="arrow-back" size={18} color="#39424f" />
           </Pressable>
           {renderAvatar(contactName, contactAvatar, 32)}
           <View style={styles.titleWrap}>
@@ -953,13 +953,13 @@ export const ChatConversationScreen = () => {
             <Text style={styles.subTitle}>{contactRole || "Member"}</Text>
           </View>
           <Pressable style={styles.headerIconBtn} onPress={() => startCall("VOICE")}>
-            <Ionicons name="call-outline" size={16} color="#334155" />
+            <Icon name="call-outline" size={16} color="#39424f" />
           </Pressable>
           <Pressable style={styles.headerIconBtn} onPress={() => startCall("VIDEO")}>
-            <Ionicons name="videocam-outline" size={16} color="#334155" />
+            <Icon name="videocam-outline" size={16} color="#39424f" />
           </Pressable>
           <Pressable style={styles.headerIconBtn} onPress={() => setCallLogsVisible(true)}>
-            <Ionicons name="time-outline" size={16} color="#334155" />
+            <Icon name="time-outline" size={16} color="#39424f" />
           </Pressable>
           <Text style={styles.messageCount}>{messageCountText}</Text>
         </View>
@@ -967,7 +967,7 @@ export const ChatConversationScreen = () => {
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         {loading ? (
-          <View style={styles.loadingWrap}><ActivityIndicator color="#0f172a" /></View>
+          <View style={styles.loadingWrap}><ActivityIndicator color="#161c24" /></View>
         ) : (
           <View style={styles.chatArea}>
             <FlatList
@@ -985,7 +985,7 @@ export const ChatConversationScreen = () => {
               ListHeaderComponent={
                 loadingHistory ? (
                   <View style={styles.historyLoader}>
-                    <ActivityIndicator size="small" color="#64748b" />
+                    <ActivityIndicator size="small" color="#6c7789" />
                     <Text style={styles.historyLoaderText}>Loading older messages...</Text>
                   </View>
                 ) : null
@@ -1010,7 +1010,7 @@ export const ChatConversationScreen = () => {
                         style={styles.forwardBtn}
                         onPress={() => openForwardPicker(item.messages.map((row) => ({ textInput: row.text || "", attachment: row.attachment || null })))}
                       >
-                        <Ionicons name="arrow-redo-outline" size={15} color="#475569" />
+                        <Icon name="arrow-redo-outline" size={15} color="#4e5867" />
                       </Pressable>
 
                       <View style={[styles.messageBubble, mine && styles.messageBubbleMine]}>
@@ -1056,7 +1056,7 @@ export const ChatConversationScreen = () => {
                       style={styles.forwardBtn}
                       onPress={() => openForwardPicker([{ textInput: message.text || "", attachment: message.attachment || null }])}
                     >
-                      <Ionicons name="arrow-redo-outline" size={15} color="#475569" />
+                      <Icon name="arrow-redo-outline" size={15} color="#4e5867" />
                     </Pressable>
 
                     <View style={[styles.messageBubble, mine && styles.messageBubbleMine]}>
@@ -1072,10 +1072,10 @@ export const ChatConversationScreen = () => {
                           style={[styles.audioCard, mine && styles.audioCardMine]}
                           onPress={() => playAudioAttachment(message._id, pickUriString(message.attachment?.fileUrl || ""))}
                         >
-                          <Ionicons
+                          <Icon
                             name={playingMessageId === message._id ? "pause" : "play"}
                             size={16}
-                            color={mine ? "#ffffff" : "#0f172a"}
+                            color={mine ? "#ffffff" : "#161c24"}
                           />
                           <Text style={[styles.audioText, mine && styles.messageTextMine]}>
                             {playingMessageId === message._id ? "Playing..." : "Voice note"}
@@ -1083,7 +1083,7 @@ export const ChatConversationScreen = () => {
                         </Pressable>
                       ) : isPdfAttachment ? (
                         <Pressable style={[styles.pdfCard, mine && styles.pdfCardMine]} onPress={() => openAttachmentUrl(message.attachment?.fileUrl || "")}>
-                          <Ionicons name="document-text-outline" size={16} color={mine ? "#ffffff" : "#1e293b"} />
+                          <Icon name="document-text-outline" size={16} color={mine ? "#ffffff" : "#242b35"} />
                           <Text style={[styles.pdfText, mine && styles.messageTextMine]} numberOfLines={1}>{message.attachment?.fileName || "Open PDF"}</Text>
                         </Pressable>
                       ) : (
@@ -1121,17 +1121,17 @@ export const ChatConversationScreen = () => {
                               playAudioAttachment(key, file.uri);
                             }}
                           >
-                            <Ionicons name={playingMessageId === `pending-${index}` ? "pause" : "play"} size={15} color="#334155" />
+                            <Icon name={playingMessageId === `pending-${index}` ? "pause" : "play"} size={15} color="#39424f" />
                             <Text style={styles.pendingAudioPreviewText}>
                               {playingMessageId === `pending-${index}` ? "Stop" : "Preview"}
                             </Text>
                           </Pressable>
                         ) : (
-                          <View style={styles.pendingIconWrap}><Ionicons name="document-text-outline" size={16} color="#334155" /></View>
+                          <View style={styles.pendingIconWrap}><Icon name="document-text-outline" size={16} color="#39424f" /></View>
                         )}
                         <Text numberOfLines={1} style={styles.pendingName}>{file.name}</Text>
                         <Pressable style={styles.pendingRemove} onPress={() => removePendingAttachment(index)}>
-                          <Ionicons name="close-circle" size={16} color="#ef4444" />
+                          <Icon name="close-circle" size={16} color="#d64545" />
                         </Pressable>
                       </View>
                     );
@@ -1142,13 +1142,13 @@ export const ChatConversationScreen = () => {
 
             <View style={styles.composer}>
               <Pressable style={styles.attachBtn} onPress={sendFile} disabled={sending || pickingFile || isRecording}>
-                <Ionicons name="attach" size={16} color="#475569" />
+                <Icon name="attach" size={16} color="#4e5867" />
               </Pressable>
               <Pressable style={styles.attachBtn} onPress={sendCameraPhoto} disabled={sending || pickingFile || isRecording}>
-                <Ionicons name="camera-outline" size={16} color="#475569" />
+                <Icon name="camera-outline" size={16} color="#4e5867" />
               </Pressable>
               <Pressable style={[styles.micBtn, isRecording && styles.micBtnActive]} onPress={isRecording ? stopAudioRecording : startAudioRecording} disabled={sending || pickingFile}>
-                <Ionicons name={isRecording ? "stop" : "mic"} size={16} color={isRecording ? "#fff" : "#475569"} />
+                <Icon name={isRecording ? "stop" : "mic"} size={16} color={isRecording ? "#fff" : "#4e5867"} />
               </Pressable>
               <TextInput
                 style={styles.input}
@@ -1165,7 +1165,7 @@ export const ChatConversationScreen = () => {
                 onPress={sendQueuedMessage}
                 disabled={(!draft.trim() && pendingAttachments.length === 0) || pickingFile || isRecording}
               >
-                {sending ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="paper-plane" size={15} color="#fff" />}
+                {sending ? <ActivityIndicator color="#fff" size="small" /> : <Icon name="paper-plane" size={15} color="#fff" />}
               </Pressable>
             </View>
           </View>
@@ -1175,7 +1175,7 @@ export const ChatConversationScreen = () => {
           <View style={styles.viewerBackdrop}>
             <View style={styles.viewerHeader}>
               <Text style={styles.viewerTitle}>{viewerUrls.length > 0 ? `${viewerIndex + 1}/${viewerUrls.length}` : "Image"}</Text>
-              <Pressable onPress={closeImageViewer} style={styles.viewerClose}><Ionicons name="close" size={18} color="#ffffff" /></Pressable>
+              <Pressable onPress={closeImageViewer} style={styles.viewerClose}><Icon name="close" size={18} color="#ffffff" /></Pressable>
             </View>
             <FlatList
               data={viewerUrls}
@@ -1216,7 +1216,7 @@ export const ChatConversationScreen = () => {
                       <Text style={styles.forwardName}>{item.name}</Text>
                       <Text style={styles.forwardRole}>{item.role}</Text>
                     </View>
-                    {forwarding ? <ActivityIndicator size="small" color="#0f172a" /> : null}
+                    {forwarding ? <ActivityIndicator size="small" color="#161c24" /> : null}
                   </Pressable>
                 )}
                 ListEmptyComponent={<Text style={styles.empty}>No contacts</Text>}
@@ -1231,7 +1231,7 @@ export const ChatConversationScreen = () => {
         <Modal visible={Boolean(activeCall)} transparent animationType="fade" onRequestClose={endActiveCall}>
           <View style={styles.callBackdrop}>
             <View style={styles.callCard}>
-              <Ionicons name={activeCall?.callType === "VIDEO" ? "videocam" : "call"} size={24} color="#0f172a" />
+              <Icon name={activeCall?.callType === "VIDEO" ? "videocam" : "call"} size={24} color="#161c24" />
               <Text style={styles.callTitle}>
                 {activeCall?.status === "INCOMING" ? "Incoming Call" : activeCall?.status === "OUTGOING" ? "Calling..." : "In Call"}
               </Text>
@@ -1277,10 +1277,10 @@ export const ChatConversationScreen = () => {
                   const peerName = mine ? "You" : (callerName || contactName || "Unknown");
                   return (
                     <View style={styles.callLogRow}>
-                      <Ionicons
+                      <Icon
                         name={item.callType === "VIDEO" ? "videocam-outline" : "call-outline"}
                         size={16}
-                        color="#334155"
+                        color="#39424f"
                       />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.forwardName}>{peerName}</Text>
@@ -1304,62 +1304,62 @@ export const ChatConversationScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f1f5f9" },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#ffffff", borderBottomWidth: 1, borderBottomColor: "#e2e8f0", gap: 6 },
+  root: { flex: 1, backgroundColor: "#edf0f5" },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#ffffff", borderBottomWidth: 1, borderBottomColor: "#e0e5ed", gap: 6 },
   backBtn: { width: 30, height: 30, borderRadius: 999, alignItems: "center", justifyContent: "center" },
   titleWrap: { flex: 1, marginLeft: 6 },
-  title: { color: "#0f172a", fontSize: 14, fontWeight: "700" },
-  subTitle: { marginTop: 1, color: "#64748b", fontSize: 11 },
-  messageCount: { color: "#94a3b8", fontSize: 11 },
+  title: { color: "#161c24", fontSize: 14, fontWeight: "700" },
+  subTitle: { marginTop: 1, color: "#6c7789", fontSize: 11 },
+  messageCount: { color: "#98a3b5", fontSize: 11 },
   headerIconBtn: {
     width: 30,
     height: 30,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#ffffff",
   },
-  error: { marginHorizontal: 12, marginTop: 8, borderWidth: 1, borderColor: "#fecaca", backgroundColor: "#fef2f2", color: "#b91c1c", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12 },
+  error: { marginHorizontal: 12, marginTop: 8, borderWidth: 1, borderColor: "#f6b8b5", backgroundColor: "#fdedec", color: "#942626", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   chatArea: { flex: 1 },
   messagesContent: { padding: 12, paddingBottom: 18, gap: 8 },
-  dayWrap: { alignSelf: "center", backgroundColor: "#e2e8f0", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginVertical: 6 },
-  dayText: { color: "#334155", fontSize: 11, fontWeight: "700" },
+  dayWrap: { alignSelf: "center", backgroundColor: "#e0e5ed", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginVertical: 6 },
+  dayText: { color: "#39424f", fontSize: 11, fontWeight: "700" },
   messageWrap: { alignItems: "flex-start", flexDirection: "row", gap: 6 },
   messageWrapMine: { alignItems: "flex-end", alignSelf: "flex-end" },
-  forwardBtn: { width: 24, height: 24, borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center", backgroundColor: "#fff", marginTop: 18 },
-  messageBubble: { maxWidth: "84%", backgroundColor: "#ffffff", borderRadius: 14, borderWidth: 1, borderColor: "#dbe3ee", paddingHorizontal: 10, paddingVertical: 8 },
+  forwardBtn: { width: 24, height: 24, borderRadius: 999, borderWidth: 1, borderColor: "#c8d0dd", alignItems: "center", justifyContent: "center", backgroundColor: "#fff", marginTop: 18 },
+  messageBubble: { maxWidth: "84%", backgroundColor: "#ffffff", borderRadius: 14, borderWidth: 1, borderColor: "#e0e5ed", paddingHorizontal: 10, paddingVertical: 8 },
   messageBubbleMine: { backgroundColor: "#67c3d6", borderColor: "#67c3d6" },
-  messageAuthor: { color: "#0f172a", fontSize: 11, fontWeight: "700" },
-  messageText: { color: "#0f172a", fontSize: 14, marginTop: 2 },
-  messageTime: { color: "#64748b", fontSize: 10, marginTop: 4 },
+  messageAuthor: { color: "#161c24", fontSize: 11, fontWeight: "700" },
+  messageText: { color: "#161c24", fontSize: 14, marginTop: 2 },
+  messageTime: { color: "#6c7789", fontSize: 10, marginTop: 4 },
   messageTextMine: { color: "#ffffff" },
-  fileText: { marginTop: 3, color: "#0f172a", fontSize: 13, textDecorationLine: "underline" },
-  attachmentImage: { marginTop: 6, width: 180, height: 180, borderRadius: 10, backgroundColor: "#e2e8f0" },
+  fileText: { marginTop: 3, color: "#161c24", fontSize: 13, textDecorationLine: "underline" },
+  attachmentImage: { marginTop: 6, width: 180, height: 180, borderRadius: 10, backgroundColor: "#e0e5ed" },
   groupedImageWrap: { marginTop: 2 },
-  groupedGrid: { marginTop: 6, width: 180, height: 180, borderRadius: 10, overflow: "hidden", flexDirection: "row", flexWrap: "wrap", gap: 4, backgroundColor: "#dbe3ee" },
+  groupedGrid: { marginTop: 6, width: 180, height: 180, borderRadius: 10, overflow: "hidden", flexDirection: "row", flexWrap: "wrap", gap: 4, backgroundColor: "#e0e5ed" },
   groupedGridCompact: { height: 88 },
-  groupedTile: { width: 88, height: 88, backgroundColor: "#e2e8f0" },
+  groupedTile: { width: 88, height: 88, backgroundColor: "#e0e5ed" },
   groupedTileCompact: { flex: 1 },
   groupedTileImage: { width: "100%", height: "100%" },
   groupedTileOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.55)" },
   groupedOverlayText: { color: "#ffffff", fontSize: 18, fontWeight: "700" },
-  pdfCard: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#f8fafc", maxWidth: 220 },
+  pdfCard: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#f5f7fa", maxWidth: 220 },
   pdfCardMine: { borderColor: "rgba(255,255,255,0.45)", backgroundColor: "rgba(255,255,255,0.2)" },
-  pdfText: { flex: 1, color: "#0f172a", fontSize: 12, fontWeight: "600" },
+  pdfText: { flex: 1, color: "#161c24", fontSize: 12, fontWeight: "600" },
   audioCard: {
     marginTop: 6,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     maxWidth: 220,
   },
   audioCardMine: {
@@ -1367,34 +1367,34 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.2)",
   },
   audioText: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 12,
     fontWeight: "600",
   },
-  pendingWrap: { borderTopWidth: 1, borderTopColor: "#e2e8f0", backgroundColor: "#ffffff", paddingTop: 8, paddingBottom: 6, paddingHorizontal: 12 },
-  pendingLabel: { fontSize: 11, fontWeight: "700", color: "#64748b", marginBottom: 6 },
+  pendingWrap: { borderTopWidth: 1, borderTopColor: "#e0e5ed", backgroundColor: "#ffffff", paddingTop: 8, paddingBottom: 6, paddingHorizontal: 12 },
+  pendingLabel: { fontSize: 11, fontWeight: "700", color: "#6c7789", marginBottom: 6 },
   pendingList: { paddingRight: 6, gap: 8 },
-  pendingItem: { width: 120, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", padding: 6 },
-  pendingThumb: { width: "100%", height: 60, borderRadius: 8, backgroundColor: "#e2e8f0" },
-  pendingIconWrap: { height: 60, borderRadius: 8, backgroundColor: "#f1f5f9", alignItems: "center", justifyContent: "center" },
+  pendingItem: { width: 120, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, backgroundColor: "#fff", padding: 6 },
+  pendingThumb: { width: "100%", height: 60, borderRadius: 8, backgroundColor: "#e0e5ed" },
+  pendingIconWrap: { height: 60, borderRadius: 8, backgroundColor: "#edf0f5", alignItems: "center", justifyContent: "center" },
   pendingAudioPreview: {
     height: 60,
     borderRadius: 8,
-    backgroundColor: "#f1f5f9",
+    backgroundColor: "#edf0f5",
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
     borderWidth: 1,
-    borderColor: "#dbe3ee",
+    borderColor: "#e0e5ed",
   },
-  pendingAudioPreviewText: { fontSize: 10, color: "#334155", fontWeight: "700" },
-  pendingName: { marginTop: 6, fontSize: 11, color: "#334155" },
+  pendingAudioPreviewText: { fontSize: 10, color: "#39424f", fontWeight: "700" },
+  pendingName: { marginTop: 6, fontSize: 11, color: "#39424f" },
   pendingRemove: { position: "absolute", top: 4, right: 4 },
-  composer: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 20, borderTopWidth: 1, borderTopColor: "#e2e8f0", backgroundColor: "#ffffff" },
-  attachBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  micBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  micBtnActive: { backgroundColor: "#ef4444", borderColor: "#ef4444" },
-  input: { flex: 1, minHeight: 40, maxHeight: 120, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, color: "#0f172a", backgroundColor: "#fff", textAlignVertical: "top" },
+  composer: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 20, borderTopWidth: 1, borderTopColor: "#e0e5ed", backgroundColor: "#ffffff" },
+  attachBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#c8d0dd", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
+  micBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#c8d0dd", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
+  micBtnActive: { backgroundColor: "#d64545", borderColor: "#d64545" },
+  input: { flex: 1, minHeight: 40, maxHeight: 120, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, color: "#161c24", backgroundColor: "#fff", textAlignVertical: "top" },
   sendBtn: { width: 38, height: 38, borderRadius: 999, backgroundColor: "#67c3d6", alignItems: "center", justifyContent: "center" },
   sendDisabled: { opacity: 0.55 },
   viewerBackdrop: { flex: 1, backgroundColor: "rgba(2,6,23,0.95)" },
@@ -1405,28 +1405,28 @@ const styles = StyleSheet.create({
   viewerImage: { width: "100%", height: "82%" },
   forwardBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 16 },
   forwardCard: { maxHeight: "72%", backgroundColor: "#fff", borderRadius: 14, padding: 12 },
-  forwardTitle: { color: "#0f172a", fontSize: 16, fontWeight: "700" },
-  forwardInput: { marginTop: 10, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, height: 40, paddingHorizontal: 12, color: "#0f172a", backgroundColor: "#fff" },
+  forwardTitle: { color: "#161c24", fontSize: 16, fontWeight: "700" },
+  forwardInput: { marginTop: 10, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, height: 40, paddingHorizontal: 12, color: "#161c24", backgroundColor: "#fff" },
   forwardList: { marginTop: 10 },
-  forwardRow: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 10, padding: 8, marginBottom: 6 },
-  forwardName: { color: "#0f172a", fontSize: 13, fontWeight: "700" },
-  forwardRole: { color: "#64748b", fontSize: 11, marginTop: 1 },
-  forwardCancel: { marginTop: 8, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, height: 38, alignItems: "center", justifyContent: "center" },
-  forwardCancelText: { color: "#334155", fontWeight: "700", fontSize: 12 },
-  empty: { textAlign: "center", color: "#94a3b8", marginTop: 14, fontSize: 12 },
+  forwardRow: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#e0e5ed", borderRadius: 10, padding: 8, marginBottom: 6 },
+  forwardName: { color: "#161c24", fontSize: 13, fontWeight: "700" },
+  forwardRole: { color: "#6c7789", fontSize: 11, marginTop: 1 },
+  forwardCancel: { marginTop: 8, borderWidth: 1, borderColor: "#c8d0dd", borderRadius: 10, height: 38, alignItems: "center", justifyContent: "center" },
+  forwardCancelText: { color: "#39424f", fontWeight: "700", fontSize: 12 },
+  empty: { textAlign: "center", color: "#98a3b5", marginTop: 14, fontSize: 12 },
   callBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 16 },
   callCard: {
     backgroundColor: "#fff",
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     alignItems: "center",
     padding: 16,
     gap: 8,
   },
-  callTitle: { fontSize: 18, fontWeight: "700", color: "#0f172a" },
-  callPeer: { fontSize: 14, fontWeight: "600", color: "#334155" },
-  callSub: { fontSize: 12, color: "#64748b" },
+  callTitle: { fontSize: 18, fontWeight: "700", color: "#161c24" },
+  callPeer: { fontSize: 14, fontWeight: "600", color: "#39424f" },
+  callSub: { fontSize: 12, color: "#6c7789" },
   callActions: { marginTop: 8, flexDirection: "row", gap: 10 },
   callBtn: {
     minWidth: 110,
@@ -1437,17 +1437,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 12,
   },
-  callRejectBtn: { borderColor: "#fecaca", backgroundColor: "#fff1f2" },
-  callAcceptBtn: { borderColor: "#86efac", backgroundColor: "#dcfce7" },
-  callEndBtn: { borderColor: "#fecaca", backgroundColor: "#fee2e2", marginTop: 8 },
-  callBtnText: { color: "#991b1b", fontSize: 13, fontWeight: "700" },
-  callAcceptText: { color: "#166534" },
+  callRejectBtn: { borderColor: "#f6b8b5", backgroundColor: "#fdedec" },
+  callAcceptBtn: { borderColor: "#6ecdaa", backgroundColor: "#cdeee0" },
+  callEndBtn: { borderColor: "#f6b8b5", backgroundColor: "#fbd9d7", marginTop: 8 },
+  callBtnText: { color: "#741f1f", fontSize: 13, fontWeight: "700" },
+  callAcceptText: { color: "#084f36" },
   callLogRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
     padding: 8,
     marginBottom: 6,
@@ -1460,7 +1460,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   historyLoaderText: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 11,
     fontWeight: "600",
   },

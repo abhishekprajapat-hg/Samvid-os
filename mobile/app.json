@@ -1,35 +1,43 @@
 {
   "expo": {
-    "name": "the-office-on-rent",
+    "name": "Office On Rent",
     "slug": "the-office-on-rent",
     "scheme": "theofficeonrent",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#f5f7fa"
     },
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "This app uses the camera for video calls.",
-        "NSMicrophoneUsageDescription": "This app uses the microphone for voice and video calls."
-      }
+        "NSCameraUsageDescription": "Take photos of properties and documents to attach to leads, inventory and chats, and for video calls with your team.",
+        "NSMicrophoneUsageDescription": "Record audio for voice and video calls with your team.",
+        "NSPhotoLibraryUsageDescription": "Attach photos from your library to leads, inventory records and chats.",
+        "NSLocationWhenInUseUsageDescription": "Confirm you are at the office when you check in or out, and share your position with your manager during field visits."
+      },
+      "bundleIdentifier": "com.theofficeonrent.crm"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#f5f7fa"
       },
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",
         "MODIFY_AUDIO_SETTINGS",
-        "INTERNET"
+        "INTERNET",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "POST_NOTIFICATIONS",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
       ],
       "edgeToEdgeEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
@@ -40,7 +48,13 @@
       "@react-native-community/datetimepicker",
       "expo-font",
       "expo-mail-composer",
-      "expo-speech-recognition"
+      "expo-speech-recognition",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Confirm you are at the office when you check in or out."
+        }
+      ]
     ],
     "extra": {
       "eas": {

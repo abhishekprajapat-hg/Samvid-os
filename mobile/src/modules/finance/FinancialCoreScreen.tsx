@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { useNavigation } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppChip } from "../../components/common/ui";
@@ -477,7 +477,7 @@ export const FinancialCoreScreen = () => {
             />
             <View style={{ flex: 1 }} />
             <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-              <Ionicons name="calendar-outline" size={14} color="#334155" />
+              <Icon name="calendar-outline" size={14} color="#39424f" />
             </Pressable>
             <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} disabled={refreshing} />
           </View>
@@ -685,7 +685,7 @@ export const FinancialCoreScreen = () => {
                       }}
                       disabled={clearingFollowUpId === item._id}
                     >
-                      <Ionicons name="trash-outline" size={13} color="#b91c1c" />
+                      <Icon name="trash-outline" size={13} color="#942626" />
                       <Text style={styles.followupDeleteText}>{clearingFollowUpId === item._id ? "..." : "Delete"}</Text>
                     </Pressable>
                   </View>
@@ -802,7 +802,7 @@ const styles = StyleSheet.create({
   },
   calendarIconBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 9,
     backgroundColor: "#fff",
     height: 36,
@@ -812,7 +812,7 @@ const styles = StyleSheet.create({
   },
   periodText: {
     marginTop: 8,
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 11,
     fontWeight: "600",
   },
@@ -824,13 +824,13 @@ const styles = StyleSheet.create({
   customDateBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     padding: 10,
   },
   customDateText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 11,
     fontWeight: "600",
   },
@@ -839,7 +839,7 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 12,
@@ -847,7 +847,7 @@ const styles = StyleSheet.create({
   metricTitle: {
     fontSize: 11,
     textTransform: "uppercase",
-    color: "#64748b",
+    color: "#6c7789",
     fontWeight: "700",
     letterSpacing: 0.7,
   },
@@ -855,16 +855,16 @@ const styles = StyleSheet.create({
     marginTop: 7,
     fontSize: 24,
     fontWeight: "800",
-    color: "#0f172a",
+    color: "#161c24",
   },
   metricHelper: {
     marginTop: 3,
     fontSize: 12,
-    color: "#64748b",
+    color: "#6c7789",
   },
   sectionCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 12,
@@ -873,15 +873,15 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 12,
     textTransform: "uppercase",
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "700",
     letterSpacing: 0.8,
   },
   progressBlock: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     padding: 8,
   },
   progressHead: {
@@ -891,39 +891,39 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   progressLabel: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 12,
     fontWeight: "600",
   },
   progressMeta: {
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 12,
   },
   progressTrack: {
     marginTop: 7,
     height: 8,
     borderRadius: 6,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#e0e5ed",
     overflow: "hidden",
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
   },
   progressFillDark: {
     height: "100%",
-    backgroundColor: "#334155",
+    backgroundColor: "#39424f",
   },
   sourceRow: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     padding: 8,
   },
   listRow: {
     borderTopWidth: 1,
-    borderTopColor: "#f1f5f9",
+    borderTopColor: "#edf0f5",
     paddingVertical: 8,
     flexDirection: "row",
     justifyContent: "space-between",
@@ -933,13 +933,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "700",
     fontSize: 13,
   },
   listMeta: {
     marginTop: 2,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
   },
   listRight: {
@@ -947,11 +947,11 @@ const styles = StyleSheet.create({
   },
   listDate: {
     marginTop: 2,
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 11,
   },
   empty: {
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
     marginTop: 4,
   },
@@ -961,27 +961,27 @@ const styles = StyleSheet.create({
   },
   badgeDanger: {
     borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
+    borderColor: "#f6b8b5",
+    backgroundColor: "#fdedec",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   badgeDangerText: {
-    color: "#b91c1c",
+    color: "#942626",
     fontSize: 11,
     fontWeight: "700",
   },
   badgeWarn: {
     borderWidth: 1,
-    borderColor: "#fde68a",
-    backgroundColor: "#fffbeb",
+    borderColor: "#f6d68c",
+    backgroundColor: "#fdf4e3",
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   badgeWarnText: {
-    color: "#92400e",
+    color: "#614304",
     fontSize: 11,
     fontWeight: "700",
   },
@@ -995,15 +995,15 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   watchOverdue: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
+    borderColor: "#f6b8b5",
+    backgroundColor: "#fdedec",
   },
   watchNormal: {
-    borderColor: "#e2e8f0",
-    backgroundColor: "#f8fafc",
+    borderColor: "#e0e5ed",
+    backgroundColor: "#f5f7fa",
   },
   watchDate: {
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 11,
     fontWeight: "600",
     width: 126,
@@ -1015,12 +1015,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   watchDateOverdue: {
-    color: "#b91c1c",
+    color: "#942626",
   },
   followupDeleteBtn: {
     borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fff1f2",
+    borderColor: "#f6b8b5",
+    backgroundColor: "#fdedec",
     borderRadius: 8,
     minHeight: 24,
     paddingHorizontal: 8,
@@ -1030,7 +1030,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   followupDeleteText: {
-    color: "#b91c1c",
+    color: "#942626",
     fontSize: 10,
     fontWeight: "700",
   },
@@ -1041,7 +1041,7 @@ const styles = StyleSheet.create({
   actionBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     height: 40,
@@ -1049,7 +1049,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   actionBtnText: {
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "700",
     fontSize: 12,
   },
@@ -1066,21 +1066,21 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: "#fff",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     padding: 14,
   },
   modalTitle: {
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 14,
     fontWeight: "700",
     marginBottom: 10,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
-    color: "#0f172a",
+    color: "#161c24",
     height: 44,
     paddingHorizontal: 12,
     marginBottom: 8,
@@ -1088,7 +1088,7 @@ const styles = StyleSheet.create({
   },
   webInputWrap: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     height: 44,
@@ -1099,7 +1099,7 @@ const styles = StyleSheet.create({
   webDateInput: {
     height: 30,
     fontSize: 13,
-    color: "#0f172a",
+    color: "#161c24",
     backgroundColor: "transparent",
     borderWidth: 0,
     padding: 0,
@@ -1112,7 +1112,7 @@ const styles = StyleSheet.create({
   },
   modalCancelBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     minWidth: 90,
     height: 38,
@@ -1122,20 +1122,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
   modalCancelText: {
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "600",
     fontSize: 12,
   },
   modalApplyBtn: {
     borderWidth: 1,
-    borderColor: "#0f172a",
+    borderColor: "#161c24",
     borderRadius: 10,
     minWidth: 90,
     height: 38,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
   },
   modalApplyText: {
     color: "#fff",

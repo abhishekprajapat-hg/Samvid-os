@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from "react-native-svg";
 import { Screen } from "../../components/common/Screen";
 import { useAuth } from "../../context/AuthContext";
@@ -114,21 +114,21 @@ const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number;
     <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
       <Defs>
         <LinearGradient id="createdBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#38bdf8" stopOpacity="0.55" />
-          <Stop offset="1" stopColor="#38bdf8" stopOpacity="0.12" />
+          <Stop offset="0" stopColor="#4c9dd3" stopOpacity="0.55" />
+          <Stop offset="1" stopColor="#4c9dd3" stopOpacity="0.12" />
         </LinearGradient>
         <LinearGradient id="closedAreaGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#10b981" stopOpacity="0.35" />
-          <Stop offset="1" stopColor="#10b981" stopOpacity="0.05" />
+          <Stop offset="0" stopColor="#12a06a" stopOpacity="0.35" />
+          <Stop offset="1" stopColor="#12a06a" stopOpacity="0.05" />
         </LinearGradient>
       </Defs>
       <Rect x={0} y={0} width={w} height={h} fill="#fff" rx={10} />
       {[0, 1, 2, 3, 4].map((idx) => {
         const y = p + (idx / 4) * (h - p * 2);
-        return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />;
+        return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke="#e0e5ed" strokeDasharray="4 4" />;
       })}
       {latestActiveIdx >= 0 ? (
-        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill="#22d3ee" opacity={0.09} rx={8} />
+        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill="#4c9dd3" opacity={0.09} rx={8} />
       ) : null}
       {preparedRows.map((row, idx) => {
         const x = p + idx * step;
@@ -142,27 +142,27 @@ const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number;
           fill="url(#closedAreaGrad)"
         />
       ) : null}
-      <Path d={createdPath} fill="none" stroke="#0284c7" strokeWidth={2.6} />
-      <Path d={closedPath} fill="none" stroke="#10b981" strokeWidth={3} />
-      <Path d={openPath} fill="none" stroke="#1d4ed8" strokeWidth={2.2} strokeDasharray="4 3" />
+      <Path d={createdPath} fill="none" stroke="#1f6499" strokeWidth={2.6} />
+      <Path d={closedPath} fill="none" stroke="#12a06a" strokeWidth={3} />
+      <Path d={openPath} fill="none" stroke="#1c37ab" strokeWidth={2.2} strokeDasharray="4 3" />
       {createdPoints.map((point, idx) => (
-        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill="#0284c7" />
+        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill="#1f6499" />
       ))}
       {closedPoints.map((point, idx) => (
-        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill="#10b981" />
+        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill="#12a06a" />
       ))}
       {openPoints.map((point, idx) => (
-        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill="#1d4ed8" />
+        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill="#1c37ab" />
       ))}
-      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill="#0284c7">Created</SvgText>
-      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill="#10b981">Closed</SvgText>
-      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill="#1d4ed8">Open</SvgText>
+      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill="#1f6499">Created</SvgText>
+      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill="#12a06a">Closed</SvgText>
+      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill="#1c37ab">Open</SvgText>
       {preparedRows.map((row, idx) => {
         const x = p + idx * step;
         const showLabel = preparedRows.length <= 6 || idx === 0 || idx === preparedRows.length - 1 || idx % 2 === 0;
         if (!showLabel) return null;
         return (
-          <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill="#64748b">
+          <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill="#6c7789">
             {row.label}
           </SvgText>
         );
@@ -180,12 +180,12 @@ const CircularScore = ({ percent }: { percent: number }) => {
   const offset = circumference - (safe / 100) * circumference;
   return (
     <Svg width={size} height={size}>
-      <Circle cx={size / 2} cy={size / 2} r={radius} stroke="#e2e8f0" strokeWidth={stroke} fill="none" />
+      <Circle cx={size / 2} cy={size / 2} r={radius} stroke="#e0e5ed" strokeWidth={stroke} fill="none" />
       <Circle
         cx={size / 2}
         cy={size / 2}
         r={radius}
-        stroke="#0ea5e9"
+        stroke="#2b7fbf"
         strokeWidth={stroke}
         strokeLinecap="round"
         fill="none"
@@ -193,7 +193,7 @@ const CircularScore = ({ percent }: { percent: number }) => {
         strokeDashoffset={offset}
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
       />
-      <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="700" fill="#0f172a">
+      <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="700" fill="#161c24">
         {Math.round(safe)}%
       </SvgText>
     </Svg>
@@ -585,10 +585,10 @@ export const ManagerDashboardScreen = () => {
               <Text style={[styles.filterChipText, range === "CUSTOM" && styles.filterChipTextActive]}>Custom</Text>
             </Pressable>
             <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-              <Ionicons name="calendar-outline" size={14} color="#334155" />
+              <Icon name="calendar-outline" size={14} color="#39424f" />
             </Pressable>
             <Pressable style={styles.refreshBtn} onPress={() => load(true)} disabled={refreshing}>
-              <Ionicons name={refreshing ? "sync" : "refresh"} size={14} color="#334155" />
+              <Icon name={refreshing ? "sync" : "refresh"} size={14} color="#39424f" />
             </Pressable>
           </View>
           <Text style={styles.metricHelper}>Showing: {periodLabel}</Text>
@@ -875,14 +875,14 @@ const styles = StyleSheet.create({
   },
   hero: {
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: "#bcd0ff",
     borderRadius: 16,
-    backgroundColor: "#eff6ff",
+    backgroundColor: "#eef3ff",
     padding: 14,
   },
   heroLabel: {
     fontSize: 10,
-    color: "#1d4ed8",
+    color: "#1c37ab",
     letterSpacing: 1,
     fontWeight: "700",
   },
@@ -890,7 +890,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 24,
     fontWeight: "800",
-    color: "#0f172a",
+    color: "#161c24",
   },
   heroRow: {
     marginTop: 10,
@@ -900,7 +900,7 @@ const styles = StyleSheet.create({
   heroChip: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: "#bcd0ff",
     borderRadius: 10,
     backgroundColor: "#ffffff",
     padding: 8,
@@ -908,13 +908,13 @@ const styles = StyleSheet.create({
   heroChipLabel: {
     fontSize: 10,
     textTransform: "uppercase",
-    color: "#64748b",
+    color: "#6c7789",
   },
   heroChipValue: {
     marginTop: 4,
     fontSize: 14,
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
   },
   grid: {
     gap: 10,
@@ -928,18 +928,18 @@ const styles = StyleSheet.create({
   },
   filterChip: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 8,
     backgroundColor: "#fff",
   },
   filterChipActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
+    borderColor: "#161c24",
+    backgroundColor: "#161c24",
   },
   filterChipText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -950,7 +950,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     alignItems: "center",
@@ -960,7 +960,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     backgroundColor: "#fff",
     justifyContent: "center",
@@ -974,7 +974,7 @@ const styles = StyleSheet.create({
   customDateBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     backgroundColor: "#fff",
     minHeight: 36,
@@ -982,13 +982,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   customDateText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "600",
   },
   metricCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 12,
@@ -996,7 +996,7 @@ const styles = StyleSheet.create({
   metricLabel: {
     fontSize: 11,
     textTransform: "uppercase",
-    color: "#64748b",
+    color: "#6c7789",
     fontWeight: "700",
     letterSpacing: 0.8,
   },
@@ -1004,16 +1004,16 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 24,
     fontWeight: "800",
-    color: "#0f172a",
+    color: "#161c24",
   },
   metricHelper: {
     marginTop: 4,
     fontSize: 12,
-    color: "#64748b",
+    color: "#6c7789",
   },
   section: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 12,
@@ -1022,14 +1022,14 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 13,
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
   sectionSubTitle: {
     marginTop: 2,
     marginBottom: 8,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
   },
   graphSplit: {
@@ -1037,9 +1037,9 @@ const styles = StyleSheet.create({
   },
   velocityPanel: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     padding: 10,
   },
   velocityScoreRow: {
@@ -1054,20 +1054,20 @@ const styles = StyleSheet.create({
   velocityPercent: {
     fontSize: 30,
     fontWeight: "800",
-    color: "#0f172a",
+    color: "#161c24",
   },
   chartPanel: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
     backgroundColor: "#fff",
     padding: 6,
   },
   progressCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: "#f5f7fa",
     padding: 10,
   },
   progressHead: {
@@ -1076,30 +1076,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   progressLabel: {
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "600",
     fontSize: 12,
   },
   progressMeta: {
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 12,
   },
   progressTrack: {
     marginTop: 8,
     height: 8,
     borderRadius: 6,
-    backgroundColor: "#dbeafe",
+    backgroundColor: "#dde6ff",
     overflow: "hidden",
   },
   progressFill: {
     height: "100%",
-    backgroundColor: "#1d4ed8",
+    backgroundColor: "#1c37ab",
   },
   leaderRow: {
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: "#bcd0ff",
     borderRadius: 12,
-    backgroundColor: "#f8fbff",
+    backgroundColor: "#ffffff",
     padding: 10,
     marginBottom: 8,
   },
@@ -1112,14 +1112,14 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: "#e0e5ed",
     alignItems: "center",
     justifyContent: "center",
   },
   leaderRankText: {
     fontSize: 14,
     fontWeight: "700",
-    color: "#334155",
+    color: "#39424f",
   },
   leaderInfo: {
     flex: 1,
@@ -1132,12 +1132,12 @@ const styles = StyleSheet.create({
     marginTop: 8,
     height: 8,
     borderRadius: 6,
-    backgroundColor: "#dbeafe",
+    backgroundColor: "#dde6ff",
     overflow: "hidden",
   },
   leaderFill: {
     height: "100%",
-    backgroundColor: "#0ea5e9",
+    backgroundColor: "#2b7fbf",
   },
   inlineActionRow: {
     marginTop: 2,
@@ -1146,7 +1146,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   linkTextCompact: {
-    color: "#2563eb",
+    color: "#2549d6",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -1161,7 +1161,7 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     borderRadius: 12,
     backgroundColor: "#fff",
     padding: 14,
@@ -1169,7 +1169,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 16,
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
     marginBottom: 10,
   },
   webInputWrap: {
@@ -1179,12 +1179,12 @@ const styles = StyleSheet.create({
     width: "100%",
     minHeight: 40,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
     backgroundColor: "#fff",
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 13,
   },
   modalActions: {
@@ -1196,14 +1196,14 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 38,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: "#c8d0dd",
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#fff",
   },
   modalCancelText: {
-    color: "#334155",
+    color: "#39424f",
     fontSize: 12,
     fontWeight: "700",
   },
@@ -1211,11 +1211,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 38,
     borderWidth: 1,
-    borderColor: "#0f172a",
+    borderColor: "#161c24",
     borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#0f172a",
+    backgroundColor: "#161c24",
   },
   modalApplyText: {
     color: "#fff",

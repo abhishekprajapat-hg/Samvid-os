@@ -1,40 +1,29 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { clay, colors, radii } from "../../theme/tokens";
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { colors, palette, radii, typography } from "../../theme/tokens";
 
-export const AppCard = ({ children, style }: { children: React.ReactNode; style?: object }) => (
-  <View style={[styles.card, style]}>{children}</View>
-);
+/*
+ * Compatibility shim.
+ *
+ * The screens written before Phase 1 import AppCard / AppButton / AppChip /
+ * AppInput from here. The real implementations now live in components/ui,
+ * built to the web component contract; this file re-exports them so those
+ * screens pick up the corrected design without being edited.
+ *
+ * New code should import from "../../components/ui" directly. This file goes
+ * away once the last screen has been migrated.
+ */
 
-export const AppButton = ({
-  title,
-  onPress,
-  disabled,
-  variant = "primary",
-  style,
-}: {
-  title: string;
-  onPress: () => void;
-  disabled?: boolean;
-  variant?: "primary" | "ghost";
-  style?: object;
-}) => (
-  <Pressable
-    disabled={disabled}
-    style={[
-      styles.button,
-      variant === "primary" ? styles.buttonPrimary : styles.buttonGhost,
-      disabled && styles.buttonDisabled,
-      style,
-    ]}
-    onPress={onPress}
-  >
-    <Text style={[styles.buttonText, variant === "primary" ? styles.buttonTextPrimary : styles.buttonTextGhost]}>
-      {title}
-    </Text>
-  </Pressable>
-);
+export { AppCard } from "../ui/Card";
+export { AppButton } from "../ui/Button";
+export { AppInput } from "../ui/Input";
 
+/*
+ * AppChip has no direct web counterpart - web uses Badge for status and a
+ * button group for filters, and mobile collapsed both into one control. It is
+ * kept here, restyled onto the new tokens, until the screens using it as a
+ * filter move to AppTabs and the ones using it as a label move to AppBadge.
+ */
 export const AppChip = ({
   label,
   active,
@@ -44,124 +33,40 @@ export const AppChip = ({
   label: string;
   active?: boolean;
   onPress: () => void;
-  style?: object;
+  style?: StyleProp<ViewStyle>;
 }) => (
-  <Pressable style={[styles.chip, active && styles.chipActive, style]} onPress={onPress}>
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityState={{ selected: Boolean(active) }}
+    hitSlop={{ top: 6, bottom: 6, left: 0, right: 0 }}
+    style={[styles.chip, active && styles.chipActive, style]}
+  >
     <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
   </Pressable>
 );
 
-export const AppInput = ({
-  value,
-  onChangeText,
-  placeholder,
-  secureTextEntry,
-  keyboardType,
-  autoCapitalize,
-  style,
-  editable,
-}: {
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder?: string;
-  secureTextEntry?: boolean;
-  keyboardType?: "default" | "email-address" | "phone-pad";
-  autoCapitalize?: "none" | "sentences" | "words" | "characters";
-  style?: object;
-  editable?: boolean;
-}) => (
-  <TextInput
-    style={[styles.input, style]}
-    value={value}
-    onChangeText={onChangeText}
-    placeholder={placeholder}
-    placeholderTextColor={colors.textMuted}
-    selectionColor={colors.primary}
-    secureTextEntry={secureTextEntry}
-    keyboardType={keyboardType}
-    autoCapitalize={autoCapitalize}
-    editable={editable}
-  />
-);
-
 const styles = StyleSheet.create({
-  card: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.lg,
-    backgroundColor: colors.surfaceRaised,
-    padding: 12,
-    ...clay.shadow,
-  },
-  button: {
-    height: 42,
-    borderRadius: radii.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    ...clay.shadowSmall,
-  },
-  buttonPrimary: {
-    backgroundColor: colors.primary,
-  },
-  buttonGhost: {
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.surfaceRaised,
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  buttonTextPrimary: {
-    color: colors.primaryText,
-  },
-  buttonTextGhost: {
-    color: colors.text,
-  },
   chip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.pill,
-    height: 34,
-    paddingHorizontal: 10,
+    height: 32,
     justifyContent: "center",
     alignSelf: "flex-start",
-    backgroundColor: colors.surfaceRaised,
-    shadowColor: colors.highlight,
-    shadowOffset: { width: -1, height: -1 },
-    shadowOpacity: 0.62,
-    shadowRadius: 2,
-    elevation: 0,
+    borderWidth: 1,
+    borderColor: palette.slate[300],
+    borderRadius: radii.pill,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
   },
   chipActive: {
-    borderColor: colors.accent,
-    backgroundColor: colors.primary,
+    borderColor: palette.blue[600],
+    backgroundColor: palette.blue[600],
   },
   chipText: {
-    color: colors.text,
-    fontSize: 12,
+    fontSize: typography.label,
     fontWeight: "600",
+    color: palette.slate[700],
   },
   chipTextActive: {
-    color: colors.primaryText,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    color: colors.text,
-    height: 42,
-    paddingHorizontal: 12,
-    marginBottom: 10,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.03,
-    shadowRadius: 2,
-    elevation: 0,
+    color: "#ffffff",
   },
 });

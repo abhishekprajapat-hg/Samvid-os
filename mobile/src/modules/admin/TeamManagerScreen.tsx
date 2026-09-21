@@ -20,7 +20,14 @@ import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Screen } from "../../components/common/Screen";
 import { useAuth } from "../../context/AuthContext";
-import { createUser, deleteUser, getUsers, rebalanceExecutives, updateUserById } from "../../services/userService";
+import {
+  createUser,
+  createUserDeleteRequest,
+  deleteUser,
+  getUsers,
+  rebalanceExecutives,
+  updateUserById,
+} from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
@@ -387,25 +394,40 @@ export const TeamManagerScreen = () => {
   };
 
   const remove = async (userId: string, userName: string) => {
-    if (!isAdmin || !userId) return;
+    // Web lets a manager raise a delete request even though only an admin can
+    // carry it out; mobile blocked them entirely, so the workflow was
+    // unreachable from a phone.
+    if (!canManageUsers || !userId) return;
     if (String(user?._id || user?.id || "") === String(userId)) {
       setError("You cannot delete your own account");
       return;
     }
 
-    Alert.alert("Delete user", `Delete "${userName}"? Assigned leads will be unassigned.`, [
+    Alert.alert(
+      isAdmin ? "Delete user" : "Request deletion",
+      isAdmin
+        ? `Delete "${userName}"? Assigned leads will be unassigned.`
+        : `Send a request to delete "${userName}" for admin approval?`,
+      [
       { text: "Cancel", style: "cancel" },
       {
-        text: "Delete",
-        style: "destructive",
+        text: isAdmin ? "Delete" : "Send request",
+        style: isAdmin ? "destructive" : "default",
         onPress: async () => {
           try {
             setDeletingId(userId);
-            await deleteUser(userId);
-            await load(true);
-            setSuccess("User deleted");
+            if (isAdmin) {
+              await deleteUser(userId);
+              await load(true);
+              setSuccess("User deleted");
+            } else {
+              await createUserDeleteRequest(userId, {
+                reason: "Delete requested from team access workspace",
+              });
+              setSuccess("Delete request sent to Admin for approval.");
+            }
           } catch (e) {
-            setError(toErrorMessage(e, "Failed to delete user"));
+            setError(toErrorMessage(e, isAdmin ? "Failed to delete user" : "Failed to send delete request"));
           } finally {
             setDeletingId("");
           }
@@ -696,20 +718,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: "#6ecdaa",
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: "#e8f7f0",
+    color: "#084f36",
   },
   accessCard: {
     borderWidth: 1,
-    borderColor: "#fde68a",
+    borderColor: "#f6d68c",
     borderRadius: 12,
-    backgroundColor: "#fffbeb",
+    backgroundColor: "#fdf4e3",
     padding: 12,
   },
   accessText: {
-    color: "#92400e",
+    color: "#614304",
     fontWeight: "600",
   },
   topRow: {
@@ -731,13 +753,13 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   metricCardActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#f8fafc",
+    borderColor: "#161c24",
+    backgroundColor: "#f5f7fa",
   },
   metricLabel: {
     fontSize: 10,
     textTransform: "uppercase",
-    color: "#64748b",
+    color: "#6c7789",
   },
   metricValue: {
     marginTop: 4,
@@ -746,10 +768,10 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   metricValueActive: {
-    color: "#0f172a",
+    color: "#161c24",
   },
   activeMetricText: {
-    color: "#475569",
+    color: "#4e5867",
     fontSize: 12,
     fontWeight: "600",
     marginBottom: 2,
@@ -757,14 +779,14 @@ const styles = StyleSheet.create({
   form: {},
   formTitle: {
     marginBottom: 10,
-    color: "#0f172a",
+    color: "#161c24",
     fontWeight: "700",
     fontSize: 14,
   },
   label: {
     marginBottom: 6,
     marginTop: 2,
-    color: "#334155",
+    color: "#39424f",
     fontWeight: "600",
     fontSize: 12,
   },
@@ -783,17 +805,17 @@ const styles = StyleSheet.create({
   },
   meta: {
     marginTop: 3,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
   },
-  deleteBtn: { marginTop: 10, height: 36, borderColor: "#fecaca", backgroundColor: "#fef2f2" },
+  deleteBtn: { marginTop: 10, height: 36, borderColor: "#f6b8b5", backgroundColor: "#fdedec" },
   editBtn: { marginTop: 10, height: 36 },
   deleteBtnDisabled: {
     opacity: 0.6,
   },
   emptyText: {
     marginTop: 4,
-    color: "#64748b",
+    color: "#6c7789",
     fontSize: 12,
   },
   sheetBackdrop: {
@@ -808,7 +830,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 16,
     padding: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: "#e0e5ed",
     gap: 6,
   },
   sheetWrap: {
@@ -820,7 +842,7 @@ const styles = StyleSheet.create({
   },
   sheetTitle: {
     fontWeight: "700",
-    color: "#0f172a",
+    color: "#161c24",
     fontSize: 15,
     marginBottom: 6,
   },
