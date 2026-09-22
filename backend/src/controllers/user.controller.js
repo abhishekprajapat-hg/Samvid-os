@@ -1,10 +1,12 @@
 const User = require("../models/User");
+const CustomRole = require("../models/CustomRole");
 const Lead = require("../models/Lead");
 const Inventory = require("../models/Inventory");
 const UserDeleteRequest = require("../models/UserDeleteRequest");
 const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
 const mongoose = require("mongoose");
+const { sendMongooseError } = require("../utils/mongooseError");
 const logger = require("../config/logger");
 const {
   redistributePipelineLeads,
@@ -78,6 +80,7 @@ const USER_SELECTABLE_FIELDS = [
   "role",
   "companyId",
   "parentId",
+  "customRoleId",
   "partnerCode",
   "canViewInventory",
   "brokerageConfig",
@@ -148,7 +151,7 @@ const sanitizeEmail = (value) => String(value || "").trim().toLowerCase();
 const sanitizeBrokerageNotes = (value) => String(value || "").trim();
 const normalizeRoleType = (value) => {
   const normalized = String(value || "").trim().toUpperCase();
-  return ["COMMERCIAL", "RESIDENTIAL", "BOTH"].includes(normalized) ? normalized : "COMMERCIAL";
+  return ["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"].includes(normalized) ? normalized : "COMMERCIAL";
 };
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 const isValidObjectId = (value) =>
@@ -653,6 +656,8 @@ const toProfileView = (user) => ({
   roleType: normalizeRoleType(user.roleType),
   profileImageUrl: user.profileImageUrl || "",
   role: user.role,
+  customRoleId: user.customRoleId?._id || user.customRoleId || null,
+  customRoleName: user.customRoleId?.name || "",
   companyId: user.companyId || null,
   parentId: user.parentId || null,
   partnerCode: user.partnerCode || null,
@@ -898,6 +903,7 @@ exports.getUsers = async (req, res) => {
 
     const usersQuery = User.find(query)
       .populate("parentId", "name role")
+      .populate("customRoleId", "name businessCategory baseRole")
       .sort({ createdAt: -1 });
 
     if (selectedFields) {
@@ -1161,6 +1167,7 @@ exports.getUserProfileForAdmin = async (req, res) => {
       companyId: req.user.companyId,
     })
       .populate("parentId", "name email phone role")
+      .populate("customRoleId", "name businessCategory baseRole")
       .lean();
 
     if (!profileDoc) {
@@ -1245,7 +1252,7 @@ exports.updateMyProfile = async (req, res) => {
       { _id: req.user._id, companyId: req.user.companyId },
       { $set: patch },
       {
-        new: true,
+        returnDocument: "after",
       },
     )
       .populate("parentId", "name email phone role")
@@ -1278,6 +1285,42 @@ exports.updateMyProfile = async (req, res) => {
 };
 
 // Hierarchy based user creation
+/*
+ * Account identity validation.
+ *
+ * The audit created working accounts with email "not-an-email" and phone
+ * "abcdefghij" / "1". Both fields are used to reach a real person (login,
+ * notifications, WhatsApp routing), so neither can be free text.
+ */
+const ACCOUNT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MAX_ACCOUNT_NAME_LENGTH = 120;
+
+const validateAccountIdentity = ({ name, email, phone }) => {
+  if (name !== undefined) {
+    const trimmed = String(name ?? "").trim();
+    if (!trimmed) return "Name is required";
+    if (trimmed.length > MAX_ACCOUNT_NAME_LENGTH) {
+      return `Name must be at most ${MAX_ACCOUNT_NAME_LENGTH} characters`;
+    }
+  }
+
+  if (email !== undefined) {
+    const trimmed = String(email ?? "").trim();
+    if (!trimmed) return "Email is required";
+    if (!ACCOUNT_EMAIL_PATTERN.test(trimmed)) return "Email is not a valid address";
+  }
+
+  if (phone !== undefined && String(phone ?? "").trim()) {
+    const trimmed = String(phone).trim();
+    const digits = trimmed.replace(/[^0-9]/g, "");
+    if (!/^[0-9+()\-\s]+$/.test(trimmed) || digits.length < 7 || digits.length > 15) {
+      return "Phone must be a valid number with 7 to 15 digits";
+    }
+  }
+
+  return null;
+};
+
 exports.createUserByRole = async (req, res) => {
   try {
     const {
@@ -1302,12 +1345,57 @@ exports.createUserByRole = async (req, res) => {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const existingUser = await User.findOne({ email }).select("_id").lean();
-    if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
+    const identityError = validateAccountIdentity({ name, email, phone });
+    if (identityError) {
+      return res.status(400).json({ message: identityError });
     }
 
-    const role = requestedRole;
+    const normalizedEmail = String(email).trim().toLowerCase();
+    // Scoped to the company: a global lookup let one tenant discover that an
+    // address exists in another. 409 is the right status for a conflict.
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+      companyId: req.user.companyId,
+    }).select("_id").lean();
+    if (existingUser) {
+      return res.status(409).json({ message: "User already exists" });
+    }
+
+    const normalizedPhone = String(phone ?? "").trim();
+    if (normalizedPhone) {
+      const phoneTaken = await User.findOne({
+        phone: normalizedPhone,
+        companyId: req.user.companyId,
+      }).select("_id").lean();
+      if (phoneTaken) {
+        return res.status(409).json({ message: "Phone number is already in use" });
+      }
+    }
+
+    /*
+     * A company-defined role is a preset, so it is expanded here rather than
+     * stored as a role value of its own: the base role is what every hierarchy
+     * and scoping rule in the CRM reads, the category is the role's, and its
+     * page list becomes the user's starting access. Everything below this point
+     * then runs exactly as it does for a built-in role.
+     */
+    let customRole = null;
+    const requestedCustomRoleId = String(req.body?.customRoleId || "").trim();
+    if (requestedCustomRoleId) {
+      if (!/^[a-f0-9]{24}$/i.test(requestedCustomRoleId)) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+      customRole = await CustomRole.findOne({
+        _id: requestedCustomRoleId,
+        companyId: req.user.companyId,
+        isActive: true,
+      }).lean();
+      if (!customRole) {
+        return res.status(400).json({ message: "That role no longer exists" });
+      }
+    }
+
+    const role = customRole ? customRole.baseRole : requestedRole;
 
     if (!Object.values(USER_ROLES).includes(role)) {
       return res.status(400).json({
@@ -1388,9 +1476,21 @@ exports.createUserByRole = async (req, res) => {
       name,
       email,
       phone,
-      roleType: normalizeRoleType(roleType),
+      // The role's own category wins: it is part of what the role means, and
+      // the form's category box is disabled while one is selected.
+      roleType: normalizeRoleType(customRole ? customRole.businessCategory : roleType),
       password,
       role,
+      customRoleId: customRole?._id || null,
+      /*
+       * A named role says nothing about pages, so a new user starts on their
+       * base role's defaults and an admin narrows that on the access screen.
+       * `null` is what the access service reads as "use the role defaults";
+       * an array - even an empty one - is read as a deliberate override and
+       * enforced, which is what once left everyone hired onto a named role
+       * able to open only Dashboard and Profile.
+       */
+      pageAccessOverride: null,
       companyId: req.user.companyId,
       parentId: resolvedParentId,
       canViewInventory:
@@ -1421,6 +1521,9 @@ exports.createUserByRole = async (req, res) => {
       },
     });
   } catch (error) {
+    // A missing name, a short password or a bad enum is the caller's mistake:
+    // answer 400 naming the field instead of a blanket 500.
+    if (sendMongooseError(res, error)) return undefined;
     logger.error({
       requestId: req.requestId || null,
       error: error.message,
@@ -1461,6 +1564,7 @@ exports.updateUserByAdmin = async (req, res) => {
       "phone",
       "roleType",
       "role",
+      "customRoleId",
       "reportingToId",
       "parentId",
       "managerId",
@@ -1536,9 +1640,9 @@ exports.updateUserByAdmin = async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "roleType")) {
       const roleType = String(req.body.roleType || "").trim().toUpperCase();
-      if (!["COMMERCIAL", "RESIDENTIAL", "BOTH"].includes(roleType)) {
+      if (!["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"].includes(roleType)) {
         return res.status(400).json({
-          message: "roleType must be COMMERCIAL, RESIDENTIAL or BOTH",
+          message: "roleType must be COMMERCIAL, RESIDENTIAL, COWORKING or BOTH",
         });
       }
       patch.roleType = roleType;
@@ -1561,6 +1665,46 @@ exports.updateUserByAdmin = async (req, res) => {
 
       nextRole = requestedRole;
       patch.role = nextRole;
+      // Picking a built-in role by hand means the person is no longer on a role
+      // the company named, so the link is dropped rather than left dangling.
+      patch.customRoleId = null;
+    }
+
+    /*
+     * Moving someone onto a role the company named.
+     *
+     * Applied after the plain role field so it wins: the form sends both, and
+     * the role's own base role and category are what the role means. Page
+     * access is deliberately not copied here - it was set per user on the
+     * access screen, and changing someone's job title is no reason to discard
+     * what an admin decided they should reach.
+     */
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "customRoleId")) {
+      assertNotSelfPromotion({ actingUser: req.user, targetUserId: user._id });
+      const requestedCustomRoleId = String(req.body.customRoleId || "").trim();
+
+      if (!requestedCustomRoleId) {
+        patch.customRoleId = null;
+      } else {
+        if (!isValidObjectId(requestedCustomRoleId)) {
+          return res.status(400).json({ message: "Invalid role" });
+        }
+        const customRole = await CustomRole.findOne({
+          _id: requestedCustomRoleId,
+          companyId: req.user.companyId,
+          isActive: true,
+        }).lean();
+        if (!customRole) {
+          return res.status(400).json({ message: "That role no longer exists" });
+        }
+        if (customRole.baseRole === USER_ROLES.ADMIN) {
+          return res.status(400).json({ message: "Role cannot be changed to ADMIN" });
+        }
+        nextRole = customRole.baseRole;
+        patch.role = nextRole;
+        patch.roleType = normalizeRoleType(customRole.businessCategory);
+        patch.customRoleId = customRole._id;
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "isActive")) {
@@ -1973,7 +2117,7 @@ exports.updateUserDesignation = async (req, res) => {
               : false,
         },
       },
-      { new: true },
+      { returnDocument: "after" },
     )
       .populate("parentId", "name role")
       .lean();
@@ -2049,7 +2193,7 @@ exports.updateChannelPartnerInventoryAccess = async (req, res) => {
         $set: { canViewInventory },
       },
       {
-        new: true,
+        returnDocument: "after",
       },
     )
       .populate("parentId", "name role")
@@ -2587,7 +2731,7 @@ exports.updateUserByRole = async (req, res) => {
     const updated = await User.findOneAndUpdate(
       { _id: userId, companyId: req.user.companyId },
       { $set: patch },
-      { new: true },
+      { returnDocument: "after" },
     )
       .populate("parentId", "name role")
       .select("-password")
@@ -2673,7 +2817,7 @@ exports.updateMyLocation = async (req, res) => {
         },
       },
       {
-        new: true,
+        returnDocument: "after",
         select: "_id name role liveLocation",
         lean: true,
       },

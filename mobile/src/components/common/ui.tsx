@@ -55,7 +55,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     borderWidth: 1,
     borderColor: themePalette.slate[300],
     borderRadius: radii.pill,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
   },
   chipActive: {

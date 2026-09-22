@@ -59,9 +59,9 @@ const styles = themedStyles((c) => StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.md,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
   },
   pressed: {
     backgroundColor: themePalette.slate[50],

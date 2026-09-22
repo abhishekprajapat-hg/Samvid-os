@@ -165,6 +165,15 @@ const initialMessages = (): Message[] => [
 export const AdminCommandConsoleScreen = () => {
   const navigation = useNavigation<any>();
   const chatRef = useRef<ScrollView | null>(null);
+  /*
+   * The console can act, not just answer - but never in one step. An action is
+   * parked here, confirmed in a second turn, and recorded afterwards. A
+   * natural-language surface guesses at intent, so the one thing it must not do
+   * is guess its way into an irreversible change.
+   */
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
+
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
   const [loadingSnapshot, setLoadingSnapshot] = useState(false);
@@ -348,6 +357,47 @@ export const AdminCommandConsoleScreen = () => {
     ].join("\n");
   };
 
+  // Device-local, and bounded: this is a record of what was done from THIS
+  // phone, not a substitute for the server's own audit.
+  useEffect(() => {
+    AsyncStorage.getItem(AUDIT_STORAGE_KEY)
+      .then((raw) => {
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setAuditLog(parsed.slice(0, MAX_AUDIT_ROWS));
+      })
+      .catch(() => {});
+  }, []);
+
+  const recordAudit = useCallback((entry: AuditEntry) => {
+    setAuditLog((current) => {
+      const next = appendAudit(current, entry);
+      AsyncStorage.setItem(AUDIT_STORAGE_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  /** Runs a parked action against whichever service owns that request kind. */
+  const executeAction = useCallback(
+    async (action: PendingAction) => {
+      if (action.target === "INVENTORY") {
+        if (action.kind === "APPROVE") await approveInventoryRequest(action.id);
+        else await rejectInventoryRequest(action.id, "Rejected from the admin console");
+        return;
+      }
+      if (action.target === "LEAD_STATUS") {
+        if (action.kind === "APPROVE") await approveLeadStatusRequest(action.id);
+        else await rejectLeadStatusRequest(action.id, "Rejected from the admin console");
+        return;
+      }
+      await reviewUserDeleteRequest(action.id, {
+        status: action.kind === "APPROVE" ? "APPROVED" : "REJECTED",
+        reviewNote: "Reviewed from the admin console",
+      });
+    },
+    [],
+  );
+
   const handleAsk = useCallback(async (rawInput: string) => {
     const prompt = String(rawInput || "").trim();
     if (!prompt) return;
@@ -358,8 +408,41 @@ export const AdminCommandConsoleScreen = () => {
       setMessages(initialMessages());
       return;
     }
+    // A parked action is settled before anything else is considered, so
+    // "confirm" cannot be read as a fresh query.
+    if (isCancelCommand(query, Boolean(pendingAction))) {
+      setPendingAction(null);
+      appendMessage("assistant", "Dropped. Nothing was changed.");
+      return;
+    }
+
+    if (isConfirmCommand(query, Boolean(pendingAction)) && pendingAction) {
+      setRunning(true);
+      try {
+        await executeAction(pendingAction);
+        recordAudit({
+          at: new Date().toISOString(),
+          actor: String(user?.name || "Admin"),
+          action: describeAction(pendingAction),
+          details: pendingAction.label,
+        });
+        appendMessage("assistant", `Done. ${describeAction(pendingAction)}.`);
+        setPendingAction(null);
+        await loadSnapshot(true);
+      } catch (error) {
+        appendMessage("assistant", toErrorMessage(error, "That action did not go through."));
+      } finally {
+        setRunning(false);
+      }
+      return;
+    }
+
     setRunning(true);
     try {
+      if (includesAny(query, ["audit", "what did i do", "action log", "history of actions"])) {
+        appendMessage("assistant", buildAuditReply(auditLog));
+        return;
+      }
       if (includesAny(query, ["refresh", "reload", "sync latest", "update data"])) {
         const refreshed = await loadSnapshot(true);
         appendMessage("assistant", `Data refreshed.\nSnapshot time: ${formatDateTime(refreshed.loadedAt)}`);
@@ -392,6 +475,43 @@ export const AdminCommandConsoleScreen = () => {
         appendMessage("assistant", buildInventoryReply(data, query));
         return;
       }
+      /*
+       * An approve/reject instruction parks an action rather than running it.
+       * It resolves against the OLDEST matching pending request, which is the
+       * one a queue would surface first.
+       */
+      const intent = parseActionIntent(query);
+      if (intent) {
+        const queue = (data.pendingRequests || []).filter((row: any) => {
+          const type = String(row?.type || row?.requestType || "").toUpperCase();
+          if (intent.target === "INVENTORY") return !type.includes("LEAD") && !type.includes("USER");
+          if (intent.target === "LEAD_STATUS") return type.includes("LEAD");
+          return type.includes("USER");
+        });
+
+        if (!queue.length) {
+          appendMessage("assistant", `Nothing is waiting in that queue right now.`);
+          return;
+        }
+
+        const oldest = queue[queue.length - 1];
+        const action: PendingAction = {
+          kind: intent.kind,
+          target: intent.target,
+          id: String(oldest?._id || ""),
+          label: `${String(oldest?.type || oldest?.requestType || "request").toLowerCase()} from ${resolveUserName(oldest?.requestedBy)}`,
+        };
+
+        if (!action.id) {
+          appendMessage("assistant", "I found a request but it has no id I can act on.");
+          return;
+        }
+
+        setPendingAction(action);
+        appendMessage("assistant", buildConfirmPrompt(action));
+        return;
+      }
+
       if (includesAny(query, ["find ", "search ", "look up "])) {
         appendMessage("assistant", buildSearchReply(data, query));
         return;
@@ -402,7 +522,7 @@ export const AdminCommandConsoleScreen = () => {
     } finally {
       setRunning(false);
     }
-  }, [appendMessage, loadSnapshot]);
+  }, [appendMessage, auditLog, executeAction, loadSnapshot, pendingAction, recordAudit, user?.name]);
 
   return (
     <Screen title="Admin Console" subtitle="Natural Language Ops Console" error={runtimeError}>

@@ -2,6 +2,7 @@ import React from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
+import { Icon } from "../ui/Icon";
 import { themedStyles, themePalette } from "../../theme/themedStyles";
 
 /*
@@ -17,6 +18,8 @@ import { themedStyles, themePalette } from "../../theme/themedStyles";
 export const Screen = ({
   title,
   subtitle,
+  description,
+  back,
   loading,
   error,
   onRetry,
@@ -25,6 +28,15 @@ export const Screen = ({
 }: {
   title: string;
   subtitle?: string;
+  /*
+   * A sentence under the title. `subtitle` is the uppercase eyebrow that sits
+   * above it; screens whose comp puts the explanation below the heading pass
+   * this instead.
+   */
+  description?: string;
+  /* A back affordance beside the title, for pushed screens whose comp draws
+     one in the page header rather than relying on a navigator header. */
+  back?: () => void;
   loading?: boolean;
   error?: string;
   onRetry?: () => void;
@@ -38,11 +50,23 @@ export const Screen = ({
   return (
     <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
       <View style={styles.header}>
+        {back ? (
+          <Pressable
+            onPress={back}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            style={styles.back}
+          >
+            <Icon name="arrow-back" size={20} color={themePalette.slate[900]} />
+          </Pressable>
+        ) : null}
         <View style={styles.headerText}>
           {subtitle ? <Text style={styles.eyebrow}>{subtitle}</Text> : null}
           <Text style={styles.title} numberOfLines={1}>
             {title}
           </Text>
+          {description ? <Text style={styles.description}>{description}</Text> : null}
         </View>
         {right ? <View style={styles.headerRight}>{right}</View> : null}
       </View>
@@ -83,11 +107,21 @@ export const Screen = ({
 const styles = themedStyles((c) => StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: colors.bg,
+    backgroundColor: c.bg,
+  },
+  back: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: themePalette.surfaceMuted,
+    borderWidth: 1,
+    borderColor: themePalette.border,
   },
   header: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: spacing.lg,
     paddingHorizontal: spacing.xl,
@@ -115,6 +149,11 @@ const styles = themedStyles((c) => StyleSheet.create({
     fontWeight: "600",
     color: themePalette.slate[900],
     letterSpacing: -0.25,
+  },
+  description: {
+    marginTop: 2,
+    fontSize: typography.label,
+    color: themePalette.slate[500],
   },
   body: {
     flex: 1,

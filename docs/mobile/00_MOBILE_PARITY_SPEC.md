@@ -154,6 +154,128 @@ real rule. See `02_MOBILE_NAVIGATION_AND_ACCESS.md`.
 | `AdminCommandConsole` is 3,830 LOC | Single largest screen | Phase 7 splits it into sub-screens rather than one monolith |
 | Coworking module never started | ~2,700 LOC cold start | Phase 6 budgeted accordingly; depends on permission layer from Phase 2 |
 
+## 5a. Deliberate divergence from web — the register
+
+Parity is the default. Where mobile is knowingly *not* the web app, it is
+written here, with what web would have to gain to close the gap. An entry in
+this table is a decision; anything not in it is a bug.
+
+### 2026-09-21 — Tasks module, built to mobile comps
+
+Six design comps were supplied for Tasks and implemented as drawn. They are
+ahead of `frontend/src/modules/tasks/TaskManager.jsx`, which has none of the
+following:
+
+| Divergence | Mobile | Web today | To close |
+| --- | --- | --- | --- |
+| Scope tabs | All Task / Assigned / My Task / Team across the top | One list, filtered | Port the four scopes; the API already serves them via `?scope=assigned\|mine` |
+| Board view | Kanban of To Do / In Progress / Completed, List⇄Board toggle | List only | Port the board; no API change needed |
+| Team roll-up | Workload bands + per-person roster, ADMIN/MANAGER only | Not present | Port; `/tasks/stats/by-user` already exists and is admin-gated |
+| Task detail | Full page: fact grid, description, checklist, activity rail | Inline panel | Port the page |
+| Task form | Full page, create and edit share it | Modal | Optional; the modal is fine on a desktop |
+
+Two of these read as mobile-only conveniences and two (board, team roll-up) are
+real product surface that web should eventually get. Tracked as a follow-up,
+not as part of the mobile phases.
+
+**Workload bands are a mobile invention.** The comp shows Busy / Balanced /
+Available / Offline but not the rule behind them. The rule is set in
+`mobile/src/modules/tasks/taskConstants.ts` — a deactivated account is Offline,
+four or more open tasks is Busy, one to three is Balanced, none is Available —
+and is the single source both the legend and the roster read. If web adopts the
+roll-up it must adopt this rule or change it in both places.
+
+**The activity rail is derived, not audited.** There is no task audit endpoint,
+so the timeline is built from what the record holds: `createdAt` + `createdBy`,
+each `assignmentHistory` entry, and `updatedAt`. It does not show status or
+field-level edits, because nothing records them. `buildActivity()` in
+`TaskDetailsScreen.tsx` is the one place to change if an audit trail lands.
+
+### 2026-09-21 — Attendance, built to mobile comps
+
+Seven comps. The module went from one tabbed hub to a hub plus five pushed
+pages, nested inside the Attendance tab so the bottom bar stays visible the
+way the comps draw it.
+
+| Built | Notes |
+| --- | --- |
+| `AttendanceScreen` | Admin roster with 2×2 stats, today card, filterable day list |
+| `AttendanceHistoryScreen` | The roster on its own page with a movable date |
+| `AttendanceDetailsScreen` | One person, one day: fact strip, live banner, timeline, geofence info |
+| `AttendanceApprovalsScreen` | Pending / History leave queue |
+| `AttendancePolicyScreen` | Geofence coordinates, radius, Leaflet map preview, today's insights |
+| `AttendanceViolationsScreen` | Monthly violations per person, with the required management note |
+| `attendanceShared.tsx` | Status vocabulary, roster row, stat grid, the Set Status sheet |
+
+**The bottom bar changed again.** These comps put Attendance in slot four
+where the Tasks comps put Contacts. Attendance wins, being the newer set;
+Contacts is no longer a tab and is reached from More, which now lists it
+because it is no longer in `TAB_SCREENS`.
+
+**Where the comps and the system disagree:**
+
+| Comp asks for | Reality | Decision |
+| --- | --- | --- |
+| Two request kinds in Approvals — "Leave Request" and "Attendance Correction" | There is one request entity (`LeaveRequest`) and one review endpoint. Nothing raises a correction request | Leave requests only. A correction tab would always be empty; the kind is a backend gap, not a mobile one |
+| "Effective Time (Optional)" on the Set Status sheet | `PATCH /attendance/users/:id/:date/status` takes `status` and `note` only | The field is kept and prefixed onto the note (`Effective 10:50 AM — …`) so what was typed is recorded rather than dropped |
+| Status choices include Working and On Break beside Present/Absent/Leave | WORKING and BREAK are derived, not stored; the stored enum has no such values | The sheet routes by kind: the two live states call the break endpoint, the rest patch the status |
+| A live map on the policy page | No native map dependency is installed | Leaflet over OpenStreetMap in a WebView, the approach `FieldOpsScreen` already uses. Needs network; the coordinates are printed as text regardless |
+
+**Kept although no comp shows it:** requesting leave and viewing your own
+balance. Every comp is management's view, but `LeaveSection` is the only route
+to either on a phone, so the personal side of the screen is a My day / Leave
+switch. Dropping it would have removed the feature silently.
+
+**Superseded but not deleted:** `components/TeamSection.tsx` and
+`components/ViolationsSection.tsx` are fully replaced by the hub and the
+violations page and are now unreferenced. Left in place rather than removed
+because other sessions are active in this repo; they should be deleted once
+that settles.
+
+### 2026-09-21 — Calendar, aligned to mobile comps
+
+Six comps were supplied for Calendar. Most of the module already matched them;
+the gaps closed were the month badges (the letters and the colours were the
+wrong way round — the comp reads **L** for lead follow-ups in amber and **T**
+for tasks in green), a today marker that only appeared when today happened to
+be the selected day, the labelled LEAD FOLLOW-UPS / TASK DEADLINES sections in
+the day card, Tags and Created On in the follow-up sheet, and Custom plus a
+resolved-span row in the Time Range filter.
+
+**Three things the comps ask for that the data cannot answer:**
+
+| Comp asks for | Data available | Decision |
+| --- | --- | --- |
+| "Under: Ashfiya Khan" on each follow-up card — the assignee's manager | No reporting line exists. `User` has no `reportsTo`/`manager` field in `mobile/src/types`, in `backend/src/models/User.js`, or in what `lead.controller` populates (`name role` only) | Row omitted. Inventing a hierarchy would put a wrong name in front of the person who has to act on the follow-up |
+| A Tags card with free tags ("Commercial", "Office Space", "Priority") | `Lead` has no tags field. It does carry `requirements.inventoryType`, `.propertySubtype` and `.transactionType` | Chips are those three, prettified, and the card hides itself when none are set. Real data, same shape |
+| Events drawn as hour-long blocks with a start and end time | Only `nextFollowUp` / `dueDate` — a single instant, no duration | One hour assumed, as `EVENT_MINUTES` in `MasterScheduleScreen.tsx`. Change it in one place if a duration field ever lands |
+
+### 2026-09-21 — App chrome, built to mobile comps
+
+| Divergence | Mobile | Web today | Note |
+| --- | --- | --- | --- |
+| App bar | Wordmark + alert bell + avatar, rendered as the tab navigator's `header` | Top command bar with search, date, theme, logout | Logout moved to More; search is per-screen on mobile |
+| Bottom bar | **Fixed** five: Home, Tasks, Calendar, Contacts, More | Role-driven sidebar | See below |
+| Contacts | One destination switching Owners ⇄ Brokers | Two sidebar entries | Same `ContactDatabaseScreen` underneath |
+
+**The fixed tab bar overrides role-driven tab selection, on purpose.** Until
+now `getTabItems()` picked the tabs from what a role could actually reach, which
+kept the bar in step with the web sidebar. The comps specify one bar for
+everyone, so that algorithm no longer chooses tabs.
+
+What did *not* change: every tab is still wrapped in its `PageAccessGate`, so a
+role without the grant lands on the gate rather than on a screen it may not
+read. Everything that is no longer a tab stays reachable from More — which now
+excludes the fixed five by name (`MORE_EXCLUDED_SCREENS` in `RoleTabs.tsx`)
+rather than by asking the access algorithm, since asking it would have hidden
+Leads, Inventory and Chat while nothing else offered them.
+
+The Team tab is the one role-sensitive piece left: it is hidden for anyone who
+is not ADMIN or MANAGER, because `/tasks/stats/by-user` returns 403 for them
+and a visible tab that can only fail is worse than no tab.
+
+---
+
 ## 6. Document set
 
 | Doc | Purpose |

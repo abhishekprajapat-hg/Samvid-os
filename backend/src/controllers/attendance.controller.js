@@ -1086,7 +1086,7 @@ exports.upsertAttendancePolicy = async (req, res) => {
     const updated = await AttendancePolicy.findOneAndUpdate(
       { companyId: req.user.companyId },
       { $set: payload },
-      { upsert: true, setDefaultsOnInsert: true, new: true },
+      { upsert: true, setDefaultsOnInsert: true, returnDocument: "after" },
     ).lean();
 
     return res.json({
@@ -2411,7 +2411,7 @@ exports.correctUserBreak = async (req, res) => {
         $push: { breakAudit: { actorId: req.user._id, actorName: req.user.name || "", actorRole: req.user.role, changedAt: now, reason, sessionIndex: index, before, after } },
         $inc: { __v: 1 },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     );
     if (!updated) return res.status(409).json({ message: "Attendance changed while saving. Refresh and try again." });
     return res.json({ message: before ? "Break corrected" : "Break added", attendance: toAttendanceView(updated.toObject(), policy) });
@@ -2509,7 +2509,7 @@ exports.manageUserBreak = async (req, res) => {
         $push: { breakAudit: { actorId: req.user._id, actorName: req.user.name || "", actorRole: req.user.role, changedAt: now, reason, sessionIndex, before, after } },
         $inc: { __v: 1 },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     );
     if (!updated) return res.status(409).json({ message: "Attendance changed while saving. Refresh and try again." });
 

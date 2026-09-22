@@ -1,9 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
-  FlatList,
-  Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -11,1538 +7,808 @@ import {
   Text,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { Icon } from "../../components/ui/Icon";
-import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Screen } from "../../components/common/Screen";
-import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
+import { AppSearchInput, AppSegmentedTabs, AppSheet } from "../../components/ui";
 import { useAuth } from "../../context/AuthContext";
-import { clay, colors, radii } from "../../theme/tokens";
+import { radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 import { toErrorMessage } from "../../utils/errorMessage";
 import {
-  createTask,
   deleteTask,
   getTasks,
   getTaskStats,
+  getTaskStatsByUser,
   updateTask,
   type Task,
 } from "../../services/taskService";
 import { getUsers } from "../../services/userService";
-import { getAllLeads } from "../../services/leadService";
-import { themedStyles, themeColor } from "../../theme/themedStyles";
+import {
+  PRIORITY_IDS,
+  STATUS_IDS,
+  completionRate,
+  isDueToday,
+  isOverdue,
+  priorityTone,
+  statusTone,
+  workloadBand,
+  type StatusId,
+} from "./taskConstants";
+import { FilterPill, StatGrid, type StatTile } from "./components/TaskPieces";
+import { TaskListRow } from "./components/TaskListRow";
+import { TaskBoard } from "./components/TaskBoard";
+import { TeamMemberCard, TeamWorkloadCard, type TeamMemberRow } from "./components/TeamPanel";
 
-const STATUS_OPTIONS = [
-  { id: "BACKLOG", label: "Backlog", color: themeColor("#6c7789"), bg: themeColor("#edf0f5"), border: themeColor("#c8d0dd") },
-  { id: "TODO", label: "To Do", color: themeColor("#1f6499"), bg: themeColor("#d2e9f7"), border: themeColor("#a8d3ef") },
-  { id: "IN_PROGRESS", label: "In Progress", color: themeColor("#a26f06"), bg: themeColor("#fbe9c4"), border: themeColor("#f6d68c") },
-  { id: "COMPLETED", label: "Completed", color: themeColor("#0d8055"), bg: themeColor("#cdeee0"), border: themeColor("#a3e0c9") },
+/*
+ * The Tasks screen, built to the mobile comps.
+ *
+ * Four scopes across the top - everything, what was handed to me, what I
+ * raised, and how the team is carrying it - then a list or a board of the
+ * same tasks underneath. The scopes are the API's own: `scope=assigned` is
+ * assigned-to-me-but-raised-by-someone-else and `scope=mine` is what I
+ * created, which is why the Assigned rows can say "Assigned to me" flatly
+ * while My Task rows have to name the person.
+ *
+ * This is ahead of the web Tasks page, which has neither the board nor the
+ * team roll-up. The divergence is deliberate and recorded in
+ * docs/mobile/00_MOBILE_PARITY_SPEC.md.
+ */
+
+type TabKey = "ALL" | "ASSIGNED" | "MINE" | "TEAM";
+type ViewMode = "LIST" | "BOARD";
+type SortKey = "NEWEST" | "DUE" | "PRIORITY" | "TITLE";
+
+const SORTS: Array<{ id: SortKey; label: string }> = [
+  { id: "NEWEST", label: "Newest first" },
+  { id: "DUE", label: "Due date" },
+  { id: "PRIORITY", label: "Priority" },
+  { id: "TITLE", label: "Title" },
 ];
 
-const PRIORITY_OPTIONS = [
-  { id: "LOW", label: "Low", color: themeColor("#2549d6"), bg: themeColor("#eef3ff"), border: themeColor("#bcd0ff") },
-  { id: "MEDIUM", label: "Medium", color: themeColor("#a26f06"), bg: themeColor("#fbe9c4"), border: themeColor("#f6d68c") },
-  { id: "HIGH", label: "High", color: themeColor("#942626"), bg: themeColor("#fdedec"), border: themeColor("#f6b8b5") },
-];
+const scopeFor = (tab: TabKey) => {
+  if (tab === "ASSIGNED") return "assigned";
+  if (tab === "MINE") return "mine";
+  return undefined;
+};
 
-const PREDEFINED_TAGS = ["Call", "Meeting", "Document", "Site Visit", "Urgent", "Follow-up"];
+type SheetKind = "status" | "priority" | "assignee" | "sort" | "task" | null;
 
 export const TaskManagerScreen = () => {
-  const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   const { user, role } = useAuth();
-  const isAdmin = role === "ADMIN" || (role as string) === "SUPER_ADMIN";
-  const isProductionTaskRole = ["PRODUCTION_EXECUTIVE", "COMMUNITY_MANAGER"].includes(String(role || ""));
+  const canSeeTeam = role === "ADMIN" || role === "MANAGER";
 
-  // Data States
+  const [tab, setTab] = useState<TabKey>("ALL");
+  const [view, setView] = useState<ViewMode>("LIST");
+
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [stats, setStats] = useState({
-    TODO: 0,
-    IN_PROGRESS: 0,
-    COMPLETED: 0,
-    BACKLOG: 0,
-    total: 0,
-    pending: 0,
-    overdue: 0,
-    LOW: 0,
-    MEDIUM: 0,
-    HIGH: 0,
-  });
+  const [stats, setStats] = useState<Record<string, number>>({});
+  const [byUser, setByUser] = useState<Record<string, any>>({});
   const [teamUsers, setTeamUsers] = useState<any[]>([]);
-  const [leads, setLeads] = useState<any[]>([]);
 
-  // UI States
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
 
-  // Filters State
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [priorityFilter, setPriorityFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
-  const [leadFilter, setLeadFilter] = useState("");
-  const [tagFilter, setTagFilter] = useState("");
+  const [sortBy, setSortBy] = useState<SortKey>("NEWEST");
 
-  // Grouping & Sorting State
-  const [groupBy, setGroupBy] = useState<"status" | "priority" | "assignee">("status");
-  const [sortBy, setSortBy] = useState<"createdNewest" | "dueDate" | "priority" | "title">("createdNewest");
+  const [sheet, setSheet] = useState<SheetKind>(null);
+  const [menuTask, setMenuTask] = useState<Task | null>(null);
 
-  // Collapsed Groups State
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  /* The list refetches on every keystroke otherwise. */
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
-  // Modal / Form States
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
-  const [formData, setFormData] = useState({
-    title: "",
-    description: "",
-    status: "TODO",
-    priority: "MEDIUM",
-    dueDate: "",
-    assignedTo: "",
-    leadId: "",
-    subtasks: [] as Array<{ title: string; isCompleted: boolean }>,
-    tags: [] as string[],
-  });
+  /* Team is an admin/manager view; a demoted account must not sit on it. */
+  useEffect(() => {
+    if (tab === "TEAM" && !canSeeTeam) setTab("ALL");
+  }, [tab, canSeeTeam]);
 
-  // Form Inputs
-  const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
-  const [newTagInput, setNewTagInput] = useState("");
+  const load = useCallback(
+    async (quiet = false) => {
+      try {
+        if (quiet) setRefreshing(true);
+        else setLoading(true);
+        setError("");
 
-  // Date Picker States
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [datePickerSeed, setDatePickerSeed] = useState<Date>(new Date());
+        const scope = scopeFor(tab);
+        const listParams: Record<string, any> = {};
+        if (scope) listParams.scope = scope;
+        if (statusFilter) listParams.status = statusFilter;
+        if (priorityFilter) listParams.priority = priorityFilter;
+        if (assigneeFilter) listParams.assignedTo = assigneeFilter;
+        if (search) listParams.search = search;
 
-  // Picker Overlay Dropdowns
-  const [statusDropdownOpen, setStatusDropdownOpen] = useState(false);
-  const [priorityDropdownOpen, setPriorityDropdownOpen] = useState(false);
-  const [assigneeDropdownOpen, setAssigneeDropdownOpen] = useState(false);
-  const [leadDropdownOpen, setLeadDropdownOpen] = useState(false);
+        const statsParams: Record<string, any> = {};
+        if (scope) statsParams.scope = scope;
 
-  // Load stats and data
-  const loadData = useCallback(async (quiet = false) => {
-    try {
-      if (quiet) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
+        const wantsTeam = tab === "TEAM" && canSeeTeam;
+
+        const [taskRows, statRow, teamRow, userRow] = await Promise.allSettled([
+          getTasks(listParams),
+          getTaskStats(statsParams),
+          wantsTeam ? getTaskStatsByUser() : Promise.resolve({}),
+          getUsers(),
+        ]);
+
+        if (taskRows.status === "fulfilled") setTasks(taskRows.value || []);
+        if (statRow.status === "fulfilled" && statRow.value) setStats(statRow.value);
+        if (teamRow.status === "fulfilled") setByUser(teamRow.value || {});
+        if (userRow.status === "fulfilled") setTeamUsers(userRow.value?.users || []);
+
+        /*
+         * Only the task list failing is worth a banner. The rest degrade to a
+         * zero or an empty roster, and a red bar over a page that otherwise
+         * rendered is noise.
+         */
+        if (taskRows.status === "rejected") {
+          setError(toErrorMessage(taskRows.reason, "Failed to load tasks"));
+        }
+      } catch (err) {
+        setError(toErrorMessage(err, "Failed to load tasks"));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-      setError("");
-
-      const filters: Record<string, any> = {};
-      if (statusFilter) filters.status = statusFilter;
-      if (priorityFilter) filters.priority = priorityFilter;
-      if (assigneeFilter) filters.assignedTo = assigneeFilter;
-      if (!isProductionTaskRole && leadFilter) filters.leadId = leadFilter;
-      if (searchQuery.trim()) filters.search = searchQuery.trim();
-      if (tagFilter) filters.tag = tagFilter;
-
-      const [tasksResult, statsResult, usersResult, leadsResult] = await Promise.allSettled([
-        getTasks(filters),
-        getTaskStats(),
-        getUsers(),
-        isProductionTaskRole ? Promise.resolve([]) : getAllLeads(),
-      ]);
-
-      if (tasksResult.status === "fulfilled") {
-        setTasks(tasksResult.value || []);
-      } else {
-        console.error("Failed to load tasks", tasksResult.reason);
-      }
-
-      if (statsResult.status === "fulfilled" && statsResult.value) {
-        setStats(statsResult.value);
-      }
-
-      if (usersResult.status === "fulfilled" && usersResult.value?.users) {
-        setTeamUsers(usersResult.value.users.filter((u: any) => u.isActive));
-      }
-
-      if (leadsResult.status === "fulfilled") {
-        setLeads(leadsResult.value || []);
-      }
-    } catch (err) {
-      setError(toErrorMessage(err, "Failed to load dashboard data"));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [statusFilter, priorityFilter, assigneeFilter, leadFilter, searchQuery, tagFilter, isProductionTaskRole]);
+    },
+    [tab, statusFilter, priorityFilter, assigneeFilter, search, canSeeTeam],
+  );
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    void load();
+  }, [load]);
 
-  // Flash messages auto dismiss
-  useEffect(() => {
-    if (success) {
-      const timer = setTimeout(() => setSuccess(""), 2500);
-      return () => clearTimeout(timer);
-    }
-  }, [success]);
+  /* Coming back from the details or create screen should show the change. */
+  useFocusEffect(
+    useCallback(() => {
+      void load(true);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tab]),
+  );
 
-  useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => setError(""), 4500);
-      return () => clearTimeout(timer);
-    }
-  }, [error]);
+  /* -------------------------------------------------------------- derived -- */
 
-  // Sorting & Grouping
-  const sortedTasks = useMemo(() => {
+  const sorted = useMemo(() => {
     const list = [...tasks];
-    if (sortBy === "dueDate") {
+    if (sortBy === "DUE") {
       list.sort((a, b) => {
         if (!a.dueDate) return 1;
         if (!b.dueDate) return -1;
         return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
       });
-    } else if (sortBy === "priority") {
+    } else if (sortBy === "PRIORITY") {
       const weight: Record<string, number> = { HIGH: 3, MEDIUM: 2, LOW: 1 };
-      list.sort((a, b) => (weight[b.priority || "MEDIUM"] || 0) - (weight[a.priority || "MEDIUM"] || 0));
-    } else if (sortBy === "title") {
+      list.sort(
+        (a, b) => (weight[b.priority || "MEDIUM"] || 0) - (weight[a.priority || "MEDIUM"] || 0),
+      );
+    } else if (sortBy === "TITLE") {
       list.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
     } else {
-      // createdNewest
       list.sort((a, b) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateB - dateA;
+        const left = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const right = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return right - left;
       });
     }
     return list;
   }, [tasks, sortBy]);
 
-  const groups = useMemo(() => {
-    const map: Record<string, { label: string; tasks: Task[]; key: string; colorStyle?: any }> = {};
+  const members: TeamMemberRow[] = useMemo(() => {
+    if (!canSeeTeam) return [];
+    return teamUsers
+      .filter((row) => String(row?.role || "") !== "CHANNEL_PARTNER")
+      .map((row) => {
+        const id = String(row?._id || row?.id || "");
+        const row_ = byUser[id] || {};
+        const total = Number(row_.total || 0);
+        const done = Number(row_.COMPLETED || 0);
+        const pending = Number(row_.pending ?? Math.max(total - done, 0));
+        return {
+          id,
+          name: String(row?.name || "User"),
+          role: String(row?.role || "-"),
+          band: workloadBand(pending, row?.isActive !== false),
+          total,
+          done,
+          overdue: Number(row_.overdue || 0),
+        };
+      })
+      .sort((a, b) => b.overdue - a.overdue || b.total - a.total);
+  }, [canSeeTeam, teamUsers, byUser]);
 
-    if (groupBy === "status") {
-      STATUS_OPTIONS.forEach((opt) => {
-        map[opt.id] = { label: opt.label, tasks: [], key: opt.id, colorStyle: opt };
-      });
-      sortedTasks.forEach((t) => {
-        const key = t.status || "TODO";
-        if (map[key]) {
-          map[key].tasks.push(t);
-        } else {
-          // fallback
-          if (!map["TODO"]) {
-            map["TODO"] = { label: "To Do", tasks: [], key: "TODO" };
-          }
-          map["TODO"].tasks.push(t);
-        }
-      });
-    } else if (groupBy === "priority") {
-      PRIORITY_OPTIONS.forEach((opt) => {
-        map[opt.id] = { label: opt.label + " Priority", tasks: [], key: opt.id, colorStyle: opt };
-      });
-      sortedTasks.forEach((t) => {
-        const key = t.priority || "MEDIUM";
-        if (map[key]) {
-          map[key].tasks.push(t);
-        }
-      });
-    } else {
-      // assignee
-      map["unassigned"] = { label: "Unassigned", tasks: [], key: "unassigned" };
-      teamUsers.forEach((u) => {
-        map[u._id] = { label: u.name, tasks: [], key: u._id };
-      });
-      sortedTasks.forEach((t) => {
-        const assignId = t.assignedTo && typeof t.assignedTo === "object" ? t.assignedTo._id : t.assignedTo;
-        const key = assignId || "unassigned";
-        if (map[key]) {
-          map[key].tasks.push(t);
-        } else {
-          map["unassigned"].tasks.push(t);
-        }
-      });
+  const teamTotals = useMemo(() => {
+    const total = members.reduce((sum, row) => sum + row.total, 0);
+    const done = members.reduce((sum, row) => sum + row.done, 0);
+    const overdue = members.reduce((sum, row) => sum + row.overdue, 0);
+    return { total, done, overdue };
+  }, [members]);
+
+  const tiles: StatTile[] = useMemo(() => {
+    const c = themePalette;
+    const total = Number(stats.total || 0);
+    const completed = Number(stats.COMPLETED || 0);
+    const pending = Number(stats.pending || 0);
+    const overdue = Number(stats.overdue || 0);
+    const inProgress = Number(stats.IN_PROGRESS || 0);
+    const dueToday = tasks.filter(isDueToday).length;
+
+    if (tab === "TEAM") {
+      return [
+        { label: "Team Members", value: String(members.length), icon: "people", tint: c.blue[50], color: c.blue[600] },
+        { label: "Total Tasks", value: String(teamTotals.total), icon: "document-text-outline", tint: c.blue[50], color: c.blue[600] },
+        { label: "Completed", value: String(teamTotals.done), icon: "checkmark-circle-outline", tint: c.emerald[50], color: c.emerald[600], emphasis: "success" },
+        { label: "Overdue", value: String(teamTotals.overdue), icon: "alert-circle-outline", tint: c.rose[50], color: c.rose[600], emphasis: "danger" },
+        { label: "Completion Rate", value: `${completionRate(teamTotals.done, teamTotals.total)}%`, icon: "barChart", tint: c.violet[50], color: c.violet[600] },
+      ];
     }
 
-    return Object.values(map).filter((g) => g.tasks.length > 0 || groupBy === "status");
-  }, [groupBy, sortedTasks, teamUsers]);
+    if (tab === "ASSIGNED") {
+      return [
+        { label: "Total Assigned", value: String(total), icon: "people", tint: c.blue[50], color: c.blue[600] },
+        { label: "In Progress", value: String(inProgress), icon: "time-outline", tint: c.blue[50], color: c.blue[600] },
+        { label: "Due Today", value: String(dueToday), icon: "calendarDays", tint: c.amber[50], color: c.amber[700], emphasis: "warning" },
+        { label: "Overdue", value: String(overdue), icon: "alert-circle-outline", tint: c.rose[50], color: c.rose[600], emphasis: "danger" },
+        { label: "Completion Rate", value: `${completionRate(completed, total)}%`, icon: "barChart", tint: c.violet[50], color: c.violet[600] },
+      ];
+    }
 
-  // Toggles Collapsed Group
-  const toggleGroup = (key: string) => {
-    setCollapsedGroups((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+    return [
+      { label: "Total Tasks", value: String(total), icon: "document-text-outline", tint: c.blue[50], color: c.blue[600] },
+      { label: "Completed", value: String(completed), icon: "checkmark-circle-outline", tint: c.emerald[50], color: c.emerald[600], emphasis: "success" },
+      { label: "Pending", value: String(pending), icon: "time-outline", tint: c.amber[50], color: c.amber[700], emphasis: "warning" },
+      { label: "Overdue", value: String(overdue), icon: "alert-circle-outline", tint: c.rose[50], color: c.rose[600], emphasis: "danger" },
+      { label: "Completion Rate", value: `${completionRate(completed, total)}%`, icon: "barChart", tint: c.violet[50], color: c.violet[600] },
+    ];
+  }, [tab, stats, tasks, members.length, teamTotals]);
+
+  const activeFilterCount =
+    (statusFilter ? 1 : 0) + (priorityFilter ? 1 : 0) + (assigneeFilter ? 1 : 0);
+
+  const assigneeLabel = assigneeFilter
+    ? teamUsers.find((row) => String(row?._id || row?.id) === assigneeFilter)?.name || "Assignee"
+    : "Assignee";
+
+  /* -------------------------------------------------------------- actions -- */
+
+  const openTask = (task: Task) => navigation.navigate("TaskDetails", { taskId: task._id });
+  const openCreate = (status?: StatusId) => navigation.navigate("NewTask", { status });
+
+  const toggleDone = async (task: Task) => {
+    const next = String(task.status || "").toUpperCase() === "COMPLETED" ? "TODO" : "COMPLETED";
+    /* Optimistic: the row flips now and the reload confirms it. */
+    setTasks((prev) => prev.map((row) => (row._id === task._id ? { ...row, status: next } : row)));
+    try {
+      await updateTask(task._id, { status: next });
+      void load(true);
+    } catch (err) {
+      setError(toErrorMessage(err, "Could not update the task"));
+      void load(true);
+    }
   };
 
-  // Toggle Task Completion
-  const handleToggleTaskStatus = async (task: Task) => {
-    const newStatus = task.status === "COMPLETED" ? "TODO" : "COMPLETED";
+  const moveTask = async (task: Task, status: StatusId) => {
+    setSheet(null);
+    setMenuTask(null);
     try {
-      // optimistic update
-      setTasks((prev) =>
-        prev.map((t) => (t._id === task._id ? { ...t, status: newStatus } : t))
+      await updateTask(task._id, { status });
+      void load(true);
+    } catch (err) {
+      setError(toErrorMessage(err, "Could not move the task"));
+    }
+  };
+
+  const removeTask = async (task: Task) => {
+    setSheet(null);
+    setMenuTask(null);
+    try {
+      await deleteTask(task._id);
+      void load(true);
+    } catch (err) {
+      setError(toErrorMessage(err, "Could not delete the task"));
+    }
+  };
+
+  const showMemberTasks = (member: TeamMemberRow) => {
+    setAssigneeFilter(member.id);
+    setTab("ALL");
+  };
+
+  /* --------------------------------------------------------------- render -- */
+
+  const listVariant = tab === "ASSIGNED" ? "chips" : "meta";
+
+  const renderContent = () => {
+    if (tab === "TEAM") {
+      return (
+        <View style={styles.stack}>
+          <TeamWorkloadCard members={members} />
+          {members.length === 0 ? (
+            <Text style={styles.empty}>No team members to show.</Text>
+          ) : (
+            members.map((member) => (
+              <TeamMemberCard
+                key={member.id}
+                member={member}
+                onPress={() => showMemberTasks(member)}
+                onMenu={() => showMemberTasks(member)}
+              />
+            ))
+          )}
+        </View>
       );
-      await updateTask(task._id, { status: newStatus });
-      setSuccess("Task updated");
-      void loadData(true);
-    } catch (err) {
-      setError(toErrorMessage(err, "Failed to toggle task status"));
-      void loadData(true);
-    }
-  };
-
-  // Open Form Modal
-  const openCreateModal = () => {
-    setEditingTask(null);
-    setFormData({
-      title: "",
-      description: "",
-      status: "TODO",
-      priority: "MEDIUM",
-      dueDate: "",
-      assignedTo: "",
-      leadId: "",
-      subtasks: [],
-      tags: [],
-    });
-    setNewSubtaskTitle("");
-    setNewTagInput("");
-    setIsModalOpen(true);
-  };
-
-  const openEditModal = (task: Task) => {
-    setEditingTask(task);
-    const assignId = task.assignedTo && typeof task.assignedTo === "object" ? task.assignedTo._id : (task.assignedTo || "");
-    const leadId = task.leadId && typeof task.leadId === "object" ? task.leadId._id : (task.leadId || "");
-    setFormData({
-      title: task.title || "",
-      description: task.description || "",
-      status: task.status || "TODO",
-      priority: task.priority || "MEDIUM",
-      dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split("T")[0] : "",
-      assignedTo: assignId,
-      leadId: leadId,
-      subtasks: task.subtasks || [],
-      tags: task.tags || [],
-    });
-    setNewSubtaskTitle("");
-    setNewTagInput("");
-    setIsModalOpen(true);
-  };
-
-  // Submit form
-  const handleSaveTask = async () => {
-    if (!formData.title.trim()) {
-      setError("Task title is required");
-      return;
-    }
-    setSaving(true);
-    setError("");
-
-    const payload = {
-      title: formData.title.trim(),
-      description: formData.description.trim(),
-      status: formData.status,
-      priority: formData.priority,
-      dueDate: formData.dueDate || null,
-      assignedTo: (formData.assignedTo || null) as any,
-      leadId: (isProductionTaskRole ? null : formData.leadId || null) as any,
-      subtasks: formData.subtasks,
-      tags: formData.tags,
-    };
-
-    try {
-      if (editingTask) {
-        const res = await updateTask(editingTask._id, payload);
-        if (res) {
-          setSuccess("Task updated successfully");
-          setIsModalOpen(false);
-          void loadData(true);
-        }
-      } else {
-        const res = await createTask(payload);
-        if (res) {
-          setSuccess("Task created successfully");
-          setIsModalOpen(false);
-          void loadData(true);
-        }
-      }
-    } catch (err) {
-      setError(toErrorMessage(err, "Failed to save task"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Delete task
-  const handleDeleteTask = (taskId: string) => {
-    const proceedDelete = async () => {
-      try {
-        setSaving(true);
-        await deleteTask(taskId);
-        setSuccess("Task deleted successfully");
-        setIsModalOpen(false);
-        void loadData(true);
-      } catch (err) {
-        setError(toErrorMessage(err, "Failed to delete task"));
-      } finally {
-        setSaving(false);
-      }
-    };
-
-    if (Platform.OS === "web") {
-      const conf = typeof window !== "undefined" && window.confirm("Are you sure you want to delete this task?");
-      if (conf) void proceedDelete();
-      return;
     }
 
-    Alert.alert("Delete Task", "Are you sure you want to delete this task?", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => void proceedDelete() },
-    ]);
-  };
-
-  // Date picker handlers
-  const triggerDatePicker = () => {
-    const seed = formData.dueDate ? new Date(formData.dueDate) : new Date();
-    if (Platform.OS === "android") {
-      DateTimePickerAndroid.open({
-        value: seed,
-        mode: "date",
-        onChange: (event: DateTimePickerEvent, date?: Date) => {
-          if (event.type !== "set" || !date) return;
-          setFormData((prev) => ({ ...prev, dueDate: date.toISOString().split("T")[0] }));
-        },
-      });
-      return;
+    if (view === "BOARD") {
+      return (
+        <TaskBoard
+          tasks={sorted}
+          onOpenTask={openTask}
+          onTaskMenu={(task) => {
+            setMenuTask(task);
+            setSheet("task");
+          }}
+          onAddTask={(status) => openCreate(status)}
+        />
+      );
     }
-    setDatePickerSeed(seed);
-    setShowDatePicker(true);
-  };
 
-  const onDatePickerChange = (event: DateTimePickerEvent, date?: Date) => {
-    if (event.type === "dismissed") {
-      setShowDatePicker(false);
-      return;
+    if (sorted.length === 0) {
+      return <Text style={styles.empty}>No tasks match this view.</Text>;
     }
-    if (date) {
-      setFormData((prev) => ({ ...prev, dueDate: date.toISOString().split("T")[0] }));
-    }
-    setShowDatePicker(false);
+
+    return (
+      <View style={styles.stack}>
+        {sorted.map((task) => (
+          <TaskListRow
+            key={task._id}
+            task={task}
+            variant={listVariant}
+            selfLabel={tab === "ASSIGNED"}
+            onPress={() => openTask(task)}
+            onToggle={() => toggleDone(task)}
+            onMenu={() => {
+              setMenuTask(task);
+              setSheet("task");
+            }}
+          />
+        ))}
+      </View>
+    );
   };
 
-  // Subtasks checklist modifications
-  const addSubtask = () => {
-    if (!newSubtaskTitle.trim()) return;
-    setFormData((prev) => ({
-      ...prev,
-      subtasks: [...prev.subtasks, { title: newSubtaskTitle.trim(), isCompleted: false }],
-    }));
-    setNewSubtaskTitle("");
-  };
-
-  const toggleSubtaskInForm = (idx: number) => {
-    setFormData((prev) => {
-      const list = [...prev.subtasks];
-      if (list[idx]) {
-        list[idx] = { ...list[idx], isCompleted: !list[idx].isCompleted };
-      }
-      return { ...prev, subtasks: list };
-    });
-  };
-
-  const deleteSubtask = (idx: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      subtasks: prev.subtasks.filter((_, i) => i !== idx),
-    }));
-  };
-
-  // Tags management
-  const toggleTagSelection = (tag: string) => {
-    setFormData((prev) => {
-      const exists = prev.tags.includes(tag);
-      return {
-        ...prev,
-        tags: exists ? prev.tags.filter((t) => t !== tag) : [...prev.tags, tag],
-      };
-    });
-  };
-
-  const addCustomTag = () => {
-    const cleaned = newTagInput.trim();
-    if (!cleaned) return;
-    setFormData((prev) => {
-      if (prev.tags.includes(cleaned)) return prev;
-      return { ...prev, tags: [...prev.tags, cleaned] };
-    });
-    setNewTagInput("");
-  };
-
-  // Helper date status
-  const getOverdueInfo = (task: Task) => {
-    if (task.status === "COMPLETED" || !task.dueDate) return { overdue: false, text: "" };
-    const date = new Date(task.dueDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const overdue = date < today;
-    return {
-      overdue,
-      text: overdue ? "Overdue" : `Due: ${task.dueDate.split("T")[0]}`,
-    };
-  };
-
-  const currentAssigneeName = useMemo(() => {
-    const selected = teamUsers.find((u) => u._id === formData.assignedTo);
-    return selected?.name || "Unassigned";
-  }, [formData.assignedTo, teamUsers]);
-
-  const currentLeadName = useMemo(() => {
-    const selected = leads.find((l) => l._id === formData.leadId);
-    return selected?.name || "None";
-  }, [formData.leadId, leads]);
+  const tabs = useMemo(() => {
+    const base = [
+      { key: "ALL", label: "All Task" },
+      { key: "ASSIGNED", label: "Assigned" },
+      { key: "MINE", label: "My Task" },
+    ];
+    return canSeeTeam ? [...base, { key: "TEAM", label: "Team" }] : base;
+  }, [canSeeTeam]);
 
   return (
-    <Screen title="Task Desk" subtitle="Operational Todo Lists" loading={loading} error={error}>
-      <FlatList
-        data={groups}
-        keyExtractor={(item) => item.key}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadData(true)} />}
-        contentContainerStyle={{ paddingBottom: 64 + insets.bottom }}
+    <Screen
+      title="Tasks"
+      description="Manage work and track progress"
+      loading={loading}
+      error={error}
+      onRetry={() => load()}
+    >
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.page}
         keyboardShouldPersistTaps="handled"
-        ListHeaderComponent={
-          <View style={{ marginBottom: 12 }}>
-            {success ? <Text style={styles.success}>{success}</Text> : null}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
+      >
+        <AppSegmentedTabs tabs={tabs} activeKey={tab} onChange={(key) => setTab(key as TabKey)} />
 
-            {/* Quick Stats Grid */}
-            <View style={styles.statsGrid}>
-              <View style={styles.statsCard}>
-                <Icon name="list" size={16} color={themeColor("#6c7789")} />
-                <Text style={styles.statsLabel}>Total</Text>
-                <Text style={styles.statsValue}>{stats.total}</Text>
-              </View>
-              <View style={[styles.statsCard, { borderColor: themeColor("#f6d68c") }]}>
-                <Icon name="time-outline" size={16} color={themeColor("#a26f06")} />
-                <Text style={styles.statsLabel}>Pending</Text>
-                <Text style={[styles.statsValue, { color: themeColor("#a26f06") }]}>{stats.pending}</Text>
-              </View>
-              <View style={[styles.statsCard, { borderColor: themeColor("#a3e0c9") }]}>
-                <Icon name="checkmark-circle-outline" size={16} color={themeColor("#0d8055")} />
-                <Text style={styles.statsLabel}>Done</Text>
-                <Text style={[styles.statsValue, { color: themeColor("#0d8055") }]}>{stats.COMPLETED}</Text>
-              </View>
-              <View style={[styles.statsCard, { borderColor: themeColor("#f6b8b5") }]}>
-                <Icon name="alert-circle-outline" size={16} color={themeColor("#942626")} />
-                <Text style={styles.statsLabel}>Overdue</Text>
-                <Text style={[styles.statsValue, { color: themeColor("#942626") }]}>{stats.overdue}</Text>
-              </View>
-            </View>
+        <StatGrid tiles={tiles} />
 
-            {/* Controls Bar */}
-            <View style={styles.toolbar}>
-              <View style={styles.searchRow}>
-                <Icon name="search" size={16} color={themeColor("#6c7789")} style={styles.searchIcon} />
-                <AppInput
-                  style={styles.searchInput as object}
-                  placeholder="Search title, description..."
-                  value={searchQuery}
-                  onChangeText={(val) => {
-                    setSearchQuery(val);
-                    void loadData(true);
-                  }}
-                />
-                {searchQuery ? (
-                  <Pressable
-                    style={styles.clearSearchBtn}
-                    onPress={() => {
-                      setSearchQuery("");
-                      void loadData(true);
-                    }}
-                  >
-                    <Icon name="close-circle" size={16} color={themeColor("#6c7789")} />
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <View style={styles.groupSortRow}>
-                <View style={styles.selectBtnContainer}>
-                  <Text style={styles.selectBtnTitle}>Group:</Text>
-                  <View style={styles.selectBtnWrap}>
-                    <Pressable
-                      style={[styles.smallToggleBtn, groupBy === "status" && styles.smallToggleBtnActive]}
-                      onPress={() => setGroupBy("status")}
-                    >
-                      <Text style={[styles.smallToggleBtnText, groupBy === "status" && styles.smallToggleBtnTextActive]}>Status</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.smallToggleBtn, groupBy === "priority" && styles.smallToggleBtnActive]}
-                      onPress={() => setGroupBy("priority")}
-                    >
-                      <Text style={[styles.smallToggleBtnText, groupBy === "priority" && styles.smallToggleBtnTextActive]}>Priority</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.smallToggleBtn, groupBy === "assignee" && styles.smallToggleBtnActive]}
-                      onPress={() => setGroupBy("assignee")}
-                    >
-                      <Text style={[styles.smallToggleBtnText, groupBy === "assignee" && styles.smallToggleBtnTextActive]}>Assignee</Text>
-                    </Pressable>
-                  </View>
-                </View>
-
-                <View style={styles.selectBtnContainer}>
-                  <Text style={styles.selectBtnTitle}>Sort:</Text>
-                  <View style={styles.selectBtnWrap}>
-                    <Pressable
-                      style={[styles.smallToggleBtn, sortBy === "createdNewest" && styles.smallToggleBtnActive]}
-                      onPress={() => setSortBy("createdNewest")}
-                    >
-                      <Text style={[styles.smallToggleBtnText, sortBy === "createdNewest" && styles.smallToggleBtnTextActive]}>Newest</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.smallToggleBtn, sortBy === "dueDate" && styles.smallToggleBtnActive]}
-                      onPress={() => setSortBy("dueDate")}
-                    >
-                      <Text style={[styles.smallToggleBtnText, sortBy === "dueDate" && styles.smallToggleBtnTextActive]}>Due</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.smallToggleBtn, sortBy === "priority" && styles.smallToggleBtnActive]}
-                      onPress={() => setSortBy("priority")}
-                    >
-                      <Text style={[styles.smallToggleBtnText, sortBy === "priority" && styles.smallToggleBtnTextActive]}>Priority</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              </View>
-
-              {/* Filters Scroll */}
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
-                <Text style={styles.filterTextLabel}>Filters:</Text>
-                
-                {/* Status Filter */}
-                <Pressable
-                  style={[styles.filterChip, !!statusFilter && styles.filterChipActive]}
-                  onPress={() => {
-                    const idx = STATUS_OPTIONS.findIndex((s) => s.id === statusFilter);
-                    const next = STATUS_OPTIONS[idx + 1]?.id || "";
-                    setStatusFilter(next);
-                  }}
-                >
-                  <Text style={[styles.filterChipText, !!statusFilter && styles.filterChipTextActive]}>
-                    Status: {statusFilter ? STATUS_OPTIONS.find((s) => s.id === statusFilter)?.label : "All"}
-                  </Text>
-                </Pressable>
-
-                {/* Priority Filter */}
-                <Pressable
-                  style={[styles.filterChip, !!priorityFilter && styles.filterChipActive]}
-                  onPress={() => {
-                    const idx = PRIORITY_OPTIONS.findIndex((p) => p.id === priorityFilter);
-                    const next = PRIORITY_OPTIONS[idx + 1]?.id || "";
-                    setPriorityFilter(next);
-                  }}
-                >
-                  <Text style={[styles.filterChipText, !!priorityFilter && styles.filterChipTextActive]}>
-                    Priority: {priorityFilter ? PRIORITY_OPTIONS.find((p) => p.id === priorityFilter)?.label : "All"}
-                  </Text>
-                </Pressable>
-
-                {/* Tag Filter */}
-                <Pressable
-                  style={[styles.filterChip, !!tagFilter && styles.filterChipActive]}
-                  onPress={() => {
-                    const idx = PREDEFINED_TAGS.indexOf(tagFilter);
-                    const next = PREDEFINED_TAGS[idx + 1] || "";
-                    setTagFilter(next);
-                  }}
-                >
-                  <Text style={[styles.filterChipText, !!tagFilter && styles.filterChipTextActive]}>
-                    Tag: {tagFilter || "All"}
-                  </Text>
-                </Pressable>
-
-                {(!!statusFilter || !!priorityFilter || !!tagFilter || !!searchQuery) && (
-                  <Pressable
-                    style={styles.clearFiltersBtn}
-                    onPress={() => {
-                      setStatusFilter("");
-                      setPriorityFilter("");
-                      setTagFilter("");
-                      setSearchQuery("");
-                      void loadData(true);
-                    }}
-                  >
-                    <Text style={styles.clearFiltersText}>Clear</Text>
-                  </Pressable>
-                )}
-              </ScrollView>
-
-              <AppButton title="+ Create Task" onPress={openCreateModal} style={{ marginTop: 8 }} />
-            </View>
+        {tab === "TEAM" ? (
+          <View style={styles.controlRow}>
+            <AppSearchInput
+              value={searchInput}
+              onChangeText={setSearchInput}
+              placeholder="Search team member..."
+              style={styles.searchFlex}
+            />
+            <FilterPill
+              icon="sliders"
+              label="Filters"
+              caret={false}
+              active={activeFilterCount > 0}
+              onPress={() => setSheet("status")}
+            />
+            <FilterPill icon="sort" label="Sort" caret={false} onPress={() => setSheet("sort")} />
           </View>
-        }
-        renderItem={({ item }) => {
-          const isCollapsed = collapsedGroups[item.key];
-          const colorStyles = item.colorStyle;
+        ) : view === "BOARD" ? (
+          <View style={styles.controlRow}>
+            <AppSearchInput
+              value={searchInput}
+              onChangeText={setSearchInput}
+              placeholder="Search tasks..."
+              style={styles.searchFlex}
+            />
+            <FilterPill
+              icon="sliders"
+              label="Filters"
+              caret={false}
+              active={activeFilterCount > 0}
+              onPress={() => setSheet("status")}
+            />
+            <ViewToggle view={view} onChange={setView} />
+          </View>
+        ) : (
+          <>
+            <AppSearchInput
+              value={searchInput}
+              onChangeText={setSearchInput}
+              placeholder="Search tasks by title or description..."
+            />
 
-          return (
-            <View style={styles.groupContainer}>
+            <View style={styles.filterRow}>
+              <FilterPill
+                label={statusFilter ? statusTone(statusFilter).label : "Status"}
+                icon="funnel-outline"
+                active={!!statusFilter}
+                onPress={() => setSheet("status")}
+                style={styles.filterFlex}
+              />
+              <FilterPill
+                label={priorityFilter ? priorityTone(priorityFilter).label : "Priority"}
+                icon="flag"
+                active={!!priorityFilter}
+                onPress={() => setSheet("priority")}
+                style={styles.filterFlex}
+              />
+              <FilterPill
+                label={assigneeLabel}
+                icon="people"
+                active={!!assigneeFilter}
+                onPress={() => setSheet("assignee")}
+                style={styles.filterFlex}
+              />
+              <FilterPill icon="sort" label="Sort" caret={false} onPress={() => setSheet("sort")} />
+            </View>
+
+            <View style={styles.actionRow}>
+              <ViewToggle view={view} onChange={setView} />
+              <View style={styles.spacer} />
               <Pressable
-                style={[
-                  styles.groupHeader,
-                  colorStyles && { backgroundColor: colorStyles.bg, borderColor: colorStyles.border },
-                ]}
-                onPress={() => toggleGroup(item.key)}
+                style={styles.newTask}
+                onPress={() => openCreate()}
+                accessibilityRole="button"
               >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                  <Icon
-                    name={isCollapsed ? "chevron-forward" : "chevron-down"}
-                    size={16}
-                    color={colorStyles ? colorStyles.color : themeColor("#6c7789")}
-                  />
-                  <Text
-                    style={[
-                      styles.groupTitle,
-                      colorStyles && { color: colorStyles.color },
-                    ]}
-                  >
-                    {item.label}
-                  </Text>
-                  <View
-                    style={[
-                      styles.groupBadge,
-                      {
-                        backgroundColor: colorStyles ? colorStyles.color : themeColor("#6c7789"),
-                      },
-                    ]}
-                  >
-                    <Text style={styles.groupBadgeText}>{item.tasks.length}</Text>
-                  </View>
-                </View>
-              </Pressable>
-
-              {!isCollapsed && (
-                <View style={styles.groupList}>
-                  {item.tasks.map((task) => {
-                    const isCompleted = task.status === "COMPLETED";
-                    const priorityStyle = PRIORITY_OPTIONS.find((p) => p.id === task.priority) || PRIORITY_OPTIONS[1];
-                    const dueInfo = getOverdueInfo(task);
-
-                    return (
-                      <View key={task._id} style={[styles.taskCard, isCompleted && styles.taskCardCompleted]}>
-                        <View style={styles.taskCardRow}>
-                          <Pressable
-                            style={[styles.checkbox, isCompleted && styles.checkboxCompleted]}
-                            onPress={() => void handleToggleTaskStatus(task)}
-                          >
-                            {isCompleted && <Icon name="checkmark" size={14} color={themeColor("#ffffff")} />}
-                          </Pressable>
-
-                          <Pressable style={{ flex: 1 }} onPress={() => openEditModal(task)}>
-                            <Text style={[styles.taskTitle, isCompleted && styles.taskTitleCompleted]}>
-                              {task.title}
-                            </Text>
-                            {task.description ? (
-                              <Text style={styles.taskDesc} numberOfLines={2}>
-                                {task.description}
-                              </Text>
-                            ) : null}
-
-                            <View style={styles.taskMetaRow}>
-                              {/* Priority */}
-                              <View
-                                style={[
-                                  styles.badge,
-                                  {
-                                    backgroundColor: priorityStyle.bg,
-                                    borderColor: priorityStyle.border,
-                                  },
-                                ]}
-                              >
-                                <Text style={[styles.badgeText, { color: priorityStyle.color }]}>
-                                  {priorityStyle.label}
-                                </Text>
-                              </View>
-
-                              {/* Due Date */}
-                              {task.dueDate ? (
-                                <View
-                                  style={[
-                                    styles.badge,
-                                    dueInfo.overdue && { backgroundColor: themeColor("#fdedec"), borderColor: themeColor("#f6b8b5") },
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.badgeText,
-                                      { color: dueInfo.overdue ? themeColor("#942626") : themeColor("#6c7789") },
-                                      dueInfo.overdue && { fontWeight: "700" },
-                                    ]}
-                                  >
-                                    {dueInfo.text}
-                                  </Text>
-                                </View>
-                              ) : null}
-
-                              {/* Assignee */}
-                              {task.assignedTo ? (
-                                <View style={styles.badge}>
-                                  <Text style={styles.badgeText}>
-                                    Assigned: {task.assignedTo && typeof task.assignedTo === "object" ? task.assignedTo.name : task.assignedTo}
-                                  </Text>
-                                </View>
-                              ) : null}
-
-                              {/* Lead Link */}
-                              {!isProductionTaskRole && task.leadId ? (
-                                <View style={[styles.badge, { backgroundColor: themeColor("#e8f7f0"), borderColor: themeColor("#a3e0c9") }]}>
-                                  <Text style={[styles.badgeText, { color: themeColor("#0a6544") }]}>
-                                    Lead: {task.leadId && typeof task.leadId === "object" ? task.leadId.name : "Linked"}
-                                  </Text>
-                                </View>
-                              ) : null}
-                            </View>
-
-                            {/* Tags list */}
-                            {task.tags && task.tags.length > 0 ? (
-                              <View style={styles.tagGrid}>
-                                {task.tags.map((t: string, idx: number) => (
-                                  <View key={`${t}-${idx}`} style={styles.tagBadge}>
-                                    <Text style={styles.tagBadgeText}>#{t}</Text>
-                                  </View>
-                                ))}
-                              </View>
-                            ) : null}
-
-                            {/* Subtask progress bar */}
-                            {task.subtasks && task.subtasks.length > 0 ? (
-                              <View style={styles.subtaskProgressBarContainer}>
-                                <Text style={styles.subtaskProgressText}>
-                                  Checklist: {task.subtasks.filter((s: any) => s.isCompleted).length}/{task.subtasks.length}
-                                </Text>
-                                <View style={styles.progressBarBg}>
-                                  <View
-                                    style={[
-                                      styles.progressBarFill,
-                                      {
-                                        width: `${Math.round(
-                                          (task.subtasks.filter((s: any) => s.isCompleted).length / task.subtasks.length) * 100
-                                        )}%`,
-                                      },
-                                    ]}
-                                  />
-                                </View>
-                              </View>
-                            ) : null}
-                          </Pressable>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              )}
-            </View>
-          );
-        }}
-      />
-
-      {/* CREATE/EDIT OVERLAY MODAL */}
-      <Modal visible={isModalOpen} animationType="slide" transparent onRequestClose={() => setIsModalOpen(false)}>
-        <View style={styles.modalOverlay}>
-          <AppCard style={styles.modalContentCard as object}>
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitleText}>{editingTask ? "Update Task" : "Create Task"}</Text>
-              <Pressable onPress={() => setIsModalOpen(false)}>
-                <Icon name="close" size={24} color={themeColor("#161c24")} />
+                <Icon name="add" size={16} color="#ffffff" />
+                <Text style={styles.newTaskText}>New Task</Text>
               </Pressable>
             </View>
+          </>
+        )}
 
-            <ScrollView style={styles.modalFormScroll} keyboardShouldPersistTaps="handled">
-              <Text style={styles.formLabel}>Title *</Text>
-              <AppInput
-                placeholder="What needs to be done?"
-                value={formData.title}
-                onChangeText={(val) => setFormData((prev) => ({ ...prev, title: val }))}
-              />
+        {renderContent()}
+      </ScrollView>
 
-              <Text style={styles.formLabel}>Description</Text>
-              <AppInput
-                placeholder="Add details, links, or info..."
-                value={formData.description}
-                onChangeText={(val) => setFormData((prev) => ({ ...prev, description: val }))}
-              />
+      <Pressable
+        style={styles.fab}
+        onPress={() => openCreate()}
+        accessibilityRole="button"
+        accessibilityLabel="New task"
+      >
+        <Icon name="add" size={26} color="#ffffff" />
+      </Pressable>
 
-              {/* Status Selector */}
-              <Text style={styles.formLabel}>Status</Text>
-              <Pressable style={styles.selectRowField} onPress={() => setStatusDropdownOpen(!statusDropdownOpen)}>
-                <Text style={styles.selectRowText}>
-                  {STATUS_OPTIONS.find((s) => s.id === formData.status)?.label || formData.status}
-                </Text>
-                <Icon name="chevron-down" size={16} color={themeColor("#6c7789")} />
-              </Pressable>
-              {statusDropdownOpen && (
-                <View style={styles.dropdownCard}>
-                  {STATUS_OPTIONS.map((opt) => (
-                    <Pressable
-                      key={opt.id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setFormData((prev) => ({ ...prev, status: opt.id }));
-                        setStatusDropdownOpen(false);
-                      }}
-                    >
-                      <Text style={styles.dropdownItemText}>{opt.label}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
+      {/* ------------------------------------------------------------ sheets -- */}
 
-              {/* Priority Selector */}
-              <Text style={styles.formLabel}>Priority</Text>
-              <Pressable style={styles.selectRowField} onPress={() => setPriorityDropdownOpen(!priorityDropdownOpen)}>
-                <Text style={styles.selectRowText}>
-                  {PRIORITY_OPTIONS.find((p) => p.id === formData.priority)?.label || formData.priority}
-                </Text>
-                <Icon name="chevron-down" size={16} color={themeColor("#6c7789")} />
-              </Pressable>
-              {priorityDropdownOpen && (
-                <View style={styles.dropdownCard}>
-                  {PRIORITY_OPTIONS.map((opt) => (
-                    <Pressable
-                      key={opt.id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setFormData((prev) => ({ ...prev, priority: opt.id }));
-                        setPriorityDropdownOpen(false);
-                      }}
-                    >
-                      <Text style={styles.dropdownItemText}>{opt.label}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-
-              {/* Due Date Picker */}
-              <Text style={styles.formLabel}>Due Date</Text>
-              <Pressable style={styles.selectRowField} onPress={triggerDatePicker}>
-                <Text style={styles.selectRowText}>{formData.dueDate || "Select due date (Optional)"}</Text>
-                <Icon name="calendar-outline" size={16} color={themeColor("#6c7789")} />
-              </Pressable>
-
-              {/* Assignee Selector */}
-              <Text style={styles.formLabel}>Assignee</Text>
-              <Pressable style={styles.selectRowField} onPress={() => setAssigneeDropdownOpen(!assigneeDropdownOpen)}>
-                <Text style={styles.selectRowText}>{currentAssigneeName}</Text>
-                <Icon name="person-outline" size={16} color={themeColor("#6c7789")} />
-              </Pressable>
-              {assigneeDropdownOpen && (
-                <View style={styles.dropdownCard}>
-                  <Pressable
-                    style={styles.dropdownItem}
-                    onPress={() => {
-                      setFormData((prev) => ({ ...prev, assignedTo: "" }));
-                      setAssigneeDropdownOpen(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownItemText}>Unassigned</Text>
-                  </Pressable>
-                  {teamUsers.map((u) => (
-                    <Pressable
-                      key={u._id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setFormData((prev) => ({ ...prev, assignedTo: u._id }));
-                        setAssigneeDropdownOpen(false);
-                      }}
-                    >
-                      <Text style={styles.dropdownItemText}>{u.name} ({u.role})</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-
-              {!isProductionTaskRole ? (
-                <>
-                  {/* Lead Association */}
-                  <Text style={styles.formLabel}>Associated Lead</Text>
-                  <Pressable style={styles.selectRowField} onPress={() => setLeadDropdownOpen(!leadDropdownOpen)}>
-                    <Text style={styles.selectRowText}>{currentLeadName}</Text>
-                    <Icon name="people-outline" size={16} color={themeColor("#6c7789")} />
-                  </Pressable>
-                  {leadDropdownOpen && (
-                    <View style={styles.dropdownCard}>
-                      <Pressable
-                        style={styles.dropdownItem}
-                        onPress={() => {
-                          setFormData((prev) => ({ ...prev, leadId: "" }));
-                          setLeadDropdownOpen(false);
-                        }}
-                      >
-                        <Text style={styles.dropdownItemText}>None</Text>
-                      </Pressable>
-                      {leads.map((l) => (
-                        <Pressable
-                          key={l._id}
-                          style={styles.dropdownItem}
-                          onPress={() => {
-                            setFormData((prev) => ({ ...prev, leadId: l._id }));
-                            setLeadDropdownOpen(false);
-                          }}
-                        >
-                          <Text style={styles.dropdownItemText}>{l.name} {l.phone ? `(${l.phone})` : ""}</Text>
-                        </Pressable>
-                      ))}
-                    </View>
-                  )}
-                </>
-              ) : null}
-
-              {/* Tags Section */}
-              <Text style={styles.formLabel}>Tags</Text>
-              <View style={styles.tagsContainer}>
-                {PREDEFINED_TAGS.map((tag) => {
-                  const selected = formData.tags.includes(tag);
-                  return (
-                    <Pressable
-                      key={tag}
-                      style={[styles.tagSelectChip, selected && styles.tagSelectChipActive]}
-                      onPress={() => toggleTagSelection(tag)}
-                    >
-                      <Text style={[styles.tagSelectChipText, selected && styles.tagSelectChipTextActive]}>
-                        {tag}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <View style={styles.customTagRow}>
-                <AppInput
-                  style={[styles.customTagInput, { marginBottom: 0 }] as object}
-                  placeholder="Custom tag..."
-                  value={newTagInput}
-                  onChangeText={setNewTagInput}
-                />
-                <AppButton title="Add" onPress={addCustomTag} style={styles.customTagAddBtn as object} />
-              </View>
-
-              {formData.tags.length > 0 ? (
-                <View style={[styles.tagGrid, { marginTop: 8 }]}>
-                  {formData.tags.map((t, idx) => (
-                    <View key={`selected-${t}-${idx}`} style={styles.tagBadge}>
-                      <Text style={styles.tagBadgeText}>#{t}</Text>
-                      <Pressable style={{ marginLeft: 4 }} onPress={() => toggleTagSelection(t)}>
-                        <Icon name="close-circle" size={12} color={themeColor("#6c7789")} />
-                      </Pressable>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-
-              {/* Subtasks checklist */}
-              <Text style={styles.formLabel}>Subtasks Checklist</Text>
-              <View style={styles.subtaskAddContainer}>
-                <AppInput
-                  style={[styles.subtaskAddInput, { marginBottom: 0 }] as object}
-                  placeholder="Add checklist item..."
-                  value={newSubtaskTitle}
-                  onChangeText={setNewSubtaskTitle}
-                />
-                <AppButton title="Add" onPress={addSubtask} style={styles.subtaskAddBtn as object} />
-              </View>
-
-              <View style={styles.subtaskList}>
-                {formData.subtasks.map((sub, idx) => (
-                  <View key={`form-sub-${idx}`} style={styles.subtaskRow}>
-                    <Pressable
-                      style={[styles.checkbox, sub.isCompleted && styles.checkboxCompleted]}
-                      onPress={() => toggleSubtaskInForm(idx)}
-                    >
-                      {sub.isCompleted && <Icon name="checkmark" size={12} color={themeColor("#ffffff")} />}
-                    </Pressable>
-                    <Text style={[styles.subtaskTitle, sub.isCompleted && styles.subtaskTitleCompleted]}>
-                      {sub.title}
-                    </Text>
-                    <Pressable style={styles.deleteSubtaskBtn} onPress={() => deleteSubtask(idx)}>
-                      <Icon name="trash-outline" size={14} color={themeColor("#942626")} />
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-
-            <View style={styles.modalButtonRow}>
-              {editingTask && (isAdmin || String(editingTask.createdBy) === String(user?._id)) ? (
-                <AppButton
-                  title={saving ? "Deleting..." : "Delete"}
-                  onPress={() => handleDeleteTask(editingTask._id)}
-                  disabled={saving}
-                  style={styles.modalDeleteBtn as object}
-                />
-              ) : null}
-              <AppButton title="Cancel" variant="ghost" onPress={() => setIsModalOpen(false)} disabled={saving} style={{ flex: 1 }} />
-              <AppButton title={saving ? "Saving..." : "Save"} onPress={handleSaveTask} disabled={saving} style={{ flex: 1 }} />
-            </View>
-          </AppCard>
-        </View>
-      </Modal>
-
-      {/* iOS Date Picker Modal */}
-      {showDatePicker && (
-        <DateTimePicker
-          value={datePickerSeed}
-          mode="date"
-          display="default"
-          onChange={onDatePickerChange}
+      <AppSheet
+        visible={sheet === "status"}
+        onClose={() => setSheet(null)}
+        title="Status"
+        subtitle="Show only tasks in this state"
+      >
+        <OptionList
+          options={[
+            { id: "", label: "All statuses" },
+            ...STATUS_IDS.map((id) => ({ id, label: statusTone(id).label })),
+          ]}
+          selected={statusFilter}
+          onSelect={(id) => {
+            setStatusFilter(id);
+            setSheet(null);
+          }}
         />
-      )}
+      </AppSheet>
+
+      <AppSheet
+        visible={sheet === "priority"}
+        onClose={() => setSheet(null)}
+        title="Priority"
+        subtitle="Show only tasks at this priority"
+      >
+        <OptionList
+          options={[
+            { id: "", label: "All priorities" },
+            ...PRIORITY_IDS.map((id) => ({ id, label: priorityTone(id).label })),
+          ]}
+          selected={priorityFilter}
+          onSelect={(id) => {
+            setPriorityFilter(id);
+            setSheet(null);
+          }}
+        />
+      </AppSheet>
+
+      <AppSheet
+        visible={sheet === "assignee"}
+        onClose={() => setSheet(null)}
+        title="Assignee"
+        subtitle="Show only tasks on this person"
+      >
+        <OptionList
+          options={[
+            { id: "", label: "Anyone" },
+            ...(user?._id || user?.id
+              ? [{ id: String(user?._id || user?.id), label: "Me" }]
+              : []),
+            ...teamUsers.map((row) => ({
+              id: String(row?._id || row?.id || ""),
+              label: String(row?.name || "User"),
+            })),
+          ]}
+          selected={assigneeFilter}
+          onSelect={(id) => {
+            setAssigneeFilter(id);
+            setSheet(null);
+          }}
+        />
+      </AppSheet>
+
+      <AppSheet
+        visible={sheet === "sort"}
+        onClose={() => setSheet(null)}
+        title="Sort by"
+      >
+        <OptionList
+          options={SORTS.map((row) => ({ id: row.id, label: row.label }))}
+          selected={sortBy}
+          onSelect={(id) => {
+            setSortBy(id as SortKey);
+            setSheet(null);
+          }}
+        />
+      </AppSheet>
+
+      <AppSheet
+        visible={sheet === "task" && !!menuTask}
+        onClose={() => {
+          setSheet(null);
+          setMenuTask(null);
+        }}
+        title={menuTask?.title}
+      >
+        {menuTask ? (
+          <OptionList
+            options={[
+              { id: "open", label: "Open task" },
+              ...STATUS_IDS.filter(
+                (id) => id !== String(menuTask.status || "").toUpperCase(),
+              ).map((id) => ({ id: `move:${id}`, label: `Move to ${statusTone(id).label}` })),
+              { id: "delete", label: "Delete task", tone: "danger" as const },
+            ]}
+            selected=""
+            onSelect={(id) => {
+              if (id === "open") {
+                const task = menuTask;
+                setSheet(null);
+                setMenuTask(null);
+                openTask(task);
+                return;
+              }
+              if (id === "delete") {
+                void removeTask(menuTask);
+                return;
+              }
+              if (id.startsWith("move:")) {
+                void moveTask(menuTask, id.slice(5) as StatusId);
+              }
+            }}
+          />
+        ) : null}
+      </AppSheet>
     </Screen>
   );
 };
 
+/* ------------------------------------------------------------ small parts -- */
+
+const ViewToggle = ({
+  view,
+  onChange,
+}: {
+  view: ViewMode;
+  onChange: (next: ViewMode) => void;
+}) => (
+  <View style={styles.toggle}>
+    {(["BOARD", "LIST"] as ViewMode[]).map((mode) => {
+      const active = view === mode;
+      return (
+        <Pressable
+          key={mode}
+          onPress={() => onChange(mode)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: active }}
+          style={[styles.toggleItem, active && styles.toggleItemActive]}
+        >
+          <Icon
+            name={mode === "BOARD" ? "board" : "list"}
+            size={15}
+            color={active ? themePalette.blue[600] : themePalette.slate[600]}
+          />
+          <Text style={[styles.toggleText, active && styles.toggleTextActive]}>
+            {mode === "BOARD" ? "Board" : "List"}
+          </Text>
+        </Pressable>
+      );
+    })}
+  </View>
+);
+
+const OptionList = ({
+  options,
+  selected,
+  onSelect,
+}: {
+  options: Array<{ id: string; label: string; tone?: "danger" }>;
+  selected: string;
+  onSelect: (id: string) => void;
+}) => (
+  <View>
+    {options.map((option) => {
+      const active = option.id === selected;
+      return (
+        <Pressable
+          key={option.id || "__all"}
+          onPress={() => onSelect(option.id)}
+          accessibilityRole="button"
+          style={styles.option}
+        >
+          <Text
+            style={[
+              styles.optionText,
+              active && styles.optionTextActive,
+              option.tone === "danger" && styles.optionTextDanger,
+            ]}
+          >
+            {option.label}
+          </Text>
+          {active ? (
+            <Icon name="checkmark" size={16} color={themePalette.blue[600]} />
+          ) : null}
+        </Pressable>
+      );
+    })}
+  </View>
+);
+
 const styles = themedStyles((c) => StyleSheet.create({
-  success: {
-    marginBottom: 10,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: colors.successBorder,
-    borderRadius: 10,
-    backgroundColor: colors.successBg,
-    color: colors.success,
+  page: {
+    gap: spacing.lg,
+    paddingBottom: 96,
   },
-  statsGrid: {
+  stack: {
+    gap: spacing.lg,
+  },
+  controlRow: {
     flexDirection: "row",
-    gap: 8,
-    marginBottom: 12,
+    alignItems: "center",
+    gap: spacing.md,
   },
-  statsCard: {
+  searchFlex: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    backgroundColor: c.surface,
-    padding: 8,
-    alignItems: "center",
   },
-  statsLabel: {
-    fontSize: 9,
-    color: colors.textMuted,
-    textTransform: "uppercase",
-    marginTop: 4,
-  },
-  statsValue: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.text,
-    marginTop: 2,
-  },
-  toolbar: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.lg,
-    backgroundColor: c.surface,
-    padding: 10,
-    marginBottom: 8,
-  },
-  searchRow: {
+  filterRow: {
     flexDirection: "row",
     alignItems: "center",
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
+    gap: spacing.md,
+  },
+  filterFlex: {
+    flex: 1,
+  },
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  spacer: {
+    flex: 1,
+  },
+  toggle: {
+    flexDirection: "row",
     borderRadius: radii.md,
-    backgroundColor: colors.surface,
-    height: 40,
-    paddingHorizontal: 8,
-    marginBottom: 8,
-  },
-  searchIcon: {
-    marginRight: 6,
-  },
-  searchInput: {
-    flex: 1,
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    marginBottom: 0,
-    height: "100%",
-    paddingHorizontal: 0,
-  },
-  clearSearchBtn: {
-    padding: 4,
-  },
-  groupSortRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 8,
-  },
-  selectBtnContainer: {
-    flex: 1,
-  },
-  selectBtnTitle: {
-    fontSize: 10,
-    color: colors.textMuted,
-    fontWeight: "600",
-    marginBottom: 4,
-  },
-  selectBtnWrap: {
-    flexDirection: "row",
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.sm,
-    backgroundColor: colors.surfaceMuted,
-    padding: 2,
-  },
-  smallToggleBtn: {
-    flex: 1,
-    height: 26,
-    borderRadius: radii.sm - 2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  smallToggleBtnActive: {
+    borderColor: c.border,
     backgroundColor: c.surface,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.08,
-    shadowRadius: 1,
-    elevation: 1,
-  },
-  smallToggleBtnText: {
-    fontSize: 10,
-    fontWeight: "600",
-    color: colors.textMuted,
-  },
-  smallToggleBtnTextActive: {
-    color: colors.text,
-    fontWeight: "700",
-  },
-  filtersRow: {
-    gap: 6,
-    alignItems: "center",
-    paddingVertical: 4,
-  },
-  filterTextLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: colors.textMuted,
-    marginRight: 2,
-  },
-  filterChip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.pill,
-    height: 26,
-    paddingHorizontal: 8,
-    justifyContent: "center",
-    backgroundColor: c.surface,
-  },
-  filterChipActive: {
-    borderColor: colors.accent,
-    backgroundColor: colors.primary,
-  },
-  filterChipText: {
-    fontSize: 10,
-    color: colors.text,
-    fontWeight: "600",
-  },
-  filterChipTextActive: {
-    color: c.surface,
-  },
-  clearFiltersBtn: {
-    paddingHorizontal: 8,
-    justifyContent: "center",
-  },
-  clearFiltersText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: colors.error,
-  },
-  groupContainer: {
-    marginBottom: 8,
-  },
-  groupHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: c.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  groupTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: colors.text,
-  },
-  groupBadge: {
-    borderRadius: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-  },
-  groupBadgeText: {
-    fontSize: 9,
-    fontWeight: "700",
-    color: c.surface,
-  },
-  groupList: {
-    marginTop: 4,
-    paddingLeft: 4,
-  },
-  taskCard: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: c.surface,
-    padding: 10,
-    marginBottom: 6,
-    ...clay.shadowSmall,
-  },
-  taskCardCompleted: {
-    opacity: 0.65,
-    backgroundColor: colors.surfaceMuted,
-  },
-  taskCardRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: 6,
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 2,
-    backgroundColor: c.surface,
-  },
-  checkboxCompleted: {
-    backgroundColor: colors.success,
-    borderColor: colors.success,
-  },
-  taskTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: colors.text,
-  },
-  taskTitleCompleted: {
-    textDecorationLine: "line-through",
-    color: colors.textMuted,
-  },
-  taskDesc: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginTop: 2,
-  },
-  taskMetaRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
-    marginTop: 6,
-  },
-  badge: {
-    fontSize: 9,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceMuted,
-  },
-  badgeText: {
-    fontSize: 9,
-    fontWeight: "600",
-    color: colors.textMuted,
-  },
-  tagGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 4,
-    marginTop: 4,
-  },
-  tagBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: c.cyan[100],
-    borderWidth: 1,
-    borderColor: c.infoBorder,
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-  },
-  tagBadgeText: {
-    fontSize: 9,
-    fontWeight: "600",
-    color: c.cyan[700],
-  },
-  subtaskProgressBarContainer: {
-    marginTop: 6,
-  },
-  subtaskProgressText: {
-    fontSize: 9,
-    color: colors.textMuted,
-    fontWeight: "600",
-  },
-  progressBarBg: {
-    height: 4,
-    backgroundColor: colors.border,
-    borderRadius: 2,
-    marginTop: 2,
     overflow: "hidden",
   },
-  progressBarFill: {
-    height: "100%",
-    backgroundColor: colors.success,
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "center",
-    backgroundColor: "rgba(15,23,42,0.45)",
-    padding: 16,
-  },
-  modalContentCard: {
-    maxHeight: "85%",
-    borderRadius: radii.xl,
-    padding: 16,
-  },
-  modalHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 12,
-  },
-  modalTitleText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.text,
-  },
-  modalFormScroll: {
-    marginBottom: 12,
-  },
-  formLabel: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: colors.textMuted,
-    textTransform: "uppercase",
-    marginBottom: 4,
-    marginTop: 8,
-  },
-  selectRowField: {
-    height: 40,
-    borderWidth: 1,
-    borderColor: colors.borderStrong,
-    borderRadius: radii.md,
-    backgroundColor: c.surface,
-    paddingHorizontal: 12,
+  toggleItem: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 8,
+    gap: spacing.sm,
+    height: 44,
+    paddingHorizontal: spacing.lg,
   },
-  selectRowText: {
-    fontSize: 12,
-    color: colors.text,
+  toggleItemActive: {
+    backgroundColor: c.blue[50],
   },
-  dropdownCard: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    backgroundColor: c.surface,
-    paddingVertical: 4,
-    marginBottom: 8,
-    ...clay.shadowSmall,
-  },
-  dropdownItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.surfaceMuted,
-  },
-  dropdownItemText: {
-    fontSize: 12,
-    color: colors.text,
-  },
-  tagsContainer: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 8,
-  },
-  tagSelectChip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radii.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    backgroundColor: c.surface,
-  },
-  tagSelectChipActive: {
-    borderColor: colors.accent,
-    backgroundColor: colors.primary,
-  },
-  tagSelectChipText: {
-    fontSize: 10,
-    color: colors.text,
+  toggleText: {
+    fontSize: typography.label,
     fontWeight: "600",
+    color: c.slate[600],
   },
-  tagSelectChipTextActive: {
-    color: c.surface,
+  toggleTextActive: {
+    color: c.blue[600],
   },
-  customTagRow: {
-    flexDirection: "row",
-    gap: 6,
-    marginBottom: 8,
-    height: 36,
-  },
-  customTagInput: {
-    flex: 1,
-    height: 36,
-  },
-  customTagAddBtn: {
-    height: 36,
-    paddingHorizontal: 12,
-  },
-  subtaskAddContainer: {
-    flexDirection: "row",
-    gap: 6,
-    marginBottom: 8,
-    height: 36,
-  },
-  subtaskAddInput: {
-    flex: 1,
-    height: 36,
-  },
-  subtaskAddBtn: {
-    height: 36,
-    paddingHorizontal: 12,
-  },
-  subtaskList: {
-    marginTop: 4,
-  },
-  subtaskRow: {
+  newTask: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    gap: spacing.sm,
+    height: 44,
+    paddingHorizontal: spacing.xl,
+    borderRadius: radii.md,
+    backgroundColor: c.slate[900],
   },
-  subtaskTitle: {
-    fontSize: 12,
-    color: colors.text,
-    flex: 1,
+  newTaskText: {
+    fontSize: typography.label,
+    fontWeight: "700",
+    color: "#ffffff",
   },
-  subtaskTitleCompleted: {
-    textDecorationLine: "line-through",
-    color: colors.textMuted,
+  empty: {
+    paddingVertical: 40,
+    textAlign: "center",
+    fontSize: typography.label,
+    color: c.slate[400],
   },
-  deleteSubtaskBtn: {
-    padding: 4,
+  fab: {
+    position: "absolute",
+    right: spacing.xl,
+    bottom: spacing.xl,
+    width: 60,
+    height: 60,
+    borderRadius: radii.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: c.blue[600],
+    shadowColor: c.shadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    elevation: 6,
   },
-  modalButtonRow: {
+  option: {
     flexDirection: "row",
-    gap: 8,
-    marginTop: 4,
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: c.border,
   },
-  modalDeleteBtn: {
-    backgroundColor: colors.error,
+  optionText: {
+    fontSize: typography.body,
+    color: c.slate[700],
+  },
+  optionTextActive: {
+    fontWeight: "700",
+    color: c.blue[600],
+  },
+  optionTextDanger: {
+    color: c.rose[600],
   },
 }));
+
+export default TaskManagerScreen;

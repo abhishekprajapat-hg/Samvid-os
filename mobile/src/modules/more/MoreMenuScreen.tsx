@@ -6,11 +6,12 @@ import { AppCard, AppEmptyState } from "../../components/ui";
 import { Icon } from "../../components/ui/Icon";
 import { useAuth } from "../../context/AuthContext";
 import { usePermissions } from "../../context/PermissionContext";
-import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
+import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
+
 import { useTheme, type ThemeMode } from "../../theme/ThemeContext";
-import { getMoreGroups, getTabItems, canSeeItem } from "../../navigation/access";
+import { getMoreGroups, canSeeItem } from "../../navigation/access";
 import { PROFILE_ITEM } from "../../navigation/navigationCatalogue";
-import { isScreenBuilt } from "../../navigation/RoleTabs";
+import { isScreenBuilt, MORE_EXCLUDED_SCREENS } from "../../navigation/RoleTabs";
 import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
 import { themedStyles, themePalette } from "../../theme/themedStyles";
 
@@ -71,10 +72,13 @@ export const MoreMenuScreen = ({ navigation }: any) => {
     [permissions, enforcePageAccess, user?.canViewInventory],
   );
 
-  const tabScreens = useMemo(
-    () => getTabItems(role, accessUser).filter(isScreenBuilt).map((item) => item.screen),
-    [role, accessUser],
-  );
+  /*
+   * The bottom bar is a fixed five now, so what More has to carry is no
+   * longer "whatever the access algorithm did not pick" - it is everything
+   * except those five. Deriving it from getTabItems here would hide Leads,
+   * Inventory and Chat while nothing else offered them.
+   */
+  const tabScreens = MORE_EXCLUDED_SCREENS as unknown as string[];
 
   const groups = useMemo(
     () =>
@@ -230,7 +234,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingVertical: spacing.lg,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
   rowLast: {
     borderBottomWidth: 0,

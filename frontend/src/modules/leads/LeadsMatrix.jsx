@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
+import { Search as SearchIcon } from "lucide-react";
+import { EmptyState } from "../../components/ui";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   getLeadPool,
@@ -176,7 +178,10 @@ const defaultFormData = {
   clientProfession: "",
   siteLat: "",
   siteLng: "",
+  company: "",
+  sourceChannel: "",
   requirementsInventoryType: "",
+  requirementsCoworking: {},
   requirementsPropertySubtype: "",
   requirementsSubtypeData: {},
   requirementsTransactionType: "",
@@ -295,6 +300,36 @@ const toPreferredLocationsList = (value) => {
     .slice(0, 20);
 };
 
+/*
+ * A coworking enquiry, read off a lead and written back.
+ *
+ * Cabins are a list of seat counts, one entry per cabin, because a client
+ * commonly takes a four-seater and a six-seater together - a single size times
+ * a count could not express that. Zero-seat entries are dropped rather than
+ * kept, so a half-filled row cannot travel back to the server.
+ */
+const toCoworkingDraft = (coworking = {}) => ({
+  cabins: (Array.isArray(coworking?.cabins) ? coworking.cabins : [])
+    .map((cabin) => ({ seats: Number(cabin?.seats) || 0 }))
+    .filter((cabin) => cabin.seats > 0),
+  workstations: coworking?.workstations ?? null,
+  depositMonths: coworking?.depositMonths ?? null,
+  agreedRent: coworking?.agreedRent ?? null,
+  noticePeriodMonths: coworking?.noticePeriodMonths ?? null,
+  lockInMonths: coworking?.lockInMonths ?? null,
+});
+
+const toCoworkingPayload = (draft = {}) => ({
+  cabins: (Array.isArray(draft?.cabins) ? draft.cabins : [])
+    .map((cabin) => ({ seats: toAmountNumber(cabin?.seats) }))
+    .filter((cabin) => cabin.seats !== null && cabin.seats > 0),
+  workstations: toAmountNumber(draft?.workstations),
+  depositMonths: toAmountNumber(draft?.depositMonths),
+  agreedRent: toAmountNumber(draft?.agreedRent),
+  noticePeriodMonths: toAmountNumber(draft?.noticePeriodMonths),
+  lockInMonths: toAmountNumber(draft?.lockInMonths),
+});
+
 const mapLeadRequirementsToDraft = (requirements = {}) => {
   const base = createDefaultLeadRequirementsDraft();
   const commercial = requirements?.commercial || {};
@@ -314,6 +349,7 @@ const mapLeadRequirementsToDraft = (requirements = {}) => {
     areaMin: "",
     areaMax: "",
     areaUnit: base.areaUnit,
+    coworking: toCoworkingDraft(requirements?.coworking),
     commercial: {
       seats: toRequirementDraftText(commercial?.seats),
       cabins: toRequirementDraftText(commercial?.cabins),
@@ -377,6 +413,11 @@ const buildLeadRequirementsPayloadFromDraft = (draft = {}) => {
     areaUnit: null,
   };
 
+  if (payload.inventoryType === "COWORKING") {
+    payload.coworking = toCoworkingPayload(draft?.coworking);
+    return payload;
+  }
+
   if (propertySubtype) return payload;
 
   payload.commercial = {
@@ -439,16 +480,24 @@ const getStoredUserRoleType = () => {
   try {
     const parsedUser = JSON.parse(localStorage.getItem("user") || "{}");
     const normalized = String(parsedUser?.roleType || "").trim().toUpperCase();
-    return ["RESIDENTIAL", "BOTH"].includes(normalized) ? normalized : "COMMERCIAL";
+    return ["RESIDENTIAL", "BOTH", "COWORKING"].includes(normalized) ? normalized : "COMMERCIAL";
   } catch {
     return "COMMERCIAL";
   }
 };
 
-const getDefaultFormDataForRoleType = () => ({
-  ...defaultFormData,
-  requirementsInventoryType: getStoredUserRoleType() === "RESIDENTIAL" ? "RESIDENTIAL" : "COMMERCIAL",
-});
+/*
+ * Open the form on the category the user actually works in. Anything else is
+ * rejected by the server for a single-category user, so defaulting a coworking
+ * executive to COMMERCIAL would have made every lead they filed fail.
+ */
+const getDefaultFormDataForRoleType = () => {
+  const roleType = getStoredUserRoleType();
+  return {
+    ...defaultFormData,
+    requirementsInventoryType: ["RESIDENTIAL", "COWORKING"].includes(roleType) ? roleType : "COMMERCIAL",
+  };
+};
 
 const getInventoryLeadSearchText = (inventoryLike = {}) => {
   const commercialLayout = inventoryLike?.commercialDetails?.officeLayout || {};
@@ -617,6 +666,9 @@ const mapLeadToFormData = (lead = {}) => {
       : "",
     projectInterested: String(lead?.projectInterested || ""),
     clientProfession: String(lead?.clientProfession || ""),
+    company: String(lead?.company || ""),
+    sourceChannel: String(lead?.sourceChannel || ""),
+    requirementsCoworking: toCoworkingDraft(lead?.requirements?.coworking),
     siteLat: siteLat === null ? "" : String(siteLat),
     siteLng: siteLng === null ? "" : String(siteLng),
     requirementsInventoryType: requirements.inventoryType,
@@ -785,6 +837,32 @@ const toAmountNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+/*
+ * The coworking half of a lead payload.
+ *
+ * Shared because this file builds the lead payload in two places - the add
+ * modal and buildLeadFormPayload - and a coworking enquiry saved from one but
+ * not the other would lose its cabins depending on which button was pressed.
+ *
+ * Cabins are sent as a list of seat counts, one entry per cabin: a client
+ * commonly takes a four-seater and a six-seater together, which a single size
+ * multiplied by a count could not express.
+ */
+const applyCoworkingLeadFields = (payload, formData = {}) => {
+  payload.company = String(formData.company || "").trim();
+  payload.sourceChannel = String(formData.sourceChannel || "").trim().toUpperCase();
+
+  if (!payload.requirements || payload.requirements.inventoryType !== "COWORKING") return payload;
+
+  payload.requirements.coworking = toCoworkingPayload(formData.requirementsCoworking);
+
+  // Coworking has no property subtype, so the blank-subtype branch above would
+  // otherwise attach empty commercial and residential blobs to the enquiry.
+  delete payload.requirements.commercial;
+  delete payload.requirements.residential;
+  return payload;
+};
+
 const buildLeadFormPayload = (formData = {}) => {
   const payload = {
     name: String(formData.name || "").trim(),
@@ -863,6 +941,8 @@ const buildLeadFormPayload = (formData = {}) => {
       };
     }
   }
+
+  applyCoworkingLeadFields(payload, formData);
 
   return {
     payload,
@@ -1647,27 +1727,64 @@ const LeadsMatrix = () => {
   const canConfigureSiteLocation =
     userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
   const canReviewDealPayment = userRole === "ADMIN";
-  const availableLeadInventoryTypes = useMemo(
-    () =>
-      canChooseLeadRoleType
-        ? [
-          { label: "Commercial", value: "COMMERCIAL" },
-          { label: "Residential", value: "RESIDENTIAL" },
-        ]
-        : [{ label: userRoleType === "RESIDENTIAL" ? "Residential" : "Commercial", value: userRoleType }],
-    [canChooseLeadRoleType, userRoleType],
-  );
-  const defaultBulkUploadSheetType = availableLeadInventoryTypes[0]?.value || DEFAULT_BULK_LEAD_SHEET_TYPE;
+  const availableLeadInventoryTypes = useMemo(() => {
+    const labels = { COMMERCIAL: "Commercial", RESIDENTIAL: "Residential", COWORKING: "Coworking" };
+    /*
+     * An Admin and an "All categories" user work every pipeline.
+     *
+     * Both are unscoped on the server - addLeadRoleTypeScope and
+     * assertLeadTypeMatchesUser return early for each of them - so offering
+     * an All-categories user only commercial and residential hid a pipeline
+     * they could already see, file into and be assigned from. Anyone tied to
+     * a single category gets that one and no other.
+     */
+    if (canChooseLeadRoleType) {
+      return ["COMMERCIAL", "RESIDENTIAL", "COWORKING"].map((value) => ({ label: labels[value], value }));
+    }
+    return [{ label: labels[userRoleType] || labels.COMMERCIAL, value: userRoleType }];
+  }, [canChooseLeadRoleType, userRoleType]);
+
+  /*
+   * Bulk upload reads a commercial or residential sheet; there is no coworking
+   * template. Kept as its own list so a coworking user's single lead category
+   * cannot become the sheet type and quietly file commercial rows the server
+   * then refuses.
+   */
+  /*
+   * Editing a lead has to be able to show the type the lead already is.
+   *
+   * A "Both" user is scoped to commercial and residential for new leads, but
+   * can see and open a coworking one - and a select whose value matches none
+   * of its options renders blank, so the field looked unset and one stray
+   * click silently reclassified the enquiry. The lead's own type is carried
+   * as an option for as long as that lead is open.
+   */
+  const editLeadInventoryTypes = useMemo(() => {
+    const current = String(formData.requirementsInventoryType || "").trim().toUpperCase();
+    if (!current || availableLeadInventoryTypes.some((option) => option.value === current)) {
+      return availableLeadInventoryTypes;
+    }
+    const labels = { COMMERCIAL: "Commercial", RESIDENTIAL: "Residential", COWORKING: "Coworking" };
+    return [...availableLeadInventoryTypes, { label: labels[current] || current, value: current }];
+  }, [availableLeadInventoryTypes, formData.requirementsInventoryType]);
+
+  const availableBulkSheetTypes = useMemo(() => {
+    const parsable = availableLeadInventoryTypes.filter(
+      (option) => Object.values(BULK_LEAD_SHEET_TYPES).includes(option.value),
+    );
+    return parsable.length ? parsable : [{ label: "Commercial", value: DEFAULT_BULK_LEAD_SHEET_TYPE }];
+  }, [availableLeadInventoryTypes]);
+  const defaultBulkUploadSheetType = availableBulkSheetTypes[0]?.value || DEFAULT_BULK_LEAD_SHEET_TYPE;
 
   useEffect(() => {
-    const allowedSheetTypes = new Set(availableLeadInventoryTypes.map((option) => option.value));
+    const allowedSheetTypes = new Set(availableBulkSheetTypes.map((option) => option.value));
     if (!allowedSheetTypes.has(bulkUploadSheetType)) {
       setBulkUploadSheetType(defaultBulkUploadSheetType);
       setBulkUploadParsedRows(null);
       setBulkUploadText("");
       setBulkUploadFileName("");
     }
-  }, [availableLeadInventoryTypes, bulkUploadSheetType, defaultBulkUploadSheetType]);
+  }, [availableBulkSheetTypes, bulkUploadSheetType, defaultBulkUploadSheetType]);
 
   useEffect(() => {
     if (!error) return undefined;
@@ -2261,8 +2378,41 @@ const LeadsMatrix = () => {
   const leadTotalCount =
     leadPagination?.totalItems ?? leadPagination?.total ?? leadPagination?.totalCount ?? 0;
 
+  /*
+   * The table's fallback empty state was written for the "Needs action" view
+   * ("Every live lead here has a follow-up in the future"), but it was shown for
+   * every empty result - so a search that matched nothing told the user their
+   * follow-ups were all scheduled. Say what actually happened instead.
+   */
+  const hasNarrowedLeads = Boolean(
+    query.trim()
+    || statusFilter !== "ALL"
+    || propertySubtypeFilter
+    || Object.values(advancedFilters).some(Boolean),
+  );
+
+  const pipelineEmptyState = hasNarrowedLeads ? (
+    <EmptyState
+      icon={SearchIcon}
+      title="No leads match these filters"
+      description={
+        query.trim()
+          ? `Nothing matched "${query.trim()}". Try a different name, phone number or project.`
+          : "No lead matches the filters you have applied. Clear or widen them to see more."
+      }
+      actionLabel="Clear all filters"
+      onAction={() => {
+        setQuery("");
+        setAdvancedFilters({});
+        setStatusFilter("ALL");
+        setPropertySubtypeFilter("");
+      }}
+    />
+  ) : undefined;
+
   const pipelineListProps = {
     leads: filteredLeads,
+    emptyState: pipelineEmptyState,
     loading,
     nowMs,
     showAssigned: canAssignLead,
@@ -2647,6 +2797,8 @@ const LeadsMatrix = () => {
           };
         }
       }
+
+      applyCoworkingLeadFields(payload, formData);
 
       const created = await createLead(payload);
 
@@ -3513,7 +3665,7 @@ const LeadsMatrix = () => {
             formData={formData}
             setFormData={setFormData}
             inventoryOptions={inventoryOptions}
-            availableInventoryTypes={availableLeadInventoryTypes}
+            availableInventoryTypes={editLeadInventoryTypes}
             getInventoryLeadLabel={getInventoryLeadLabel}
             onInventorySelection={handleInventorySelection}
             onClose={() => {
@@ -3532,7 +3684,7 @@ const LeadsMatrix = () => {
             isDark={isDark}
             csvText={bulkUploadText}
             sheetType={bulkUploadSheetType}
-            availableInventoryTypes={availableLeadInventoryTypes}
+            availableInventoryTypes={availableBulkSheetTypes}
             onSheetTypeChange={(value) => {
               setBulkUploadSheetType(value);
               setBulkUploadParsedRows(null);

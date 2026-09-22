@@ -337,7 +337,7 @@ const AdminNotifications = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [approvalFilter]);
+  }, [approvalFilter, userRole]);
 
   useEffect(() => {
     loadNotifications();

@@ -3985,9 +3985,9 @@ const styles = themedStyles((c) => StyleSheet.create({
   },
   card: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     padding: 12,
     marginBottom: 10,
   },
@@ -4022,7 +4022,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     fontWeight: "700",
     textTransform: "uppercase",
   },
-  name: { fontSize: 18, fontWeight: "700", color: colors.text },
+  name: { fontSize: 18, fontWeight: "700", color: c.text },
   profileMetaRow: {
     marginTop: 6,
     marginBottom: 10,
@@ -4488,9 +4488,9 @@ const styles = themedStyles((c) => StyleSheet.create({
   },
   activityCard: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
   },

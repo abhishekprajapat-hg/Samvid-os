@@ -18,6 +18,63 @@ Living status for the phase plan in [04_MOBILE_IMPLEMENTATION_PHASES.md](04_MOBI
 | 9 | Push & native integration | ✅ Done |
 | 10 | Release | ⛔ Needs devices & store accounts |
 
+## 2026-09-21 — Dark mode fixes
+
+The switch worked; the call sites did not. `themedStyles`, `themePalette` and
+`themeColor` all resolved correctly the whole time, so the mechanism was never
+at fault. Four things around it were.
+
+| Fault | Effect | Fix |
+| --- | --- | --- |
+| `NavigationContainer` had no `theme` | Scene background and push-transition cards stayed on React Navigation's light `DefaultTheme`, so dark screens sat on a white page and every transition flashed white | `useNavigationTheme()` maps the navigator's palette onto the active scheme |
+| 17 files read the static `colors.` / `palette.` export inside a themed stylesheet | Frozen light. `Screen.tsx` was one of them, so this was the page background of **every** screen | Rebound to the stylesheet's `c` parameter, or to `themePalette` where the read is in JSX |
+| 7 module-scope colour tables built from `themePalette` / `themeColor` | The proxy is right but a module constant reads it once, at import — always before the stored preference resolves, so always light. Hit every `AppButton`, the lead status pills, attendance tones, the leaderboard podium and the whole coworking booking board | Each became a function, resolved per call |
+| `app.json` splash had no `dark` variant | Light splash flashed before a dark app painted | `splash.dark.backgroundColor` = `#0d1219` |
+
+Also removed: a `key={scheme}` on `NavigationContainer`. `ThemeProvider`
+already remounts that subtree through its keyed Fragment, so it was a second
+remount doing nothing the first had not.
+
+**Two tests now hold this.** `test/theme.test.cjs` covers the mechanism —
+per-scheme resolution, the cache flipping back, the dark inversion actually
+differing. `test/themeCallSites.test.cjs` is the one that matters: it scans
+`src/` for both faults above and fails with the offending file and line.
+Verified against a reintroduced bug rather than assumed — it catches both.
+
+---
+
+## 2026-09-21 — Tasks module + app chrome, built to comps
+
+Six mobile comps for Tasks were supplied and implemented as drawn, together
+with the app chrome they show. This is the first deliberate step *ahead* of
+web; the divergence register in
+[00_MOBILE_PARITY_SPEC.md](00_MOBILE_PARITY_SPEC.md) §5a says what web would
+need to catch up.
+
+| Delivered | Notes |
+| --- | --- |
+| `components/common/AppHeader.tsx` | Wordmark, alert bell with dot, avatar. Registered as the tab navigator's `header`, so it is identical on every tab and the top inset stays consumed |
+| `navigation/RoleTabs.tsx` | Fixed bottom bar: Home, Tasks, Calendar, Contacts, More. Tabs still gated; More now excludes the fixed five by name |
+| `modules/contacts/ContactsScreen.tsx` | Owners ⇄ Brokers over the existing `ContactDatabaseScreen`, which gained an `above` slot |
+| `modules/tasks/TaskManagerScreen.tsx` | Four scope tabs, per-scope stat tiles, filters, List ⇄ Board, team roll-up, FAB |
+| `modules/tasks/TaskDetailsScreen.tsx` | Fact grid, description, checklist, derived activity rail, sticky complete button |
+| `modules/tasks/NewTaskScreen.tsx` | Full-page form; create and edit share it |
+| `modules/tasks/components/` | `TaskPieces`, `TaskListRow`, `TaskBoard`, `TeamPanel` |
+| `modules/tasks/taskConstants.ts` | One status/priority/workload vocabulary for the module |
+| `ui/Tabs.tsx` | `AppSegmentedTabs`, the pill row the comps use for a primary mode switch |
+| `common/Screen.tsx` | New `description` prop — a sentence under the title, where `subtitle` is the eyebrow above it |
+
+**Where the comps contradicted each other:** the My Task list comp reads
+"Manage your workspace and daily activities." and the My Task board comp reads
+"Manage work and track progress" for the same screen. The latter is used, being
+three of the four comps.
+
+**Not built:** drag-and-drop between board columns. A horizontal pan inside a
+horizontally scrolling board fights the scroller on touch; a card changes
+status from its own menu instead.
+
+---
+
 ## Verification
 
 All three gates pass as of the last change:

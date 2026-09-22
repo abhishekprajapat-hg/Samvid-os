@@ -52,7 +52,9 @@ const SOLD_PAYMENT_MODE_LABEL: Record<string, string> = {
 };
 const SOLD_TRANSFER_TYPES = ["NEFT", "RTGS", "IMPS"];
 type SoldDateField = "remainingDueDate" | "paymentDate" | "chequeDate";
-const INPUT_PLACEHOLDER = themeColor("#98a3b5");
+// A function, not a constant: read at import it would freeze to the light
+// scheme, since the module loads before the stored preference resolves.
+const inputPlaceholder = () => themeColor("#98a3b5");
 const DEAL_TYPE_OPTIONS = ["PURCHASE", "RENT", "LEASE"];
 
 const formatDateOnly = (value: Date) =>
@@ -1020,7 +1022,7 @@ export const AssetVaultScreen = () => {
       <TextInput
         style={styles.search}
         placeholder="Search title, location, status"
-        placeholderTextColor={INPUT_PLACEHOLDER}
+        placeholderTextColor={inputPlaceholder()}
         value={search}
         onChangeText={setSearch}
       />
@@ -1211,35 +1213,35 @@ export const AssetVaultScreen = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Title"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.title}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, title: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Location"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.location}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, location: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Category"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.category}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, category: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Type (Sale/Rent)"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.type}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, type: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Price"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.price}
                 keyboardType="number-pad"
                 onChangeText={(value) => setForm((prev) => ({ ...prev, price: value }))}
@@ -1247,7 +1249,7 @@ export const AssetVaultScreen = () => {
               <TextInput
                 style={[styles.input, { height: 80 }]}
                 placeholder="Description"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 multiline
                 value={form.description}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, description: value }))}
@@ -1257,7 +1259,7 @@ export const AssetVaultScreen = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Office Number"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.officeNumber}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, officeNumber: value }))}
               />
@@ -1266,14 +1268,14 @@ export const AssetVaultScreen = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Owner Name"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.ownerName}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, ownerName: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Owner Number"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 keyboardType="phone-pad"
                 value={form.ownerNumber}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, ownerNumber: value }))}
@@ -1283,14 +1285,14 @@ export const AssetVaultScreen = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Key Manager Name"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.keyManagerName}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, keyManagerName: value }))}
               />
               <TextInput
                 style={styles.input}
                 placeholder="Key Manager Number"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 keyboardType="phone-pad"
                 value={form.keyManagerNumber}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, keyManagerNumber: value }))}
@@ -1352,7 +1354,7 @@ export const AssetVaultScreen = () => {
               <TextInput
                 style={styles.input}
                 placeholder="Custom amenities (comma separated)"
-                placeholderTextColor={INPUT_PLACEHOLDER}
+                placeholderTextColor={inputPlaceholder()}
                 value={form.customAmenities}
                 onChangeText={(value) => setForm((prev) => ({ ...prev, customAmenities: value }))}
               />

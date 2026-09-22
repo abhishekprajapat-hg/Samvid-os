@@ -128,18 +128,18 @@ const styles = themedStyles((c) => StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: "flex-end",
-    backgroundColor: colors.overlay,
+    backgroundColor: c.overlay,
   },
   backdropPress: {
     ...StyleSheet.absoluteFillObject,
   },
   sheet: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: colors.border,
+    borderColor: c.border,
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
     maxHeight: "85%",
@@ -158,7 +158,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     paddingBottom: spacing.xl,
     marginBottom: spacing.xl,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
   title: {
     fontSize: typography.title,
@@ -181,7 +181,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     paddingTop: spacing.xl,
     marginTop: spacing.xl,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: c.border,
   },
   confirmActions: {
     flexDirection: "row",

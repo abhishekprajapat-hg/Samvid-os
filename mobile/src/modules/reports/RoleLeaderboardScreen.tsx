@@ -6,7 +6,7 @@ import { colors, radii, spacing, typography } from "../../theme/tokens";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { getRoleLeaderboard, type LeaderboardEntry } from "../../services/userService";
 import { useAuth } from "../../context/AuthContext";
-import { themedStyles, themeColor } from "../../theme/themedStyles";
+import { themeColor, themePalette, themedStyles } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/reports/RoleLeaderboard.jsx. The web version renders a ranked
@@ -14,11 +14,14 @@ import { themedStyles, themeColor } from "../../theme/themedStyles";
  * unreadable. Same data, same ordering, same role filters.
  */
 
-const RANK_TONE = [
-  { bg: themeColor("#fdf4e3"), border: themeColor("#eebf51"), text: themeColor("#7d5605") }, // 1st
-  { bg: themeColor("#edf0f5"), border: themeColor("#c8d0dd"), text: themeColor("#39424f") }, // 2nd
-  { bg: themeColor("#fdedec"), border: themeColor("#ee908c"), text: themeColor("#942626") }, // 3rd
-];
+// Per call, so the podium follows the active scheme; as a module constant it
+// resolved once at import, when the scheme is still the default light.
+const rankTone = (index: number) =>
+  [
+    { bg: themeColor("#fdf4e3"), border: themeColor("#eebf51"), text: themeColor("#7d5605") }, // 1st
+    { bg: themeColor("#edf0f5"), border: themeColor("#c8d0dd"), text: themeColor("#39424f") }, // 2nd
+    { bg: themeColor("#fdedec"), border: themeColor("#ee908c"), text: themeColor("#942626") }, // 3rd
+  ][index];
 
 const formatNumber = (value: unknown) => {
   const parsed = Number(value || 0);
@@ -131,7 +134,7 @@ export const RoleLeaderboardScreen = () => {
         ) : (
           entries.map((entry, index) => {
             const rank = Number(entry.rank || index + 1);
-            const tone = RANK_TONE[rank - 1];
+            const tone = rankTone(rank - 1);
             const isMe = myId && String(entry._id || "") === myId;
 
             return (
@@ -145,7 +148,7 @@ export const RoleLeaderboardScreen = () => {
                       styles.rank,
                       tone
                         ? { backgroundColor: tone.bg, borderColor: tone.border }
-                        : { backgroundColor: colors.surfaceMuted, borderColor: colors.border },
+                        : { backgroundColor: themePalette.surfaceMuted, borderColor: themePalette.border },
                     ]}
                   >
                     <Text style={[styles.rankText, tone ? { color: tone.text } : null]}>{rank}</Text>
@@ -187,7 +190,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     marginBottom: spacing.sm,
   },
   cardMe: {
-    borderColor: colors.primary,
+    borderColor: c.primary,
   },
   head: {
     flexDirection: "row",
@@ -204,7 +207,7 @@ const styles = themedStyles((c) => StyleSheet.create({
   rankText: {
     fontSize: typography.section,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   identity: {
     flex: 1,
@@ -213,12 +216,12 @@ const styles = themedStyles((c) => StyleSheet.create({
   name: {
     fontSize: typography.section,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   role: {
     marginTop: 1,
     fontSize: typography.label,
-    color: colors.textMuted,
+    color: c.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
@@ -227,7 +230,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     marginTop: spacing.md,
     paddingTop: spacing.md,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: c.border,
   },
   stat: {
     flex: 1,
@@ -236,18 +239,18 @@ const styles = themedStyles((c) => StyleSheet.create({
   statValue: {
     fontSize: typography.body,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   statLabel: {
     marginTop: 2,
     fontSize: typography.label,
-    color: colors.textMuted,
+    color: c.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   emptyText: {
     fontSize: typography.body,
-    color: colors.textMuted,
+    color: c.textMuted,
     textAlign: "center",
     paddingVertical: spacing.lg,
   },

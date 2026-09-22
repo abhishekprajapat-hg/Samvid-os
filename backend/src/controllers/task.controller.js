@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { sendMongooseError } = require("../utils/mongooseError");
 const Task = require("../models/Task");
 const User = require("../models/User");
 const Lead = require("../models/Lead");
@@ -99,8 +100,9 @@ exports.createTask = async (req, res) => {
 
     res.status(201).json(populatedTask);
   } catch (error) {
+    if (sendMongooseError(res, error)) return;
     req.log?.error(error);
-    res.status(500).json({ message: "Failed to create task", error: error.message });
+    res.status(500).json({ message: "Failed to create task" });
   }
 };
 
@@ -316,7 +318,7 @@ exports.updateTask = async (req, res) => {
     res.status(200).json(populatedTask);
   } catch (error) {
     req.log?.error(error);
-    res.status(500).json({ message: "Failed to update task", error: error.message });
+    res.status(500).json({ message: "Failed to update task" });
   }
 };
 
@@ -363,7 +365,7 @@ exports.deleteTask = async (req, res) => {
     res.status(200).json({ message: "Task successfully deleted", taskId });
   } catch (error) {
     req.log?.error(error);
-    res.status(500).json({ message: "Failed to delete task", error: error.message });
+    res.status(500).json({ message: "Failed to delete task" });
   }
 };
 

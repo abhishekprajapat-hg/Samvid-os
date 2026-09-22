@@ -11,6 +11,7 @@ import {
   Trash2, TrendingUp, Trophy, User, UserCheck, UserCircle2, Users, Video, X,
   CheckSquare, CreditCard, Mic, MicOff, Pause, Play, Square, VideoOff,
   Volume1, Volume2, IndianRupee, ListTodo, TrendingDown, UserPlus, Zap,
+  ArrowUpDown, Columns3, EllipsisVertical, Flag, ListChecks, SlidersHorizontal, Tag,
   XCircle, type LucideIcon,
 } from "lucide-react-native";
 import { palette } from "../../theme/tokens";
@@ -62,6 +63,13 @@ const ICONS: Record<string, LucideIcon> = {
   quickAction: Zap,
   pieChart: PieChart,
   barChart: BarChart3,
+  sort: ArrowUpDown,
+  flag: Flag,
+  board: Columns3,
+  sliders: SlidersHorizontal,
+  "ellipsis-vertical": EllipsisVertical,
+  tag: Tag,
+  subtasks: ListChecks,
 
   /* ---- Ionicons aliases, kept so existing screens keep working ---- */
   "alert-circle-outline": AlertCircle,

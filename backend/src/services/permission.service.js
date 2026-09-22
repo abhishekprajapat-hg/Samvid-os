@@ -75,7 +75,7 @@ const updateRolePermissions = async ({ companyId, role, permissions, actingUser,
   const updated = await RolePermission.findOneAndUpdate(
     { companyId, role },
     { $set: { permissions: uniquePermissions, updatedBy: actingUser._id } },
-    { new: true, upsert: true, setDefaultsOnInsert: true },
+    { returnDocument: "after", upsert: true, setDefaultsOnInsert: true },
   ).lean();
 
   invalidateAccessCache();

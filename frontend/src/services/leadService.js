@@ -5,9 +5,43 @@ export const getLeadPool = async (params = {}) => {
   return res.data;
 };
 
+/*
+ * The server now always paginates, so a bare GET /leads returns the first page
+ * rather than the whole table. Seven screens (Finance, Reports, Leaderboard,
+ * Team Manager, Field Ops, Tasks, Admin Console) were written against the old
+ * "returns everything" behaviour, so this walks the pages for them instead of
+ * silently handing back 25 rows.
+ *
+ * Each response is bounded and the walk stops at MAX_LEAD_PAGES, which caps
+ * what one screen can pull. That keeps those screens correct today; the real
+ * fix is for them to ask for an aggregate rather than every lead, and each one
+ * should move to a summary endpoint or an explicit filter.
+ */
+const LEAD_PAGE_SIZE = 200;
+const MAX_LEAD_PAGES = 25;
+
 export const getAllLeads = async (params = {}) => {
-  const res = await api.get("/leads", { params });
-  return res.data?.leads || [];
+  const first = await api.get("/leads", {
+    params: { limit: LEAD_PAGE_SIZE, page: 1, ...params },
+  });
+  const rows = first.data?.leads || [];
+
+  // An explicit page/limit from the caller means they are driving pagination
+  // themselves, so hand back exactly the page they asked for.
+  if (params.page !== undefined || params.limit !== undefined) return rows;
+
+  let pageInfo = first.data?.pagination;
+  let page = 1;
+  while (pageInfo?.hasNextPage && page < MAX_LEAD_PAGES) {
+    page += 1;
+    const next = await api.get("/leads", {
+      params: { limit: LEAD_PAGE_SIZE, page, ...params },
+    });
+    rows.push(...(next.data?.leads || []));
+    pageInfo = next.data?.pagination;
+  }
+
+  return rows;
 };
 
 export const getLeadById = async (leadId) => {

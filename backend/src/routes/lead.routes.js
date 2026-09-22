@@ -8,11 +8,40 @@ const {
   requirePageAccess,
   requirePageAction,
   requirePageActionForMethod,
+  checkRoleOrPageAccess,
 } = require("../middleware/pageAccess.middleware");
+
+/*
+ * The built-in lead hierarchy. Anyone outside it (Production Executive,
+ * Community Manager, Coworking admin, or a custom role built on them) reaches
+ * leads only where an Admin has explicitly granted the Leads page.
+ *
+ * getAllLeads already enforced this through buildLeadScope, but its siblings -
+ * the analytics and status-request endpoints - did not, so a role that got 403
+ * from GET /leads could still read company-wide lead totals from
+ * /leads/performance/overview. Gating at the router keeps every lead route
+ * answering the same question the same way.
+ */
+const LEAD_MODULE_ROLES = [
+  "ADMIN",
+  "MANAGER",
+  "EXECUTIVE",
+  "INSIDE_EXECUTIVE",
+  "FIELD_EXECUTIVE",
+  "CHANNEL_PARTNER",
+];
+
+/*
+ * Internal staff only. A Channel Partner is an outside broker who may work the
+ * leads they introduced, but company-wide performance totals and the internal
+ * status-change approval queue are not theirs to read.
+ */
+const INTERNAL_LEAD_ROLES = LEAD_MODULE_ROLES.filter((role) => role !== "CHANNEL_PARTNER");
 
 // Router-level auth so the page guard can read req.user. The per-route
 // authMiddleware.protect calls below stay as they are and short-circuit.
 router.use(authMiddleware.protect);
+router.use(checkRoleOrPageAccess(LEAD_MODULE_ROLES, "leads", "my_leads"));
 router.use(requirePageAccess("leads", "my_leads"));
 router.use(requirePageActionForMethod("leads", "my_leads"));
 
@@ -69,12 +98,14 @@ router.get(
 router.get(
   "/status-requests",
   authMiddleware.protect,
+  authMiddleware.checkRole(INTERNAL_LEAD_ROLES),
   leadController.getLeadStatusRequests
 );
 
 router.get(
   "/performance/overview",
   authMiddleware.protect,
+  authMiddleware.checkRole(INTERNAL_LEAD_ROLES),
   leadController.getCompanyPerformanceOverview
 );
 

@@ -25,8 +25,8 @@ const upsertContact = async ({ companyId, kind, phone, name, email, notes, prope
  if (leadId) links.leadIds = leadId;
  if (inventoryId) links.inventoryIds = inventoryId;
  const update = { $set: fields, $setOnInsert: { createdBy: actor }, ...(Object.keys(links).length ? { $addToSet: links } : {}) };
- try { return await Contact.findOneAndUpdate(filter, update, { upsert: true, new: true, runValidators: true }); }
- catch (error) { if (error.code !== 11000) throw error; return Contact.findOneAndUpdate(filter, update, { new: true, runValidators: true }); }
+ try { return await Contact.findOneAndUpdate(filter, update, { upsert: true, returnDocument: "after", runValidators: true }); }
+ catch (error) { if (error.code !== 11000) throw error; return Contact.findOneAndUpdate(filter, update, { returnDocument: "after", runValidators: true }); }
 };
 
 /*
@@ -56,7 +56,7 @@ const recordBlockedLead = async (contactId, { name, phone, origin = "MANUAL", at
     $slice: -50,
    },
   },
- }, { new: true }).catch(() => null);
+ }, { returnDocument: "after" }).catch(() => null);
 };
 
 const MAX_BULK_CONTACT_ROWS = 5000;

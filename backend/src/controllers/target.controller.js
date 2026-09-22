@@ -458,7 +458,7 @@ exports.assignTarget = async (req, res) => {
       {
         upsert: true,
         setDefaultsOnInsert: true,
-        new: true,
+        returnDocument: "after",
       },
     );
 

@@ -68,22 +68,30 @@ const LEAD_STATUSES = [
 ];
 const EXECUTIVE_ROLES = new Set(["EXECUTIVE", "FIELD_EXECUTIVE"]);
 
-const statusPillStyles = {
-  NEW: { bg: themeColor("#eef3ff"), border: themeColor("#bcd0ff"), text: themeColor("#1c37ab") },
-  CONTACTED: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#7d5605") },
-  INTERESTED: { bg: themeColor("#e8f7f0"), border: themeColor("#a3e0c9"), text: themeColor("#0a6544") },
-  SITE_VISIT_SCHEDULED: { bg: themeColor("#e9f4fb"), border: themeColor("#a8d3ef"), text: themeColor("#184f79") },
-  SITE_VISIT: { bg: themeColor("#f2eefe"), border: themeColor("#cfbdfb"), text: themeColor("#4f31b0") },
-  SITE_VISIT_OVERDUE: { bg: themeColor("#fdedec"), border: themeColor("#f6b8b5"), text: themeColor("#942626") },
-  MISSING_IN_ACTION: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#614304") },
-  NOT_PICKING_CALLS: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#614304") },
-  INVALID: { bg: themeColor("#edf0f5"), border: themeColor("#c8d0dd"), text: themeColor("#4e5867") },
-  OWNER: { bg: themeColor("#eef3ff"), border: themeColor("#bcd0ff"), text: themeColor("#1c37ab") },
-  BROKER: { bg: themeColor("#f2eefe"), border: themeColor("#cfbdfb"), text: themeColor("#4f31b0") },
-  REQUESTED: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#7d5605") },
-  CLOSED: { bg: themeColor("#161c24"), border: themeColor("#161c24"), text: themeColor("#ffffff") },
-  LOST: { bg: themeColor("#fdedec"), border: themeColor("#f6b8b5"), text: themeColor("#942626") },
-} as const;
+/*
+ * Built per call. themePalette/themeColor resolve against the scheme active
+ * when they are read, so holding this table in a module constant pinned every
+ * status pill to the light scheme for the life of the process.
+ */
+const statusPillTone = (status?: string) => {
+  const table: Record<string, { bg: string; border: string; text: string }> = {
+    NEW: { bg: themeColor("#eef3ff"), border: themeColor("#bcd0ff"), text: themeColor("#1c37ab") },
+    CONTACTED: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#7d5605") },
+    INTERESTED: { bg: themeColor("#e8f7f0"), border: themeColor("#a3e0c9"), text: themeColor("#0a6544") },
+    SITE_VISIT_SCHEDULED: { bg: themeColor("#e9f4fb"), border: themeColor("#a8d3ef"), text: themeColor("#184f79") },
+    SITE_VISIT: { bg: themeColor("#f2eefe"), border: themeColor("#cfbdfb"), text: themeColor("#4f31b0") },
+    SITE_VISIT_OVERDUE: { bg: themeColor("#fdedec"), border: themeColor("#f6b8b5"), text: themeColor("#942626") },
+    MISSING_IN_ACTION: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#614304") },
+    NOT_PICKING_CALLS: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#614304") },
+    INVALID: { bg: themeColor("#edf0f5"), border: themeColor("#c8d0dd"), text: themeColor("#4e5867") },
+    OWNER: { bg: themeColor("#eef3ff"), border: themeColor("#bcd0ff"), text: themeColor("#1c37ab") },
+    BROKER: { bg: themeColor("#f2eefe"), border: themeColor("#cfbdfb"), text: themeColor("#4f31b0") },
+    REQUESTED: { bg: themeColor("#fdf4e3"), border: themeColor("#f6d68c"), text: themeColor("#7d5605") },
+    CLOSED: { bg: themeColor("#161c24"), border: themeColor("#161c24"), text: themeColor("#ffffff") },
+    LOST: { bg: themeColor("#fdedec"), border: themeColor("#f6b8b5"), text: themeColor("#942626") },
+  };
+  return table[String(status || "").toUpperCase()];
+};
 
 const toInputDateTime = (value?: string) => {
   if (!value) return "";
@@ -621,7 +629,7 @@ export const LeadsMatrixScreen = () => {
           </>
         }
         renderItem={({ item }) => {
-          const statusStyle = statusPillStyles[(item.status || "NEW") as keyof typeof statusPillStyles] || statusPillStyles.NEW;
+          const statusStyle = statusPillTone(item.status) || statusPillTone("NEW")!;
           return (
             <Pressable onPress={() => navigation.navigate("LeadDetails", { leadId: item._id, lead: item })} style={styles.card}>
               <View style={styles.cardHead}>
@@ -823,7 +831,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     width: "31%",
     minWidth: 95,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 10,
     backgroundColor: c.surface,
     padding: 8,
@@ -840,13 +848,13 @@ const styles = themedStyles((c) => StyleSheet.create({
   metricValue: {
     marginTop: 4,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
     fontSize: 18,
   },
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
@@ -871,7 +879,7 @@ const styles = themedStyles((c) => StyleSheet.create({
   name: {
     fontSize: 16,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
     flex: 1,
   },
   meta: {

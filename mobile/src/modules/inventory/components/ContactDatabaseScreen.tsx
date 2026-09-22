@@ -52,10 +52,14 @@ export const ContactDatabaseScreen = ({
   kind,
   title,
   blurb,
+  above,
 }: {
   kind: ContactKind;
   title: string;
   blurb: string;
+  /* Rendered directly under the page header - the Contacts tab puts its
+     Owners/Brokers switch here rather than wrapping the whole screen. */
+  above?: React.ReactNode;
 }) => {
   const { canPageAction } = usePermissions();
   const canWrite = canPageAction("inventory", "create");
@@ -155,6 +159,8 @@ export const ContactDatabaseScreen = ({
 
   return (
     <Screen title={title} subtitle={subtitle} error={error} onRetry={load}>
+      {above}
+
       <AppSearchInput
         value={search}
         onChangeText={setSearch}

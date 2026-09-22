@@ -12,7 +12,7 @@ Validate these critical business paths end-to-end:
 - Role-based access and hierarchy behavior
 - Leads lifecycle (create, assign, rebalance, follow-up, close)
 - Deal payment approval flow (including partial payment)
-- Inventory request and property status workflow]\75d q FG?
+- Inventory request and property status workflow
 - Admin notifications for approval-required actions
 
 ## 2. Prerequisites
@@ -36,9 +36,10 @@ Run on non-production DB only.
 ### 3.1 Seed minimum users
 
 ```powershell
-npm --prefix backend run seed:super-admin
 npm --prefix backend run seed:admin
 ```
+
+> There is no `seed:super-admin` script; `seed:admin` creates the admin account.
 
 Defaults from seeder:
 
@@ -51,6 +52,14 @@ Defaults from seeder:
 npm --prefix backend run seed:inventory -- 20
 npm --prefix backend run seed:leads -- 50
 ```
+
+## 3.3 Run the automated suite
+
+```powershell
+npm --prefix backend test
+```
+
+All backend tests must pass before manual testing begins.
 
 ## 4. Start Application
 

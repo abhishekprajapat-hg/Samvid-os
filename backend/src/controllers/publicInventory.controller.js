@@ -1,6 +1,24 @@
 const Inventory = require("../models/Inventory");
 const InventoryShareLink = require("../models/InventoryShareLink");
 const logger = require("../config/logger");
+const { withFileToken } = require("../utils/fileAccessToken");
+
+// A share link has no session, so each media URL it hands out carries its own
+// short-lived token bound to that one file.
+const FILE_URL_FIELDS = ["images", "documents", "floorPlans", "videoTours"];
+const signMediaUrls = (safe) => {
+  FILE_URL_FIELDS.forEach((field) => {
+    if (!Array.isArray(safe[field])) return;
+    safe[field] = safe[field].map((entry) => {
+      if (typeof entry === "string") return withFileToken(entry);
+      if (entry && typeof entry === "object" && entry.url) {
+        return { ...entry, url: withFileToken(entry.url) };
+      }
+      return entry;
+    });
+  });
+  return safe;
+};
 
 const CLIENT_SAFE_FIELDS = [
   "_id",
@@ -55,7 +73,7 @@ const toClientSafeView = (inventory) => {
     .filter(Boolean);
   safe.title = titleParts.join(" - ") || "Property";
 
-  return safe;
+  return signMediaUrls(safe);
 };
 
 exports.getSharedInventory = async (req, res) => {

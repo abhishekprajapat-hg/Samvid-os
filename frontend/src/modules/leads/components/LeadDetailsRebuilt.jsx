@@ -1,4 +1,5 @@
 import BrokerPhoneHint from "./BrokerPhoneHint";
+import CoworkingRequirementFields from "./CoworkingRequirementFields";
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import { createInventoryShareLink } from "../../../services/inventoryService";
@@ -6,6 +7,7 @@ import { uploadFile } from "../../../services/uploadService";
 import {
   ArrowLeft,
   Building2,
+  Calendar,
   CalendarClock,
   Check,
   Copy,
@@ -759,6 +761,7 @@ const LeadDetailsRebuiltContent = ({
   const furnishingValue = furnishingOptions.some((option) => option.value === requirementsDraft?.furnishingStatus)
     ? requirementsDraft?.furnishingStatus
     : "";
+  const isCoworkingRequirement = normalizedRequirementInventoryType === "COWORKING";
   const isPlotRequirement = normalizedRequirementPropertySubtype === "PLOT";
   const isFlatRequirement = normalizedRequirementPropertySubtype === "APARTMENT";
   const budgetRangeOptions = getBudgetRangeOptions(requirementsDraft?.transactionType);
@@ -1404,10 +1407,8 @@ const LeadDetailsRebuiltContent = ({
   }, [
     proposalSpecialNote,
     proposalValidityDays,
-    selectedLead?.assignedTo?.name,
     selectedLead?.city,
     selectedLead?.name,
-    selectedLead?.phone,
     selectedLead?.projectInterested,
     selectedPropertyCount,
     selectedProposalProperties,
@@ -2255,9 +2256,10 @@ const LeadDetailsRebuiltContent = ({
                   <option value="">Any</option>
                   <option value="COMMERCIAL">Commercial</option>
                   <option value="RESIDENTIAL">Residential</option>
+                  <option value="COWORKING">Coworking</option>
                 </select>
               </label>
-              {normalizedRequirementInventoryType ? (
+              {normalizedRequirementInventoryType && !isCoworkingRequirement ? (
                 <label className="space-y-1">
                   <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                     {normalizedRequirementInventoryType === "COMMERCIAL" ? "Commercial Property Type" : "Residential Property Type"}
@@ -2482,6 +2484,22 @@ const LeadDetailsRebuiltContent = ({
                 </>
               )}
             </div>
+
+            {isCoworkingRequirement ? (
+              <div className={`mt-3 rounded-xl border p-2.5 ${softCard}`}>
+                <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Coworking Requirement
+                </div>
+                <div className="mt-2">
+                  <CoworkingRequirementFields
+                    value={requirementsDraft?.coworking || {}}
+                    onChange={(next) => updateRequirementRootField("coworking", next)}
+                    inputClass={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    labelClass={`mb-1 block text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}
+                  />
+                </div>
+              </div>
+            ) : null}
 
             {propertySubtypeConfig ? (
               <div className={`mt-3 rounded-xl border p-2.5 ${softCard}`}>

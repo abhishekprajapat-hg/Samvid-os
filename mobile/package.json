@@ -13,7 +13,7 @@
     "build:apk": "eas build --platform android --profile development",
     "build:apk:preview": "eas build --platform android --profile preview",
     "typecheck": "tsc --noEmit",
-    "pretest": "tsc src/navigation/access.ts src/navigation/navigationCatalogue.ts src/modules/leads/pipelineViews.ts src/modules/leads/leadFilters.ts src/modules/inventory/inventoryAccess.ts --outDir .test-build --module commonjs --target es2020 --skipLibCheck --esModuleInterop",
+    "pretest": "tsc src/navigation/access.ts src/navigation/navigationCatalogue.ts src/modules/leads/pipelineViews.ts src/modules/leads/leadFilters.ts src/modules/inventory/inventoryAccess.ts src/modules/admin/consoleActions.ts src/theme/themedStyles.ts --outDir .test-build --module commonjs --target es2020 --skipLibCheck --esModuleInterop",
     "test": "node --test \"test/**/*.test.cjs\""
   },
   "dependencies": {

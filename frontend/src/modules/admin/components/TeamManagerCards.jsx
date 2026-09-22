@@ -56,11 +56,17 @@ const formatBrokerageSummary = (config = null) => {
     : `${formatCurrency(normalized.value)} per closed deal`;
 };
 
+// Kept in step with TeamManager's list: a category with no name here fell
+// through to "Commercial", which read as a wrong answer rather than a missing one.
+const ROLE_TYPE_LABELS = {
+  COMMERCIAL: "Commercial",
+  RESIDENTIAL: "Residential",
+  COWORKING: "Coworking",
+  BOTH: "All categories",
+};
+
 const formatRoleType = (value) =>
-  String(value || "").trim().toUpperCase() === "BOTH" ? "Both" :
-  String(value || "").trim().toUpperCase() === "RESIDENTIAL"
-    ? "Residential"
-    : "Commercial";
+  ROLE_TYPE_LABELS[String(value || "").trim().toUpperCase()] || "Commercial";
 
 const roleBadgeTone = (role, isDarkTheme) => {
   if (role === "MANAGER") {

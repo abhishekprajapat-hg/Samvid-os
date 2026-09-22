@@ -20,7 +20,7 @@ const generateExpenseCode = async (companyId) => {
   const counter = await CoworkingIdCounter.findOneAndUpdate(
     { companyId, category: "EXPENSE" },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   return `EXP-${String(counter.seq).padStart(5, "0")}`;
 };

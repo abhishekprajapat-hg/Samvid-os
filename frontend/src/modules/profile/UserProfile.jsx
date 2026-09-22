@@ -557,6 +557,7 @@ const UserProfile = () => {
                   {uploadingPhoto ? <Loader size={13} className="animate-spin" /> : <Camera size={13} />}
                   <input
                     type="file"
+                    aria-label="Upload a profile photo"
                     accept="image/*"
                     onChange={handlePhotoChange}
                     disabled={uploadingPhoto}

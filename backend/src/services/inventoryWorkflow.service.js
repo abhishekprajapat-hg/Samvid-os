@@ -186,7 +186,7 @@ const generatePropertyId = async ({ companyId, inventoryType }) => {
   const counter = await InventoryIdCounter.findOneAndUpdate(
     { companyId, category },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   const prefix = PROPERTY_ID_PREFIX[category];
   return `${prefix}-${String(counter.seq).padStart(4, "0")}`;

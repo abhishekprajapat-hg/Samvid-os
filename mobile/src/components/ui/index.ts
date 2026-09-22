@@ -18,6 +18,6 @@ export {
 } from "./Card";
 export { AppBadge, type BadgeVariant } from "./Badge";
 export { AppInput, AppSearchInput, type AppInputProps } from "./Input";
-export { AppTabs, type TabItem } from "./Tabs";
+export { AppTabs, AppSegmentedTabs, type TabItem } from "./Tabs";
 export { AppSheet, AppConfirmDialog } from "./Overlay";
 export { AppEmptyState, AppErrorState, AppSkeleton, AppSkeletonList } from "./Feedback";

@@ -39,8 +39,15 @@ const configuredOrigins = (process.env.CORS_ORIGIN || "")
 const isLoopbackOrigin = (origin) =>
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || "").trim());
 
+/*
+ * Any 192.168.x.x origin was accepted with credentials, so any device or app on
+ * the same office LAN could make credentialed cross-origin calls. That is a
+ * convenience for phone testing against a dev machine, so it now only applies
+ * outside production, where CORS_ORIGIN is the allowlist.
+ */
 const isLanOrigin = (origin) =>
-  /^https?:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/i.test(String(origin || "").trim());
+  process.env.NODE_ENV !== "production"
+  && /^https?:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/i.test(String(origin || "").trim());
 
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
@@ -110,9 +117,25 @@ app.use(
   "/api/uploads/files",
   (req, res, next) => {
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    // These bytes are per-account, so a shared cache must never reuse them.
+    res.setHeader("Vary", "Authorization, Cookie");
     next();
   },
-  express.static(uploadsRootDir, { maxAge: "30d", immutable: true }),
+  require("./middleware/fileAccess.middleware").requireFileAccess,
+  express.static(uploadsRootDir, {
+    maxAge: "30d",
+    immutable: true,
+    // Uploads are user-supplied: never let one be sniffed into another type,
+    // and never hand the browser something it will render as a document.
+    setHeaders: (res, filePath) => {
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "private, max-age=2592000, immutable");
+      if (/\.(html?|svg|xhtml|xml)$/i.test(filePath)) {
+        res.setHeader("Content-Type", "application/octet-stream");
+        res.setHeader("Content-Disposition", "attachment");
+      }
+    },
+  }),
 );
 app.use("/api", apiLimiter);
 app.use("/api/client", require("./routes/client.routes"));
@@ -130,6 +153,7 @@ app.use("/api/webhook", require("./routes/webhook.routes"));
 app.use("/api/chat", require("./routes/chat.routes"));
 app.use("/api/assistant", require("./routes/officeAssistant.routes"));
 app.use("/api/contacts", require("./routes/crmContact.routes"));
+app.use("/api/roles", require("./routes/customRole.routes"));
 app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/tasks", require("./routes/task.routes"));
 app.use("/api/coworking", require("./routes/coworkingAccess.routes"));
@@ -144,6 +168,15 @@ app.use((req, res) => {
 });
 
 app.use((error, req, res, _next) => {
+  // A validation/cast failure that reached here is still the caller's mistake.
+  const mapped = require("./utils/mongooseError").toHttpError(error);
+  if (mapped) {
+    return res.status(mapped.status).json({
+      message: mapped.message,
+      requestId: req.requestId || null,
+    });
+  }
+
   req.log?.error({
     requestId: req.requestId || null,
     error: error.message,

@@ -1,17 +1,13 @@
-import React, { useMemo } from "react";
+import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Platform, Pressable, Text } from "react-native";
+import { Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Icon } from "../components/ui/Icon";
 import { PageAccessGate, CoworkingPermissionGate } from "../components/auth/PageAccessGate";
 import { ErrorBoundary } from "../components/common/ErrorBoundary";
-import { useAuth } from "../context/AuthContext";
-import { usePermissions } from "../context/PermissionContext";
 import { useRealtimeAlerts } from "../context/RealtimeAlertsContext";
-import { palette, typography } from "../theme/tokens";
 import type { UserRole } from "../types";
-import { getTabItems } from "./access";
 import type { NavItem } from "./navigationCatalogue";
 
 import { ManagerDashboardScreen } from "../modules/manager/ManagerDashboardScreen";
@@ -41,6 +37,10 @@ import { NotificationsScreen } from "../modules/notifications/NotificationsScree
 import { ProfileScreen } from "../modules/profile/ProfileScreen";
 import { MoreMenuScreen } from "../modules/more/MoreMenuScreen";
 import { TaskManagerScreen } from "../modules/tasks/TaskManagerScreen";
+import { TaskDetailsScreen } from "../modules/tasks/TaskDetailsScreen";
+import { NewTaskScreen } from "../modules/tasks/NewTaskScreen";
+import { ContactsScreen } from "../modules/contacts/ContactsScreen";
+import { AttendanceStack } from "./AttendanceStack";
 import { OwnerDatabaseScreen } from "../modules/inventory/OwnerDatabaseScreen";
 import { BrokerDatabaseScreen } from "../modules/inventory/BrokerDatabaseScreen";
 import { ProjectsScreen } from "../modules/inventory/ProjectsScreen";
@@ -51,6 +51,7 @@ import { BookingBoardScreen } from "../modules/coworking/BookingBoardScreen";
 import { CoworkingClientsScreen } from "../modules/coworking/CoworkingClientsScreen";
 import { DataUseNoticeScreen, ServiceTermsNoticeScreen } from "../modules/legal/LegalNoticeScreen";
 import { RealtimePopupOverlay } from "../components/common/RealtimePopupOverlay";
+import { AppHeader } from "../components/common/AppHeader";
 import { themePalette } from "../theme/themedStyles";
 
 const Tab = createBottomTabNavigator();
@@ -76,10 +77,51 @@ const BUILT_SCREENS = new Set([
   "Finance", "Reports", "Leaderboard", "Targets", "Field Ops", "Users",
   "Console", "MetaAds", "Notifications", "Settings", "Profile",
   "OwnerDatabase", "BrokerDatabase", "Projects",
-  "CoworkingBooking", "CoworkingClients",
+  "CoworkingBooking", "CoworkingClients", "Contacts",
 ]);
 
 export const isScreenBuilt = (item: NavItem) => BUILT_SCREENS.has(item.screen);
+
+/*
+ * The bottom bar the mobile comps draw: five fixed destinations, the same for
+ * every role, rather than the four the access algorithm used to pick.
+ *
+ * Choosing the tabs by role kept the bar in step with the web sidebar, and
+ * giving that up is a deliberate trade the design asks for. Access itself is
+ * not given up: each tab is still wrapped in its PageAccessGate, so a role
+ * without the grant lands on the gate rather than a screen it may not read,
+ * and everything that is no longer a tab stays reachable from More.
+ *
+ * Contacts covers both contact directories, so Owner and Broker are listed
+ * here too - otherwise More would offer a second door to the same screen.
+ */
+export const TAB_SCREENS = ["Dashboard", "Tasks", "Calendar", "Attendance"] as const;
+
+/*
+ * Contacts is no longer a tab, so it is not excluded from More any more -
+ * but the two directories it wraps still are, otherwise More would offer
+ * three doors to the same screen.
+ */
+export const MORE_EXCLUDED_SCREENS = [
+  ...TAB_SCREENS,
+  "OwnerDatabase",
+  "BrokerDatabase",
+];
+
+type FixedTab = {
+  name: string;
+  label: string;
+  icon: string;
+  page: string;
+  component?: React.ComponentType<any>;
+};
+
+const FIXED_TABS: FixedTab[] = [
+  { name: "Dashboard", label: "Home", icon: "dashboard", page: "dashboard" },
+  { name: "Tasks", label: "Tasks", icon: "checkbox", page: "tasks", component: TaskManagerScreen },
+  { name: "Calendar", label: "Calendar", icon: "calendar", page: "calendar", component: MasterScheduleScreen },
+  { name: "Attendance", label: "Attendance", icon: "attendance", page: "attendance", component: AttendanceStack },
+];
 
 const dashboardFor = (role: UserRole) => {
   if (role === "EXECUTIVE") return ExecutiveDashboardScreen;
@@ -134,77 +176,59 @@ const gated = (Component: React.ComponentType<any>, page: string) => {
 };
 
 const RoleMainTabs = ({ role }: { role: UserRole }) => {
-  const { logout, user } = useAuth();
-  const { permissions, enforcePageAccess } = usePermissions();
   const { chatUnreadTotal, notificationUnreadTotal } = useRealtimeAlerts();
   const insets = useSafeAreaInsets();
 
   const bottomSpacing = Math.max(insets.bottom, Platform.OS === "android" ? 16 : 10);
 
-  const tabs = useMemo(
-    () =>
-      getTabItems(role, {
-        permissions,
-        enforcePageAccess,
-        canViewInventory: user?.canViewInventory,
-      }).filter(isScreenBuilt),
-    [role, permissions, enforcePageAccess, user?.canViewInventory],
-  );
-
-  const badgeFor = (screen: string) => {
-    const count = screen === "Chat" ? chatUnreadTotal : 0;
-    const normalized = Math.max(0, Number(count || 0));
-    if (!normalized) return undefined;
-    return normalized > 99 ? 99 : normalized;
-  };
-
   const moreBadge = (() => {
-    const count = Math.max(0, Number(notificationUnreadTotal || 0));
+    const count = Math.max(0, Number(notificationUnreadTotal || 0) + Number(chatUnreadTotal || 0));
     if (!count) return undefined;
     return count > 99 ? 99 : count;
   })();
 
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        headerRight: () => (
-          <Pressable onPress={logout} hitSlop={10} style={{ marginRight: 14 }}>
-            <Text style={{ color: themePalette.slate[700], fontWeight: "600", fontSize: typography.label }}>
-              Logout
-            </Text>
-          </Pressable>
-        ),
+      screenOptions={{
+        /*
+         * The wordmark bar replaces the default title bar. React Navigation
+         * still treats the top inset as consumed by a custom header, so the
+         * screens below keep laying out the way they did.
+         */
+        header: () => <AppHeader />,
         tabBarLabelStyle: { fontSize: 11, marginBottom: 2 },
         tabBarIconStyle: { marginTop: -2 },
         tabBarStyle: {
-          height: 56 + bottomSpacing,
+          height: 58 + bottomSpacing,
           paddingBottom: bottomSpacing,
           paddingTop: 6,
           borderTopColor: themePalette.slate[200],
+          backgroundColor: themePalette.surface,
         },
         tabBarActiveTintColor: themePalette.blue[600],
         tabBarInactiveTintColor: themePalette.slate[500],
-        tabBarIcon: ({ focused, color, size }) => (
-          <Icon
-            name={route.name === "More" ? "more" : tabs.find((t) => t.screen === route.name)?.icon || "ellipse"}
-            size={size ?? 22}
-            color={color}
-            strokeWidth={focused ? 2.4 : 1.9}
-          />
-        ),
-      })}
+      }}
     >
-      {tabs.map((item) => {
+      {FIXED_TABS.map((item) => {
         const Component =
-          item.screen === "Dashboard" ? dashboardFor(role) : TAB_COMPONENTS[item.screen];
-        if (!Component) return null;
+          item.name === "Dashboard" ? dashboardFor(role) : (item.component as React.ComponentType<any>);
 
         return (
           <Tab.Screen
-            key={item.screen}
-            name={item.screen}
+            key={item.name}
+            name={item.name}
             component={gated(Component, item.page)}
-            options={{ title: item.label, tabBarBadge: badgeFor(item.screen) }}
+            options={{
+              title: item.label,
+              tabBarIcon: ({ focused, color, size }) => (
+                <Icon
+                  name={item.icon}
+                  size={size ?? 22}
+                  color={color}
+                  strokeWidth={focused ? 2.4 : 1.9}
+                />
+              ),
+            }}
           />
         );
       })}
@@ -212,7 +236,17 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
       <Tab.Screen
         name="More"
         component={MoreMenuScreen}
-        options={{ tabBarBadge: moreBadge }}
+        options={{
+          tabBarBadge: moreBadge,
+          tabBarIcon: ({ focused, color, size }) => (
+            <Icon
+              name="ellipsis-horizontal"
+              size={size ?? 22}
+              color={color}
+              strokeWidth={focused ? 2.4 : 1.9}
+            />
+          ),
+        }}
       />
     </Tab.Navigator>
   );
@@ -226,7 +260,7 @@ export const RoleTabs = ({ role }: { role: UserRole }) => (
       </Stack.Screen>
 
       {/* Every pushed destination carries the same gate its tab would. */}
-      <Stack.Screen name="Attendance" component={gated(AttendanceScreen, "attendance")} options={{ title: "Attendance" }} />
+      <Stack.Screen name="Attendance" component={gated(AttendanceStack, "attendance")} options={{ headerShown: false }} />
       <Stack.Screen name="Finance" component={gated(FinancialCoreScreen, "finance")} options={{ title: "Finance" }} />
       <Stack.Screen name="Targets" component={gated(PerformanceScreen, "targets")} options={{ title: "Targets" }} />
       <Stack.Screen name="Calendar" component={gated(MasterScheduleScreen, "calendar")} options={{ title: "Calendar" }} />
@@ -257,6 +291,14 @@ export const RoleTabs = ({ role }: { role: UserRole }) => (
       <Stack.Screen name="Profile" component={gated(ProfileScreen, "profile")} options={{ title: "Profile" }} />
 
       {/* Detail and modal routes: reached from a gated parent, so not gated again. */}
+      <Stack.Screen
+        name="TaskDetails"
+        component={TaskDetailsScreen}
+        options={{ header: () => <AppHeader /> }}
+      />
+      {/* The form is a full-page sheet in the comp - no wordmark bar above it. */}
+      <Stack.Screen name="NewTask" component={NewTaskScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Contacts" component={gated(ContactsScreen, "inventory")} options={{ title: "Contacts" }} />
       <Stack.Screen name="LeadDetails" component={LeadDetailsScreen} options={{ title: "Lead Details" }} />
       <Stack.Screen name="InventoryDetails" component={InventoryDetailsScreen} options={{ title: "Inventory Details" }} />
       <Stack.Screen name="ProjectDetails" component={ProjectDetailsScreen} options={{ title: "Project" }} />

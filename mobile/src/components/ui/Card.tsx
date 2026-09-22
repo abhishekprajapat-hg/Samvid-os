@@ -67,22 +67,22 @@ export const AppCardFooter = ({
 const styles = themedStyles((c) => StyleSheet.create({
   card: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.lg,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     padding: spacing.xl,
     ...elevation.card,
   },
   // Web deliberately has no hover translate - it jitters rows in dense lists.
   interactive: {
-    borderColor: colors.borderStrong,
+    borderColor: c.borderStrong,
   },
   header: {
     gap: spacing.sm,
     paddingBottom: spacing.xl,
     marginBottom: spacing.xl,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
   title: {
     fontSize: typography.cardTitle,
@@ -104,7 +104,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     paddingTop: spacing.xl,
     marginTop: spacing.xl,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
+    borderTopColor: c.border,
   },
 }));
 

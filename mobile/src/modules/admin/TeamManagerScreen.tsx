@@ -845,7 +845,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     width: "31%",
     minWidth: 95,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 10,
     backgroundColor: c.surface,
     padding: 8,
@@ -863,7 +863,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     marginTop: 4,
     fontSize: 18,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   metricValueActive: {
     color: c.text,
@@ -910,7 +910,7 @@ const styles = themedStyles((c) => StyleSheet.create({
   card: { marginBottom: 8 },
   name: {
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
     fontSize: 15,
   },
   meta: {

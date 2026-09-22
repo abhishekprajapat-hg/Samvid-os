@@ -10,12 +10,42 @@ const {
   revokeRefreshToken,
   revokeAllUserRefreshTokens,
 } = require("../services/authToken.service");
+const {
+  FILE_COOKIE_NAME,
+  signFileSessionToken,
+} = require("../utils/fileAccessToken");
+
+/*
+ * Uploaded files are rendered by <img>/<a>, which cannot send an Authorization
+ * header, so the browser needs a credential it will attach by itself. This
+ * cookie is scoped to the uploads path, is httpOnly so script cannot read it,
+ * and carries a "files" scope that authMiddleware.protect refuses as a session.
+ */
+const setFileAccessCookie = (res, user) => {
+  const isProduction = process.env.NODE_ENV === "production";
+  const maxAgeSeconds = Number.parseInt(process.env.FILE_ACCESS_COOKIE_MAX_AGE_SECONDS, 10) || 12 * 60 * 60;
+  const parts = [
+    `${FILE_COOKIE_NAME}=${signFileSessionToken(user)}`,
+    "Path=/api/uploads",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAgeSeconds}`,
+  ];
+  if (isProduction) parts.push("Secure");
+  res.append("Set-Cookie", parts.join("; "));
+};
+
+const clearFileAccessCookie = (res) => {
+  const parts = [`${FILE_COOKIE_NAME}=`, "Path=/api/uploads", "HttpOnly", "SameSite=Lax", "Max-Age=0"];
+  if (process.env.NODE_ENV === "production") parts.push("Secure");
+  res.append("Set-Cookie", parts.join("; "));
+};
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 const BROKERAGE_MODES = new Set(["FLAT", "PERCENTAGE"]);
 const DEFAULT_BROKERAGE_VALUE = 50000;
 const DEFAULT_BROKERAGE_PERCENTAGE = 2;
-const ROLE_TYPE_VALUES = new Set(["COMMERCIAL", "RESIDENTIAL", "BOTH"]);
+const ROLE_TYPE_VALUES = new Set(["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"]);
 const normalizeRoleType = (value) => {
   const normalized = String(value || "").trim().toUpperCase();
   return ROLE_TYPE_VALUES.has(normalized) ? normalized : "COMMERCIAL";
@@ -167,24 +197,39 @@ exports.login = async (req, res) => {
   try {
     const { email, password, portal } = req.body;
 
-    if (!email || !password) {
+    /*
+     * Both credentials have to be strings before they reach Mongo. Passing
+     * { "email": { "$ne": null } } used to put the operator straight into the
+     * query, match a real user, and only fail later because bcrypt threw on a
+     * non-string - a 500, and an authentication that held by accident rather
+     * than by design.
+     */
+    if (typeof email !== "string" || typeof password !== "string") {
+      return res.status(400).json({ message: "Email and password required" });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || !password) {
       return res.status(400).json({
         message: "Email and password required",
       });
     }
 
-    const user = await User.findOne({ email }).select("+password");
-    if (!user) {
-      return res.status(400).json({ message: "Invalid credentials" });
+    const user = await User.findOne({ email: normalizedEmail }).select("+password");
+
+    /*
+     * 401, not 400: this is a failed authentication, not a malformed request.
+     * The password is verified before the isActive check so that a deactivated
+     * account answers exactly like an unknown one to anybody who does not hold
+     * the password - otherwise any address could be probed for "deactivated".
+     */
+    const isMatch = user ? await user.matchPassword(password) : false;
+    if (!user || !isMatch) {
+      return res.status(401).json({ message: "Invalid credentials" });
     }
 
     if (!user.isActive) {
       return res.status(403).json({ message: "Account is deactivated" });
-    }
-
-    const isMatch = await user.matchPassword(password);
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid credentials" });
     }
 
     if (portal === "ADMIN" && user.role !== USER_ROLES.ADMIN) {
@@ -225,6 +270,7 @@ exports.login = async (req, res) => {
     user.lastLoginAt = new Date();
     await user.save({ validateBeforeSave: false });
 
+    setFileAccessCookie(res, user);
     return res.json(toAuthResponse({ user, tokenBundle, tenant: resolvedTenant }));
   } catch (error) {
     logger.error({
@@ -262,6 +308,7 @@ exports.refresh = async (req, res) => {
     }
 
     const accessToken = generateToken(user);
+    setFileAccessCookie(res, user);
     return res.json({
       token: accessToken,
       accessToken,
@@ -305,6 +352,7 @@ exports.logout = async (req, res) => {
       });
     }
 
+    clearFileAccessCookie(res);
     return res.json({ message: "Logout successful" });
   } catch (error) {
     logger.error({

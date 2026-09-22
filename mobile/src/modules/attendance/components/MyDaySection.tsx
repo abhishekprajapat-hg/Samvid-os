@@ -15,7 +15,7 @@ import {
   type LeaveBalance,
 } from "../../../services/attendanceService";
 import { getAttendanceLocation } from "../../../utils/location";
-import { themedStyles } from "../../../theme/themedStyles";
+import { themePalette, themedStyles } from "../../../theme/themedStyles";
 
 /*
  * Attendance, phone-first.
@@ -33,19 +33,25 @@ import { themedStyles } from "../../../theme/themedStyles";
  * nothing behind it.
  */
 
-const STATUS_TONE: Record<string, { bg: string; border: string; text: string }> = {
-  PRESENT: { bg: colors.successBg, border: colors.successBorder, text: colors.success },
-  LATE: { bg: colors.warningBg, border: colors.warning, text: colors.warning },
-  HALF_DAY: { bg: colors.warningBg, border: colors.warning, text: colors.warning },
-  ABSENT: { bg: colors.errorBg, border: colors.errorBorder, text: colors.error },
-  LEAVE: { bg: colors.surfaceMuted, border: colors.border, text: colors.textMuted },
-};
+/*
+ * Built per call, not once. themePalette resolves against whichever scheme is
+ * active at the moment it is read, so a table held in a module constant is
+ * fixed to the scheme that happened to be active at import - which is always
+ * light, since the module loads before the stored preference does.
+ */
+const statusTones = (): Record<string, { bg: string; border: string; text: string }> => ({
+  PRESENT: { bg: themePalette.successBg, border: themePalette.successBorder, text: themePalette.success },
+  LATE: { bg: themePalette.warningBg, border: themePalette.warning, text: themePalette.warning },
+  HALF_DAY: { bg: themePalette.warningBg, border: themePalette.warning, text: themePalette.warning },
+  ABSENT: { bg: themePalette.errorBg, border: themePalette.errorBorder, text: themePalette.error },
+  LEAVE: { bg: themePalette.surfaceMuted, border: themePalette.border, text: themePalette.textMuted },
+});
 
 const toneFor = (status?: string) =>
-  STATUS_TONE[String(status || "").toUpperCase()] || {
-    bg: colors.surfaceMuted,
-    border: colors.border,
-    text: colors.textMuted,
+  statusTones()[String(status || "").toUpperCase()] || {
+    bg: themePalette.surfaceMuted,
+    border: themePalette.border,
+    text: themePalette.textMuted,
   };
 
 const formatClock = (value?: string | null) => {
@@ -324,15 +330,15 @@ const styles = themedStyles((c) => StyleSheet.create({
   cardTitle: {
     fontSize: typography.section,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   clockRow: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: c.surfaceMuted,
     paddingVertical: spacing.md,
   },
   clockBlock: {
@@ -342,11 +348,11 @@ const styles = themedStyles((c) => StyleSheet.create({
   clockDivider: {
     width: 1,
     alignSelf: "stretch",
-    backgroundColor: colors.border,
+    backgroundColor: c.border,
   },
   clockLabel: {
     fontSize: typography.label,
-    color: colors.textMuted,
+    color: c.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
@@ -354,7 +360,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     marginTop: 2,
     fontSize: 20,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   metricRow: {
     flexDirection: "row",
@@ -367,12 +373,12 @@ const styles = themedStyles((c) => StyleSheet.create({
   metricValue: {
     fontSize: typography.section,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   metricLabel: {
     marginTop: 2,
     fontSize: typography.label,
-    color: colors.textMuted,
+    color: c.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
@@ -386,19 +392,19 @@ const styles = themedStyles((c) => StyleSheet.create({
   doneNote: {
     textAlign: "center",
     fontSize: typography.body,
-    color: colors.textMuted,
+    color: c.textMuted,
     paddingVertical: spacing.sm,
   },
   geofenceNote: {
     marginTop: spacing.md,
     fontSize: typography.label,
-    color: colors.textMuted,
+    color: c.textMuted,
     textAlign: "center",
   },
   breakNote: {
     marginTop: spacing.sm,
     fontSize: typography.body,
-    color: colors.warning,
+    color: c.warning,
     textAlign: "center",
   },
   summaryWrap: {
@@ -409,9 +415,9 @@ const styles = themedStyles((c) => StyleSheet.create({
   },
   summaryChip: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: c.surfaceMuted,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     minWidth: 82,
@@ -419,11 +425,11 @@ const styles = themedStyles((c) => StyleSheet.create({
   summaryChipValue: {
     fontSize: typography.section,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   summaryChipLabel: {
     fontSize: typography.label,
-    color: colors.textMuted,
+    color: c.textMuted,
     textTransform: "capitalize",
   },
   sectionHeading: {
@@ -431,7 +437,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     marginBottom: spacing.sm,
     fontSize: typography.label,
     fontWeight: "700",
-    color: colors.textMuted,
+    color: c.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
@@ -446,7 +452,7 @@ const styles = themedStyles((c) => StyleSheet.create({
   historyDate: {
     fontSize: typography.body,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   historyRow: {
     marginTop: spacing.sm,
@@ -455,7 +461,7 @@ const styles = themedStyles((c) => StyleSheet.create({
   },
   historyMeta: {
     fontSize: typography.body,
-    color: colors.textMuted,
+    color: c.textMuted,
   },
   pill: {
     borderWidth: 1,
@@ -472,11 +478,11 @@ const styles = themedStyles((c) => StyleSheet.create({
   sectionError: {
     marginBottom: spacing.lg,
     fontSize: typography.label,
-    color: colors.error,
+    color: c.error,
   },
   emptyText: {
     fontSize: typography.body,
-    color: colors.textMuted,
+    color: c.textMuted,
     textAlign: "center",
     paddingVertical: spacing.lg,
   },

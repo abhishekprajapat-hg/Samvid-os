@@ -10,7 +10,7 @@ import {
   updateMyTenantMetaIntegration,
   type MetaIntegration,
 } from "../../services/saasService";
-import { themedStyles } from "../../theme/themedStyles";
+import { themePalette, themedStyles } from "../../theme/themedStyles";
 
 /*
  * Mirrors modules/admin/AdminMetaAdsPanel.jsx - the Meta lead-ads integration
@@ -135,7 +135,7 @@ export const AdminMetaAdsScreen = () => {
             <View
               style={[
                 styles.statusDot,
-                { backgroundColor: ready ? colors.success : colors.warning },
+                { backgroundColor: ready ? themePalette.success : themePalette.warning },
               ]}
             />
             <Text style={styles.statusText}>
@@ -219,12 +219,12 @@ const styles = themedStyles((c) => StyleSheet.create({
   cardTitle: {
     fontSize: typography.section,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
     marginBottom: spacing.sm,
   },
   cardNote: {
     fontSize: typography.body,
-    color: colors.textMuted,
+    color: c.textMuted,
     marginBottom: spacing.md,
   },
   statusRow: {
@@ -240,27 +240,27 @@ const styles = themedStyles((c) => StyleSheet.create({
   statusText: {
     fontSize: typography.section,
     fontWeight: "700",
-    color: colors.text,
+    color: c.text,
   },
   missingBox: {
     marginTop: spacing.md,
     padding: spacing.md,
     borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.warning,
-    backgroundColor: colors.warningBg,
+    borderColor: c.warning,
+    backgroundColor: c.warningBg,
   },
   missingHeading: {
     fontSize: typography.label,
     fontWeight: "700",
-    color: colors.warning,
+    color: c.warning,
     textTransform: "uppercase",
     letterSpacing: 0.6,
     marginBottom: 4,
   },
   missingItem: {
     fontSize: typography.body,
-    color: colors.warning,
+    color: c.warning,
     textTransform: "capitalize",
   },
   field: {
@@ -269,27 +269,27 @@ const styles = themedStyles((c) => StyleSheet.create({
   fieldLabel: {
     fontSize: typography.label,
     fontWeight: "600",
-    color: colors.textMuted,
+    color: c.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.6,
     marginBottom: 6,
   },
   readOnly: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: c.surfaceMuted,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   readOnlyText: {
     fontSize: typography.body,
-    color: colors.text,
+    color: c.text,
   },
   copyHint: {
     marginTop: 4,
     fontSize: typography.label,
-    color: colors.textMuted,
+    color: c.textMuted,
   },
   fullWidth: {
     width: "100%",
@@ -301,6 +301,6 @@ const styles = themedStyles((c) => StyleSheet.create({
   dangerLinkText: {
     fontSize: typography.body,
     fontWeight: "600",
-    color: colors.error,
+    color: c.error,
   },
 }));

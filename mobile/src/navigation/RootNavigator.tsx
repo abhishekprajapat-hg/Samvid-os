@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { NavigationContainer } from "@react-navigation/native";
+import { DarkTheme, DefaultTheme, NavigationContainer, type Theme } from "@react-navigation/native";
 import { ActivityIndicator, View } from "react-native";
 import { AuthProvider, useAuth } from "../context/AuthContext";
 import { PermissionProvider } from "../context/PermissionContext";
@@ -13,6 +13,7 @@ import { ensureNotificationSetup, registerNotificationTapListener } from "../ser
 import { RealtimePopupOverlay } from "../components/common/RealtimePopupOverlay";
 import { palette } from "../theme/tokens";
 import { themePalette } from "../theme/themedStyles";
+import { useTheme } from "../theme/ThemeContext";
 
 const AppShell = () => {
   const { loading, isLoggedIn, role } = useAuth();
@@ -63,6 +64,46 @@ const AppShell = () => {
   return <RoleTabs role={role} />;
 };
 
+/*
+ * React Navigation paints surfaces this app's tokens never reach: the scene
+ * background behind a screen, and the card colour during a push transition.
+ * Left on DefaultTheme those stay light, so a dark screen sits on a white
+ * page and every transition flashes white. This maps the navigator's own
+ * palette onto the active scheme.
+ */
+const useNavigationTheme = (): Theme => {
+  const { scheme } = useTheme();
+  const base = scheme === "dark" ? DarkTheme : DefaultTheme;
+  return {
+    ...base,
+    dark: scheme === "dark",
+    colors: {
+      ...base.colors,
+      primary: themePalette.primary,
+      background: themePalette.bg,
+      card: themePalette.surface,
+      text: themePalette.text,
+      border: themePalette.border,
+      notification: themePalette.rose[500],
+    },
+  };
+};
+
+const NavigationRoot = () => {
+  const navigationTheme = useNavigationTheme();
+
+  return (
+    <NavigationContainer
+      ref={navigationRef}
+      linking={linking}
+      theme={navigationTheme}
+    >
+      <AppShell />
+      <RealtimePopupOverlay />
+    </NavigationContainer>
+  );
+};
+
 export const RootNavigator = () => (
   <AuthProvider>
     {/*
@@ -72,10 +113,7 @@ export const RootNavigator = () => (
      */}
     <PermissionProvider>
       <RealtimeAlertsProvider>
-        <NavigationContainer ref={navigationRef} linking={linking}>
-          <AppShell />
-          <RealtimePopupOverlay />
-        </NavigationContainer>
+        <NavigationRoot />
       </RealtimeAlertsProvider>
     </PermissionProvider>
   </AuthProvider>

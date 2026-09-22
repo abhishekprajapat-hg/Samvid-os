@@ -5,6 +5,8 @@ const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
 const LeadStatusRequest = require("../models/LeadStatusRequest");
 const logger = require("../config/logger");
+const { sendMongooseError } = require("../utils/mongooseError");
+const { createHttpError } = require("../utils/httpError");
 const { resolveAccessProfile } = require("../services/access.service");
 const CrmContact = require("../models/CrmContact");
 const { findBrokerByPhone, recordBlockedLead, normalizePhone } = require("../services/crmContact.service");
@@ -142,6 +144,8 @@ const LEAD_SELECTABLE_FIELDS = [
   "assignedExecutive",
   "assignedFieldExecutive",
   "assignmentHistory",
+  "company",
+  "sourceChannel",
   "hotClient",
   "brokerContactId",
   "qualifiedBy",
@@ -174,7 +178,7 @@ const FIELD_EXECUTIVE_ROLE = USER_ROLES.FIELD_EXECUTIVE;
 const SITE_VISIT_STATUS = "SITE_VISIT";
 const SITE_VISIT_REQUIRED_STATUS = "SITE_VISIT_REQUIRED";
 const QUALIFIED_LEAD_STATUS = "QUALIFIED_LEAD";
-const ROLE_TYPE_VALUES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "BOTH"]);
+const ROLE_TYPE_VALUES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"]);
 const REQUESTED_STATUS = "REQUESTED";
 const CLOSED_STATUS = "CLOSED";
 const LEAD_STATUS_VALUES = Object.freeze([
@@ -228,7 +232,12 @@ const MAX_BROKERAGE_TEXT_LENGTH = 180;
 const BROKERAGE_AMOUNT_TOLERANCE = 0.01;
 const MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH = 500;
 const MAX_BULK_LEAD_UPLOAD_ROWS = 5000;
-const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTIAL"]);
+// Kept in step with the sourceChannel enum on the Lead model.
+const LEAD_SOURCE_CHANNELS = Object.freeze([
+  "META", "JUSTDIAL", "OLX", "MYBRICKS", "99ACRES",
+  "REFERENCE", "BROKER", "DIRECT_CALL", "DIRECT_VISIT",
+]);
+const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "COWORKING"]);
 const LEAD_REQUIREMENT_TRANSACTION_TYPES = Object.freeze(["SALE", "LEASE", "RENT"]);
 const LEAD_REQUIREMENT_AREA_UNITS = Object.freeze(["SQ_FT", "SQ_M"]);
 const CRM_ASSIGNABLE_ROLES = Object.freeze([
@@ -355,6 +364,16 @@ const getUserRoleType = (user) => normalizeRoleType(user?.roleType);
 const buildLeadTypeClause = (roleType) => {
   if (roleType === "RESIDENTIAL") {
     return { "requirements.inventoryType": "RESIDENTIAL" };
+  }
+
+  /*
+   * Coworking staff have no real-estate pipeline; they work the coworking
+   * module. Matched on their own category rather than allowed to fall through,
+   * because the fallback below treats everything that is not RESIDENTIAL as
+   * commercial - which would have handed them the entire commercial pipeline.
+   */
+  if (roleType === "COWORKING") {
+    return { "requirements.inventoryType": "COWORKING" };
   }
 
   return {
@@ -640,6 +659,45 @@ const buildLeadRequirementsFromInventory = (inventory) => {
   };
 };
 
+/*
+ * A coworking enquiry's own numbers.
+ *
+ * Cabins arrive as a list of seat counts, one per cabin, because a client can
+ * take several of different sizes. The list is capped and each entry bounded,
+ * so a malformed payload cannot store an enquiry for nine thousand cabins.
+ */
+const MAX_COWORKING_CABINS = 50;
+const normalizeCoworkingRequirements = (raw = {}) => {
+  const cabins = (Array.isArray(raw?.cabins) ? raw.cabins : [])
+    .slice(0, MAX_COWORKING_CABINS)
+    .map((row) => Math.round(Number(row?.seats ?? row)))
+    .filter((seats) => Number.isFinite(seats) && seats >= 1 && seats <= 100)
+    .map((seats) => ({ seats }));
+
+  /*
+   * An empty box is not a zero. The form sends null for a field nobody filled
+   * in, and Number(null) and Number("") are both 0 - so a blank deposit was
+   * saved as a nought-month deposit and a blank rent as an agreed 0. Those
+   * read as terms that were negotiated, which is a different claim from
+   * "not answered yet", so they are held apart here.
+   */
+  const positive = (value, max) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === "string" && value.trim() === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= max ? parsed : null;
+  };
+
+  return {
+    cabins,
+    workstations: positive(raw?.workstations, 100000),
+    depositMonths: positive(raw?.depositMonths, 60),
+    agreedRent: positive(raw?.agreedRent, 1e9),
+    noticePeriodMonths: positive(raw?.noticePeriodMonths, 60),
+    lockInMonths: positive(raw?.lockInMonths, 120),
+  };
+};
+
 const normalizeLeadRequirements = ({ rawRequirements, inventory }) => {
   const base = buildLeadRequirementsFromInventory(inventory);
 
@@ -716,6 +774,7 @@ const normalizeLeadRequirements = ({ rawRequirements, inventory }) => {
       )
       || base.areaUnit
       || "SQ_FT",
+    coworking: normalizeCoworkingRequirements(rawRequirements?.coworking),
     commercial: {
       seats: normalizeLeadRequirementNumber(
         commercialInput?.seats,
@@ -925,10 +984,44 @@ const addLeadAndClause = (query, clause) => {
   query.$and = [...(Array.isArray(query.$and) ? query.$and : []), clause];
 };
 
+/*
+ * sortBy was accepted and then ignored - ascending, descending and the default
+ * all came back in the same order. Only these columns can be sorted on; a "-"
+ * prefix reverses, and anything else is refused rather than silently dropped.
+ */
+const SORTABLE_LEAD_FIELDS = new Set([
+  "createdAt", "updatedAt", "name", "phone", "city", "status", "nextFollowUp", "budget",
+]);
+
+const parseLeadSort = (rawSortBy) => {
+  const raw = typeof rawSortBy === "string" ? rawSortBy.trim() : "";
+  if (!raw) return null;
+
+  const descending = raw.startsWith("-");
+  const field = descending ? raw.slice(1) : raw;
+  if (!SORTABLE_LEAD_FIELDS.has(field)) {
+    throw createHttpError(400, `Cannot sort by "${field}". Sortable fields: ${[...SORTABLE_LEAD_FIELDS].join(", ")}`);
+  }
+  // _id breaks ties so paging stays stable across requests.
+  return { [field]: descending ? -1 : 1, _id: -1 };
+};
+
 const applyLeadListFilters = (query, rawQuery = {}) => {
   require("../utils/leadAdvancedFilters").applyLeadAdvancedFilters(query, rawQuery);
   if (rawQuery.status === "TRANSFER") addLeadAndClause(query, { "assignmentHistory.action": "MANUAL_TRANSFER" });
+
+  /*
+   * An unrecognised filter used to be dropped in silence, so ?status=TYPO
+   * answered 200 with the whole unfiltered list - a saved view with a typo
+   * quietly returned more than it should. Say so instead.
+   */
+  const rawStatus = typeof rawQuery.status === "string" ? rawQuery.status.trim() : "";
   const status = normalizeLeadStatusValue(rawQuery.status);
+  if (rawStatus
+    && !["ALL", "TRANSFER"].includes(rawStatus.toUpperCase())
+    && !LEAD_STATUS_VALUES.includes(status)) {
+    throw createHttpError(400, `Invalid status filter. Expected one of: ${LEAD_STATUS_VALUES.join(", ")}`);
+  }
   if (status && LEAD_STATUS_VALUES.includes(status)) {
     query.status = status;
   }
@@ -947,14 +1040,15 @@ const applyLeadListFilters = (query, rawQuery = {}) => {
     }
   }
 
-  const dateFrom = normalizeDateBoundary(
-    rawQuery.dateFrom || rawQuery.startDate,
-    "start",
-  );
-  const dateTo = normalizeDateBoundary(
-    rawQuery.dateTo || rawQuery.endDate,
-    "end",
-  );
+  const rawDateFrom = rawQuery.dateFrom || rawQuery.startDate;
+  const rawDateTo = rawQuery.dateTo || rawQuery.endDate;
+  const dateFrom = normalizeDateBoundary(rawDateFrom, "start");
+  const dateTo = normalizeDateBoundary(rawDateTo, "end");
+  if (rawDateFrom && !dateFrom) throw createHttpError(400, "Invalid start date filter");
+  if (rawDateTo && !dateTo) throw createHttpError(400, "Invalid end date filter");
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    throw createHttpError(400, "Start date cannot be after end date");
+  }
   if (dateFrom || dateTo) {
     query.createdAt = {
       ...(dateFrom ? { $gte: dateFrom } : {}),
@@ -1867,17 +1961,16 @@ const applyLeadQueryOptions = ({
   queryBuilder,
   selectedFields,
   pagination,
+  sort,
 }) => {
   if (selectedFields) {
     queryBuilder.select(selectedFields);
   }
 
   queryBuilder.populate(LEAD_POPULATE_FIELDS);
-  queryBuilder.sort({ createdAt: -1 });
+  queryBuilder.sort(sort || { createdAt: -1 });
 
-  if (pagination.enabled) {
-    queryBuilder.skip(pagination.skip).limit(pagination.limit);
-  }
+  queryBuilder.skip(pagination.skip).limit(pagination.limit);
 
   return queryBuilder.lean();
 };
@@ -1975,6 +2068,48 @@ const buildCreatorLeadAssignment = async (user) => {
   return assignment;
 };
 
+/*
+ * Lead intake validation.
+ *
+ * "   " is truthy, so a whitespace-only name and phone passed the old
+ * `if (!name)` guard and Mongoose's trim then stored an empty string - the
+ * audit found real rows with name "   " and phone "   ". Everything is trimmed
+ * first and checked on the trimmed value.
+ */
+const MAX_LEAD_NAME_LENGTH = 120;
+const MAX_LEAD_TEXT_LENGTH = 500;
+const LEAD_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+const validateLeadContact = ({ name, phone, email }) => {
+  if (typeof name !== "string" || typeof phone !== "string") {
+    return "Name and phone must be text";
+  }
+
+  const trimmedName = name.trim();
+  const trimmedPhone = phone.trim();
+
+  if (!trimmedName) return "Name is required";
+  if (trimmedName.length > MAX_LEAD_NAME_LENGTH) {
+    return `Name must be at most ${MAX_LEAD_NAME_LENGTH} characters`;
+  }
+
+  if (!trimmedPhone) return "Phone is required";
+  // Digits, allowing +, spaces, dashes and brackets as typed.
+  const digits = trimmedPhone.replace(/[^0-9]/g, "");
+  if (!/^[0-9+()\-\s]+$/.test(trimmedPhone) || digits.length < 7 || digits.length > 15) {
+    return "Phone must be a valid number with 7 to 15 digits";
+  }
+
+  if (email !== undefined && email !== null && String(email).trim()) {
+    const trimmedEmail = String(email).trim();
+    if (trimmedEmail.length > MAX_LEAD_TEXT_LENGTH || !LEAD_EMAIL_PATTERN.test(trimmedEmail)) {
+      return "Email is not a valid address";
+    }
+  }
+
+  return null;
+};
+
 exports.createLead = async (req, res) => {
   try {
     const {
@@ -1985,6 +2120,8 @@ exports.createLead = async (req, res) => {
       preferredLocations,
       projectInterested,
       clientProfession,
+      company,
+      sourceChannel,
       inventoryId: rawInventoryId,
       relatedInventoryIds: rawRelatedInventoryIds,
       siteLocation: rawSiteLocation,
@@ -1996,7 +2133,12 @@ exports.createLead = async (req, res) => {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const existing = await Lead.findOne({ phone, companyId }).select("_id").lean();
+    const contactError = validateLeadContact({ name, phone, email });
+    if (contactError) {
+      return res.status(400).json({ message: contactError });
+    }
+
+    const existing = await Lead.findOne({ phone: String(phone).trim(), companyId }).select("_id").lean();
     if (existing) {
       return res.status(400).json({ message: "Lead already exists" });
     }
@@ -2079,12 +2221,17 @@ exports.createLead = async (req, res) => {
       preferredLocations: normalizePreferredLocations(preferredLocations),
       projectInterested: resolvedProjectInterested,
       clientProfession: String(clientProfession || "").trim(),
+      company: String(company || "").trim().slice(0, 200),
       requirements: normalizeLeadRequirements({
         rawRequirements,
         inventory,
       }),
       companyId,
       source: "MANUAL",
+      // Where the enquiry came from, as distinct from how it reached the CRM.
+      sourceChannel: LEAD_SOURCE_CHANNELS.includes(String(sourceChannel || "").toUpperCase())
+        ? String(sourceChannel).toUpperCase()
+        : "",
       createdBy: req.user._id,
       ...(await buildCreatorLeadAssignment(req.user)),
     };
@@ -2823,16 +2970,8 @@ exports.getAllLeads = async (req, res) => {
       queryBuilder: Lead.find(query),
       selectedFields,
       pagination,
+      sort: parseLeadSort(req.query?.sortBy),
     });
-
-    if (!pagination.enabled) {
-      const [leadRows, roleCounts] = await Promise.all([
-        leadsQuery,
-        getLeadRoleCounts(query),
-      ]);
-      const leads = leadRows.map((lead) => toLeadView(lead));
-      return res.json({ leads, roleCounts });
-    }
 
     const [leadRows, totalCount, roleCounts] = await Promise.all([
       leadsQuery,
@@ -3519,6 +3658,8 @@ exports.updateLeadStatus = async (req, res) => {
       dealPayment: rawDealPayment,
       closureDocuments: rawClosureDocuments,
       requirements: rawRequirements,
+      company,
+      sourceChannel,
     } = req.body;
     const requestedStatus = normalizeLeadStatusValue(rawStatus);
     if (req.body.hotClient !== undefined && typeof req.body.hotClient !== "boolean") return res.status(400).json({ message: "hotClient must be boolean" });
@@ -3535,6 +3676,8 @@ exports.updateLeadStatus = async (req, res) => {
     const hasProjectInterestedField = Object.prototype.hasOwnProperty.call(req.body || {}, "projectInterested");
     const hasClientProfessionField = Object.prototype.hasOwnProperty.call(req.body || {}, "clientProfession");
     const hasRequirementsField = Object.prototype.hasOwnProperty.call(req.body || {}, "requirements");
+    const hasCompanyField = Object.prototype.hasOwnProperty.call(req.body || {}, "company");
+    const hasSourceChannelField = Object.prototype.hasOwnProperty.call(req.body || {}, "sourceChannel");
     const normalizedName = hasNameField ? String(name || "").trim() : "";
     const normalizedPhone = hasPhoneField ? String(phone || "").trim() : "";
     const normalizedEmail = hasEmailField ? String(email || "").trim() : "";
@@ -3664,6 +3807,26 @@ exports.updateLeadStatus = async (req, res) => {
       if (normalizedClientProfession !== existingClientProfession) {
         lead.clientProfession = normalizedClientProfession;
         updatedProfileFields.push("clientProfession");
+      }
+    }
+
+    if (hasCompanyField) {
+      const nextCompany = String(company || "").trim().slice(0, 200);
+      if (nextCompany !== String(lead?.company || "")) {
+        lead.company = nextCompany;
+        updatedProfileFields.push("company");
+      }
+    }
+
+    if (hasSourceChannelField) {
+      // An unrecognised channel clears the field rather than being written
+      // through, which is what the create path does with the same input.
+      const nextSourceChannel = LEAD_SOURCE_CHANNELS.includes(String(sourceChannel || "").toUpperCase())
+        ? String(sourceChannel).toUpperCase()
+        : "";
+      if (nextSourceChannel !== String(lead?.sourceChannel || "")) {
+        lead.sourceChannel = nextSourceChannel;
+        updatedProfileFields.push("sourceChannel");
       }
     }
 

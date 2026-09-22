@@ -31,7 +31,7 @@ const AUTO_ASSIGNMENT_REASON = "New lead automatically assigned to Inside Execut
 const DEFAULT_MAX_ACTIVE_LEADS = 120;
 const ACTIVE_LOAD_WEIGHT = 100;
 const DAILY_LOAD_WEIGHT = 10;
-const ROLE_TYPE_VALUES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "BOTH"]);
+const ROLE_TYPE_VALUES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"]);
 
 const configuredMaxActiveLeads = Number.parseInt(
   process.env.AUTO_ASSIGN_MAX_ACTIVE_LEADS || "",

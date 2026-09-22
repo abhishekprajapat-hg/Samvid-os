@@ -36,7 +36,10 @@ const configuredOrigins = (process.env.CORS_ORIGIN || "")
 const isLoopbackOrigin = (origin) =>
   /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || "").trim());
 
+// Dev convenience only; see app.js for the reasoning.
 const isLanOrigin = (origin) =>
+  process.env.NODE_ENV !== "production"
+  &&
   /^https?:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/i.test(String(origin || "").trim());
 
 const isAllowedOrigin = (origin) => {

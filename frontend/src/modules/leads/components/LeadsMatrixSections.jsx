@@ -1,4 +1,6 @@
 import BrokerPhoneHint from "./BrokerPhoneHint";
+import CoworkingRequirementFields from "./CoworkingRequirementFields";
+import PlaceAutocompleteInput from "../../../components/common/PlaceAutocompleteInput";
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import {
@@ -35,6 +37,7 @@ import ToastNotice from "../../../components/ui/ToastNotice";
 import {
   FURNISHING_OPTIONS,
   INVENTORY_TYPE_OPTIONS,
+  LEAD_SOURCE_CHANNELS,
   PLOT_LOCATION_OPTIONS,
   PLOT_OCCUPANCY_OPTIONS,
   PLOT_PURPOSE_OPTIONS,
@@ -1698,11 +1701,34 @@ export const AddLeadModal = ({
             <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="City">
               <input placeholder="City" value={formData.city} onChange={(event) => updateField("city", event.target.value)} className={inputClass} />
             </AddLeadFieldShell>
+            {/* A coworking enquiry is often one person, so the firm is optional
+                and only asked for where it means something. */}
+            {requirementInventoryType === "COWORKING" ? (
+              <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Company (optional)">
+                <input placeholder="Company name" value={formData.company || ""} onChange={(event) => updateField("company", event.target.value)} className={inputClass} />
+              </AddLeadFieldShell>
+            ) : null}
+            <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Lead Source">
+              <AddLeadSelectControl inputClass={inputClass} isDark={isDark} value={formData.sourceChannel || ""} onChange={(event) => updateField("sourceChannel", event.target.value)}>
+                {LEAD_SOURCE_CHANNELS.map((option) => (
+                  <option key={option.value || "any-source"} value={option.value}>{option.label}</option>
+                ))}
+              </AddLeadSelectControl>
+            </AddLeadFieldShell>
             <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Location" className="md:col-span-2">
-              <input
-                placeholder="Add multiple locations separated by comma"
+              <PlaceAutocompleteInput
+                multiValue
                 value={formData.preferredLocations}
-                onChange={(event) => updateField("preferredLocations", event.target.value)}
+                onChange={(next) => updateField("preferredLocations", next)}
+                onSelect={({ lat, lng }) => {
+                  // Coordinates only exist for a picked suggestion; a typed
+                  // locality leaves the site fields alone.
+                  if (lat && lng) {
+                    updateField("siteLat", String(lat));
+                    updateField("siteLng", String(lng));
+                  }
+                }}
+                placeholder="Search a locality, or type several separated by comma"
                 className={inputClass}
               />
             </AddLeadFieldShell>
@@ -1728,7 +1754,7 @@ export const AddLeadModal = ({
                   ))}
                 </AddLeadSelectControl>
               </AddLeadFieldShell>
-              {requirementInventoryType ? (
+              {requirementInventoryType && requirementInventoryType !== "COWORKING" ? (
                 <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title={requirementInventoryType === "COMMERCIAL" ? "Commercial Property Type" : "Residential Property Type"}>
                   <AddLeadSelectControl inputClass={inputClass} isDark={isDark} value={formData.requirementsPropertySubtype} onChange={(event) => updateRequirementPropertySubtype(event.target.value)}>
                     <option value="">Property Type (Any)</option>
@@ -1756,6 +1782,17 @@ export const AddLeadModal = ({
                 </AddLeadFieldShell>
               ) : null}
             </div>
+
+            {requirementInventoryType === "COWORKING" ? (
+              <div className="mt-3">
+                <CoworkingRequirementFields
+                  value={formData.requirementsCoworking || {}}
+                  onChange={(next) => updateField("requirementsCoworking", next)}
+                  inputClass={inputClass}
+                  labelClass={fieldTitleClass}
+                />
+              </div>
+            ) : null}
 
             {isPlotRequirement ? (
               <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">

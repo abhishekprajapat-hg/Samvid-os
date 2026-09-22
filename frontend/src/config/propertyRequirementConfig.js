@@ -2,6 +2,31 @@ export const INVENTORY_TYPE_OPTIONS = [
   { value: "", label: "Inventory Type (Any)" },
   { value: "COMMERCIAL", label: "Commercial" },
   { value: "RESIDENTIAL", label: "Residential" },
+  /*
+   * Offered only to people whose business category is Coworking - a real-estate
+   * executive has no coworking pipeline, and an option they can pick but never
+   * work is worse than one they cannot see. Filtered by the caller, which knows
+   * the user's category.
+   */
+  { value: "COWORKING", label: "Coworking", categories: ["COWORKING", "BOTH"] },
+];
+
+/** Cabin counts a coworking enquiry is normally quoted in, plus a way out. */
+export const COWORKING_CABIN_COUNTS = [1, 2, 3, 4, 5, 6, 7, 8];
+export const COWORKING_CABIN_SEAT_OPTIONS = [4, 6, 8, 9, 10];
+export const COWORKING_TERM_MONTHS = [1, 2, 3, 6, 9];
+
+export const LEAD_SOURCE_CHANNELS = [
+  { value: "", label: "Lead source (not set)" },
+  { value: "META", label: "Meta" },
+  { value: "JUSTDIAL", label: "JustDial" },
+  { value: "OLX", label: "OLX" },
+  { value: "MYBRICKS", label: "MyBricks" },
+  { value: "99ACRES", label: "99acres" },
+  { value: "REFERENCE", label: "Reference" },
+  { value: "BROKER", label: "Broker" },
+  { value: "DIRECT_CALL", label: "Direct call" },
+  { value: "DIRECT_VISIT", label: "Direct visit" },
 ];
 
 export const FURNISHING_OPTIONS = [

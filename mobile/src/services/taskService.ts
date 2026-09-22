@@ -59,8 +59,8 @@ export const deleteTask = async (taskId: string): Promise<any> => {
   return res.data || null;
 };
 
-export const getTaskStats = async (): Promise<any> => {
-  const res = await api.get("/tasks/stats");
+export const getTaskStats = async (params: Record<string, any> = {}): Promise<any> => {
+  const res = await api.get("/tasks/stats", { params });
   return res.data || null;
 };
 

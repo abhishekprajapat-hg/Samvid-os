@@ -687,3 +687,537 @@ test("a board save must state the version it was built on", async () => {
   // a permission gate crept back in.
   assert.ok(layer.route.stack.length <= 2, `PUT / has ${layer.route.stack.length} handlers; a permission gate may have been re-added`);
 });
+
+// ---- Coworking as a business category.
+test("Coworking is a business category the user record accepts", () => {
+  const UserModel = require("../src/models/User");
+  assert.deepEqual(
+    [...UserModel.schema.path("roleType").enumValues].sort(),
+    ["BOTH", "COMMERCIAL", "COWORKING", "RESIDENTIAL"],
+  );
+});
+
+test("a coworking user is scoped out of the real-estate pipeline, not into commercial", () => {
+  const leadController = load("controllers/lead.controller.js", {}, "\nmodule.exports.testScope = addLeadRoleTypeScope; module.exports.testClause = buildLeadTypeClause;");
+
+  /*
+   * The clause for anything that is not RESIDENTIAL used to fall through to
+   * commercial. If that returns for COWORKING, a coworking hire silently gets
+   * the whole commercial pipeline.
+   */
+  const clause = leadController.testClause("COWORKING");
+  assert.equal(clause["requirements.inventoryType"], "COWORKING");
+  assert.equal(clause.$or, undefined, "a coworking user must not receive the commercial fallback clause");
+
+  const scope = { companyId };
+  leadController.testScope(scope, { _id: employeeId, companyId, role: "EXECUTIVE", roleType: "COWORKING" });
+  assert.ok(
+    scope.$and.some((row) => row["requirements.inventoryType"] === "COWORKING"),
+    "the coworking scope is applied to the query",
+  );
+});
+
+for (const [name, roleType, expectedRefusal] of [
+  ["a commercial lead", "COMMERCIAL", false],
+  ["a residential lead", "RESIDENTIAL", false],
+]) {
+  test(`a coworking user is refused ${name}`, () => {
+    const leadController = load("controllers/lead.controller.js", {}, "\nmodule.exports.testType = assertLeadTypeMatchesUser;");
+    const refusal = leadController.testType(
+      { requirements: { inventoryType: roleType } },
+      { _id: employeeId, companyId, role: "EXECUTIVE", roleType: "COWORKING" },
+    );
+    assert.ok(refusal, `expected a refusal for ${roleType}`);
+    assert.match(refusal, /coworking/i);
+    assert.equal(expectedRefusal, false);
+  });
+}
+
+test("the existing categories are untouched by the addition", () => {
+  const leadController = load("controllers/lead.controller.js", {}, "\nmodule.exports.testClause = buildLeadTypeClause;");
+  assert.equal(leadController.testClause("RESIDENTIAL")["requirements.inventoryType"], "RESIDENTIAL");
+  // Commercial keeps its "blank counts as commercial" behaviour.
+  assert.ok(leadController.testClause("COMMERCIAL").$or);
+});
+
+// ---- Assigning a company-defined role.
+const customRoleId = "abcdefabcdefabcdefabcdef";
+
+const userControllerWith = (customRole, sink = {}) => load("controllers/user.controller.js", {
+  "../models/CustomRole": { findOne: () => query(customRole) },
+  "../models/User": {
+    findOne: () => query(null),
+    find: () => query([]),
+    countDocuments: async () => 0,
+    create: async (doc) => { sink.created = doc; return { ...doc, _id: employeeId }; },
+  },
+  "../services/auditLog.service": { writeAuditLog: async () => {} },
+});
+
+const createRequest = (body) => ({
+  user: { _id: managerId, name: "Admin", companyId, role: "ADMIN" },
+  body: { name: "New Hire", email: "hire@example.com", phone: "9876543210", password: "secret1", ...body },
+  headers: {},
+});
+
+test("a custom role is expanded into its base role and category, and grants no pages of its own", async () => {
+  const sink = {};
+  const controller = userControllerWith(
+    {
+      _id: customRoleId,
+      companyId,
+      name: "Test role",
+      baseRole: "MANAGER",
+      businessCategory: "COWORKING",
+      isActive: true,
+    },
+    sink,
+  );
+  const res = response();
+  // The category the form sent is deliberately different: the role's own wins.
+  await controller.createUserByRole(createRequest({ customRoleId, roleType: "RESIDENTIAL" }), res);
+
+  assert.equal(res.code, 201, JSON.stringify(res.body));
+  assert.equal(sink.created.role, "MANAGER", "the base role is what the CRM stores");
+  assert.equal(sink.created.roleType, "COWORKING", "the role's category wins over the form's");
+  assert.equal(String(sink.created.customRoleId), customRoleId);
+  /*
+   * A named role says nothing about pages, so the new user inherits their base
+   * role's defaults. Writing a list here - even an empty one - makes it a
+   * deliberate override that the access service then enforces, which is what
+   * once left everyone on a named role holding Dashboard and Profile alone.
+   */
+  assert.equal(
+    sink.created.pageAccessOverride,
+    null,
+    "a named role must not hand the new user a page override",
+  );
+});
+
+test("a built-in role still creates a user with no custom role attached", async () => {
+  const sink = {};
+  const controller = userControllerWith(null, sink);
+  const res = response();
+  await controller.createUserByRole(createRequest({ role: "MANAGER", roleType: "COMMERCIAL" }), res);
+
+  assert.equal(res.code, 201, JSON.stringify(res.body));
+  assert.equal(sink.created.role, "MANAGER");
+  assert.equal(sink.created.roleType, "COMMERCIAL");
+  assert.equal(sink.created.customRoleId, null);
+  assert.equal(sink.created.pageAccessOverride, null, "a built-in role inherits its defaults, it does not override them");
+});
+
+for (const [name, body, expected] of [
+  ["a role id that is not an id", { customRoleId: "not-an-id" }, 400],
+  ["a role from another company or deleted", { customRoleId }, 400],
+]) {
+  test(`creating a user refuses ${name}`, async () => {
+    const sink = {};
+    // findOne returns null: the scoped lookup found nothing.
+    const controller = userControllerWith(null, sink);
+    const res = response();
+    await controller.createUserByRole(createRequest(body), res);
+    assert.equal(res.code, expected, JSON.stringify(res.body));
+    assert.equal(sink.created, undefined, "no user is created when the role is refused");
+  });
+}
+
+/*
+ * Moving somebody already hired onto a role the company named.
+ *
+ * A separate controller from the create path, so the two can drift: the details
+ * screen offers every role in one list, and the server has to expand a custom
+ * one the same way creating a user does.
+ */
+// Values built inside the vm realm are not deepStrictEqual to plain ones.
+const plainValue = (value) => JSON.parse(JSON.stringify(value));
+
+const updateControllerWith = (customRole, target, sink = {}) => load("controllers/user.controller.js", {
+  "../models/CustomRole": { findOne: () => query(customRole) },
+  "../models/User": {
+    findOne: () => query(target),
+    findById: () => query(target),
+    find: () => query([]),
+    countDocuments: async () => 0,
+    findByIdAndUpdate: async (id, update) => { sink.patch = update.$set || update; return query({ ...target, ...(update.$set || {}) }); },
+    findOneAndUpdate: async (filter, update) => { sink.patch = update.$set || update; return query({ ...target, ...(update.$set || {}) }); },
+    updateOne: async (filter, update) => { sink.patch = update.$set || update; return { modifiedCount: 1 }; },
+    updateMany: async () => ({ modifiedCount: 0 }),
+  },
+  // The reporting tree and the lead counts are read on the way out. They are
+  // not what these tests are about, and left real they reach for a database.
+  "../models/Lead": { countDocuments: async () => 0, find: () => query([]), updateMany: async () => ({ modifiedCount: 0 }) },
+  "../models/Inventory": { countDocuments: async () => 0 },
+  "../services/hierarchy.service": {
+    getDescendantUsers: async () => [],
+    getDescendantExecutiveIds: async () => [],
+    getDescendantByRoleCount: async () => ({}),
+    // Changing someone's role re-parents them, and an executive reports to a
+    // manager. With nobody to report to the controller refuses before it
+    // reaches the role logic these tests are about.
+    getFirstLevelChildrenByRole: async () => [{ _id: managerId, role: "MANAGER" }],
+  },
+  "../services/auditLog.service": { writeAuditLog: async () => {} },
+});
+
+const targetUser = (sink = {}) => ({
+  _id: employeeId,
+  companyId,
+  name: "Existing Hire",
+  email: "hire@example.com",
+  role: "EXECUTIVE",
+  roleType: "COMMERCIAL",
+  customRoleId: null,
+  pageAccessOverride: [{ pageKey: "leads", actions: ["view"] }],
+  isActive: true,
+  // updateUserByAdmin assigns onto the document and saves it, so what was
+  // written is whatever the document holds by the time save is called.
+  save() { sink.saved = { ...this }; return Promise.resolve(this); },
+});
+
+test("assigning a named role from the details screen copies its base role and category", async () => {
+  const sink = {};
+  const controller = updateControllerWith(
+    { _id: customRoleId, companyId, name: "Floor Lead", baseRole: "FIELD_EXECUTIVE", businessCategory: "COWORKING", pages: [], isActive: true },
+    targetUser(sink),
+    sink,
+  );
+  const res = response();
+  await controller.updateUserByAdmin({
+    user: { _id: managerId, name: "Admin", companyId, role: "ADMIN" },
+    params: { userId: employeeId },
+    body: { customRoleId },
+    headers: {},
+  }, res);
+
+  assert.ok(sink.saved, `nothing was saved: ${JSON.stringify(res.body)}`);
+  assert.equal(sink.saved.role, "FIELD_EXECUTIVE");
+  assert.equal(sink.saved.roleType, "COWORKING");
+  assert.equal(String(sink.saved.customRoleId), customRoleId);
+  /*
+   * Page access was decided per user on the access screen. Changing somebody's
+   * job title is no reason to throw that away.
+   */
+  assert.deepEqual(plainValue(sink.saved.pageAccessOverride), [{ pageKey: "leads", actions: ["view"] }]);
+});
+
+test("picking a built-in role instead drops the named role rather than leaving it dangling", async () => {
+  const sink = {};
+  const target = targetUser(sink);
+  target.customRoleId = customRoleId;
+  const controller = updateControllerWith(null, target, sink);
+  const res = response();
+  await controller.updateUserByAdmin({
+    user: { _id: managerId, name: "Admin", companyId, role: "ADMIN" },
+    params: { userId: employeeId },
+    body: { role: "MANAGER" },
+    headers: {},
+  }, res);
+
+  assert.ok(sink.saved, `nothing was saved: ${JSON.stringify(res.body)}`);
+  assert.equal(sink.saved.role, "MANAGER");
+  assert.equal(sink.saved.customRoleId, null);
+});
+
+test("a named role from another company or one since deleted is refused", async () => {
+  const sink = {};
+  const controller = updateControllerWith(null, targetUser(), sink);
+  const res = response();
+  await controller.updateUserByAdmin({
+    user: { _id: managerId, name: "Admin", companyId, role: "ADMIN" },
+    params: { userId: employeeId },
+    body: { customRoleId },
+    headers: {},
+  }, res);
+
+  assert.equal(res.code, 400, JSON.stringify(res.body));
+  assert.equal(sink.saved, undefined, "nothing is written when the role is refused");
+});
+
+test("the team list and details screen are given the role's own name, not just its base", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/controllers/user.controller.js"), "utf8");
+  // Without the populate the list can only show the built-in role underneath,
+  // so every role a company named reads as whatever it was based on.
+  const populates = source.match(/\.populate\("customRoleId"/g) || [];
+  assert.equal(populates.length, 2, "both the list and the single profile populate it");
+  assert.match(source, /customRoleName: user\.customRoleId\?\.name/);
+});
+
+
+// ---- Naming a role from inside the Create User form.
+const roleRoutes = () => require("../src/routes/customRole.routes.js");
+
+const runRoute = async (method, routePath, req) => {
+  const layer = roleRoutes().stack.find((row) => row.route?.path === routePath && row.route.methods[method]);
+  assert.ok(layer, `${method.toUpperCase()} ${routePath} is registered`);
+  const handler = layer.route.stack[layer.route.stack.length - 1].handle;
+  const res = response();
+  await handler(req, res);
+  return res;
+};
+
+test("a role named without a base role is an executive, the narrowest scope", async () => {
+  let saved = null;
+  const CustomRole = require("../src/models/CustomRole");
+  const create = CustomRole.create;
+  CustomRole.create = async (doc) => { saved = doc; return { ...doc, _id: "f".repeat(24) }; };
+
+  const res = await runRoute("post", "/", {
+    user: { _id: managerId, companyId, role: "ADMIN" },
+    body: { name: "Floor Lead", businessCategory: "COWORKING" },
+  });
+
+  CustomRole.create = create;
+  assert.equal(res.code, 201, JSON.stringify(res.body));
+  /*
+   * Not MANAGER, and not blank: a role created without a thought must grant the
+   * least. Anyone wanting a manager picks Manager from the role list directly.
+   */
+  assert.equal(saved.baseRole, "EXECUTIVE");
+  assert.equal(saved.businessCategory, "COWORKING");
+});
+
+test("a role is created from a name and the built-in role it behaves as", async () => {
+  let saved = null;
+  const CustomRole = require("../src/models/CustomRole");
+  const create = CustomRole.create;
+  CustomRole.create = async (doc) => { saved = doc; return { ...doc, _id: "f".repeat(24) }; };
+
+  const res = await runRoute("post", "/", {
+    user: { _id: managerId, companyId, role: "ADMIN" },
+    body: { name: "  Senior Sales Executive  ", baseRole: "executive", businessCategory: "COWORKING" },
+  });
+
+  CustomRole.create = create;
+  assert.equal(res.code, 201, JSON.stringify(res.body));
+  assert.equal(saved.name, "Senior Sales Executive", "the name is trimmed");
+  assert.equal(saved.baseRole, "EXECUTIVE", "the base role is normalised");
+  assert.equal(saved.businessCategory, "COWORKING");
+  /*
+   * No page list on create: what the role reaches is set on the page access
+   * screen the admin lands on straight after making the user.
+   */
+  assert.equal(saved.pages, undefined);
+});
+
+for (const [name, body, expected] of [
+  ["a role with no name", { baseRole: "EXECUTIVE" }, /name is required/i],
+  ["a role based on something that is not a role", { name: "Floor Lead", baseRole: "WIZARD" }, /based on/i],
+  ["a role based on ADMIN", { name: "Shadow Admin", baseRole: "ADMIN" }, /based on/i],
+  ["an unknown business category", { name: "Floor Lead", baseRole: "EXECUTIVE", businessCategory: "RETAIL" }, /business category/i],
+]) {
+  test(`creating ${name} is refused`, async () => {
+    const res = await runRoute("post", "/", { user: { _id: managerId, companyId, role: "ADMIN" }, body });
+    assert.equal(res.code, 400, JSON.stringify(res.body));
+    assert.match(res.body.message, expected);
+  });
+}
+
+test("roles are readable by whoever may create a user, and the page that managed them is gone", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/routes/customRole.routes.js"), "utf8");
+  // Managers create users, so they may name a role for one. It grants nothing
+  // they could not already do by picking the base role directly.
+  assert.match(source, /checkRole\(\[USER_ROLES\.ADMIN, USER_ROLES\.MANAGER\]\)/);
+  /*
+   * Everything that existed only for the removed Roles page is gone with it.
+   * Matched on the route registrations rather than the words, which still
+   * appear in prose - "the built-in role it behaves as" is a comment, not a
+   * surviving endpoint.
+   */
+  for (const dead of [
+    /router\.post\("\/adopt"/,
+    /router\.put\("\/built-in/,
+    /require\("\.\.\/models\/RolePermission"\)/,
+  ]) {
+    assert.doesNotMatch(source, dead);
+  }
+});
+
+test("page access still comes from the built-in default for the role", async () => {
+  const service = load("services/access.service.js", {
+    "../models/RolePermission": { findOne: () => query(null) },
+  });
+  const profile = await service.resolveAccessProfile({ _id: employeeId, companyId, role: "EXECUTIVE" });
+  assert.ok(profile.permissions.some((row) => row.startsWith("page.leads.")));
+});
+
+
+// ---- Editing and deleting a role from the Create User form.
+const roleId = "f".repeat(24);
+
+test("renaming a role brings everyone already on it up to date", async () => {
+  let applied = null;
+  const CustomRole = require("../src/models/CustomRole");
+  const User = require("../src/models/User");
+  const findOneAndUpdate = CustomRole.findOneAndUpdate;
+  const updateMany = User.updateMany;
+  const findOne = CustomRole.findOne;
+  CustomRole.findOne = () => ({ lean: async () => ({ _id: roleId, name: "Floor Lead", baseRole: "EXECUTIVE" }) });
+  CustomRole.findOneAndUpdate = async (filter, update) => ({ _id: roleId, ...update.$set });
+  User.updateMany = async (filter, update) => { applied = { filter, update }; return { modifiedCount: 3 }; };
+
+  const res = await runRoute("patch", "/:roleId", {
+    user: { _id: managerId, companyId, role: "ADMIN" },
+    params: { roleId },
+    body: { name: "Floor Lead", baseRole: "FIELD_EXECUTIVE", businessCategory: "COMMERCIAL" },
+  });
+
+  CustomRole.findOneAndUpdate = findOneAndUpdate;
+  CustomRole.findOne = findOne;
+  User.updateMany = updateMany;
+
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(res.body.usersUpdated, 3);
+  assert.equal(applied.update.$set.role, "FIELD_EXECUTIVE", "the base role is pushed onto holders");
+  assert.equal(applied.update.$set.roleType, "COMMERCIAL");
+  /*
+   * Page access is per user and was set on the access screen. Renaming a role
+   * is no reason to overwrite it, so it must not appear in this write.
+   */
+  assert.equal(applied.update.$set.pageAccessOverride, undefined);
+});
+
+test("renaming a role leaves what it is based on alone", async () => {
+  let applied = null;
+  const CustomRole = require("../src/models/CustomRole");
+  const User = require("../src/models/User");
+  const findOne = CustomRole.findOne;
+  const findOneAndUpdate = CustomRole.findOneAndUpdate;
+  const updateMany = User.updateMany;
+  CustomRole.findOne = () => ({ lean: async () => ({ _id: roleId, name: "Floor Lead", baseRole: "MANAGER" }) });
+  CustomRole.findOneAndUpdate = async (filter, update) => ({ _id: roleId, ...update.$set });
+  User.updateMany = async (filter, update) => { applied = update; return { modifiedCount: 2 }; };
+
+  /*
+   * The edit form asks for a name and a category only. Reading its silence as
+   * "make this an executive" would quietly demote everyone already on the role.
+   */
+  const res = await runRoute("patch", "/:roleId", {
+    user: { _id: managerId, companyId, role: "ADMIN" },
+    params: { roleId },
+    body: { name: "Floor Manager", businessCategory: "COMMERCIAL" },
+  });
+
+  CustomRole.findOne = findOne;
+  CustomRole.findOneAndUpdate = findOneAndUpdate;
+  User.updateMany = updateMany;
+
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(res.body.role.baseRole, "MANAGER", "the stored base role survives a rename");
+  // Holders cannot be demoted by a write that never mentions their role.
+  assert.equal(applied?.$set?.role, undefined, "and holders are not demoted");
+});
+
+/*
+ * "Renaming is all this changes" is the promise printed above the save button,
+ * so a rename has to reach nobody at all. It used to default an absent category
+ * to COMMERCIAL and copy that onto every holder, moving people between
+ * pipelines as a side effect of an admin fixing a job title.
+ */
+test("a rename on its own writes to nobody", async () => {
+  let touched = false;
+  const CustomRole = require("../src/models/CustomRole");
+  const User = require("../src/models/User");
+  const findOne = CustomRole.findOne;
+  const findOneAndUpdate = CustomRole.findOneAndUpdate;
+  const updateMany = User.updateMany;
+  CustomRole.findOne = () => ({
+    lean: async () => ({ _id: roleId, name: "Floor Lead", baseRole: "EXECUTIVE", businessCategory: "COWORKING" }),
+  });
+  CustomRole.findOneAndUpdate = async (filter, update) => ({ _id: roleId, ...update.$set });
+  User.updateMany = async () => { touched = true; return { modifiedCount: 9 }; };
+
+  const res = await runRoute("patch", "/:roleId", {
+    user: { _id: managerId, companyId, role: "ADMIN" },
+    params: { roleId },
+    body: { name: "Floor Manager" },
+  });
+
+  CustomRole.findOne = findOne;
+  CustomRole.findOneAndUpdate = findOneAndUpdate;
+  User.updateMany = updateMany;
+
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(res.body.role.businessCategory, "COWORKING", "an unmentioned category is left alone");
+  assert.equal(touched, false, "no holder is written to by a rename");
+  assert.equal(res.body.usersUpdated, 0);
+});
+
+test("only an admin can change what a role is based on", async () => {
+  const CustomRole = require("../src/models/CustomRole");
+  const findOne = CustomRole.findOne;
+  CustomRole.findOne = () => ({
+    lean: async () => ({ _id: roleId, name: "Floor Lead", baseRole: "EXECUTIVE", businessCategory: "COMMERCIAL" }),
+  });
+
+  const res = await runRoute("patch", "/:roleId", {
+    user: { _id: managerId, companyId, role: "MANAGER" },
+    params: { roleId },
+    body: { name: "Floor Lead", baseRole: "MANAGER" },
+  });
+
+  CustomRole.findOne = findOne;
+
+  // Rewriting the built-in role of everyone on a role, in one statement and
+  // with none of the user editor's guards, is not a manager's to do in passing.
+  assert.equal(res.code, 403, JSON.stringify(res.body));
+});
+
+test("a role nobody holds can be deleted", async () => {
+  const CustomRole = require("../src/models/CustomRole");
+  const User = require("../src/models/User");
+  const countDocuments = User.countDocuments;
+  const findOneAndDelete = CustomRole.findOneAndDelete;
+  User.countDocuments = async () => 0;
+  CustomRole.findOneAndDelete = async () => ({ _id: roleId, name: "Floor Lead" });
+
+  const res = await runRoute("delete", "/:roleId", {
+    user: { _id: managerId, companyId, role: "ADMIN" },
+    params: { roleId },
+  });
+
+  User.countDocuments = countDocuments;
+  CustomRole.findOneAndDelete = findOneAndDelete;
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.match(res.body.message, /deleted/);
+});
+
+test("a role somebody holds is not deleted out from under them", async () => {
+  const CustomRole = require("../src/models/CustomRole");
+  const User = require("../src/models/User");
+  const countDocuments = User.countDocuments;
+  let deleted = false;
+  const findOneAndDelete = CustomRole.findOneAndDelete;
+  User.countDocuments = async () => 4;
+  CustomRole.findOneAndDelete = async () => { deleted = true; return null; };
+
+  const res = await runRoute("delete", "/:roleId", {
+    user: { _id: managerId, companyId, role: "ADMIN" },
+    params: { roleId },
+  });
+
+  User.countDocuments = countDocuments;
+  CustomRole.findOneAndDelete = findOneAndDelete;
+  assert.equal(res.code, 409, JSON.stringify(res.body));
+  assert.equal(res.body.userCount, 4, "the refusal says how many people are on it");
+  assert.equal(deleted, false, "nothing is removed");
+});
+
+for (const [name, params, body, expected] of [
+  ["an id that is not an id", { roleId: "nope" }, { name: "X", baseRole: "EXECUTIVE" }, 400],
+  ["a rename to nothing", { roleId }, { name: "   ", baseRole: "EXECUTIVE" }, 400],
+  ["a rebase onto ADMIN", { roleId }, { name: "Shadow", baseRole: "ADMIN" }, 400],
+]) {
+  test(`editing refuses ${name}`, async () => {
+    const CustomRole = require("../src/models/CustomRole");
+    const findOne = CustomRole.findOne;
+    CustomRole.findOne = () => ({ lean: async () => ({ _id: roleId, name: "Floor Lead", baseRole: "EXECUTIVE" }) });
+    const res = await runRoute("patch", "/:roleId", {
+      user: { _id: managerId, companyId, role: "ADMIN" },
+      params,
+      body,
+    });
+    CustomRole.findOne = findOne;
+    assert.equal(res.code, expected, JSON.stringify(res.body));
+  });
+}

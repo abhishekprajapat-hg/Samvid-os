@@ -2,13 +2,11 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Bell, CalendarDays, LogOut, Menu, MessageCircle, Moon, Search, Sun, User } from "lucide-react";
 import { PROFILE_ITEM, getAllVisibleMenuGroups, roleCanSeeItem } from "./workbenchNavigation";
-import { useIsMobileViewport } from "../../hooks/useIsMobileViewport";
 import "./AppTopCommandBar.css";
 
 const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogout, actions, user, userRole, unreadAlerts = 0, unreadChats = 0 }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const isMobileViewport = useIsMobileViewport();
   const searchRef = useRef(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -26,18 +24,14 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
   const results = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
 
   /*
-   * On a phone the floating messenger is not rendered at all - a draggable
-   * panel over a 360px screen covers the very thing it is meant to sit beside -
-   * so the icon opens the full chat page. On a desktop it still opens the
-   * messenger over whatever you were doing, which is the point of it.
+   * Two ways into chat, deliberately doing different things.
+   *
+   * This icon opens the full page, where the conversation list and the thread
+   * sit side by side - the view for actually working through messages. The
+   * floating button at the bottom right opens the panel over the current page,
+   * for answering something without leaving what you were doing.
    */
-  const openChat = () => {
-    if (isMobileViewport) {
-      navigate("/chat");
-      return;
-    }
-    window.dispatchEvent(new Event("crm:open-messenger"));
-  };
+  const openChat = () => navigate("/chat");
 
   useEffect(() => {
     const key = (event) => {

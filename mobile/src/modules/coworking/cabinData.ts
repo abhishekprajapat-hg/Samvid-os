@@ -1,4 +1,4 @@
-import { palette } from "../../theme/tokens";
+import { themePalette } from "../../theme/themedStyles";
 
 /*
  * Cabin status model for the booking board, ported from
@@ -32,30 +32,36 @@ export type StatusMeta = {
   tileText: string;
 };
 
-export const STATUS_META: Record<CabinStatus, StatusMeta> = {
+/*
+ * Built per call rather than held as a constant. themePalette resolves against
+ * whichever scheme is active when it is read, and a module-level table reads it
+ * once at import - while the scheme is still the default light - which left the
+ * whole booking board in light colours after a switch to dark.
+ */
+export const statusMetaTable = (): Record<CabinStatus, StatusMeta> => ({
   VACANT: {
     label: "Vacant",
     short: "Vacant",
-    dot: palette.rose[600],
-    tileBackground: palette.rose[50],
-    tileBorder: palette.rose[200],
-    tileText: palette.rose[900],
+    dot: themePalette.rose[600],
+    tileBackground: themePalette.rose[50],
+    tileBorder: themePalette.rose[200],
+    tileText: themePalette.rose[900],
   },
   BOOKED: {
     label: "Booked",
     short: "Booked",
-    dot: palette.emerald[600],
-    tileBackground: palette.emerald[50],
-    tileBorder: palette.emerald[200],
-    tileText: palette.emerald[900],
+    dot: themePalette.emerald[600],
+    tileBackground: themePalette.emerald[50],
+    tileBorder: themePalette.emerald[200],
+    tileText: themePalette.emerald[900],
   },
   RESERVED: {
     label: "Reserved",
     short: "Held",
-    dot: palette.amber[600],
-    tileBackground: palette.amber[50],
-    tileBorder: palette.amber[200],
-    tileText: palette.amber[900],
+    dot: themePalette.amber[600],
+    tileBackground: themePalette.amber[50],
+    tileBorder: themePalette.amber[200],
+    tileText: themePalette.amber[900],
   },
   BLOCKED: {
     // Violet, not a second red: two different reds - "nobody in it" and
@@ -63,20 +69,20 @@ export const STATUS_META: Record<CabinStatus, StatusMeta> = {
     // manager could actually act on wrongly.
     label: "Blocked",
     short: "Blocked",
-    dot: palette.violet[700],
-    tileBackground: palette.violet[50],
-    tileBorder: palette.violet[200],
-    tileText: palette.violet[900],
+    dot: themePalette.violet[700],
+    tileBackground: themePalette.violet[50],
+    tileBorder: themePalette.violet[200],
+    tileText: themePalette.violet[900],
   },
   MAINTENANCE: {
     label: "Maintenance",
     short: "Upkeep",
-    dot: palette.slate[500],
-    tileBackground: palette.slate[100],
-    tileBorder: palette.slate[200],
-    tileText: palette.slate[600],
+    dot: themePalette.slate[500],
+    tileBackground: themePalette.slate[100],
+    tileBorder: themePalette.slate[200],
+    tileText: themePalette.slate[600],
   },
-};
+});
 
 export const STATUS_ORDER: CabinStatus[] = [
   "VACANT",
@@ -105,8 +111,10 @@ export const CABIN_SEATS: Record<string, number> = {
   D1: 4, D2: 4,
 };
 
-export const statusMetaFor = (status?: string): StatusMeta =>
-  STATUS_META[String(status || "").toUpperCase() as CabinStatus] || STATUS_META.MAINTENANCE;
+export const statusMetaFor = (status?: string): StatusMeta => {
+  const table = statusMetaTable();
+  return table[String(status || "").toUpperCase() as CabinStatus] || table.MAINTENANCE;
+};
 
 /** The wing a cabin code belongs to - "B12" → "B". */
 export const wingOf = (code?: string) => String(code || "").trim().charAt(0).toUpperCase();

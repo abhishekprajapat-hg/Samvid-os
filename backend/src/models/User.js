@@ -29,6 +29,9 @@ const userSchema = new mongoose.Schema(
     // action-aware shape { pageKey, actions }, so existing employee grants
     // keep working while new grants can restrict create/edit/delete/etc.
     pageAccessOverride: { type: [mongoose.Schema.Types.Mixed], default: null },
+    // The company-defined role this user was given, if any. Their role,
+    // roleType and pageAccessOverride are copied from it on assignment.
+    customRoleId: { type: mongoose.Schema.Types.ObjectId, ref: "CustomRole", default: null },
     name: {
       type: String,
       required: true,
@@ -52,7 +55,7 @@ const userSchema = new mongoose.Schema(
     // key off these three values.
     roleType: {
       type: String,
-      enum: ["COMMERCIAL", "RESIDENTIAL", "BOTH"],
+      enum: ["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"],
       default: "COMMERCIAL",
     },
 

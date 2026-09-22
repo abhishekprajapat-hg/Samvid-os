@@ -83,10 +83,17 @@ const getOrdinalSuffix = (rank) => {
 };
 
 const RoleLeaderboard = () => {
-  const [viewerRole] = useState(() =>
-    String(window.localStorage.getItem("role") || "").trim().toUpperCase(),
-  );
-  const [selectedRole, setSelectedRole] = useState(viewerRole || "");
+  /*
+   * Deliberately empty, not the viewer's own role.
+   *
+   * Seeding this from localStorage sent role=ADMIN on the first load, and ADMIN
+   * is not a rankable role - the API answered 400 "Invalid role filter", so the
+   * board came up empty AND allowedRoleFilters never arrived, which meant the
+   * role selector never rendered and the user could not pick a valid role to
+   * recover. Sending no role lets the API choose the first role this viewer is
+   * allowed to rank; the effect below then adopts whatever it picked.
+   */
+  const [selectedRole, setSelectedRole] = useState("");
   const [windowKey, setWindowKey] = useState("MONTH");
   const [mode, setMode] = useState("CLOSURES");
   const [loading, setLoading] = useState(true);

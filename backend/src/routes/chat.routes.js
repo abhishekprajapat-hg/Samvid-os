@@ -6,9 +6,30 @@ const broadcastController = require("../controllers/broadcast.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 const { requireChatRoles } = require("../middleware/chatPermission.middleware");
 const { chatMessageLimiter } = require("../middleware/rateLimit.middleware");
-const { requirePageAccess, requirePageActionForMethod } = require("../middleware/pageAccess.middleware");
+const {
+  requirePageAccess,
+  requirePageActionForMethod,
+  checkRoleOrPageAccess,
+} = require("../middleware/pageAccess.middleware");
+
+/*
+ * Internal staff only. CHANNEL_PARTNER is an external broker account and
+ * COWORKING_ADMIN runs the coworking desk; neither has the Team Chat page in
+ * its defaults, and without this gate both could read the full staff directory
+ * through /chat/contacts.
+ */
+const CHAT_ROLES = [
+  "ADMIN",
+  "MANAGER",
+  "EXECUTIVE",
+  "INSIDE_EXECUTIVE",
+  "FIELD_EXECUTIVE",
+  "PRODUCTION_EXECUTIVE",
+  "COMMUNITY_MANAGER",
+];
 
 router.use(authMiddleware.protect);
+router.use(checkRoleOrPageAccess(CHAT_ROLES, "chat"));
 router.use(requirePageAccess("chat"));
 router.use(requirePageActionForMethod("chat"));
 

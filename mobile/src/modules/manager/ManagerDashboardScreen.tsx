@@ -9,9 +9,9 @@ import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
-import { colors, elevation, palette, radii, spacing, typography } from "../../theme/tokens";
+import { elevation, radii, spacing, typography } from "../../theme/tokens";
+import { themedStyles, themePalette } from "../../theme/themedStyles";
 import type { InventoryAsset, Lead, User } from "../../types";
-import { themePalette } from "../../theme/themedStyles";
 
 /*
  * The mobile cut of frontend/src/modules/manager/ManagerDashboard.jsx - the
@@ -39,7 +39,12 @@ type Stage = {
   soft: string;
 };
 
-const STAGES: Stage[] = [
+/*
+ * A function, not a constant. themePalette answers for the scheme active when
+ * it is read, and a module-level array reads it once at import - when the
+ * scheme is always still light.
+ */
+const buildStages = (): Stage[] => [
   { key: "NEW", label: "New", icon: "todo", color: themePalette.blue[500], soft: themePalette.blue[50] },
   { key: "CONTACTED", label: "Contacted", icon: "call", color: themePalette.blue[400], soft: themePalette.blue[50] },
   { key: "INTERESTED", label: "Interested", icon: "people", color: themePalette.emerald[500], soft: themePalette.emerald[50] },
@@ -204,7 +209,7 @@ const InventoryDonut = ({
     <View style={styles.donutWrap}>
       <Svg width={128} height={128} viewBox="0 0 42 42">
         <G rotation={-90} origin="21, 21">
-          <Circle cx="21" cy="21" r="15.9155" fill="none" stroke={colors.border} strokeWidth={6} />
+          <Circle cx="21" cy="21" r="15.9155" fill="none" stroke={themePalette.border} strokeWidth={6} />
           {segments.map((segment) => {
             const share = total ? (segment.value / total) * 100 : 0;
             const slice = (
@@ -365,7 +370,7 @@ export const ManagerDashboardScreen = () => {
       .sort((a, b) => (dateOf(b.updatedAt)?.getTime() || 0) - (dateOf(a.updatedAt)?.getTime() || 0))
       .slice(0, 4);
 
-    const stages = STAGES.map((stage) => ({
+    const stages = buildStages().map((stage) => ({
       ...stage,
       value: leads.filter((lead) => String(lead.status).toUpperCase() === stage.key).length,
     }));
@@ -671,7 +676,7 @@ export const ManagerDashboardScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   container: {
     paddingBottom: spacing.xxl,
     gap: spacing.xl,
@@ -705,9 +710,9 @@ const styles = StyleSheet.create({
     width: "48%",
     minHeight: 112,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.lg,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     padding: spacing.lg,
     gap: spacing.xs,
     ...elevation.card,
@@ -754,9 +759,9 @@ const styles = StyleSheet.create({
   card: {
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.lg,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     ...elevation.card,
   },
   cardHeader: {
@@ -767,7 +772,7 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
     paddingHorizontal: spacing.xl,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: c.border,
   },
   cardTitleWrap: {
     flexShrink: 1,
@@ -784,7 +789,7 @@ const styles = StyleSheet.create({
   cardLink: {
     fontSize: typography.caption,
     fontWeight: "600",
-    color: colors.primary,
+    color: c.primary,
   },
   rangePill: {
     flexDirection: "row",
@@ -793,9 +798,9 @@ const styles = StyleSheet.create({
     height: 30,
     paddingHorizontal: spacing.lg,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.sm,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
   },
   rangePillText: {
     fontSize: typography.caption,
@@ -824,7 +829,7 @@ const styles = StyleSheet.create({
     bottom: 30,
     borderLeftWidth: 1,
     borderBottomWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
   },
   occGridRow: {
     flex: 1,
@@ -973,7 +978,7 @@ const styles = StyleSheet.create({
   stageCard: {
     width: "48%",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: radii.md,
     padding: spacing.lg,
     gap: spacing.md,
@@ -1006,7 +1011,7 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: radii.pill,
     overflow: "hidden",
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
   },
   stageFill: {
     height: "100%",
@@ -1041,6 +1046,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: themePalette.slate[400],
   },
-});
+}));
 
 export default ManagerDashboardScreen;

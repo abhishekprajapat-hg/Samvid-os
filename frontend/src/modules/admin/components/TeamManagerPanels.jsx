@@ -1,5 +1,6 @@
 import React from "react";
 import { AnimatePresence, motion as Motion } from "framer-motion";
+import useDialogDismiss from "../../../hooks/useDialogDismiss";
 import {
   Briefcase,
   CalendarClock,
@@ -10,6 +11,8 @@ import {
   X,
 } from "lucide-react";
 import ToastNotice from "../../../components/ui/ToastNotice";
+
+export const NEW_ROLE_OPTION = "__new_role__";
 
 export const UserFormPanel = ({
   isOpen,
@@ -23,6 +26,14 @@ export const UserFormPanel = ({
   error,
   isDarkTheme,
   roleOptions,
+  selectedCustomRole = null,
+  newRole,
+  setNewRole,
+  onCreateRole,
+  onCancelRole,
+  onEditRole,
+  onDeleteRole,
+  creatingRole = false,
   selectedBaseRole = "",
   reportingParentRoles,
 }) => {
@@ -32,6 +43,7 @@ export const UserFormPanel = ({
   const fieldControlClass = `w-full border rounded-lg px-3 py-2 ${
     isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""
   }`;
+  const dialogRef = useDialogDismiss(isOpen, onClose);
 
   return (
     <AnimatePresence>
@@ -43,6 +55,10 @@ export const UserFormPanel = ({
           className="mobile-bottom-sheet fixed inset-0 z-50 flex justify-end bg-black/45 sm:items-stretch sm:justify-end"
         >
           <Motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            tabIndex={-1}
             initial={{ x: 500 }}
             animate={{ x: 0 }}
             exit={{ x: 500 }}
@@ -108,18 +124,103 @@ export const UserFormPanel = ({
 
               <label className="block space-y-1">
                 <span className={fieldLabelClass}>Business category</span>
-                <select value={formData.roleType} onChange={(event) => setFormData({ ...formData, roleType: event.target.value })} className={fieldControlClass}>
+                <select
+                  value={formData.roleType}
+                  onChange={(event) => setFormData({ ...formData, roleType: event.target.value })}
+                  /* A company-defined role carries its own category, so this is
+                     locked rather than left editable and then overridden - a box
+                     you can change that changes nothing is worse than a locked one. */
+                  disabled={Boolean(selectedCustomRole)}
+                  className={`${fieldControlClass} disabled:opacity-60`}
+                >
                   <option value="COMMERCIAL">Commercial</option>
                   <option value="RESIDENTIAL">Residential</option>
-                  <option value="BOTH">Both</option>
+                  <option value="COWORKING">Coworking</option>
+                  <option value="BOTH">All categories</option>
                 </select>
+                {selectedCustomRole ? (
+                  <span className="block text-[10.5px] text-slate-400">Set by the {selectedCustomRole.name} role.</span>
+                ) : null}
               </label>
               <label className="block space-y-1">
                 <span className={fieldLabelClass}>Role</span>
-                <select value={formData.role} onChange={(event) => setFormData({ ...formData, role: event.target.value, reportingToId: "", canViewInventory: false })} className={fieldControlClass}>
-                  {roleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                <select
+                  value={formData.role}
+                  onChange={(event) => {
+                    const next = roleOptions.find((option) => option.value === event.target.value);
+                    setFormData({
+                      ...formData,
+                      role: event.target.value,
+                      // The role decides the category when it is one of yours.
+                      roleType: next?.businessCategory || formData.roleType,
+                      reportingToId: "",
+                      canViewInventory: false,
+                    });
+                  }}
+                  className={fieldControlClass}
+                >
+                  {/* One flat list: which roles the CRM shipped and which this
+                      company named is not a distinction anyone is choosing by. */}
+                  {roleOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                  {/* Naming a role is part of hiring someone into it, so it is
+                      offered here rather than on a page you have to leave for. */}
+                  <option value={NEW_ROLE_OPTION}>+ Create new role…</option>
                 </select>
+                {selectedCustomRole && !newRole._id ? (
+                  <span className="flex flex-wrap items-center gap-2 text-[10.5px] text-slate-400">
+                    {/* Edit and delete live here rather than in the list: a
+                        select cannot hold buttons, and the role you want to
+                        change is the one you just picked. */}
+                    <button type="button" onClick={() => onEditRole(selectedCustomRole)} className="font-semibold text-blue-600 hover:underline">
+                      Edit
+                    </button>
+                    <button type="button" onClick={() => onDeleteRole(selectedCustomRole)} className="font-semibold text-rose-500 hover:underline">
+                      Delete
+                    </button>
+                  </span>
+                ) : null}
               </label>
+
+              {formData.role === NEW_ROLE_OPTION || newRole._id ? (
+                <div className={`space-y-2 rounded-lg border p-3 ${isDarkTheme ? "border-slate-700 bg-slate-950/40" : "border-slate-200 bg-slate-50"}`}>
+                  <p className={fieldLabelClass}>{newRole._id ? "Edit role" : "New role"}</p>
+                  <input
+                    autoFocus
+                    value={newRole.name}
+                    onChange={(event) => setNewRole({ ...newRole, name: event.target.value })}
+                    placeholder="Role name, e.g. Senior Sales Executive"
+                    maxLength={60}
+                    className={fieldControlClass}
+                  />
+                  {/* No "based on" picker: which built-in role this behaves
+                      as is plumbing, and a name is the part being decided here.
+                      What it reaches is set on the access screen right after. */}
+                  <p className="text-[10.5px] text-slate-400">
+                    {newRole._id
+                      ? "Renaming is all this changes; everyone already on the role keeps their access."
+                      : "You’ll set what this role can open right after the user is created."}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={onCreateRole}
+                      disabled={creatingRole || !newRole.name.trim()}
+                      className="h-9 rounded-lg bg-blue-600 px-3 text-[13px] font-semibold text-white disabled:opacity-60"
+                    >
+                      {creatingRole ? "Saving…" : newRole._id ? "Save changes" : "Create role"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onCancelRole}
+                      className="h-9 rounded-lg border border-slate-300 px-3 text-[13px] font-semibold text-slate-600"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               {needsReporting && (
                 <label className="block space-y-1">
@@ -243,10 +344,16 @@ export const UserProfilePanel = ({
     ? performance.recentLeads
     : [];
 
+  const dialogRef2 = useDialogDismiss(isOpen, onClose);
+
   return (
     <AnimatePresence>
       {isOpen && (
         <Motion.div
+          ref={dialogRef2}
+          role="dialog"
+          aria-modal="true"
+          tabIndex={-1}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -315,7 +422,7 @@ export const UserProfilePanel = ({
                       {profile.isActive ? "ACTIVE" : "INACTIVE"}
                     </span>
                     <span className={`text-[10px] px-2 py-1 rounded-full font-bold ${isDarkTheme ? "bg-cyan-500/20 text-cyan-200" : "bg-cyan-100 text-cyan-700"}`}>
-                      {roleLabels[profile.role] || profile.role || "-"}
+                      {profile.customRoleName || roleLabels[profile.role] || profile.role || "-"}
                     </span>
                   </div>
 

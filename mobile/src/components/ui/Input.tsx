@@ -172,7 +172,7 @@ const styles = themedStyles((c) => StyleSheet.create({
     borderWidth: 1,
     borderColor: themePalette.slate[300],
     borderRadius: radii.md,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     gap: spacing.md,
   },

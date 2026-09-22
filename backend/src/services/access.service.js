@@ -31,6 +31,16 @@ const accessProfileCache = createTtlCache({
 
 const invalidateAccessCache = () => accessProfileCache.clear();
 
+/*
+ * "on" | "log" | "off" - see enforcePageAccess in buildAccessProfile.
+ * Defaults to "log" so that turning this on cannot silently start refusing
+ * traffic in an existing deployment; flip to "on" once the logs are clean.
+ */
+const PAGE_ACCESS_MODE = (() => {
+  const raw = String(process.env.PAGE_ACCESS_ENFORCEMENT || "log").trim().toLowerCase();
+  return ["on", "log", "off"].includes(raw) ? raw : "log";
+})();
+
 const isAdminRole = (role) => role === USER_ROLES.ADMIN;
 
 const resolveLegacyPermissions = async ({ companyId, role }) => {
@@ -151,7 +161,33 @@ const buildAccessProfile = async (user) => {
     permissions,
     pages,
     dataScope: getDefaultDataScopeForRole(baseRole),
-    enforcePageAccess: hasPageOverride,
+    /*
+     * Whether the page guards actually enforce this profile.
+     *
+     * This used to be `hasPageOverride`, which meant the role defaults in
+     * rolePageAccess.constants.js were enforced for nobody: an account that had
+     * never been customised skipped requirePageAccess and
+     * requirePageActionForMethod entirely, so that file shaped the navigation
+     * and gated nothing on the server.
+     *
+     * An explicit override is still always enforced. What the mode controls is
+     * whether role *defaults* are enforced too:
+     *   on   - enforce defaults (the intended behaviour)
+     *   log  - allow, but log every request that enforcement would have denied
+     *   off  - previous behaviour, defaults are advisory
+     * Roll out through "log", read the logs, then switch to "on".
+     */
+    enforcePageAccess: hasPageOverride || PAGE_ACCESS_MODE === "on",
+    enforcementMode: hasPageOverride ? "on" : PAGE_ACCESS_MODE,
+    /*
+     * True only when an Admin configured this individual account.
+     * checkRoleOrPageAccess / checkRoleOrPageAction widen a built-in role on
+     * the strength of a page grant, and they must keep meaning "an Admin
+     * deliberately granted this person the page" - not "their role's defaults
+     * happen to list it", which would hand every executive the Admin/Manager
+     * -only operations those helpers guard.
+     */
+    hasExplicitPageOverride: hasPageOverride,
   };
 };
 
@@ -236,6 +272,7 @@ const assertGrantablePermissions = async ({ actor, permissions = [] }) => {
 };
 
 module.exports = {
+  PAGE_ACCESS_MODE,
   CRM_PAGES,
   invalidateAccessCache,
   isAdminRole,

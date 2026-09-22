@@ -27,20 +27,31 @@ export type ButtonSize = "sm" | "md" | "lg";
 
 type Tone = { border: string; background: string; text: string };
 
-const VARIANTS: Record<ButtonVariant, Tone> = {
-  primary: { border: themePalette.blue[600], background: themePalette.blue[600], text: themeColor("#ffffff") },
-  secondary: { border: themePalette.slate[300], background: colors.surface, text: themePalette.slate[800] },
-  ghost: { border: "transparent", background: "transparent", text: themePalette.slate[600] },
-  danger: { border: themePalette.rose[600], background: themePalette.rose[600], text: themeColor("#ffffff") },
-  success: { border: themePalette.emerald[600], background: themePalette.emerald[600], text: themeColor("#ffffff") },
+/*
+ * Resolved per render rather than held in a constant: themePalette answers for
+ * whichever scheme is active when it is read, and a module constant reads it
+ * once, at import, while the scheme is still the default light.
+ */
+const variantTone = (variant: ButtonVariant): Tone => {
+  const table: Record<ButtonVariant, Tone> = {
+    primary: { border: themePalette.blue[600], background: themePalette.blue[600], text: themeColor("#ffffff") },
+    secondary: { border: themePalette.slate[300], background: themePalette.surface, text: themePalette.slate[800] },
+    ghost: { border: "transparent", background: "transparent", text: themePalette.slate[600] },
+    danger: { border: themePalette.rose[600], background: themePalette.rose[600], text: themeColor("#ffffff") },
+    success: { border: themePalette.emerald[600], background: themePalette.emerald[600], text: themeColor("#ffffff") },
+  };
+  return table[variant] || table.primary;
 };
 
-const PRESSED: Record<ButtonVariant, string> = {
-  primary: themePalette.blue[700],
-  secondary: themePalette.slate[50],
-  ghost: themePalette.slate[100],
-  danger: themePalette.rose[700],
-  success: themePalette.emerald[700],
+const pressedTone = (variant: ButtonVariant): string => {
+  const table: Record<ButtonVariant, string> = {
+    primary: themePalette.blue[700],
+    secondary: themePalette.slate[50],
+    ghost: themePalette.slate[100],
+    danger: themePalette.rose[700],
+    success: themePalette.emerald[700],
+  };
+  return table[variant] || table.primary;
 };
 
 const SIZES: Record<ButtonSize, { height: number; paddingHorizontal: number; fontSize: number }> = {
@@ -80,7 +91,7 @@ export const AppButton = ({
   fullWidth,
   style,
 }: AppButtonProps) => {
-  const tone = VARIANTS[variant] || VARIANTS.primary;
+  const tone = variantTone(variant);
   const dimensions = SIZES[size] || SIZES.md;
   const inert = Boolean(disabled || loading);
 
@@ -97,7 +108,7 @@ export const AppButton = ({
           height: dimensions.height,
           paddingHorizontal: dimensions.paddingHorizontal,
           borderColor: tone.border,
-          backgroundColor: pressed && !inert ? PRESSED[variant] : tone.background,
+          backgroundColor: pressed && !inert ? pressedTone(variant) : tone.background,
         },
         fullWidth && styles.fullWidth,
         inert && styles.inert,

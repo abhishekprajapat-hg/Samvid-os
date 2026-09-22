@@ -53,7 +53,7 @@ const leadSchema = new mongoose.Schema(
     requirements: {
       inventoryType: {
         type: String,
-        enum: ["COMMERCIAL", "RESIDENTIAL", ""],
+        enum: ["COMMERCIAL", "RESIDENTIAL", "COWORKING", ""],
         default: "",
         trim: true,
       },
@@ -145,6 +145,32 @@ const leadSchema = new mongoose.Schema(
         readyToMove: { type: Boolean, default: false },
         underConstruction: { type: Boolean, default: false },
       },
+      /*
+       * What a coworking enquiry actually asks for.
+       *
+       * Cabins are a list rather than a count plus one seat size, because a
+       * client commonly takes several of different capacities - one four-seater
+       * and one six-seater is a single enquiry, not two. The list length is the
+       * number of cabins, so the two can never disagree.
+       *
+       * Workstations is stored rather than derived: it usually equals the seats
+       * across the cabins, but a client can ask for open desks beyond them, and
+       * a computed field could not represent that.
+       */
+      coworking: {
+        cabins: [
+          {
+            seats: { type: Number, min: 1, max: 100, required: true },
+            _id: false,
+          },
+        ],
+        workstations: { type: Number, min: 0, default: null },
+        depositMonths: { type: Number, min: 0, max: 60, default: null },
+        agreedRent: { type: Number, min: 0, default: null },
+        noticePeriodMonths: { type: Number, min: 0, max: 60, default: null },
+        lockInMonths: { type: Number, min: 0, max: 120, default: null },
+      },
+
       residential: {
         bhkType: {
           type: String,
@@ -175,10 +201,31 @@ const leadSchema = new mongoose.Schema(
 
     hotClient: { type: Boolean, default: false },
     brokerContactId: { type: mongoose.Schema.Types.ObjectId, ref: "CrmContact", default: null },
+    // Optional: a coworking enquiry is often a single person, not a firm.
+    company: { type: String, default: "", trim: true, maxlength: 200 },
+
     source: {
       type: String,
       enum: ["META", "MANUAL"],
       required: true
+    },
+
+    /*
+     * Where the enquiry actually came from.
+     *
+     * Separate from `source`, which records how it entered the CRM - the Meta
+     * webhook or somebody typing it in - and which the intake code, the filters
+     * and the dedupe all branch on. Widening that enum to hold JustDial would
+     * have made every one of those reads ambiguous.
+     */
+    sourceChannel: {
+      type: String,
+      enum: [
+        "META", "JUSTDIAL", "OLX", "MYBRICKS", "99ACRES",
+        "REFERENCE", "BROKER", "DIRECT_CALL", "DIRECT_VISIT", "",
+      ],
+      default: "",
+      trim: true,
     },
 
     status: {
