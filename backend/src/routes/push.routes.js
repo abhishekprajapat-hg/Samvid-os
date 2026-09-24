@@ -95,7 +95,7 @@ router.post("/unsubscribe", writeLimiter, async (req, res) => {
 router.post("/test", writeLimiter, async (req, res) => {
   try {
     const result = await sendToUser(req.user._id, {
-      title: "The Office on Rent",
+      title: "Samvid OS",
       body: "Notifications are working on this device.",
       url: "/",
       tag: "push-test",

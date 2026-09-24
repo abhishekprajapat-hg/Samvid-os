@@ -160,7 +160,7 @@ const PrimarySidebar = ({
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13.5px] font-bold leading-tight text-slate-900 dark:text-slate-50">
-                Office on Rent
+                Samvid OS
               </p>
               <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
                 {roleLabel || "Admin"}

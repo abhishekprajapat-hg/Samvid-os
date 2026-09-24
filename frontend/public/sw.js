@@ -8,7 +8,7 @@
  * default.
  */
 
-const ICON = "/theofficeonrentlogo-mark.png";
+const ICON = "/favicon.png";
 const BADGE = "/favicon.png";
 
 /*
@@ -27,10 +27,10 @@ self.addEventListener("push", (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: "The Office on Rent", body: event.data ? event.data.text() : "" };
+    payload = { title: "Samvid OS", body: event.data ? event.data.text() : "" };
   }
 
-  const title = payload.title || "The Office on Rent";
+  const title = payload.title || "Samvid OS";
   const data = { url: payload.url || "/", ...(payload.data || {}) };
 
   /*

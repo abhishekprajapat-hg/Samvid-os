@@ -108,7 +108,7 @@ const ClientHome = () => {
               S
             </div>
             <div className="text-left">
-              <p className="font-display text-base tracking-wide text-slate-900">THE OFFICE ON RENT</p>
+              <p className="font-display text-base tracking-wide text-slate-900">SAMVID OS</p>
               <p className="text-[10px] uppercase tracking-[0.25em] text-cyan-700">Estates</p>
             </div>
           </button>

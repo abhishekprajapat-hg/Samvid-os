@@ -1437,7 +1437,7 @@ export const LeadDetailsScreen = () => {
     const today = formatProposalDate(new Date());
     const validity = Number.parseInt(proposalValidityDays, 10);
     const lines = [
-      "THE OFFICE ON RENT - PROPERTY PROPOSAL",
+      "SAMVID OS - PROPERTY PROPOSAL",
       `Date: ${today}`,
       "",
       `Dear ${String(lead.name || "Client")},`,

@@ -1,7 +1,7 @@
 /*
  * What a client has to produce before they get keys.
  *
- * These three lists are the ones The Office on Rent actually issues to clients
+ * These three lists are the ones Samvid OS actually issues to clients
  * (documents handout, Sept 2026) - not a generic KYC checklist. They are
  * reproduced exactly, including "GST if available" being the one optional item
  * on the company list. Nothing has been added: asking for a document the firm

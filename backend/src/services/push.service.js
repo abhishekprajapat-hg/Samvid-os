@@ -33,7 +33,7 @@ const getPublicKey = () => publicKey;
 // A push payload is capped (4KB on most services) and shown on a lock screen,
 // so it carries a headline and a link, never a record.
 const buildPayload = ({ title, body, url = "/", tag = "", data = {} }) => JSON.stringify({
-  title: String(title || "The Office on Rent").slice(0, 120),
+  title: String(title || "Samvid OS").slice(0, 120),
   body: String(body || "").slice(0, 300),
   url: String(url || "/"),
   tag: String(tag || ""),

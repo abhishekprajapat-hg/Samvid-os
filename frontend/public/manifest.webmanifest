@@ -1,7 +1,7 @@
 {
-  "name": "The Office on Rent CRM",
-  "short_name": "Office on Rent",
-  "description": "Leads, inventory, coworking and attendance for The Office on Rent.",
+  "name": "Samvid OS",
+  "short_name": "Samvid OS",
+  "description": "Leads, inventory, coworking and attendance in Samvid OS.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -10,13 +10,13 @@
   "theme_color": "#2549d6",
   "icons": [
     {
-      "src": "/theofficeonrentlogo-mark.png",
+      "src": "/favicon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/theofficeonrentlogo-mark.png",
+      "src": "/favicon.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
