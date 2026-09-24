@@ -3,9 +3,9 @@ const assert = require("node:assert/strict");
 const http = require("node:http");
 
 // Every router has to be reachable at BOTH /api/<name> and /api/client/<name>:
-// the web and mobile clients talk to the /api/client namespace (see
-// frontend/src/services/api.js, whose axios baseURL is "/api/client"), while
-// /api/<name> is the direct mount. Adding a router to only one of them is a
+// the web and mobile clients can use either namespace (see
+// frontend/src/services/api.js, whose axios baseURL is configurable).
+// Adding a router to only one of them is a
 // silent 404 that no unit test would catch, so this drives the real app.
 //
 // Unauthenticated requests are the probe: a mounted route answers 401 from
@@ -40,6 +40,7 @@ const statusOf = (server, path) =>
 const ROUTES = [
   "/access/me",
   "/access/users/111111111111111111111111/pages",
+  "/saas/companies",
   "/users",
   "/leads",
   "/tasks",

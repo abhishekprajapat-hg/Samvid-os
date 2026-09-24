@@ -120,6 +120,7 @@ app.use("/api/leads", require("./routes/lead.routes"));
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/users", require("./routes/user.routes"));
 app.use("/api/access", require("./routes/accessControl.routes"));
+app.use("/api/saas", require("./routes/saas.routes"));
 app.use("/api/attendance", require("./routes/attendance.routes"));
 app.use("/api/targets", require("./routes/target.routes"));
 app.use("/api/inventory", require("./routes/inventory.routes"));
