@@ -1,49 +1,95 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Crown,
-  Loader2,
-  Medal,
-  RefreshCw,
-  Trophy,
-  Users,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
+import ToastNotice from "../../components/ui/ToastNotice";
+import { getAllLeads } from "../../services/leadService";
+import { getMyTargets } from "../../services/targetService";
 import { getRoleLeaderboard } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
-import ToastNotice from "../../components/ui/ToastNotice";
 
 const WINDOW_OPTIONS = [
-  { label: "Last 7 Days", value: 7 },
-  { label: "Last 30 Days", value: 30 },
-  { label: "Last 90 Days", value: 90 },
+  { key: "MONTH", label: "This month", days: () => new Date().getDate() },
+  {
+    key: "QUARTER",
+    label: "This quarter",
+    days: () => {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+      return Math.max(1, Math.ceil((now - start) / 86400000) + 1);
+    },
+  },
+  { key: "ALL", label: "All time", days: () => 3650 },
 ];
-const formatPercent = (value) => {
-  const numeric = Number(value || 0);
-  if (!Number.isFinite(numeric)) return "0%";
-  const rounded = Math.round(numeric * 10) / 10;
-  return `${rounded}%`;
+
+const MODE_OPTIONS = [
+  { key: "CLOSURES", label: "Closures" },
+  { key: "VISITS", label: "Site visits" },
+  { key: "REVENUE", label: "Revenue" },
+];
+
+const toMonthKey = (date = new Date()) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+const toDate = (value) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 
-const rankBadgeClass = (rank) => {
-  if (rank === 1) return "bg-amber-100 text-amber-700 border-amber-200";
-  if (rank === 2) return "bg-slate-100 text-slate-700 border-slate-200";
-  if (rank === 3) return "bg-cyan-100 text-cyan-700 border-cyan-200";
-  return "bg-slate-50 text-slate-600 border-slate-200";
+const formatCurrencyCompact = (value) => {
+  const amount = Number(value) || 0;
+  if (Math.abs(amount) >= 100000) {
+    const lakhs = amount / 100000;
+    return `₹${lakhs.toFixed(lakhs >= 10 ? 1 : 2).replace(/\.0+$/, "")} L`;
+  }
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
 };
 
-const RankIcon = ({ rank }) => {
-  if (rank === 1) return <Crown size={14} />;
-  if (rank <= 3) return <Medal size={14} />;
-  return <Trophy size={14} />;
+const getInitials = (name = "") =>
+  String(name || "User")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "U";
+
+const getLeadRevenue = (lead = {}) => {
+  const received = Number(lead.brokerageReceived);
+  if (Number.isFinite(received) && received > 0) return received;
+  const saleDetails = lead?.inventoryId?.saleDetails;
+  const total = Number(saleDetails?.totalAmount || lead?.inventoryId?.price || 0);
+  const remaining = Number(saleDetails?.remainingAmount || 0);
+  return Math.max(0, total - remaining);
+};
+
+const getLeadOwnerId = (lead = {}, selectedRole = "") => {
+  if (selectedRole === "CHANNEL_PARTNER") {
+    return String(lead?.createdBy?._id || lead?.createdBy || "");
+  }
+  return String(lead?.assignedTo?._id || lead?.assignedTo || "");
+};
+
+const getOrdinalSuffix = (rank) => {
+  const value = Number(rank || 0);
+  if (!value) return "";
+  const teen = value % 100;
+  if (teen >= 11 && teen <= 13) return "th";
+  if (value % 10 === 1) return "st";
+  if (value % 10 === 2) return "nd";
+  if (value % 10 === 3) return "rd";
+  return "th";
 };
 
 const RoleLeaderboard = () => {
   const [viewerRole] = useState(() =>
-    String(localStorage.getItem("role") || "").trim().toUpperCase(),
+    String(window.localStorage.getItem("role") || "").trim().toUpperCase(),
   );
   const [selectedRole, setSelectedRole] = useState(viewerRole || "");
-  const [windowDays, setWindowDays] = useState(30);
+  const [windowKey, setWindowKey] = useState("MONTH");
+  const [mode, setMode] = useState("CLOSURES");
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState({
     role: "",
@@ -52,210 +98,247 @@ const RoleLeaderboard = () => {
     leaderboard: [],
     allowedRoleFilters: [],
   });
+  const [targetState, setTargetState] = useState({ myTarget: null, outgoing: [] });
+  const [leads, setLeads] = useState([]);
 
-  const loadLeaderboard = async (days, roleFilter, { quiet = false } = {}) => {
-    if (quiet) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setError("");
-
-    try {
-      const payload = await getRoleLeaderboard({
-        windowDays: days,
-        ...(roleFilter ? { role: roleFilter } : {}),
-      });
-      setData({
-        role: payload.role,
-        roleLabel: payload.roleLabel,
-        count: payload.count,
-        leaderboard: payload.leaderboard,
-        allowedRoleFilters: payload.allowedRoleFilters || [],
-      });
-
-      const normalizedRequested = String(roleFilter || "").trim().toUpperCase();
-      const normalizedResolved = String(payload.role || "").trim().toUpperCase();
-      if (normalizedResolved && normalizedRequested !== normalizedResolved) {
-        setSelectedRole(normalizedResolved);
-      }
-    } catch (fetchError) {
-      setError(toErrorMessage(fetchError, "Leaderboard load failed"));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  const windowDays = useMemo(
+    () => WINDOW_OPTIONS.find((option) => option.key === windowKey)?.days() || 30,
+    [windowKey],
+  );
 
   useEffect(() => {
-    loadLeaderboard(windowDays, selectedRole);
-  }, [windowDays, selectedRole]);
+    let alive = true;
+    const loadLeaderboard = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const [payload, leadRows, targetPayload] = await Promise.all([
+          getRoleLeaderboard({
+            windowDays,
+            ...(selectedRole ? { role: selectedRole } : {}),
+          }),
+          getAllLeads(),
+          getMyTargets({ month: toMonthKey() }).catch(() => ({ myTarget: null, outgoing: [] })),
+        ]);
+        if (!alive) return;
+        setData({
+          role: payload.role,
+          roleLabel: payload.roleLabel,
+          count: payload.count,
+          leaderboard: payload.leaderboard,
+          allowedRoleFilters: payload.allowedRoleFilters || [],
+        });
+        setSelectedRole(String(payload.role || selectedRole || "").trim().toUpperCase());
+        setLeads(Array.isArray(leadRows) ? leadRows : []);
+        setTargetState({
+          myTarget: targetPayload.myTarget || null,
+          outgoing: targetPayload.outgoing || [],
+        });
+      } catch (fetchError) {
+        if (alive) setError(toErrorMessage(fetchError, "Leaderboard load failed"));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
 
-  const rows = useMemo(
-    () => (Array.isArray(data.leaderboard) ? data.leaderboard : []),
-    [data.leaderboard],
-  );
-  const myRow = useMemo(
-    () => rows.find((row) => Boolean(row?.isSelf)) || null,
-    [rows],
-  );
-  const topRow = rows[0] || null;
-  const roleFilterOptions = data.allowedRoleFilters || [];
+    loadLeaderboard();
+    return () => {
+      alive = false;
+    };
+  }, [selectedRole, windowDays]);
 
-  const handleRefresh = () => {
-    loadLeaderboard(windowDays, selectedRole, { quiet: true });
-  };
+  const revenueByUserId = useMemo(() => {
+    const since = new Date(Date.now() - windowDays * 86400000);
+    const rows = new Map();
+    leads.forEach((lead) => {
+      if (String(lead.status || "").toUpperCase() !== "CLOSED") return;
+      const rangeDate = toDate(lead.updatedAt || lead.createdAt);
+      if (rangeDate && rangeDate < since) return;
+      const ownerId = getLeadOwnerId(lead, data.role);
+      if (!ownerId) return;
+      rows.set(ownerId, (rows.get(ownerId) || 0) + getLeadRevenue(lead));
+    });
+    return rows;
+  }, [data.role, leads, windowDays]);
+
+  const targetByUserId = useMemo(() => {
+    const rows = new Map();
+    targetState.outgoing.forEach((target) => {
+      const assigneeId = String(target?.assignedTo?._id || target?.assignedTo || "");
+      if (assigneeId) rows.set(assigneeId, target);
+    });
+    const myTarget = targetState.myTarget;
+    const myAssigneeId = String(myTarget?.assignedTo?._id || myTarget?.assignedTo || "");
+    if (myAssigneeId) rows.set(myAssigneeId, myTarget);
+    return rows;
+  }, [targetState]);
+
+  const rankedRows = useMemo(() => {
+    const rows = (data.leaderboard || []).map((row) => {
+      const revenue = revenueByUserId.get(String(row.userId)) || 0;
+      const target = targetByUserId.get(String(row.userId)) || null;
+      const targetValue = Number(target?.leadsTarget || target?.revenueTarget || 0);
+      const achievedValue = target?.leadsTarget
+        ? Number(target?.achievements?.closedDealsAchieved || row.closedLeads || 0)
+        : revenue;
+      const targetPercent = targetValue > 0 ? Math.round((achievedValue / targetValue) * 100) : null;
+      return { ...row, revenue, targetPercent };
+    });
+
+    const sorter = {
+      CLOSURES: (left, right) => right.closedLeads - left.closedLeads || right.siteVisits - left.siteVisits,
+      VISITS: (left, right) => right.siteVisits - left.siteVisits || right.closedLeads - left.closedLeads,
+      REVENUE: (left, right) => right.revenue - left.revenue || right.closedLeads - left.closedLeads,
+    }[mode];
+
+    return [...rows].sort(sorter).map((row, index) => ({ ...row, displayRank: index + 1 }));
+  }, [data.leaderboard, mode, revenueByUserId, targetByUserId]);
+
+  const myRow = rankedRows.find((row) => row.isSelf) || null;
+  const teamTarget = rankedRows.reduce((sum, row) => {
+    const target = targetByUserId.get(String(row.userId));
+    return sum + Number(target?.leadsTarget || 0);
+  }, 0);
+  const achieved = rankedRows.reduce((sum, row) => sum + Number(row.closedLeads || 0), 0);
+  const now = new Date();
+  const daysLeft = Math.max(0, new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate());
+  const neededPerDay = daysLeft > 0 ? Math.max(0, (teamTarget - achieved) / daysLeft) : 0;
+  const currentWindowLabel = WINDOW_OPTIONS.find((option) => option.key === windowKey)?.label || "This month";
 
   return (
-    <div className="ui-page-shell custom-scrollbar">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-          {roleFilterOptions.length > 1 ? (
-            <>
-              <label className="sr-only" htmlFor="leaderboard-role">
-                Select role filter
-              </label>
-              <select
-                id="leaderboard-role"
-                value={selectedRole}
-                onChange={(event) => setSelectedRole(event.target.value)}
-                className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-              >
-                {roleFilterOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </>
-          ) : null}
-
-          <label className="sr-only" htmlFor="leaderboard-window">
-            Select leaderboard window
-          </label>
-          <select
-            id="leaderboard-window"
-            value={windowDays}
-            onChange={(event) => setWindowDays(Number(event.target.value))}
-            className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-          >
-            {WINDOW_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={loading || refreshing}
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Refresh
-          </button>
-      </div>
-
+    <div className="leaderboard-doc-screen ui-page-shell custom-scrollbar">
       <ToastNotice message={error} type="error" />
 
+      <div className="leaderboard-toolbar">
+        <div className="leaderboard-seg">
+          {WINDOW_OPTIONS.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              className={windowKey === option.key ? "on" : ""}
+              onClick={() => setWindowKey(option.key)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <div className="leaderboard-seg">
+          {MODE_OPTIONS.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              className={mode === option.key ? "on" : ""}
+              onClick={() => setMode(option.key)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        {data.allowedRoleFilters.length > 1 ? (
+          <select
+            value={selectedRole}
+            onChange={(event) => setSelectedRole(event.target.value)}
+            className="leaderboard-select"
+            aria-label="Role filter"
+          >
+            {data.allowedRoleFilters.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+
       {loading ? (
-        <div className="ui-soft-panel flex h-40 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500">
-          <Loader2 size={18} className="mr-2 animate-spin" />
+        <div className="leaderboard-card leaderboard-loading">
+          <Loader2 size={18} className="animate-spin" />
           Loading leaderboard...
         </div>
       ) : (
-        <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Active Peers
-              </p>
-              <div className="mt-2 flex items-center gap-2 text-slate-900">
-                <Users size={16} className="text-cyan-600" />
-                <span className="text-xl font-semibold">{Number(data.count || 0)}</span>
-              </div>
+        <div className="leaderboard-split">
+          <div className="leaderboard-card">
+            <div className="leaderboard-card-h">
+              <h4>{new Date().toLocaleString("en-IN", { month: "long" })} rankings</h4>
+              <span className="leaderboard-muted">Updated now</span>
             </div>
-
-            <div className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Your Rank
-              </p>
-              <div className="mt-2 flex items-center gap-2 text-slate-900">
-                <Trophy size={16} className="text-amber-500" />
-                <span className="text-xl font-semibold">
-                  {myRow?.rank ? `#${myRow.rank}` : "-"}
-                </span>
-              </div>
-            </div>
-
-            <div className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Top Conversion
-              </p>
-              <div className="mt-2 flex items-center gap-2 text-slate-900">
-                <Crown size={16} className="text-amber-500" />
-                <span className="text-xl font-semibold">
-                  {topRow ? formatPercent(topRow.conversionRate) : "0%"}
-                </span>
-              </div>
+            <div className="leaderboard-table-wrap">
+              <table className="leaderboard-tbl">
+                <thead>
+                  <tr>
+                    <th className="leaderboard-rank-col">#</th>
+                    <th>Executive</th>
+                    <th>Closures</th>
+                    <th>Visits</th>
+                    <th>Revenue</th>
+                    <th>Target</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rankedRows.length === 0 ? (
+                    <tr><td colSpan={6} className="leaderboard-empty">No leaderboard rows for {currentWindowLabel.toLowerCase()}.</td></tr>
+                  ) : null}
+                  {rankedRows.map((row) => (
+                    <tr key={row.userId} className={row.displayRank === 1 ? "is-top" : row.isSelf ? "is-self" : ""}>
+                      <td><b className={row.displayRank === 1 ? "leaderboard-rank-top" : ""}>{row.displayRank}</b></td>
+                      <td>
+                        <div className="leaderboard-cellname">
+                          <div className="leaderboard-avatar">{getInitials(row.name)}</div>
+                          <div>
+                            <b>{row.name || "Unknown User"}</b>
+                            <small>{row.isSelf ? "You" : data.roleLabel || row.role || "Executive"}</small>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="leaderboard-num"><b>{Number(row.closedLeads || 0)}</b></td>
+                      <td className="leaderboard-num">{Number(row.siteVisits || 0)}</td>
+                      <td className="leaderboard-num">{formatCurrencyCompact(row.revenue)}</td>
+                      <td>
+                        {row.targetPercent === null ? (
+                          <span className="leaderboard-muted">-</span>
+                        ) : (
+                          <span className={`leaderboard-pill ${row.targetPercent >= 100 ? "t-won" : row.targetPercent >= 70 ? "t-warm" : "t-risk"}`}>
+                            <i />
+                            {row.targetPercent}%
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
-          {rows.length === 0 ? (
-            <div className="ui-soft-panel mt-5 rounded-2xl border border-slate-200 bg-white px-4 py-6 text-sm text-slate-600 shadow-sm">
-              No users available for leaderboard in selected window.
-            </div>
-          ) : (
-            <div className="ui-soft-panel mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-slate-200">
-                  <thead className="bg-slate-50">
-                    <tr className="text-left text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                      <th className="px-4 py-3">Rank</th>
-                      <th className="px-4 py-3">User</th>
-                      <th className="px-4 py-3">Closed</th>
-                      <th className="px-4 py-3">Total</th>
-                      <th className="px-4 py-3">Conversion</th>
-                      <th className="px-4 py-3">Site Visits</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {rows.map((row) => (
-                      <tr
-                        key={row.userId}
-                        className={row.isSelf ? "bg-cyan-50/70" : "bg-white"}
-                      >
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-semibold ${rankBadgeClass(row.rank)}`}>
-                            <RankIcon rank={row.rank} />
-                            #{row.rank}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <p className="text-sm font-semibold text-slate-900">
-                            {row.name || "Unknown User"}
-                            {row.isSelf ? " (You)" : ""}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-800">
-                          {Number(row.closedLeads || 0).toLocaleString("en-IN")}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-slate-700">
-                          {Number(row.totalLeads || 0).toLocaleString("en-IN")}
-                        </td>
-                        <td className="px-4 py-3 text-sm font-semibold text-cyan-700">
-                          {formatPercent(row.conversionRate)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-slate-700">
-                          {Number(row.siteVisits || 0).toLocaleString("en-IN")}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <div className="leaderboard-side">
+            <div className="leaderboard-card">
+              <div className="leaderboard-card-h"><h4>Your position</h4></div>
+              <div className="leaderboard-position">
+                <div className="leaderboard-position-rank">
+                  {myRow?.displayRank || "-"}
+                  {myRow?.displayRank ? <span>{getOrdinalSuffix(myRow.displayRank)}</span> : null}
+                </div>
+                <p className="leaderboard-hint">of {data.count || rankedRows.length} in {currentWindowLabel.toLowerCase()}</p>
+                <div className="leaderboard-bar-mini">
+                  <i style={{ width: `${myRow?.targetPercent ? Math.min(myRow.targetPercent, 100) : 0}%` }} />
+                </div>
+                <p className="leaderboard-hint">
+                  {myRow ? `${myRow.closedLeads} closures tracked` : "No personal rank in this filter"}
+                </p>
               </div>
             </div>
-          )}
-        </>
+
+            <div className="leaderboard-card">
+              <div className="leaderboard-card-h"><h4>Team pace</h4></div>
+              <div className="leaderboard-card-b">
+                <div className="leaderboard-rowlist">
+                  <div><span>Team target</span><b className="leaderboard-num">{teamTarget || "-"} closures</b></div>
+                  <div><span>Achieved</span><b className="leaderboard-num ok">{achieved}</b></div>
+                  <div><span>Days left</span><b className="leaderboard-num">{daysLeft}</b></div>
+                  <div><span>Needed per day</span><b className="leaderboard-num">{neededPerDay.toFixed(2)}</b></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

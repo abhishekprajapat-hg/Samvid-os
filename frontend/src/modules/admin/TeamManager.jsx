@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { GitBranch, Plus, RefreshCw, Search, ShieldCheck, Sparkles, X } from "lucide-react";
+import { Edit2, Plus, RefreshCw, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import {
   createUserDeleteRequest,
   createUser,
   deleteUser,
+  getAdminUserDeleteRequests,
   getUsers,
   rebalanceExecutives,
   updateChannelPartnerInventoryAccess,
@@ -12,21 +13,10 @@ import {
 import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
+import EmployeePageAccess from "./components/EmployeePageAccess";
 import {
   UserFormPanel,
 } from "./components/TeamManagerPanels";
-import {
-  TeamLeadOverviewCards,
-  TeamUserGrid,
-} from "./components/TeamManagerCards";
-
-const ROLE_OPTIONS = [
-  { label: "Manager", value: "MANAGER" },
-  { label: "Executive", value: "EXECUTIVE" },
-  { label: "Field Executive", value: "FIELD_EXECUTIVE" },
-  { label: "Production Executive", value: "PRODUCTION_EXECUTIVE" },
-  { label: "Channel Partner", value: "CHANNEL_PARTNER" },
-];
 
 const MANAGEMENT_ROLES = ["MANAGER"];
 const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
@@ -36,7 +26,9 @@ const REPORTING_PARENT_ROLES = {
   EXECUTIVE: ["MANAGER"],
   FIELD_EXECUTIVE: ["MANAGER"],
   PRODUCTION_EXECUTIVE: ["MANAGER"],
+  COMMUNITY_MANAGER: ["MANAGER"],
   CHANNEL_PARTNER: ["MANAGER"],
+  COWORKING_ADMIN: ["ADMIN"],
 };
 const ROLE_LABELS = {
   SUPER_ADMIN: "Super Admin",
@@ -45,7 +37,9 @@ const ROLE_LABELS = {
   EXECUTIVE: "Executive",
   FIELD_EXECUTIVE: "Field Executive",
   PRODUCTION_EXECUTIVE: "Production Executive",
+  COMMUNITY_MANAGER: "Community Manager",
   CHANNEL_PARTNER: "Channel Partner",
+  COWORKING_ADMIN: "Coworking admin",
 };
 const DEFAULT_BROKERAGE_VALUE = 50000;
 const ROLE_HIERARCHY = [
@@ -55,7 +49,9 @@ const ROLE_HIERARCHY = [
   { role: "EXECUTIVE", reportsTo: "Manager", scope: "Assigned leads" },
   { role: "FIELD_EXECUTIVE", reportsTo: "Manager", scope: "Field visits" },
   { role: "PRODUCTION_EXECUTIVE", reportsTo: "Manager", scope: "Production tasks" },
+  { role: "COMMUNITY_MANAGER", reportsTo: "Manager", scope: "Production tasks" },
   { role: "CHANNEL_PARTNER", reportsTo: "Manager", scope: "Partner-created leads" },
+  { role: "COWORKING_ADMIN", reportsTo: "Admin", scope: "Coworking workspace controls" },
 ];
 
 const normalizeBrokerageMode = (value) =>
@@ -67,10 +63,52 @@ const getEntityId = (value) => {
   return String(value._id || value.id || "");
 };
 
+const getUserInitials = (name = "") =>
+  String(name || "")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || "")
+    .join("")
+    || "U";
+
+const formatRoleType = (value) =>
+  String(value || "").trim().toUpperCase() === "BOTH" ? "Both" :
+  String(value || "").trim().toUpperCase() === "RESIDENTIAL"
+    ? "Residential"
+    : "Commercial";
+
+const formatLastActive = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Never";
+
+  const diffMs = Date.now() - date.getTime();
+  const minute = 60 * 1000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (diffMs < minute) return "Just now";
+  if (diffMs < hour) return `${Math.max(1, Math.floor(diffMs / minute))} min ago`;
+  if (diffMs < day) return `${Math.floor(diffMs / hour)} hour${diffMs >= 2 * hour ? "s" : ""} ago`;
+  if (diffMs < 2 * day) return "Yesterday";
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+};
+
+const getRolePillClass = (role) => {
+  if (role === "EXECUTIVE") return "t-open";
+  if (role === "FIELD_EXECUTIVE") return "t-sched";
+  if (role === "PRODUCTION_EXECUTIVE" || role === "COMMUNITY_MANAGER") return "t-warm";
+  if (role === "CHANNEL_PARTNER") return "t-party";
+  if (role === "COWORKING_ADMIN") return "t-dead";
+  if (role === "ADMIN" || role === "MANAGER") return "t-won";
+  return "t-risk";
+};
+
 
 const TeamManager = ({ theme = "light" }) => {
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
+  const [accessEmployee, setAccessEmployee] = useState(null);
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -80,21 +118,25 @@ const TeamManager = ({ theme = "light" }) => {
   const [rebalancing, setRebalancing] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState("");
   const [inventoryAccessUpdatingUserId, setInventoryAccessUpdatingUserId] = useState("");
+  const [deleteRequestsCount, setDeleteRequestsCount] = useState(0);
+  const [statusFilter, setStatusFilter] = useState("ACTIVE");
   const [roleFilter, setRoleFilter] = useState("ALL");
+  const [roleTypeFilter, setRoleTypeFilter] = useState("ALL");
+  const [reportingFilter, setReportingFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     phone: "",
+    roleType: "COMMERCIAL",
     password: "",
-    role: "MANAGER",
+    role: "EXECUTIVE",
     reportingToId: "",
     canViewInventory: false,
     brokerageMode: "FLAT",
     brokerageValue: String(DEFAULT_BROKERAGE_VALUE),
     brokerageNotes: "",
   });
-
   const currentRole = localStorage.getItem("role");
   const isAdmin = currentRole === "ADMIN" || currentRole === "SUPER_ADMIN";
   const canUseAdminTools = isAdmin || currentRole === "MANAGER";
@@ -103,8 +145,13 @@ const TeamManager = ({ theme = "light" }) => {
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const currentUserId = currentUser?.id || currentUser?._id || "";
 
+  const selectedBaseRole = formData.role;
+  const roleOptions = Object.entries(ROLE_LABELS)
+    .filter(([value]) => value !== "ADMIN")
+    .map(([value, label]) => ({ value, label }));
+
   const reportingCandidates = useMemo(() => {
-    const allowedParentRoles = REPORTING_PARENT_ROLES[formData.role] || [];
+    const allowedParentRoles = REPORTING_PARENT_ROLES[selectedBaseRole] || [];
     if (!allowedParentRoles.length) return [];
 
     return users.filter(
@@ -112,15 +159,15 @@ const TeamManager = ({ theme = "light" }) => {
         user.isActive &&
         allowedParentRoles.includes(user.role),
     );
-  }, [formData.role, users]);
+  }, [selectedBaseRole, users]);
 
   const reportingLabel = useMemo(() => {
-    const allowedParentRoles = REPORTING_PARENT_ROLES[formData.role] || [];
+    const allowedParentRoles = REPORTING_PARENT_ROLES[selectedBaseRole] || [];
     if (!allowedParentRoles.length) return "";
     return allowedParentRoles
       .map((role) => ROLE_LABELS[role] || role)
       .join(" / ");
-  }, [formData.role]);
+  }, [selectedBaseRole]);
 
   const roleFilterOptions = useMemo(() => {
     const visibleRoleSet = new Set(
@@ -147,35 +194,62 @@ const TeamManager = ({ theme = "light" }) => {
     ];
   }, [users]);
 
-  const normalizedSearchQuery = String(searchQuery || "").trim().toLowerCase();
-
-  const roleBreakdown = useMemo(() => {
-    const breakdown = {};
+  const reportingFilterOptions = useMemo(() => {
+    const parents = new Map();
     users.forEach((user) => {
-      const role = String(user?.role || "").trim();
-      if (!role) return;
-      breakdown[role] = Number(breakdown[role] || 0) + 1;
+      const parentId = getEntityId(user.parentId);
+      if (!parentId) return;
+      parents.set(parentId, user.parentId?.name || "Unknown");
     });
-    return breakdown;
+
+    return [
+      { label: "All reporting", value: "ALL" },
+      ...[...parents.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1]))
+        .map(([value, label]) => ({ label, value })),
+    ];
   }, [users]);
+
+  const normalizedSearchQuery = String(searchQuery || "").trim().toLowerCase();
 
   const activeUsersCount = useMemo(
     () => users.filter((user) => user?.isActive).length,
     [users],
   );
 
+  const inactiveUsersCount = useMemo(
+    () => users.filter((user) => !user?.isActive).length,
+    [users],
+  );
+
+  const invitedUsersCount = useMemo(
+    () => users.filter((user) => !user?.isActive && !user?.lastLoginAt).length,
+    [users],
+  );
+
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
+      const statusMatch =
+        statusFilter === "ALL"
+        || (statusFilter === "ACTIVE" && user?.isActive)
+        || (statusFilter === "INVITED" && !user?.isActive && !user?.lastLoginAt)
+        || (statusFilter === "DISABLED" && !user?.isActive);
       const roleMatch =
         roleFilter === "ALL" || String(user.role || "").trim() === roleFilter;
+      const roleTypeMatch =
+        roleTypeFilter === "ALL"
+        || String(user.roleType || "COMMERCIAL").trim().toUpperCase() === roleTypeFilter;
+      const reportingMatch =
+        reportingFilter === "ALL" || getEntityId(user.parentId) === reportingFilter;
 
-      if (!roleMatch) return false;
+      if (!statusMatch || !roleMatch || !roleTypeMatch || !reportingMatch) return false;
       if (!normalizedSearchQuery) return true;
 
       const searchableText = [
         user?.name,
         user?.email,
         user?.phone,
+        user?.roleType === "BOTH" ? "Both" : user?.roleType === "RESIDENTIAL" ? "Residential" : "Commercial",
         user?.parentId?.name,
         user?.partnerCode,
         ROLE_LABELS[user?.role] || user?.role,
@@ -185,10 +259,14 @@ const TeamManager = ({ theme = "light" }) => {
 
       return searchableText.includes(normalizedSearchQuery);
     });
-  }, [normalizedSearchQuery, roleFilter, users]);
+  }, [normalizedSearchQuery, reportingFilter, roleFilter, roleTypeFilter, statusFilter, users]);
 
   const hasActiveFilters =
-    roleFilter !== "ALL" || Boolean(normalizedSearchQuery);
+    statusFilter !== "ACTIVE"
+    || roleFilter !== "ALL"
+    || roleTypeFilter !== "ALL"
+    || reportingFilter !== "ALL"
+    || Boolean(normalizedSearchQuery);
 
   const leadStats = useMemo(() => {
     const childrenByParent = new Map();
@@ -271,25 +349,22 @@ const TeamManager = ({ theme = "light" }) => {
     return statsByUserId;
   }, [users, leads]);
 
-  const globalStats = useMemo(() => {
-    const converted = leads.filter((lead) => lead.status === "CLOSED").length;
-    const unassigned = leads.filter((lead) => !getEntityId(lead.assignedTo)).length;
-
-    return {
-      total: leads.length,
-      converted,
-      unassigned,
-    };
-  }, [leads]);
-
   const loadData = async () => {
     try {
       setLoading(true);
       setError("");
 
-      const [userData, leadData] = await Promise.all([getUsers(), getAllLeads()]);
+      const requestPromise = isAdmin
+        ? getAdminUserDeleteRequests({ status: "PENDING" }).catch(() => [])
+        : Promise.resolve([]);
+      const [userData, leadData, deleteRequests] = await Promise.all([
+        getUsers(),
+        getAllLeads(),
+        requestPromise,
+      ]);
       setUsers(userData.users || []);
       setLeads(Array.isArray(leadData) ? leadData : []);
+      setDeleteRequestsCount(Array.isArray(deleteRequests) ? deleteRequests.length : 0);
     } catch (err) {
       setError(toErrorMessage(err, "Failed to load users"));
     } finally {
@@ -314,8 +389,9 @@ const TeamManager = ({ theme = "light" }) => {
       name: "",
       email: "",
       phone: "",
+      roleType: "COMMERCIAL",
       password: "",
-      role: "MANAGER",
+      role: "EXECUTIVE",
       reportingToId: "",
       canViewInventory: false,
       brokerageMode: "FLAT",
@@ -334,8 +410,13 @@ const TeamManager = ({ theme = "light" }) => {
   const handleCreateUser = async () => {
     if (!canUseAdminTools) return;
 
-    if (!formData.name || !formData.email || !formData.password || !formData.role) {
-      setFormError("Name, email, password and role are required.");
+    if (!formData.name || !formData.email || !formData.password) {
+      setFormError("Name, email and password are required.");
+      return;
+    }
+
+    if (!formData.role) {
+      setFormError("Select a role.");
       return;
     }
 
@@ -348,10 +429,11 @@ const TeamManager = ({ theme = "light" }) => {
         email: formData.email.trim(),
         phone: formData.phone.trim(),
         password: formData.password,
+        roleType: formData.roleType,
         role: formData.role,
       };
 
-      if (formData.role === "CHANNEL_PARTNER") {
+      if (selectedBaseRole === "CHANNEL_PARTNER") {
         const brokerageMode = normalizeBrokerageMode(formData.brokerageMode);
         const brokerageValue = Number(formData.brokerageValue);
         if (!Number.isFinite(brokerageValue) || brokerageValue < 0) {
@@ -460,13 +542,6 @@ const TeamManager = ({ theme = "light" }) => {
     }
   };
 
-  const getLeadScopeLabel = (role) => {
-    if (role === "ADMIN") return "Global Leads";
-    if (MANAGEMENT_ROLES.includes(role)) return "Team Leads";
-    if (EXECUTIVE_ROLES.includes(role)) return "Assigned Leads";
-    return "Owned Leads";
-  };
-
   if (!canViewTeamAccess) {
     return (
       <div className={`ui-page-shell custom-scrollbar ${isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"}`}>
@@ -478,261 +553,260 @@ const TeamManager = ({ theme = "light" }) => {
   }
 
   return (
-    <div className={`ui-page-shell custom-scrollbar overflow-x-hidden flex flex-col gap-4 ${
-      isDarkTheme ? "bg-slate-950/40" : "bg-slate-50/70"
-    }`}>
-      <section className={`ui-hero-card rounded-2xl border p-4 ${
-        isDarkTheme ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"
-      }`}>
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold ${
-              isAdmin
-                ? isDarkTheme
-                  ? "border-cyan-400/35 bg-cyan-500/15 text-cyan-100"
-                  : "border-cyan-200 bg-cyan-50 text-cyan-700"
-                : isDarkTheme
-                  ? "border-slate-600 bg-slate-800/80 text-slate-200"
-                  : "border-slate-300 bg-slate-100 text-slate-700"
-            }`}>
-              <Sparkles size={13} />
-              {isAdmin ? "Admin Command Mode" : "Manager Command Mode"}
-            </div>
-            <span className={`rounded-full border px-3 py-1 text-xs ${
-              isDarkTheme ? "border-slate-700 bg-slate-950/70 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
-            }`}>
-              Users: <span className="font-semibold">{users.length}</span>
-            </span>
-            <span className={`rounded-full border px-3 py-1 text-xs ${
-              isDarkTheme ? "border-slate-700 bg-slate-950/70 text-emerald-300" : "border-slate-200 bg-slate-50 text-emerald-700"
-            }`}>
-              Active: <span className="font-semibold">{activeUsersCount}</span>
-            </span>
-            <span className={`rounded-full border px-3 py-1 text-xs ${
-              isDarkTheme ? "border-slate-700 bg-slate-950/70 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
-            }`}>
-              Leads: <span className="font-semibold">{globalStats.total}</span>
-            </span>
-            <span className={`rounded-full border px-3 py-1 text-xs ${
-              isDarkTheme ? "border-slate-700 bg-slate-950/70 text-cyan-300" : "border-slate-200 bg-slate-50 text-cyan-700"
-            }`}>
-              Closed: <span className="font-semibold">{globalStats.converted}</span>
-            </span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={loadData}
-              className={`h-10 rounded-xl border px-4 text-sm font-semibold inline-flex items-center gap-2 ${
-                isDarkTheme
-                  ? "border-slate-700 text-slate-200 bg-slate-950/70 hover:border-cyan-300/45"
-                  : "border-slate-300 text-slate-700 bg-white hover:border-cyan-300"
-              }`}
-            >
-              <RefreshCw size={15} />
-              Refresh
-            </button>
-            {canUseAdminTools ? (
-              <>
-                <button
-                  onClick={handleRebalance}
-                  disabled={rebalancing}
-                  className={`h-10 rounded-xl border px-4 text-sm font-semibold ${
-                    isDarkTheme
-                      ? "border-slate-700 text-slate-200 bg-slate-950/70 hover:border-cyan-300/45"
-                      : "border-slate-300 text-slate-700 bg-white hover:border-cyan-300"
-                  } disabled:opacity-60`}
-                >
-                  {rebalancing ? "Rebalancing..." : "Rebalance Executives"}
-                </button>
-                <button
-                  onClick={() => setPanelOpen(true)}
-                  className="h-10 rounded-xl bg-cyan-600 px-4 text-sm font-semibold text-white hover:bg-cyan-500 inline-flex items-center gap-2"
-                >
-                  <Plus size={15} />
-                  New User
-                </button>
-              </>
-            ) : null}
-          </div>
-        </div>
-      </section>
-
+    <div className="ui-page-shell team-doc-screen custom-scrollbar">
       <ToastNotice message={error} type="error" />
 
-      <section className={`rounded-2xl border p-4 ${
-        isDarkTheme ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"
-      }`}>
-        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${
-              isDarkTheme ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-100" : "border-cyan-200 bg-cyan-50 text-cyan-700"
-            }`}>
-              <GitBranch size={13} />
-              Role hierarchy
-            </div>
-            <p className={`mt-2 text-sm ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}>
-              Reporting structure and lead visibility boundaries for the team workspace.
-            </p>
-          </div>
-          <div className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-semibold ${
-            isDarkTheme ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-slate-50 text-slate-600"
-          }`}>
-            <ShieldCheck size={14} />
-            {isAdmin ? "Full controls enabled" : "Full controls; deletes require Admin approval"}
-          </div>
+      <div className="team-toolbar">
+        <div className="team-seg">
+          <button
+            type="button"
+            className={statusFilter === "ACTIVE" ? "on" : ""}
+            onClick={() => setStatusFilter("ACTIVE")}
+          >
+            Active <span className="team-muted">{activeUsersCount}</span>
+          </button>
+          <button
+            type="button"
+            className={statusFilter === "INVITED" ? "on" : ""}
+            onClick={() => setStatusFilter("INVITED")}
+          >
+            Invited <span className="team-muted">{invitedUsersCount}</span>
+          </button>
+          <button
+            type="button"
+            className={statusFilter === "DISABLED" ? "on" : ""}
+            onClick={() => setStatusFilter("DISABLED")}
+          >
+            Disabled <span className="team-muted">{inactiveUsersCount}</span>
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-5">
-          {ROLE_HIERARCHY.map((row) => (
-            <button
-              key={row.role}
-              type="button"
-              onClick={() => setRoleFilter(row.role)}
-              className={`rounded-2xl border p-3 text-left transition hover:-translate-y-0.5 ${
-                roleFilter === row.role
-                  ? isDarkTheme
-                    ? "border-cyan-300/45 bg-cyan-500/15"
-                    : "border-cyan-300 bg-cyan-50"
-                  : isDarkTheme
-                    ? "border-slate-700 bg-slate-950/70"
-                    : "border-slate-200 bg-slate-50"
-              }`}
-            >
-              <p className={`text-sm font-bold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>
-                {ROLE_LABELS[row.role] || row.role}
-              </p>
-              <p className={`mt-1 text-[10px] uppercase tracking-[0.12em] ${isDarkTheme ? "text-slate-500" : "text-slate-500"}`}>
-                {Number(roleBreakdown[row.role] || 0)} users
-              </p>
-              <p className={`mt-2 text-xs ${isDarkTheme ? "text-slate-400" : "text-slate-600"}`}>
-                Reports to {row.reportsTo}
-              </p>
-              <p className={`mt-1 text-xs ${isDarkTheme ? "text-cyan-200" : "text-cyan-700"}`}>
-                {row.scope}
-              </p>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className={`ui-soft-panel rounded-2xl border p-4 ${
-        isDarkTheme ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"
-      }`}>
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1.2fr_280px]">
-          <label className={`relative block ${isDarkTheme ? "text-slate-300" : "text-slate-700"}`}>
-            <Search size={14} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${
-              isDarkTheme ? "text-slate-500" : "text-slate-400"
-            }`} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by name, email, phone, partner code, manager or role..."
-              className={`h-11 w-full rounded-xl border pl-9 pr-3 text-sm ${
-                isDarkTheme
-                  ? "border-slate-700 bg-slate-950 text-slate-200"
-                  : "border-slate-300 bg-white text-slate-700"
-              }`}
-            />
-          </label>
-
-          <div className="flex items-center gap-2">
-            <select
-              value={roleFilter}
-              onChange={(event) => setRoleFilter(event.target.value)}
-              className={`h-11 w-full rounded-xl border px-3 text-sm ${
-                isDarkTheme
-                  ? "border-slate-700 bg-slate-950 text-slate-200"
-                  : "border-slate-300 bg-white text-slate-700"
-              }`}
-            >
-              {roleFilterOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            {hasActiveFilters ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setRoleFilter("ALL");
-                  setSearchQuery("");
-                }}
-                className={`h-11 rounded-xl border px-3 text-xs font-semibold ${
-                  isDarkTheme
-                    ? "border-slate-700 bg-slate-950 text-slate-200 hover:border-cyan-300/45"
-                    : "border-slate-300 bg-white text-slate-700 hover:border-cyan-300"
-                }`}
-              >
-                <X size={14} />
-              </button>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          {roleFilterOptions
-            .filter((option) => option.value !== "ALL")
-            .map((option) => (
-              <button
-                key={`chip-${option.value}`}
-                type="button"
-                onClick={() => setRoleFilter(option.value)}
-                className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
-                  roleFilter === option.value
-                    ? isDarkTheme
-                      ? "border-cyan-300/45 bg-cyan-500/15 text-cyan-100"
-                      : "border-cyan-200 bg-cyan-50 text-cyan-700"
-                    : isDarkTheme
-                      ? "border-slate-700 bg-slate-950/70 text-slate-300"
-                      : "border-slate-200 bg-slate-50 text-slate-600"
-                }`}
-              >
-                {option.label} ({Number(roleBreakdown[option.value] || 0)})
-              </button>
+        <label className="team-chip">
+          <SlidersHorizontal size={13} />
+          Role
+          <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+            {roleFilterOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
             ))}
-          <span className={`ml-auto text-xs ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
-            Showing {filteredUsers.length} of {users.length} user(s)
-          </span>
-        </div>
-      </section>
+          </select>
+        </label>
+        <label className="team-chip">
+          <SlidersHorizontal size={13} />
+          Branch
+          <select value={roleTypeFilter} onChange={(event) => setRoleTypeFilter(event.target.value)}>
+            <option value="ALL">All branches</option>
+            <option value="COMMERCIAL">Commercial</option>
+            <option value="RESIDENTIAL">Residential</option>
+            <option value="BOTH">Both</option>
+          </select>
+        </label>
+        <label className="team-chip">
+          <SlidersHorizontal size={13} />
+          Reports to
+          <select value={reportingFilter} onChange={(event) => setReportingFilter(event.target.value)}>
+            {reportingFilterOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </label>
 
-      <TeamLeadOverviewCards
-        globalStats={globalStats}
-        roleBreakdown={roleBreakdown}
-        totalUsers={users.length}
-        activeUsers={activeUsersCount}
-        isDarkTheme={isDarkTheme}
-      />
+        <label className="team-search">
+          <Search size={14} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Name, email, role..."
+          />
+        </label>
 
-      <div className={`text-xs ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>
-        {canUseAdminTools
-          ? isAdmin
-            ? "Admin mode: user controls, profile edit navigation and direct delete are enabled."
-            : "Manager mode: admin controls are enabled. Delete actions are sent to Admin for approval."
-          : "Leadership mode: view-only visibility for your hierarchy team details."}
+        {hasActiveFilters ? (
+          <button
+            type="button"
+            className="team-btn team-btn-sec team-btn-sm"
+            onClick={() => {
+              setStatusFilter("ACTIVE");
+              setRoleFilter("ALL");
+              setRoleTypeFilter("ALL");
+              setReportingFilter("ALL");
+              setSearchQuery("");
+            }}
+          >
+            <X size={13} />
+            Clear
+          </button>
+        ) : null}
+
+        {isAdmin ? (
+          <button type="button" className="team-btn team-btn-sec team-btn-sm team-push">
+            Delete requests
+            <span className="team-pill t-warm">
+              <i />
+              {deleteRequestsCount}
+            </span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleRebalance}
+            disabled={rebalancing}
+            className="team-btn team-btn-sec team-btn-sm team-push"
+          >
+            <RefreshCw size={13} className={rebalancing ? "animate-spin" : ""} />
+            Rebalance
+          </button>
+        )}
+
+        {canUseAdminTools ? (
+          <button type="button" onClick={() => setPanelOpen(true)} className="team-btn team-btn-pri team-btn-sm">
+            <Plus size={13} />
+            Add user
+          </button>
+        ) : null}
       </div>
 
-      <TeamUserGrid
-        users={filteredUsers}
-        loading={loading}
-        leadStats={leadStats}
-        isDarkTheme={isDarkTheme}
-        deletingUserId={deletingUserId}
-        currentUserId={currentUserId}
-        roleLabels={ROLE_LABELS}
-        canManageUsers={canUseAdminTools}
-        canDeleteUsers={canUseAdminTools}
-        canDeleteDirect={isAdmin}
-        canOpenUserProfile={canUseAdminTools}
-        onOpenUserProfile={handleOpenUserProfile}
-        onDeleteUser={handleDeleteUser}
-        onToggleChannelPartnerInventoryAccess={handleToggleChannelPartnerInventoryAccess}
-        inventoryAccessUpdatingUserId={inventoryAccessUpdatingUserId}
-        getLeadScopeLabel={getLeadScopeLabel}
-      />
+      <div className="team-card">
+        <div className="team-table-wrap">
+          <table className="team-tbl">
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Role</th>
+                <th>Reports to</th>
+                <th>Branch</th>
+                <th>Leads</th>
+                <th>Last active</th>
+                <th>Status</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="team-empty-row">Loading team...</td>
+                </tr>
+              ) : filteredUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="team-empty-row">No users found.</td>
+                </tr>
+              ) : (
+                filteredUsers.map((user) => {
+                  const userStats = leadStats[String(user._id)] || { total: 0, converted: 0 };
+                  const isSelf = String(user._id) === String(currentUserId);
+                  const cannotUseRoute = ![
+                    "ADMIN",
+                    "MANAGER",
+                    "EXECUTIVE",
+                    "FIELD_EXECUTIVE",
+                    "PRODUCTION_EXECUTIVE",
+                    "COMMUNITY_MANAGER",
+                    "CHANNEL_PARTNER",
+                    "COWORKING_ADMIN",
+                  ].includes(user.role);
+
+                  return (
+                    <tr
+                      key={user._id}
+                      className={`${isSelf ? "is-self" : ""} ${canUseAdminTools ? "is-clickable" : ""}`.trim()}
+                      onClick={() => handleOpenUserProfile(user._id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleOpenUserProfile(user._id);
+                        }
+                      }}
+                      tabIndex={canUseAdminTools ? 0 : undefined}
+                      role={canUseAdminTools ? "button" : undefined}
+                      title={canUseAdminTools ? "Open user access profile" : undefined}
+                    >
+                      <td>
+                        <div className="team-cellname">
+                          <div className="team-avatar">{getUserInitials(user.name)}</div>
+                          <div>
+                            <b>{user.name || "-"}</b>
+                            <small>{user.email || "-"}</small>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`team-pill ${cannotUseRoute ? "t-risk" : getRolePillClass(user.role)}`}>
+                          {getRolePillClass(user.role) !== "t-party" ? <i /> : null}
+                          {ROLE_LABELS[user.role] || user.role || "-"}
+                        </span>
+                      </td>
+                      <td className="team-muted">{user.parentId?.name || "-"}</td>
+                      <td className="team-muted">
+                        {user.role === "CHANNEL_PARTNER" ? "External" : formatRoleType(user.roleType)}
+                      </td>
+                      <td className="team-num">{userStats.total}</td>
+                      <td className="team-muted">{formatLastActive(user.lastLoginAt || user.updatedAt || user.createdAt)}</td>
+                      <td>
+                        <span className={`team-pill ${cannotUseRoute ? "t-risk" : user.isActive ? "t-won" : "t-risk"}`}>
+                          <i />
+                          {cannotUseRoute ? "Cannot log in" : user.isActive ? "Active" : "Disabled"}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="team-rowacts">
+                          {isAdmin && user.role !== "ADMIN" && <button type="button" className="team-mini-toggle" onClick={(event) => { event.stopPropagation(); setAccessEmployee(user); }} title={`Manage page access for ${user.name}`}>Page access</button>}
+                          {canUseAdminTools ? (
+                            <button
+                              type="button"
+                              className="team-iconbtn"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleOpenUserProfile(user._id);
+                              }}
+                              title="Edit user"
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                          ) : null}
+                          {user.role === "CHANNEL_PARTNER" && canUseAdminTools ? (
+                            <button
+                              type="button"
+                              className={`team-mini-toggle ${user.canViewInventory ? "on" : ""}`}
+                              disabled={String(inventoryAccessUpdatingUserId) === String(user._id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleToggleChannelPartnerInventoryAccess(user);
+                              }}
+                              title="Toggle inventory access"
+                            >
+                              Inv.
+                            </button>
+                          ) : null}
+                          {canUseAdminTools ? (
+                            <button
+                              type="button"
+                              className="team-iconbtn danger"
+                              disabled={deletingUserId === user._id || isSelf}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteUser(user);
+                              }}
+                              title={isAdmin ? "Delete user" : "Request delete"}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="team-notebox">
+        <b>Flagged in this table:</b>
+        <span>
+          Accounts whose role is outside the route gates are shown as Cannot log in. Reporting To mirrors the hierarchy rules used by user creation and edit flows.
+        </span>
+      </div>
 
       {canUseAdminTools ? (
         <UserFormPanel
@@ -749,13 +823,14 @@ const TeamManager = ({ theme = "light" }) => {
           submitting={submitting}
           error={formError}
           isDarkTheme={isDarkTheme}
-          roleOptions={ROLE_OPTIONS}
+          roleOptions={roleOptions}
+          selectedBaseRole={selectedBaseRole}
           reportingParentRoles={REPORTING_PARENT_ROLES}
         />
       ) : null}
+      {accessEmployee && <EmployeePageAccess key={accessEmployee._id} user={accessEmployee} onClose={() => setAccessEmployee(null)} />}
     </div>
   );
 };
 
 export default TeamManager;
-

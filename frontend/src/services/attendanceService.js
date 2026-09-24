@@ -1,5 +1,16 @@
 import api from "./api";
 
+export const correctUserBreak = async (userId, date, payload) => {
+  const res = await api.patch(`/attendance/users/${userId}/${date}/breaks`, payload);
+  return res.data;
+};
+
+// Starts or ends a break for someone else, as of now, from the team list.
+export const manageUserBreak = async (userId, payload) => {
+  const res = await api.post(`/attendance/users/${userId}/break`, payload);
+  return res.data;
+};
+
 export const checkInAttendance = async (payload = {}) => {
   const res = await api.post("/attendance/check-in", payload);
   return {
@@ -117,6 +128,25 @@ export const updateAttendancePolicy = async (payload = {}) => {
 
 export const getMyLeaveBalance = async (params = {}) => {
   const res = await api.get("/attendance/leave-balance/my", { params });
+  return {
+    month: res.data?.month || "",
+    timezone: res.data?.timezone || "",
+    monthlyAccrual: Number(res.data?.monthlyAccrual || 0),
+    accrualStartMonth: res.data?.accrualStartMonth || "",
+    monthsAccrued: Number(res.data?.monthsAccrued || 0),
+    accrued: Number(res.data?.accrued || 0),
+    used: Number(res.data?.used || 0),
+    pending: Number(res.data?.pending || 0),
+    available: Number(res.data?.available || 0),
+    carryForward: Number(res.data?.carryForward || 0),
+  };
+};
+
+export const getLeaveBalanceForAdmin = async (userId, params = {}) => {
+  const id = String(userId || "").trim();
+  if (!id) return null;
+
+  const res = await api.get(`/attendance/leave-balance/${id}`, { params });
   return {
     month: res.data?.month || "",
     timezone: res.data?.timezone || "",

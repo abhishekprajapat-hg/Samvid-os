@@ -4,6 +4,10 @@ const { Server } = require("socket.io");
 const app = require("./app");
 const connectDB = require("./config/db");
 const { registerChatSocketHandlers } = require("./socket/chat.socket");
+const { runAutoCheckoutSweep } = require("./controllers/attendance.controller");
+const { runExpiredBookingSweep } = require("./services/coworkingBooking.service");
+const { runContractLifecycleSweep } = require("./services/coworkingContract.service");
+const { runInvoiceOverdueSweep } = require("./services/coworkingInvoice.service");
 const logger = require("./config/logger");
 
 const PORT = process.env.PORT || 5000;
@@ -76,8 +80,154 @@ const io = new Server(httpServer, {
 app.set("io", io);
 registerChatSocketHandlers(io);
 
+const startAttendanceAutoCheckoutSweep = () => {
+  if (String(process.env.ATTENDANCE_AUTO_CHECKOUT_SWEEP_ENABLED || "true").toLowerCase() === "false") {
+    return;
+  }
+
+  const intervalMs = Math.max(
+    60 * 1000,
+    toPositiveInt(process.env.ATTENDANCE_AUTO_CHECKOUT_SWEEP_INTERVAL_MS, 5 * 60 * 1000),
+  );
+  let isRunning = false;
+
+  const runSweep = async () => {
+    if (isRunning) return;
+    isRunning = true;
+    try {
+      const updatedCount = await runAutoCheckoutSweep();
+      if (updatedCount > 0) {
+        logger.info({
+          updatedCount,
+          message: "Attendance auto checkout sweep completed",
+        });
+      }
+    } catch (error) {
+      logger.error({
+        error: error.message,
+        message: "Attendance auto checkout sweep failed",
+      });
+    } finally {
+      isRunning = false;
+    }
+  };
+
+  const timer = setInterval(runSweep, intervalMs);
+  if (typeof timer.unref === "function") timer.unref();
+  runSweep();
+};
+
+const startBookingExpirySweep = () => {
+  if (String(process.env.BOOKING_EXPIRY_SWEEP_ENABLED || "true").toLowerCase() === "false") {
+    return;
+  }
+
+  const intervalMs = Math.max(
+    60 * 1000,
+    toPositiveInt(process.env.BOOKING_EXPIRY_SWEEP_INTERVAL_MS, 5 * 60 * 1000),
+  );
+  let isRunning = false;
+
+  const runSweep = async () => {
+    if (isRunning) return;
+    isRunning = true;
+    try {
+      const updatedCount = await runExpiredBookingSweep();
+      if (updatedCount > 0) {
+        logger.info({
+          updatedCount,
+          message: "Coworking booking expiry sweep completed",
+        });
+      }
+    } catch (error) {
+      logger.error({
+        error: error.message,
+        message: "Coworking booking expiry sweep failed",
+      });
+    } finally {
+      isRunning = false;
+    }
+  };
+
+  const timer = setInterval(runSweep, intervalMs);
+  if (typeof timer.unref === "function") timer.unref();
+  runSweep();
+};
+
+const startContractLifecycleSweep = () => {
+  if (String(process.env.CONTRACT_LIFECYCLE_SWEEP_ENABLED || "true").toLowerCase() === "false") {
+    return;
+  }
+
+  const intervalMs = Math.max(
+    60 * 1000,
+    toPositiveInt(process.env.CONTRACT_LIFECYCLE_SWEEP_INTERVAL_MS, 60 * 60 * 1000),
+  );
+  let isRunning = false;
+
+  const runSweep = async () => {
+    if (isRunning) return;
+    isRunning = true;
+    try {
+      const { toExpiring, expired } = await runContractLifecycleSweep();
+      if (toExpiring > 0 || expired > 0) {
+        logger.info({ toExpiring, expired, message: "Coworking contract lifecycle sweep completed" });
+      }
+    } catch (error) {
+      logger.error({ error: error.message, message: "Coworking contract lifecycle sweep failed" });
+    } finally {
+      isRunning = false;
+    }
+  };
+
+  const timer = setInterval(runSweep, intervalMs);
+  if (typeof timer.unref === "function") timer.unref();
+  runSweep();
+};
+
+const startInvoiceOverdueSweep = () => {
+  if (String(process.env.INVOICE_OVERDUE_SWEEP_ENABLED || "true").toLowerCase() === "false") {
+    return;
+  }
+
+  const intervalMs = Math.max(
+    60 * 1000,
+    toPositiveInt(process.env.INVOICE_OVERDUE_SWEEP_INTERVAL_MS, 60 * 60 * 1000),
+  );
+  let isRunning = false;
+
+  const runSweep = async () => {
+    if (isRunning) return;
+    isRunning = true;
+    try {
+      const updatedCount = await runInvoiceOverdueSweep();
+      if (updatedCount > 0) {
+        logger.info({ updatedCount, message: "Coworking invoice overdue sweep completed" });
+      }
+    } catch (error) {
+      logger.error({ error: error.message, message: "Coworking invoice overdue sweep failed" });
+    } finally {
+      isRunning = false;
+    }
+  };
+
+  const timer = setInterval(runSweep, intervalMs);
+  if (typeof timer.unref === "function") timer.unref();
+  runSweep();
+};
+
+const startAttendanceViolationSweep = () => {
+ let running = false;
+ const sweep = async () => { if (running) return; running = true; try { await require("./services/attendanceViolation.service").runViolationSweep(); } catch (error) { logger.error({ error: error.message, message: "Attendance violation sweep failed" }); } finally { running = false; } };
+ const timer = setInterval(sweep, 60 * 60 * 1000); timer.unref(); sweep();
+};
 const bootstrap = async () => {
   await connectDB();
+  startAttendanceAutoCheckoutSweep();
+  startAttendanceViolationSweep();
+  startBookingExpirySweep();
+  startContractLifecycleSweep();
+  startInvoiceOverdueSweep();
   httpServer.listen(PORT, () => {
     logger.info({ port: PORT, message: "Server started" });
   });

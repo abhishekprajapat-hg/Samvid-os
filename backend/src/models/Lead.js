@@ -11,6 +11,7 @@ const leadSchema = new mongoose.Schema(
       default: [],
     },
     projectInterested: String,
+    clientProfession: String,
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
@@ -172,6 +173,8 @@ const leadSchema = new mongoose.Schema(
       },
     },
 
+    hotClient: { type: Boolean, default: false },
+    brokerContactId: { type: mongoose.Schema.Types.ObjectId, ref: "CrmContact", default: null },
     source: {
       type: String,
       enum: ["META", "MANUAL"],
@@ -183,6 +186,9 @@ const leadSchema = new mongoose.Schema(
       enum: [
         "NEW",
         "CONTACTED",
+        "FOLLOW_UP_1",
+        "FOLLOW_UP_2",
+        "FOLLOW_UP_3",
         "INTERESTED",
         "SITE_VISIT_SCHEDULED",
         "SITE_VISIT",
@@ -483,4 +489,13 @@ leadSchema.index(
   },
 );
 
+leadSchema.pre("save", async function syncContact() {
+ if (!this.companyId || !(this.isNew || this.isModified("phone") || this.isModified("status") || this.isModified("name") || this.isModified("email"))) return;
+ const { normalizePhone, upsertContact } = require("../services/crmContact.service");
+ if (["OWNER", "BROKER"].includes(this.status)) {
+   const contact = await upsertContact({ companyId: this.companyId, kind: this.status, phone: this.phone, name: this.name, email: this.email, leadId: this._id, inventoryId: this.inventoryId, actor: this.createdBy });
+   if (this.status === "BROKER") this.brokerContactId = contact?._id || null;
+ }
+ this.brokerContactId = (await require("./CrmContact").findOne({ companyId: this.companyId, kind: "BROKER", phone: normalizePhone(this.phone) }).select("_id"))?._id || null;
+});
 module.exports = mongoose.model("Lead", leadSchema);

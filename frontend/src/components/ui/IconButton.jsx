@@ -3,8 +3,8 @@ import { cn } from "./utils";
 
 const sizes = {
   sm: "h-8 w-8 rounded-lg",
-  md: "h-10 w-10 rounded-xl",
-  lg: "h-11 w-11 rounded-2xl",
+  md: "h-9 w-9 rounded-lg",
+  lg: "h-10 w-10 rounded-lg",
 };
 
 const IconButton = React.forwardRef(
@@ -15,15 +15,16 @@ const IconButton = React.forwardRef(
       aria-label={label}
       title={label}
       className={cn(
-        "inline-flex shrink-0 items-center justify-center border border-slate-300 bg-white text-slate-700 outline-none transition",
-        "hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500/50",
-        "disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
+        "inline-flex shrink-0 items-center justify-center border border-slate-200 bg-white text-slate-500 outline-none transition",
+        "hover:bg-slate-50 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-500/50",
+        "disabled:cursor-not-allowed disabled:opacity-60",
+        "dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100",
         sizes[size] || sizes.md,
         className,
       )}
       {...props}
     >
-      {Icon ? <Icon aria-hidden="true" size={17} /> : children}
+      {Icon ? <Icon aria-hidden="true" size={16} /> : children}
     </button>
   ),
 );

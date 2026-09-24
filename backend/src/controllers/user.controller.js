@@ -34,6 +34,12 @@ const {
   buildPaginationMeta,
   parseFieldSelection,
 } = require("../utils/queryOptions");
+const {
+  assertReportingTargetInActorScope,
+  assertNotSelfPromotion,
+} = require("../services/userAccessGuards.service");
+
+const { writeAuditLog } = require("../services/auditLog.service");
 
 const LOCATION_ALLOWED_ROLES = [...EXECUTIVE_ROLES];
 const LOCATION_VIEWER_ROLES = [
@@ -71,6 +77,7 @@ const USER_SELECTABLE_FIELDS = [
   "name",
   "email",
   "phone",
+  "roleType",
   "role",
   "companyId",
   "parentId",
@@ -149,6 +156,10 @@ const sanitizePhone = (value) => String(value || "").trim();
 const sanitizeProfileImageUrl = (value) => String(value || "").trim();
 const sanitizeEmail = (value) => String(value || "").trim().toLowerCase();
 const sanitizeBrokerageNotes = (value) => String(value || "").trim();
+const normalizeRoleType = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  return ["COMMERCIAL", "RESIDENTIAL", "BOTH"].includes(normalized) ? normalized : "COMMERCIAL";
+};
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -286,8 +297,9 @@ const buildProfilePerformanceSummary = async (userDoc) => {
   todayStart.setHours(0, 0, 0, 0);
   const todayEnd = new Date();
   todayEnd.setHours(23, 59, 59, 999);
+  const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
 
-  const [leadSummaryRows, recentLeads, activitiesPerformed, diaryEntriesCreated, directReports] = await Promise.all([
+  const [leadSummaryRows, recentLeads, activitiesPerformed, diaryEntriesCreated, directReports, achievedTarget] = await Promise.all([
     Lead.aggregate([
       { $match: leadQuery },
       {
@@ -360,6 +372,11 @@ const buildProfilePerformanceSummary = async (userDoc) => {
       parentId: userDoc._id,
       isActive: true,
     }),
+    Lead.countDocuments({
+      ...leadQuery,
+      status: "CLOSED",
+      updatedAt: { $gte: monthStart },
+    }),
   ]);
 
   const leadSummary = leadSummaryRows?.[0] || {};
@@ -388,6 +405,7 @@ const buildProfilePerformanceSummary = async (userDoc) => {
     diaryEntriesCreated,
     statusBreakdown,
     recentLeads,
+    achievedTarget: Number(achievedTarget || 0),
   };
 };
 
@@ -633,11 +651,16 @@ const buildLeadPerformanceRowsByOwnerIds = async ({
   );
 };
 
+const toEmployeeCode = (userId) =>
+  `EMP-${String(userId || "").slice(-6).toUpperCase()}`;
+
 const toProfileView = (user) => ({
   _id: user._id,
+  employeeCode: toEmployeeCode(user._id),
   name: user.name,
   email: user.email,
   phone: user.phone || "",
+  roleType: normalizeRoleType(user.roleType),
   profileImageUrl: user.profileImageUrl || "",
   role: user.role,
   companyId: user.companyId || null,
@@ -646,6 +669,11 @@ const toProfileView = (user) => ({
   canViewInventory: Boolean(user.canViewInventory),
   brokerageConfig: toBrokerageConfigView(user.brokerageConfig),
   isActive: Boolean(user.isActive),
+  department: user.department || "",
+  branch: user.branch || "",
+  shiftTiming: user.shiftTiming || "",
+  monthlyTarget: Number.isFinite(user.monthlyTarget) ? user.monthlyTarget : 10,
+  lastLoginAt: user.lastLoginAt || null,
   lastAssignedAt: user.lastAssignedAt || null,
   liveLocation: user.liveLocation || null,
   createdAt: user.createdAt || null,
@@ -1266,8 +1294,9 @@ exports.createUserByRole = async (req, res) => {
       name,
       email,
       phone,
+      roleType,
       password,
-      role,
+      role: requestedRole,
       managerId,
       parentId,
       reportingToId,
@@ -1287,6 +1316,8 @@ exports.createUserByRole = async (req, res) => {
     if (existingUser) {
       return res.status(400).json({ message: "User already exists" });
     }
+
+    const role = requestedRole;
 
     if (!Object.values(USER_ROLES).includes(role)) {
       return res.status(400).json({
@@ -1308,6 +1339,14 @@ exports.createUserByRole = async (req, res) => {
       let reportingParent = null;
 
       if (requestedReportingToId) {
+        // A Manager may only point new accounts at themselves or someone in
+        // their own branch of the tree; Admins are unrestricted.
+        await assertReportingTargetInActorScope({
+          actingUser: req.user,
+          parentId: requestedReportingToId,
+          companyId: req.user.companyId,
+        });
+
         reportingParent = await User.findOne({
           _id: requestedReportingToId,
           role: { $in: allowedParentRoles },
@@ -1359,6 +1398,7 @@ exports.createUserByRole = async (req, res) => {
       name,
       email,
       phone,
+      roleType: normalizeRoleType(roleType),
       password,
       role,
       companyId: req.user.companyId,
@@ -1370,12 +1410,19 @@ exports.createUserByRole = async (req, res) => {
       brokerageConfig: parsedBrokerageConfig.value,
     });
 
+    await writeAuditLog({
+      companyId: req.user.companyId, actor: req.user,
+      action: "USER_ROLE_ASSIGNED", entityType: "User", entityId: newUser._id,
+      metadata: { role, roleType: newUser.roleType }, req,
+    });
+
     res.status(201).json({
       message: `${role} created successfully`,
       user: {
         _id: newUser._id,
         name: newUser.name,
         email: newUser.email,
+        roleType: normalizeRoleType(newUser.roleType),
         role: newUser.role,
         companyId: newUser.companyId,
         parentId: newUser.parentId,
@@ -1389,7 +1436,9 @@ exports.createUserByRole = async (req, res) => {
       error: error.message,
       message: "createUserByRole failed",
     });
-    return res.status(500).json({ message: "Server error" });
+    return res.status(error.statusCode || 500).json({
+      message: error.statusCode ? error.message : "Server error",
+    });
   }
 };
 
@@ -1420,6 +1469,7 @@ exports.updateUserByAdmin = async (req, res) => {
       "name",
       "email",
       "phone",
+      "roleType",
       "role",
       "reportingToId",
       "parentId",
@@ -1428,6 +1478,10 @@ exports.updateUserByAdmin = async (req, res) => {
       "canViewInventory",
       "brokerageConfig",
       "password",
+      "department",
+      "branch",
+      "shiftTiming",
+      "monthlyTarget",
     ].some((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
 
     if (!hasAnyEditableField) {
@@ -1446,6 +1500,7 @@ exports.updateUserByAdmin = async (req, res) => {
     }
 
     const previousRole = user.role;
+    const previousRoleType = user.roleType;
     const patch = {};
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "name")) {
@@ -1489,8 +1544,20 @@ exports.updateUserByAdmin = async (req, res) => {
       patch.phone = phone;
     }
 
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "roleType")) {
+      const roleType = String(req.body.roleType || "").trim().toUpperCase();
+      if (!["COMMERCIAL", "RESIDENTIAL", "BOTH"].includes(roleType)) {
+        return res.status(400).json({
+          message: "roleType must be COMMERCIAL, RESIDENTIAL or BOTH",
+        });
+      }
+      patch.roleType = roleType;
+    }
+
     let nextRole = user.role;
+
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "role")) {
+      assertNotSelfPromotion({ actingUser: req.user, targetUserId: user._id });
       const requestedRole = String(req.body.role || "").trim().toUpperCase();
       if (!requestedRole || !Object.values(USER_ROLES).includes(requestedRole)) {
         return res.status(400).json({ message: "Invalid role" });
@@ -1531,6 +1598,26 @@ exports.updateUserByAdmin = async (req, res) => {
         return res.status(400).json({ message: parsedBrokerageConfig.error });
       }
       patch.brokerageConfig = parsedBrokerageConfig.value;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "department")) {
+      patch.department = String(req.body.department || "").trim().slice(0, 80);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "branch")) {
+      patch.branch = String(req.body.branch || "").trim().slice(0, 80);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "shiftTiming")) {
+      patch.shiftTiming = String(req.body.shiftTiming || "").trim().slice(0, 60);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "monthlyTarget")) {
+      const monthlyTarget = Number(req.body.monthlyTarget);
+      if (!Number.isFinite(monthlyTarget) || monthlyTarget < 0) {
+        return res.status(400).json({ message: "monthlyTarget must be 0 or more" });
+      }
+      patch.monthlyTarget = monthlyTarget;
     }
 
     if (EXECUTIVE_ROLES.includes(previousRole) && !EXECUTIVE_ROLES.includes(nextRole)) {
@@ -1692,6 +1779,14 @@ exports.updateUserByAdmin = async (req, res) => {
       }
     }
 
+    if (previousRole !== nextRole || previousRoleType !== user.roleType) {
+      await writeAuditLog({
+        companyId: req.user.companyId, actor: req.user,
+        action: "USER_ROLE_CHANGED", entityType: "User", entityId: user._id,
+        metadata: { previous: { role: previousRole, roleType: previousRoleType }, next: { role: nextRole, roleType: user.roleType } }, req,
+      });
+    }
+
     const updated = await User.findOne({
       _id: user._id,
       companyId: req.user.companyId,
@@ -1709,7 +1804,9 @@ exports.updateUserByAdmin = async (req, res) => {
       error: error.message,
       message: "updateUserByAdmin failed",
     });
-    return res.status(500).json({ message: "Server error" });
+    return res.status(error.statusCode || 500).json({
+      message: error.statusCode ? error.message : "Server error",
+    });
   }
 };
 

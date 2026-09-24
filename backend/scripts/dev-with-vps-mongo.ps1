@@ -56,4 +56,24 @@ if (-not (Test-LocalMongoPort)) {
 
 Write-Host "Mongo tunnel is ready on $localMongoHost`:$localMongoPort"
 Set-Location $backendRoot
+
+$envFilePath = Join-Path $backendRoot ".env"
+$mongoUri = ""
+if (Test-Path -LiteralPath $envFilePath) {
+  $mongoUriLine = Get-Content -LiteralPath $envFilePath |
+    Where-Object { $_ -match "^\s*MONGO_URI\s*=" } |
+    Select-Object -First 1
+  if ($mongoUriLine) {
+    $mongoUri = ($mongoUriLine -replace "^\s*MONGO_URI\s*=\s*", "").Trim()
+  }
+}
+
+if ($env:MONGO_TUNNEL_URI) {
+  $env:MONGO_URI = $env:MONGO_TUNNEL_URI
+} elseif ($mongoUri -match "^mongodb://127\.0\.0\.1:27017/") {
+  $env:MONGO_URI = $mongoUri -replace "127\.0\.0\.1:27017", "$localMongoHost`:$localMongoPort"
+} else {
+  Write-Warning "MONGO_URI was not switched automatically. Set MONGO_TUNNEL_URI to your authenticated 127.0.0.1:$localMongoPort URI if this backend cannot connect."
+}
+
 npx nodemon src/server.js

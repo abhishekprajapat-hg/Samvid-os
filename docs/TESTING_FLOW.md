@@ -267,3 +267,86 @@ Release allowed only if all are true:
 4. Frontend lint + build pass.
 5. Health endpoint stable and no fatal backend crash logs.
 
+## 11. Coworking RBAC Verification (Phase 2)
+
+Covers the permission system introduced for the coworking module: `COWORKING_ADMIN` role,
+granular `<module>.<action>` permissions, the permission matrix, and audit logging. Requires a
+seeded ADMIN plus one MANAGER and one EXECUTIVE (or similar low-privilege role) test account.
+
+### 11.1 Role creation
+
+1. Log in as ADMIN, create a user with role `Coworking Admin` (`/admin/users` create flow, or
+   `POST /api/users/create` with `role: "COWORKING_ADMIN"`).
+2. Log in as that user. Expect an immediate redirect to `/coworking/dashboard` (not the general
+   sales dashboard) and the sidebar showing only the "Coworking" section plus Profile/Settings.
+
+### 11.2 Unauthorized route access (frontend)
+
+1. As an EXECUTIVE, navigate directly to `/coworking/dashboard` by typing the URL. Expect redirect
+   to `/` (role gate in `App.jsx` fails before the page ever mounts).
+2. As COWORKING_ADMIN (with default full permissions), strip `roles.view` from COWORKING_ADMIN via
+   the permission matrix (`/coworking/roles`, requires `roles.manage`), then reload
+   `/coworking/roles` directly. Expect redirect to `/coworking/dashboard` (permission gate, not
+   role gate, since the role check still passes).
+3. Restore `roles.view` afterwards so the account isn't locked out of the matrix.
+
+### 11.3 Unauthorized API requests (backend)
+
+```powershell
+# No token at all
+Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/coworking/permissions/me" -Method Get
+# Expect 401 "Not authorized, no token"
+
+# Valid token, role not in COWORKING_ACCESS_ROLES (e.g. EXECUTIVE)
+Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/coworking/roles" -Headers @{ Authorization = "Bearer $executiveToken" }
+# Expect 403 "Access denied" (checkRole)
+
+# Valid MANAGER/COWORKING_ADMIN token, but roles.manage stripped from that role
+Invoke-RestMethod -Uri "http://127.0.0.1:5000/api/coworking/roles/COWORKING_ADMIN" -Method Patch `
+  -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json" `
+  -Body (@{ permissions = @("dashboard.view") } | ConvertTo-Json)
+# Expect 403 "You do not have permission to perform this action" (requirePermission)
+```
+
+### 11.4 Role restrictions
+
+- Attempt to create a user with role `ADMIN` via `POST /api/users/create` — must be rejected
+  ("Admin role cannot be created from this endpoint"), unaffected by this phase.
+- Attempt to create a `COWORKING_ADMIN` user while logged in as MANAGER: the endpoint requires an
+  active ADMIN as `reportingToId`/auto-assigned parent (`ROLE_PARENT_RULES.COWORKING_ADMIN = [ADMIN]`)
+  — expect either a 400 asking for a valid parent, or success only if an ADMIN parent is resolvable.
+
+### 11.5 Tenant restrictions
+
+- With two separate companies (two different ADMIN accounts), confirm `GET /api/coworking/roles`
+  and `GET /api/coworking/users` for Company A never return Company B's rows (all queries are
+  scoped by `req.user.companyId`, enforced by `requireCompanyContext`).
+- Confirm `PATCH /api/coworking/roles/:role` from a Company A token cannot affect Company B's
+  `RolePermission` document (unique index is `{companyId, role}`).
+
+### 11.6 Permission combinations
+
+- Grant COWORKING_ADMIN only `properties.view` (via the matrix) and confirm: `/coworking/properties`
+  loads, `/coworking/cabins` redirects to `/coworking/dashboard`, and the sidebar only shows
+  Properties under "Spaces".
+- Restore full permissions afterward.
+
+### 11.7 Session expiration and logout
+
+1. Log in, then manually clear/expire the token (e.g. edit `localStorage.token` to an invalid
+   value) and reload a `/coworking/*` page — expect the API's 401 to trigger the existing
+   refresh-token retry, and on refresh failure, a hard redirect to `/login` (`services/api.js`).
+2. Click Logout from the coworking dashboard — expect `localStorage` cleared and redirect to
+   `/login`; confirm the browser back button does not restore the authenticated view.
+
+### 11.8 Direct URL access after logout
+
+After logging out, paste a previously-valid `/coworking/...` URL directly into the address bar.
+Expect redirect to `/login`, not a flash of protected content.
+
+### 11.9 Audit logging
+
+After 11.2–11.6 above, open `/coworking/audit-logs` as ADMIN and confirm `ROLE_PERMISSIONS_UPDATED`
+and `USER_ROLE_CHANGED` entries appear with the correct actor, role, and before/after permissions
+in `metadata`.
+

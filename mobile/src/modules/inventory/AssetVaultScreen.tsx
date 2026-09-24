@@ -48,6 +48,7 @@ const SOLD_PAYMENT_MODE_LABEL: Record<string, string> = {
 const SOLD_TRANSFER_TYPES = ["NEFT", "RTGS", "IMPS"];
 type SoldDateField = "remainingDueDate" | "paymentDate" | "chequeDate";
 const INPUT_PLACEHOLDER = "#94a3b8";
+const DEAL_TYPE_OPTIONS = ["PURCHASE", "RENT", "LEASE"];
 
 const formatDateOnly = (value: Date) =>
   `${String(value.getDate()).padStart(2, "0")}-${String(value.getMonth() + 1).padStart(2, "0")}-${value.getFullYear()}`;
@@ -63,6 +64,17 @@ const parseDateOnly = (value: string): Date | null => {
   if (Number.isNaN(date.getTime())) return null;
   if (date.getDate() !== day || date.getMonth() !== month || date.getFullYear() !== year) return null;
   return date;
+};
+
+const formatIsoDateOnly = (value: Date) =>
+  `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+
+const parseIsoDateOnly = (value: string): Date | null => {
+  const safe = String(value || "").trim();
+  const match = safe.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(`${safe}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
 };
 const AMENITY_OPTIONS = [
   "Parking",
@@ -93,6 +105,14 @@ const EMPTY_FORM = {
   price: "",
   description: "",
   customAmenities: "",
+  officeNumber: "",
+  ownerName: "",
+  ownerNumber: "",
+  keyManagerName: "",
+  keyManagerNumber: "",
+  dealType: "",
+  propertyDate: "",
+  gstApplicable: false,
 };
 
 const resolveFileUrl = (url?: string) => {
@@ -164,6 +184,8 @@ export const AssetVaultScreen = () => {
   const [soldDateField, setSoldDateField] = useState<SoldDateField | null>(null);
   const [webDatePickerField, setWebDatePickerField] = useState<SoldDateField | null>(null);
   const [webDatePickerValue, setWebDatePickerValue] = useState("");
+  const [propertyDatePickerOpen, setPropertyDatePickerOpen] = useState(false);
+  const [webPropertyDatePickerOpen, setWebPropertyDatePickerOpen] = useState(false);
   const [soldForm, setSoldForm] = useState({
     leadId: "",
     paymentMode: "CASH",
@@ -436,6 +458,21 @@ export const AssetVaultScreen = () => {
     setSoldDateField(null);
   };
 
+  const openPropertyDatePicker = () => {
+    if (Platform.OS === "web") {
+      setWebPropertyDatePickerOpen(true);
+      return;
+    }
+    setPropertyDatePickerOpen(true);
+  };
+
+  const onNativePropertyDateChange = (event: DateTimePickerEvent, picked?: Date) => {
+    if (event.type !== "dismissed" && picked) {
+      setForm((prev) => ({ ...prev, propertyDate: formatIsoDateOnly(picked) }));
+    }
+    setPropertyDatePickerOpen(false);
+  };
+
   const pickStatusAttachment = async () => {
     if (saving || pickingStatusAttachment) return;
     try {
@@ -545,6 +582,14 @@ export const AssetVaultScreen = () => {
       price: String(Number(asset.price || 0) || ""),
       description: String((asset as any)?.description || ""),
       customAmenities: "",
+      officeNumber: String(asset.officeNumber || ""),
+      ownerName: String(asset.ownerName || ""),
+      ownerNumber: String(asset.ownerNumber || ""),
+      keyManagerName: String(asset.keyManagerName || ""),
+      keyManagerNumber: String(asset.keyManagerNumber || ""),
+      dealType: String(asset.dealType || ""),
+      propertyDate: asset.propertyDate ? String(asset.propertyDate).slice(0, 10) : "",
+      gstApplicable: Boolean(asset.gstApplicable),
     });
     setSelectedAmenities(Array.isArray(asset.amenities) ? asset.amenities : []);
     setPickedImages([]);
@@ -1162,6 +1207,89 @@ export const AssetVaultScreen = () => {
                 onChangeText={(value) => setForm((prev) => ({ ...prev, description: value }))}
               />
 
+              <Text style={styles.sectionLabel}>Office Details</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Office Number"
+                placeholderTextColor={INPUT_PLACEHOLDER}
+                value={form.officeNumber}
+                onChangeText={(value) => setForm((prev) => ({ ...prev, officeNumber: value }))}
+              />
+
+              <Text style={styles.sectionLabel}>Owner Details</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Owner Name"
+                placeholderTextColor={INPUT_PLACEHOLDER}
+                value={form.ownerName}
+                onChangeText={(value) => setForm((prev) => ({ ...prev, ownerName: value }))}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Owner Number"
+                placeholderTextColor={INPUT_PLACEHOLDER}
+                keyboardType="phone-pad"
+                value={form.ownerNumber}
+                onChangeText={(value) => setForm((prev) => ({ ...prev, ownerNumber: value }))}
+              />
+
+              <Text style={styles.sectionLabel}>Key Manager Details</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Key Manager Name"
+                placeholderTextColor={INPUT_PLACEHOLDER}
+                value={form.keyManagerName}
+                onChangeText={(value) => setForm((prev) => ({ ...prev, keyManagerName: value }))}
+              />
+              <TextInput
+                style={styles.input}
+                placeholder="Key Manager Number"
+                placeholderTextColor={INPUT_PLACEHOLDER}
+                keyboardType="phone-pad"
+                value={form.keyManagerNumber}
+                onChangeText={(value) => setForm((prev) => ({ ...prev, keyManagerNumber: value }))}
+              />
+
+              <Text style={styles.sectionLabel}>Deal Type</Text>
+              <View style={styles.row}>
+                {DEAL_TYPE_OPTIONS.map((dealType) => (
+                  <Pressable
+                    key={dealType}
+                    style={[styles.statusChip, form.dealType === dealType && styles.statusActive]}
+                    onPress={() => setForm((prev) => ({
+                      ...prev,
+                      dealType: prev.dealType === dealType ? "" : dealType,
+                    }))}
+                  >
+                    <Text style={[styles.chipText, form.dealType === dealType && styles.activeText]}>{dealType}</Text>
+                  </Pressable>
+                ))}
+              </View>
+
+              <Text style={styles.sectionLabel}>Property Date</Text>
+              <View style={styles.dateFieldActionRow}>
+                <Pressable style={styles.dateFieldBtn} onPress={openPropertyDatePicker}>
+                  <Ionicons name="calendar-outline" size={14} color="#334155" />
+                  <Text style={styles.dateFieldBtnText}>{form.propertyDate || "Pick property date"}</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.sectionLabel}>GST Applicable</Text>
+              <View style={styles.row}>
+                <Pressable
+                  style={[styles.statusChip, form.gstApplicable && styles.statusActive]}
+                  onPress={() => setForm((prev) => ({ ...prev, gstApplicable: true }))}
+                >
+                  <Text style={[styles.chipText, form.gstApplicable && styles.activeText]}>Yes</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.statusChip, !form.gstApplicable && styles.statusActive]}
+                  onPress={() => setForm((prev) => ({ ...prev, gstApplicable: false }))}
+                >
+                  <Text style={[styles.chipText, !form.gstApplicable && styles.activeText]}>No</Text>
+                </Pressable>
+              </View>
+
               <Text style={styles.sectionLabel}>Amenities</Text>
               <View style={styles.amenityWrap}>
                 {AMENITY_OPTIONS.map((amenity) => (
@@ -1563,6 +1691,31 @@ export const AssetVaultScreen = () => {
           onChange={onNativeSoldDateChange}
         />
       ) : null}
+      {propertyDatePickerOpen ? (
+        <DateTimePicker
+          value={parseIsoDateOnly(form.propertyDate) || new Date()}
+          mode="date"
+          onChange={onNativePropertyDateChange}
+        />
+      ) : null}
+      <Modal visible={webPropertyDatePickerOpen} transparent animationType="fade" onRequestClose={() => setWebPropertyDatePickerOpen(false)}>
+        <View style={styles.webDateModalOverlay}>
+          <View style={styles.webDateModalCard}>
+            <Text style={styles.sectionLabel}>Pick Property Date</Text>
+            <input
+              type="date"
+              value={form.propertyDate}
+              onChange={(event: any) => {
+                const value = String(event?.target?.value || "");
+                setForm((prev) => ({ ...prev, propertyDate: value }));
+                setWebPropertyDatePickerOpen(false);
+              }}
+              onBlur={() => setWebPropertyDatePickerOpen(false)}
+              style={styles.webDateInput as any}
+            />
+          </View>
+        </View>
+      </Modal>
       <Modal visible={Boolean(webDatePickerField)} transparent animationType="fade" onRequestClose={() => setWebDatePickerField(null)}>
         <View style={styles.webDateModalOverlay}>
           <View style={styles.webDateModalCard}>

@@ -21,6 +21,8 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/e2e/.auth/
 mobile/coverage/
+backend/uploads/*
+!backend/uploads/.gitkeep
 
 # Editor directories and files
 .vscode/*

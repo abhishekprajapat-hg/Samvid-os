@@ -7,6 +7,7 @@ const { httpLogger } = require("./middleware/httpLogger.middleware");
 const { apiLimiter } = require("./middleware/rateLimit.middleware");
 const { httpMetricsMiddleware, metricsHandler } = require("./observability/metrics");
 const { resolveTenantContext } = require("./middleware/tenant.middleware");
+const { uploadsRootDir } = require("./config/uploadStorage");
 
 const app = express();
 app.disable("x-powered-by");
@@ -43,9 +44,6 @@ const isLanOrigin = (origin) =>
 
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
-  if (process.env.NODE_ENV === "production") {
-    return configuredOrigins.includes(origin);
-  }
   if (configuredOrigins.includes("*")) return true;
   if (configuredOrigins.includes(origin)) return true;
   if (isLoopbackOrigin(origin) || isLanOrigin(origin)) return true;
@@ -60,17 +58,6 @@ app.use(compression({
     return compression.filter(req, res);
   },
 }));
-app.use(attachRequestId);
-app.use((req, res, next) => {
-  const origin = String(req.headers.origin || "").trim();
-  if (origin && !isAllowedOrigin(origin)) {
-    return res.status(403).json({
-      message: "CORS origin not allowed",
-      requestId: req.requestId || null,
-    });
-  }
-  return next();
-});
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -78,30 +65,20 @@ app.use(
         callback(null, origin || true);
         return;
       }
-      callback(null, false);
+      callback(new Error("Not allowed by CORS"));
     },
     credentials: true,
   }),
 );
+app.use(attachRequestId);
 app.use(httpLogger);
 app.use(httpMetricsMiddleware);
-app.use(express.json({
-  limit: jsonBodyLimit,
-  verify: (req, _res, buffer) => {
-    const requestPath = String(req.originalUrl || req.url || "");
-    if (
-      requestPath.startsWith("/api/webhook")
-      || requestPath.startsWith("/api/client/webhook")
-    ) {
-      req.rawBody = Buffer.from(buffer);
-    }
-  },
-}));
+app.use(express.json({ limit: jsonBodyLimit }));
 app.use(express.urlencoded({ extended: false, limit: urlencodedBodyLimit }));
 app.use(resolveTenantContext);
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "samvid-os-backend", timestamp: new Date().toISOString() });
+  res.json({ ok: true, service: "the-office-on-rent-backend", timestamp: new Date().toISOString() });
 });
 
 app.get("/api/metrics", async (req, res) => {
@@ -129,20 +106,35 @@ app.get("/api/metrics", async (req, res) => {
 });
 
 app.use("/api/public", require("./routes/publicInventory.routes"));
+app.use(
+  "/api/uploads/files",
+  (req, res, next) => {
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    next();
+  },
+  express.static(uploadsRootDir, { maxAge: "30d", immutable: true }),
+);
 app.use("/api", apiLimiter);
 app.use("/api/client", require("./routes/client.routes"));
 app.use("/api/leads", require("./routes/lead.routes"));
 app.use("/api/auth", require("./routes/auth.routes"));
 app.use("/api/users", require("./routes/user.routes"));
+app.use("/api/access", require("./routes/accessControl.routes"));
 app.use("/api/attendance", require("./routes/attendance.routes"));
 app.use("/api/targets", require("./routes/target.routes"));
 app.use("/api/inventory", require("./routes/inventory.routes"));
 app.use("/api/inventory-request", require("./routes/inventoryRequest.routes"));
+app.use("/api/projects", require("./routes/project.routes"));
+app.use("/api/uploads", require("./routes/upload.routes"));
 app.use("/api/webhook", require("./routes/webhook.routes"));
 app.use("/api/chat", require("./routes/chat.routes"));
 app.use("/api/assistant", require("./routes/officeAssistant.routes"));
+app.use("/api/contacts", require("./routes/crmContact.routes"));
+app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/tasks", require("./routes/task.routes"));
-app.use("/api/saas", require("./routes/saas.routes"));
+app.use("/api/coworking", require("./routes/coworkingAccess.routes"));
+app.use("/api/portal/auth", require("./routes/clientPortalAuth.routes"));
+app.use("/api/portal", require("./routes/clientPortalData.routes"));
 
 app.use((req, res) => {
   res.status(404).json({

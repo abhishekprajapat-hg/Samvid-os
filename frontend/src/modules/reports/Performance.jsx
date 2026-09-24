@@ -1,35 +1,51 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  Calendar,
-  Loader2,
-  MapPin,
-  RefreshCw,
-  Send,
-  Target,
-  TrendingUp,
-  Users,
-} from "lucide-react";
-import { assignHierarchyTarget, getMyTargets } from "../../services/targetService";
-import { toErrorMessage } from "../../utils/errorMessage";
+import { Loader2 } from "lucide-react";
 import ToastNotice from "../../components/ui/ToastNotice";
+import { getMyTargets } from "../../services/targetService";
+import { toErrorMessage } from "../../utils/errorMessage";
 
-const formatNumber = (value) => Number(value || 0).toLocaleString("en-IN");
-const formatCurrency = (value) => `Rs ${formatNumber(value)}`;
+const MANAGEMENT_ROLES = new Set(["ADMIN", "MANAGER"]);
 
-const getCurrentMonthKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+const toMonthKey = (date = new Date()) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+const addMonths = (date, amount) =>
+  new Date(date.getFullYear(), date.getMonth() + amount, 1);
+
+const formatMonthLabel = (monthKey) => {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  const date = new Date(year || new Date().getFullYear(), (month || 1) - 1, 1);
+  return date.toLocaleString("en-IN", { month: "long" });
+};
+
+const formatShortMonth = (monthKey) => {
+  const [year, month] = String(monthKey || "").split("-").map(Number);
+  const date = new Date(year || new Date().getFullYear(), (month || 1) - 1, 1);
+  return date.toLocaleString("en-IN", { month: "short" });
 };
 
 const clampPercent = (value) => {
   const numeric = Number(value || 0);
   if (!Number.isFinite(numeric)) return 0;
-  if (numeric < 0) return 0;
-  if (numeric > 100) return 100;
-  return Math.round(numeric * 10) / 10;
+  return Math.max(0, Math.min(100, Math.round(numeric)));
+};
+
+const formatCurrencyCompact = (value) => {
+  const amount = Number(value) || 0;
+  if (Math.abs(amount) >= 100000) {
+    const lakhs = amount / 100000;
+    return `₹${lakhs.toFixed(lakhs >= 10 ? 1 : 2).replace(/\.0+$/, "")} L`;
+  }
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(amount);
 };
 
 const safeTarget = (row) => ({
+  month: row?.month || "",
+  assignedTo: row?.assignedTo || null,
   leadsTarget: Number(row?.leadsTarget || 0),
   revenueTarget: Number(row?.revenueTarget || 0),
   siteVisitTarget: Number(row?.siteVisitTarget || 0),
@@ -46,453 +62,275 @@ const safeTarget = (row) => ({
   },
 });
 
-const MetricCard = ({
-  title,
-  subtitle,
-  icon: IconComponent,
-  target,
-  achieved,
-  percent,
-  formatValue,
-}) => (
-  <div className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-    <div className="mb-4 flex items-start justify-between gap-3">
-      <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-          {title}
-        </p>
-        <p className="mt-1 text-xs text-slate-500">{subtitle}</p>
-      </div>
-      <div className="rounded-lg bg-cyan-50 p-2 text-cyan-600">
-        {React.createElement(IconComponent, { size: 15 })}
-      </div>
-    </div>
-
-    <div className="text-sm text-slate-700">
-      <span className="font-semibold text-slate-900">{formatValue(achieved)}</span>
-      <span className="text-slate-500"> / {formatValue(target)}</span>
-    </div>
-
-    <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
-      <div
-        className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-sky-500 transition-all duration-300"
-        style={{ width: `${clampPercent(percent)}%` }}
-      />
-    </div>
-    <p className="mt-1 text-right text-xs font-semibold text-cyan-600">
-      {clampPercent(percent)}% achieved
-    </p>
-  </div>
-);
-
-const TargetListItem = ({ row }) => {
-  const stats = safeTarget(row);
-  const assignee = row?.assignedTo || {};
-  const assigner = row?.assignedBy || {};
-
-  return (
-    <div className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">{assignee.name || "Unknown User"}</p>
-          <p className="text-xs text-slate-500">
-            {assignee.roleLabel || assignee.role || "-"} | Assigned by {assigner.name || "-"}
-          </p>
-        </div>
-        <p className="rounded-md bg-cyan-50 px-2 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan-700">
-          {row?.month || "-"}
-        </p>
-      </div>
-
-      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-3">
-        <div className="rounded-lg bg-slate-50 px-3 py-2">
-          Leads: {formatNumber(stats.achievements.leadsAchieved)} / {formatNumber(stats.leadsTarget)}
-        </div>
-        <div className="rounded-lg bg-slate-50 px-3 py-2">
-          Site Visits: {formatNumber(stats.achievements.siteVisitsAchieved)} / {formatNumber(stats.siteVisitTarget)}
-        </div>
-        <div className="rounded-lg bg-slate-50 px-3 py-2">
-          Revenue: {formatCurrency(stats.achievements.revenueAchieved)} / {formatCurrency(stats.revenueTarget)}
-        </div>
-      </div>
-
-      {row?.notes ? (
-        <p className="mt-3 rounded-lg bg-cyan-50 px-3 py-2 text-xs text-cyan-700">
-          Note: {row.notes}
-        </p>
-      ) : null}
-    </div>
+const combineTargets = (targets = [], month = "") => {
+  const summary = targets.reduce(
+    (acc, row) => {
+      const target = safeTarget(row);
+      acc.leadsTarget += target.leadsTarget;
+      acc.revenueTarget += target.revenueTarget;
+      acc.siteVisitTarget += target.siteVisitTarget;
+      acc.achievements.leadsAchieved += target.achievements.leadsAchieved;
+      acc.achievements.revenueAchieved += target.achievements.revenueAchieved;
+      acc.achievements.siteVisitsAchieved += target.achievements.siteVisitsAchieved;
+      acc.achievements.closedDealsAchieved += target.achievements.closedDealsAchieved;
+      return acc;
+    },
+    {
+      month,
+      leadsTarget: 0,
+      revenueTarget: 0,
+      siteVisitTarget: 0,
+      achievements: {
+        leadsAchieved: 0,
+        revenueAchieved: 0,
+        siteVisitsAchieved: 0,
+        closedDealsAchieved: 0,
+      },
+    },
   );
+
+  return {
+    ...summary,
+    progress: {
+      leadsPercent: clampPercent((summary.achievements.closedDealsAchieved / Math.max(summary.leadsTarget, 1)) * 100),
+      revenuePercent: clampPercent((summary.achievements.revenueAchieved / Math.max(summary.revenueTarget, 1)) * 100),
+      siteVisitPercent: clampPercent((summary.achievements.siteVisitsAchieved / Math.max(summary.siteVisitTarget, 1)) * 100),
+    },
+  };
 };
 
 const Performance = () => {
-  const [month, setMonth] = useState(getCurrentMonthKey());
+  const [viewerRole] = useState(() =>
+    String(window.localStorage.getItem("role") || "").trim().toUpperCase(),
+  );
+  const [viewMode, setViewMode] = useState("ME");
+  const [month, setMonth] = useState(toMonthKey());
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
   const [targetState, setTargetState] = useState({
-    month: "",
     canAssign: false,
-    assignableReports: [],
     myTarget: null,
     incoming: [],
     outgoing: [],
   });
-  const [assignmentForm, setAssignmentForm] = useState({
-    assignedToId: "",
-    leadsTarget: "",
-    revenueTarget: "",
-    siteVisitTarget: "",
-    notes: "",
-  });
-
-  const loadTargets = async (requestedMonth, { quiet = false } = {}) => {
-    if (quiet) {
-      setRefreshing(true);
-    } else {
-      setLoading(true);
-    }
-    setError("");
-
-    try {
-      const payload = await getMyTargets({ month: requestedMonth });
-      setTargetState({
-        month: payload.month,
-        canAssign: Boolean(payload.canAssign),
-        assignableReports: payload.assignableReports || [],
-        myTarget: payload.myTarget || null,
-        incoming: payload.incoming || [],
-        outgoing: payload.outgoing || [],
-      });
-    } catch (fetchError) {
-      setError(toErrorMessage(fetchError, "Failed to load targets"));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+  const [history, setHistory] = useState([]);
 
   useEffect(() => {
-    loadTargets(month);
+    let alive = true;
+
+    const loadTargets = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const currentDate = new Date(`${month}-01T00:00:00`);
+        const historyMonths = Array.from({ length: 6 }, (_, index) => toMonthKey(addMonths(currentDate, index - 5)));
+        const [current, ...historyRows] = await Promise.all([
+          getMyTargets({ month }),
+          ...historyMonths.map((monthKey) =>
+            getMyTargets({ month: monthKey }).catch(() => ({
+              month: monthKey,
+              myTarget: null,
+              outgoing: [],
+            })),
+          ),
+        ]);
+        if (!alive) return;
+        setTargetState({
+          canAssign: Boolean(current.canAssign),
+          myTarget: current.myTarget || null,
+          incoming: current.incoming || [],
+          outgoing: current.outgoing || [],
+        });
+        setHistory(historyRows.map((row, index) => ({
+          month: historyMonths[index],
+          myTarget: row.myTarget || null,
+          outgoing: row.outgoing || [],
+        })));
+      } catch (fetchError) {
+        if (alive) setError(toErrorMessage(fetchError, "Failed to load targets"));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+
+    loadTargets();
+    return () => {
+      alive = false;
+    };
   }, [month]);
 
-  useEffect(() => {
-    if (!targetState.canAssign) return;
-
-    setAssignmentForm((prev) => {
-      const exists = targetState.assignableReports.some(
-        (row) => String(row._id) === String(prev.assignedToId),
-      );
-
-      if (exists) return prev;
-
-      return {
-        ...prev,
-        assignedToId: targetState.assignableReports[0]?._id || "",
-      };
-    });
-  }, [targetState.canAssign, targetState.assignableReports]);
-
-  const myTarget = useMemo(() => safeTarget(targetState.myTarget), [targetState.myTarget]);
-  const hasMyTarget = Boolean(targetState.myTarget);
-
-  const handleRefresh = () => {
-    loadTargets(month, { quiet: true });
-  };
-
-  const handleAssign = async (event) => {
-    event.preventDefault();
-    setSuccessMessage("");
-    setError("");
-
-    const leadsTarget = Number(assignmentForm.leadsTarget || 0);
-    const revenueTarget = Number(assignmentForm.revenueTarget || 0);
-    const siteVisitTarget = Number(assignmentForm.siteVisitTarget || 0);
-
-    if (!assignmentForm.assignedToId) {
-      setError("Please select a reporting user");
-      return;
+  const canSeeTeam = MANAGEMENT_ROLES.has(viewerRole) && targetState.outgoing.length > 0;
+  const currentTarget = useMemo(() => {
+    if (viewMode === "TEAM" && canSeeTeam) {
+      return combineTargets(targetState.outgoing, month);
     }
+    return safeTarget(targetState.myTarget);
+  }, [canSeeTeam, month, targetState.myTarget, targetState.outgoing, viewMode]);
 
-    if (
-      !Number.isFinite(leadsTarget)
-      || !Number.isFinite(revenueTarget)
-      || !Number.isFinite(siteVisitTarget)
-      || leadsTarget < 0
-      || revenueTarget < 0
-      || siteVisitTarget < 0
-    ) {
-      setError("All targets must be valid non-negative numbers");
-      return;
-    }
+  const daysLeft = useMemo(() => {
+    const now = new Date();
+    const selected = new Date(`${month}-01T00:00:00`);
+    if (selected.getMonth() !== now.getMonth() || selected.getFullYear() !== now.getFullYear()) return 0;
+    return Math.max(0, new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() - now.getDate());
+  }, [month]);
 
-    if (leadsTarget <= 0 && revenueTarget <= 0 && siteVisitTarget <= 0) {
-      setError("At least one target value should be greater than zero");
-      return;
-    }
+  const closurePercent = clampPercent(
+    (currentTarget.achievements.closedDealsAchieved / Math.max(currentTarget.leadsTarget, 1)) * 100,
+  );
+  const paceBehind = currentTarget.leadsTarget > 0 && closurePercent < 70;
+  const remainingClosures = Math.max(0, currentTarget.leadsTarget - currentTarget.achievements.closedDealsAchieved);
+  const neededPerDay = daysLeft > 0 ? remainingClosures / daysLeft : 0;
 
-    setSubmitting(true);
-    try {
-      const result = await assignHierarchyTarget({
-        assignedToId: assignmentForm.assignedToId,
-        month,
-        leadsTarget,
-        revenueTarget,
-        siteVisitTarget,
-        notes: assignmentForm.notes,
-      });
-      setSuccessMessage(result.message || "Target assigned successfully");
-      await loadTargets(month, { quiet: true });
-    } catch (assignError) {
-      setError(toErrorMessage(assignError, "Unable to assign target"));
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  const progressRows = [
+    {
+      label: "Closures",
+      achieved: currentTarget.achievements.closedDealsAchieved,
+      target: currentTarget.leadsTarget,
+      percent: closurePercent,
+      color: "var(--b500)",
+      valueLabel: `${currentTarget.achievements.closedDealsAchieved} of ${currentTarget.leadsTarget}`,
+    },
+    {
+      label: "Site visits",
+      achieved: currentTarget.achievements.siteVisitsAchieved,
+      target: currentTarget.siteVisitTarget,
+      percent: currentTarget.progress.siteVisitPercent,
+      color: "var(--ok500)",
+      valueLabel: `${currentTarget.achievements.siteVisitsAchieved} of ${currentTarget.siteVisitTarget}`,
+    },
+    {
+      label: "Revenue",
+      achieved: currentTarget.achievements.revenueAchieved,
+      target: currentTarget.revenueTarget,
+      percent: currentTarget.progress.revenuePercent,
+      color: "var(--wa500)",
+      valueLabel: `${formatCurrencyCompact(currentTarget.achievements.revenueAchieved)} of ${formatCurrencyCompact(currentTarget.revenueTarget)}`,
+    },
+    {
+      label: "New leads contacted",
+      achieved: currentTarget.achievements.leadsAchieved,
+      target: currentTarget.leadsTarget,
+      percent: currentTarget.progress.leadsPercent,
+      color: "var(--ok500)",
+      valueLabel: `${currentTarget.achievements.leadsAchieved} of ${currentTarget.leadsTarget}`,
+    },
+  ];
+
+  const historyBars = history.map((row) => {
+    const target = viewMode === "TEAM" && canSeeTeam
+      ? combineTargets(row.outgoing, row.month)
+      : safeTarget(row.myTarget);
+    const percent = clampPercent(
+      (target.achievements.closedDealsAchieved / Math.max(target.leadsTarget, 1)) * 100,
+    );
+    return {
+      month: row.month,
+      label: formatShortMonth(row.month),
+      percent,
+      color: percent >= 85 ? "var(--ok500)" : percent >= 55 ? "var(--wa500)" : "var(--dg500)",
+    };
+  });
+
+  if (loading) {
+    return (
+      <div className="targets-doc-screen ui-page-shell custom-scrollbar targets-loading">
+        <Loader2 size={18} className="animate-spin" />
+        Loading targets...
+      </div>
+    );
+  }
 
   return (
-    <div className="ui-page-shell custom-scrollbar">
-      <div className="flex flex-wrap items-center justify-end gap-2">
-          <label className="sr-only" htmlFor="target-month">
-            Select month
-          </label>
-          <div className="relative">
-            <Calendar
-              size={14}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
-            />
-            <input
-              id="target-month"
-              type="month"
-              value={month}
-              onChange={(event) => setMonth(event.target.value)}
-              className="h-10 rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={loading || refreshing}
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            Refresh
-          </button>
+    <div className="targets-doc-screen ui-page-shell custom-scrollbar">
+      <ToastNotice message={error} type="error" />
+
+      <div className="targets-toolbar">
+        <input
+          type="month"
+          value={month}
+          onChange={(event) => setMonth(event.target.value || toMonthKey())}
+          className="targets-month"
+          aria-label="Target month"
+        />
       </div>
 
-      <ToastNotice message={error} type="error" />
-      <ToastNotice message={successMessage} type="success" />
-
-      {loading ? (
-        <div className="ui-soft-panel flex h-44 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500">
-          <Loader2 size={18} className="mr-2 animate-spin" />
-          Loading targets...
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <MetricCard
-              title="Leads Target"
-              subtitle="Assigned leads for selected month"
-              icon={Users}
-              target={myTarget.leadsTarget}
-              achieved={myTarget.achievements.leadsAchieved}
-              percent={myTarget.progress.leadsPercent}
-              formatValue={formatNumber}
-            />
-            <MetricCard
-              title="Site Visits"
-              subtitle="Verified site visit completions"
-              icon={MapPin}
-              target={myTarget.siteVisitTarget}
-              achieved={myTarget.achievements.siteVisitsAchieved}
-              percent={myTarget.progress.siteVisitPercent}
-              formatValue={formatNumber}
-            />
-            <MetricCard
-              title="Revenue Target"
-              subtitle="Converted revenue from closed deals"
-              icon={TrendingUp}
-              target={myTarget.revenueTarget}
-              achieved={myTarget.achievements.revenueAchieved}
-              percent={myTarget.progress.revenuePercent}
-              formatValue={formatCurrency}
-            />
+      <div className="targets-statgrid">
+        <div className="targets-stat">
+          <div className="targets-k">Closures</div>
+          <div className="targets-v">
+            {currentTarget.achievements.closedDealsAchieved}
+            <span>/ {currentTarget.leadsTarget}</span>
           </div>
+          <div className="targets-d">{closurePercent}% - {daysLeft} days left</div>
+        </div>
+        <div className="targets-stat">
+          <div className="targets-k">Site visits</div>
+          <div className="targets-v">
+            {currentTarget.achievements.siteVisitsAchieved}
+            <span>/ {currentTarget.siteVisitTarget}</span>
+          </div>
+          <div className="targets-d">{currentTarget.progress.siteVisitPercent}%</div>
+        </div>
+        <div className="targets-stat">
+          <div className="targets-k">Revenue</div>
+          <div className="targets-v targets-v-money">
+            {formatCurrencyCompact(currentTarget.achievements.revenueAchieved)}
+            <span>/ {formatCurrencyCompact(currentTarget.revenueTarget)}</span>
+          </div>
+          <div className="targets-d">{currentTarget.progress.revenuePercent}%</div>
+        </div>
+        <div className={`targets-stat ${paceBehind ? "is-alert" : ""}`}>
+          <div className="targets-k">Pace</div>
+          <div className="targets-v targets-v-pace">{paceBehind ? "Behind" : "On track"}</div>
+          <div className="targets-d">Need {neededPerDay.toFixed(2)} closures/day</div>
+        </div>
+      </div>
 
-          {!hasMyTarget ? (
-            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              No target is assigned to you for {targetState.month || month} yet.
+      <div className="targets-split">
+        <div className="targets-card">
+          <div className="targets-card-h">
+            <h4>{formatMonthLabel(month)} targets</h4>
+            <div className="targets-seg">
+              <button type="button" className={viewMode === "ME" ? "on" : ""} onClick={() => setViewMode("ME")}>Me</button>
+              {MANAGEMENT_ROLES.has(viewerRole) ? (
+                <button type="button" className={viewMode === "TEAM" ? "on" : ""} onClick={() => setViewMode("TEAM")}>Team</button>
+              ) : null}
             </div>
-          ) : null}
-
-          {targetState.canAssign ? (
-            <section className="ui-soft-panel mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="mb-4 flex items-center gap-2">
-                <Target size={16} className="text-cyan-600" />
-                <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-700">
-                  Assign Target To Direct Report
-                </h2>
+          </div>
+          <div className="targets-card-b targets-progress-stack">
+            {progressRows.map((row) => (
+              <div key={row.label}>
+                <div className="targets-progress-line">
+                  <b>{row.label}</b>
+                  <span>{row.valueLabel}</span>
+                </div>
+                <div className="targets-bar-mini">
+                  <i style={{ width: `${row.percent}%`, background: row.color }} />
+                </div>
               </div>
+            ))}
+          </div>
+        </div>
 
-              {targetState.assignableReports.length === 0 ? (
-                <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  No direct reporting users available in your next hierarchy level.
-                </p>
-              ) : (
-                <form onSubmit={handleAssign} className="space-y-4">
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                      Reporting User
-                      <select
-                        value={assignmentForm.assignedToId}
-                        onChange={(event) =>
-                          setAssignmentForm((prev) => ({
-                            ...prev,
-                            assignedToId: event.target.value,
-                          }))
-                        }
-                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                      >
-                        {targetState.assignableReports.map((row) => (
-                          <option key={row._id} value={row._id}>
-                            {row.name} ({row.roleLabel || row.role})
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                      Leads Target
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={assignmentForm.leadsTarget}
-                        onChange={(event) =>
-                          setAssignmentForm((prev) => ({
-                            ...prev,
-                            leadsTarget: event.target.value,
-                          }))
-                        }
-                        placeholder="0"
-                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                      />
-                    </label>
-
-                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                      Site Visit Target
-                      <input
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={assignmentForm.siteVisitTarget}
-                        onChange={(event) =>
-                          setAssignmentForm((prev) => ({
-                            ...prev,
-                            siteVisitTarget: event.target.value,
-                          }))
-                        }
-                        placeholder="0"
-                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                      />
-                    </label>
-
-                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                      Revenue Target
-                      <input
-                        type="number"
-                        min="0"
-                        step="1000"
-                        value={assignmentForm.revenueTarget}
-                        onChange={(event) =>
-                          setAssignmentForm((prev) => ({
-                            ...prev,
-                            revenueTarget: event.target.value,
-                          }))
-                        }
-                        placeholder="0"
-                        className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-normal text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                      />
-                    </label>
-                  </div>
-
-                  <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">
-                    Notes (Optional)
-                    <textarea
-                      value={assignmentForm.notes}
-                      onChange={(event) =>
-                        setAssignmentForm((prev) => ({
-                          ...prev,
-                          notes: event.target.value,
-                        }))
-                      }
-                      rows={3}
-                      maxLength={500}
-                      placeholder="Add context for assignee"
-                      className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                    />
-                  </label>
-
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs text-slate-500">
-                      Target will be saved for {targetState.month || month}.
-                    </p>
-                    <button
-                      type="submit"
-                      disabled={submitting}
-                      className="inline-flex h-10 items-center gap-2 rounded-lg bg-cyan-600 px-4 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                      Assign Target
-                    </button>
-                  </div>
-                </form>
-              )}
-            </section>
-          ) : null}
-
-          <section className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <div className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-slate-700">
-                My Incoming Targets
-              </h3>
-
-              {targetState.incoming.length === 0 ? (
-                <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  No incoming targets for this month.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {targetState.incoming.map((row) => (
-                    <TargetListItem key={row._id} row={row} />
-                  ))}
+        <div className="targets-card">
+          <div className="targets-card-h"><h4>Last 6 months</h4></div>
+          <div className="targets-card-b">
+            <div className="targets-bars">
+              {historyBars.map((bar) => (
+                <div key={bar.month} title={`${bar.percent}%`}>
+                  <i style={{ height: `${Math.max(8, bar.percent)}%`, background: bar.color }} />
+                  <span>{bar.label}</span>
                 </div>
-              )}
+              ))}
             </div>
+            <p className="targets-hint">Percent of monthly closure target achieved.</p>
+          </div>
+        </div>
+      </div>
 
-            <div className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-slate-700">
-                Targets Assigned By Me
-              </h3>
-
-              {targetState.outgoing.length === 0 ? (
-                <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  You have not assigned any targets for this month.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {targetState.outgoing.map((row) => (
-                    <TargetListItem key={row._id} row={row} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-        </>
-      )}
+      {!targetState.myTarget && viewMode === "ME" ? (
+        <div className="targets-empty">No target is assigned to you for {month} yet.</div>
+      ) : null}
     </div>
   );
 };

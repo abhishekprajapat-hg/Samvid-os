@@ -1,16 +1,27 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import "./notifications.css";
 import { useNavigate } from "react-router-dom";
 import {
   BellRing,
   Building2,
-  CircleDollarSign,
+  CalendarDays,
+  Check,
   CheckCircle2,
+  ChevronRight,
   Clock3,
+  ExternalLink,
   FileText,
+  Filter,
+  IndianRupee,
   Loader,
+  Mail,
+  Package,
+  Radio,
   RefreshCw,
   Search,
+  Settings as SettingsIcon,
   UserRound,
+  Users,
   XCircle,
 } from "lucide-react";
 import { getLeadPaymentRequests, updateLeadStatus } from "../../services/leadService";
@@ -65,7 +76,48 @@ const formatDate = (value) => {
 const formatAmount = (value) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return "-";
-  return `Rs ${parsed.toLocaleString("en-IN")}`;
+  return `₹${parsed.toLocaleString("en-IN")}`;
+};
+
+const READ_STORAGE_KEY = "adminNotificationsReadIds";
+
+const INBOX_TABS = [
+  { id: "all", label: "All" },
+  { id: "unread", label: "Unread" },
+  { id: "payments", label: "Payments" },
+  { id: "inventory", label: "Inventory" },
+  { id: "system", label: "System" },
+];
+
+const DATE_FILTERS = [
+  { value: "ALL", label: "All Dates" },
+  { value: "TODAY", label: "Today" },
+  { value: "WEEK", label: "Last 7 days" },
+  { value: "MONTH", label: "Last 30 days" },
+];
+
+const formatWhen = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === now.toDateString()) return `Today, ${time}`;
+  if (date.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`;
+  return `${date.toLocaleDateString([], { day: "numeric", month: "short" })}, ${time}`;
+};
+
+const withinDateFilter = (value, filter) => {
+  if (filter === "ALL") return true;
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const now = new Date();
+  if (filter === "TODAY") return date.toDateString() === now.toDateString();
+  const days = filter === "WEEK" ? 7 : 30;
+  return now.getTime() - date.getTime() <= days * 24 * 60 * 60 * 1000;
 };
 
 const formatPaymentMode = (value) => {
@@ -109,7 +161,7 @@ const formatInventoryStatusLabel = (value) => {
 };
 
 const getInventoryUnitLabel = (inventoryLike = {}) =>
-  [inventoryLike.projectName, inventoryLike.towerName, inventoryLike.unitNumber]
+  [inventoryLike?.projectName, inventoryLike?.towerName, inventoryLike?.unitNumber]
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(" - ");
@@ -222,30 +274,21 @@ const AdminNotifications = () => {
   const [leadRequests, setLeadRequests] = useState([]);
   const [inventoryRequests, setInventoryRequests] = useState([]);
   const [userDeleteRequests, setUserDeleteRequests] = useState([]);
+  const [inboxTab, setInboxTab] = useState("all");
+  const [dateFilter, setDateFilter] = useState("ALL");
+  const [showInboxFilters, setShowInboxFilters] = useState(true);
+  const [selectedId, setSelectedId] = useState("");
+  const [readIds, setReadIds] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(READ_STORAGE_KEY) || "[]");
+      return new Set(Array.isArray(raw) ? raw : []);
+    } catch {
+      return new Set();
+    }
+  });
   const [reviewingLeadId, setReviewingLeadId] = useState("");
   const [reviewingInventoryRequestId, setReviewingInventoryRequestId] = useState("");
   const [reviewingUserDeleteRequestId, setReviewingUserDeleteRequestId] = useState("");
-  const leadSectionRef = useRef(null);
-  const inventorySectionRef = useRef(null);
-  const userDeleteSectionRef = useRef(null);
-
-  const isDirectInteractiveTarget = useCallback((target) => {
-    if (!target || typeof target.closest !== "function") return false;
-    return Boolean(target.closest("button, a, input, select, textarea, option"));
-  }, []);
-
-  const scrollToSection = useCallback((sectionKey) => {
-    if (sectionKey === "inventory") {
-      inventorySectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-    if (sectionKey === "user-delete") {
-      userDeleteSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      return;
-    }
-    leadSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
-
   const loadNotifications = useCallback(async (asRefresh = false) => {
     try {
       if (asRefresh) {
@@ -473,6 +516,146 @@ const AdminNotifications = () => {
     };
   }, [leadRequests, inventoryRequests.length, userDeleteRequests.length]);
 
+  const persistReadIds = useCallback((nextSet) => {
+    setReadIds(nextSet);
+    try {
+      localStorage.setItem(READ_STORAGE_KEY, JSON.stringify([...nextSet]));
+    } catch {
+      /* storage unavailable - read state stays in memory only */
+    }
+  }, []);
+
+  // Every request type folded into one inbox feed, newest first
+  const inboxItems = useMemo(() => {
+    const items = [];
+
+    filteredLeadRequests.forEach((lead) => {
+      const status = String(lead?.dealPayment?.approvalStatus || "PENDING").toUpperCase();
+      const propertyRows = getLeadPropertyRows(lead);
+      const property = propertyRows[0] || null;
+      const title = status === "APPROVED"
+        ? "Lead payment approved"
+        : status === "REJECTED"
+          ? "Lead payment rejected"
+          : "Lead payment approval requested";
+      items.push({
+        id: `payment:${toObjectIdString(lead?._id)}`,
+        category: "payments",
+        status,
+        icon: IndianRupee,
+        title,
+        subtitle: lead?.name || "Lead",
+        context: property ? getInventoryUnitLabel(property) : (lead?.projectInterested || "-"),
+        meta: [
+          formatAmount(property?.price),
+          formatPaymentType(lead?.dealPayment?.paymentType),
+          formatPaymentMode(lead?.dealPayment?.mode),
+        ].filter((value) => value && value !== "-").join(" · "),
+        at: lead?.dealPayment?.approvalReviewedAt || lead?.dealPayment?.approvalRequestedAt || lead?.updatedAt,
+        lead,
+        property,
+        propertyRows,
+        soldCount: propertyRows.filter((row) => isSoldInventoryStatus(row?.status)).length,
+      });
+    });
+
+    filteredInventoryRequests.forEach((request) => {
+      const requestId = toObjectIdString(request?._id || request?.id);
+      const label = getInventoryUnitLabel(request?.inventoryId)
+        || getInventoryUnitLabel(request?.proposedData)
+        || "New inventory";
+      items.push({
+        id: `inventory:${requestId}`,
+        category: "inventory",
+        status: "PENDING",
+        icon: Building2,
+        title: `${String(request?.type || "UPDATE").toUpperCase()} inventory request`,
+        subtitle: request?.requestedBy?.name || "-",
+        context: label,
+        meta: [request?.teamId?.name, formatAmount(request?.proposedData?.price ?? request?.inventoryId?.price)]
+          .filter((value) => value && value !== "-").join(" · "),
+        at: request?.createdAt,
+        request,
+        requestId,
+      });
+    });
+
+    filteredUserDeleteRequests.forEach((request) => {
+      const requestId = toObjectIdString(request?._id || request?.id);
+      const target = request?.targetUser || request?.snapshot || {};
+      items.push({
+        id: `account:${requestId}`,
+        category: "system",
+        status: "PENDING",
+        icon: UserRound,
+        title: `Delete ${target?.name || "user"} request`,
+        subtitle: request?.requestedBy?.name || "-",
+        context: [target?.role, target?.email].filter(Boolean).join(" · ") || "-",
+        meta: request?.reason || "",
+        at: request?.createdAt,
+        request,
+        requestId,
+        target,
+      });
+    });
+
+    filteredRecentAlerts.forEach((alert, index) => {
+      items.push({
+        id: `alert:${alert?.id || index}`,
+        category: "system",
+        status: "ALERT",
+        icon: BellRing,
+        title: alert?.preview || "Realtime alert",
+        subtitle: String(alert?.source || "Realtime").toUpperCase(),
+        context: String(alert?.requestType || "-"),
+        meta: "",
+        at: alert?.createdAt,
+        alert,
+      });
+    });
+
+    return items.sort((x, y) => new Date(y.at || 0).getTime() - new Date(x.at || 0).getTime());
+  }, [filteredLeadRequests, filteredInventoryRequests, filteredUserDeleteRequests, filteredRecentAlerts]);
+
+  const dateFilteredItems = useMemo(
+    () => inboxItems.filter((item) => withinDateFilter(item.at, dateFilter)),
+    [inboxItems, dateFilter],
+  );
+
+  const tabCounts = useMemo(() => ({
+    all: dateFilteredItems.length,
+    unread: dateFilteredItems.filter((item) => !readIds.has(item.id)).length,
+    payments: dateFilteredItems.filter((item) => item.category === "payments").length,
+    inventory: dateFilteredItems.filter((item) => item.category === "inventory").length,
+    system: dateFilteredItems.filter((item) => item.category === "system").length,
+  }), [dateFilteredItems, readIds]);
+
+  const visibleItems = useMemo(() => {
+    if (inboxTab === "unread") return dateFilteredItems.filter((item) => !readIds.has(item.id));
+    if (inboxTab === "all") return dateFilteredItems;
+    return dateFilteredItems.filter((item) => item.category === inboxTab);
+  }, [dateFilteredItems, inboxTab, readIds]);
+
+  const selectedItem = useMemo(
+    () => visibleItems.find((item) => item.id === selectedId) || visibleItems[0] || null,
+    [visibleItems, selectedId],
+  );
+
+  const handleSelectItem = useCallback((item) => {
+    setSelectedId(item.id);
+    if (!readIds.has(item.id)) {
+      const next = new Set(readIds);
+      next.add(item.id);
+      persistReadIds(next);
+    }
+  }, [readIds, persistReadIds]);
+
+  const handleMarkAllRead = useCallback(() => {
+    persistReadIds(new Set(inboxItems.map((item) => item.id)));
+    markAdminRequestsRead();
+    setSuccess("All notifications marked as read");
+  }, [inboxItems, markAdminRequestsRead, persistReadIds]);
+
   const handleApproveLeadRequest = useCallback(async (lead) => {
     const leadId = String(lead?._id || "");
     if (!leadId) return;
@@ -642,893 +825,771 @@ const AdminNotifications = () => {
     navigate("/admin/notifications");
   }, [navigate]);
 
+  const cardCls = isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white";
+  const innerCardCls = isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-white";
+  const mutedCls = isDark ? "text-slate-400" : "text-slate-500";
+  const titleCls = isDark ? "text-slate-100" : "text-slate-900";
+  const chipCls = isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600";
+  const inputCls = isDark
+    ? "border-slate-700 bg-slate-950 text-slate-200 placeholder:text-slate-500"
+    : "border-slate-200 bg-white text-slate-700 placeholder:text-slate-400";
+  const btnCls = isDark
+    ? "border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-600"
+    : "border-slate-200 bg-white text-slate-700 hover:border-slate-300";
+  const accentCls = isDark
+    ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+    : "border-sky-500 bg-sky-50 text-sky-700";
+
+  const renderFieldGrid = (leftRows, rightRows) => (
+    <div className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+      {[leftRows, rightRows].map((rows, columnIndex) => (
+        <div
+          key={columnIndex}
+          className={`grid grid-cols-[104px_minmax(0,1fr)] gap-x-3 gap-y-2 ${
+            columnIndex === 1 ? (isDark ? "sm:border-l sm:border-white/5 sm:pl-8" : "sm:border-l sm:border-slate-100 sm:pl-8") : ""
+          }`}
+        >
+          {rows.filter(Boolean).map(([label, value]) => (
+            <React.Fragment key={label}>
+              <span className={`text-xs ${mutedCls}`}>{label}</span>
+              <span className={`min-w-0 break-words text-xs font-semibold ${titleCls}`}>{value}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderSection = (Icon, title, body) => (
+    <div className={`rounded-2xl border p-4 ${innerCardCls}`}>
+      <div className="mb-3 flex items-center gap-2">
+        <Icon size={16} className={mutedCls} />
+        <p className={`text-sm font-black ${titleCls}`}>{title}</p>
+      </div>
+      {body}
+    </div>
+  );
+
+  const renderTimeline = (rows) => (
+    <div className="space-y-3">
+      {rows.map((row) => (
+        <div key={row.label} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+            row.done ? "bg-emerald-500 text-white" : (isDark ? "bg-slate-800 text-slate-600" : "bg-slate-200 text-slate-400")
+          }`}>
+            <Check size={12} />
+          </span>
+          <span className={`w-20 shrink-0 text-xs font-bold ${titleCls}`}>{row.label}</span>
+          <span className={`min-w-0 flex-1 text-xs ${mutedCls}`}>{row.text}</span>
+          <span className={`shrink-0 text-xs ${mutedCls}`}>{row.at ? formatWhen(row.at) : "-"}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  const renderPanelHeader = (Icon, tone, title, subtitle, statusBadge, actions) => (
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${tone}`}>
+          <Icon size={20} />
+        </span>
+        <div className="min-w-0">
+          <p className={`truncate text-lg font-black ${titleCls}`}>{title}</p>
+          <p className={`truncate text-xs ${mutedCls}`}>{subtitle}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {statusBadge}
+        {actions}
+      </div>
+    </div>
+  );
+
   return (
-    <div
-      className={`ui-page-shell custom-scrollbar ${
-        isDark ? "bg-slate-950/45" : "bg-slate-50/80"
-      }`}
-    >
-      <div className="flex justify-end">
-        <button
-          type="button"
-          onClick={() => loadNotifications(true)}
-          disabled={refreshing}
-          className={`h-10 rounded-lg border px-4 text-xs font-semibold inline-flex items-center gap-2 shadow-sm ${
-            isDark
-              ? "border-slate-700 bg-slate-900 text-slate-200 hover:border-cyan-300/45"
-              : "border-slate-300 bg-white text-slate-700 hover:border-cyan-300"
-          } disabled:opacity-60`}
-        >
-          {refreshing ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-          Refresh
-        </button>
-      </div>
+    <div className={`notifications-page ui-page-shell scrollbar-hide ${isDark ? "bg-slate-950/45" : "bg-slate-50/80"}`}>
+      <ToastNotice message={error} type="error" />
+      <ToastNotice message={success} type="success" />
 
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-5">
-        <button
-          type="button"
-          onClick={() => {
-            setApprovalFilter("PENDING");
-            scrollToSection("lead");
-          }}
-          className={`ui-soft-panel rounded-xl border p-3 text-left transition-colors ${
-            isDark
-              ? "border-slate-700 bg-slate-900/80 hover:border-amber-300/40"
-              : "border-slate-200 bg-white hover:border-amber-300"
-          }`}
-        >
-          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Pending Payments
-          </p>
-          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-amber-200" : "text-amber-700"}`}>
-            {metrics.pendingLead}
-          </p>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setApprovalFilter("APPROVED");
-            scrollToSection("lead");
-          }}
-          className={`ui-soft-panel rounded-xl border p-3 text-left transition-colors ${
-            isDark
-              ? "border-slate-700 bg-slate-900/80 hover:border-emerald-300/40"
-              : "border-slate-200 bg-white hover:border-emerald-300"
-          }`}
-        >
-          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Approved Payments
-          </p>
-          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-emerald-200" : "text-emerald-700"}`}>
-            {metrics.approvedLead}
-          </p>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setApprovalFilter("REJECTED");
-            scrollToSection("lead");
-          }}
-          className={`ui-soft-panel rounded-xl border p-3 text-left transition-colors ${
-            isDark
-              ? "border-slate-700 bg-slate-900/80 hover:border-rose-300/40"
-              : "border-slate-200 bg-white hover:border-rose-300"
-          }`}
-        >
-          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Rejected Payments
-          </p>
-          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-rose-200" : "text-rose-700"}`}>
-            {metrics.rejectedLead}
-          </p>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setApprovalFilter("ALL");
-            scrollToSection("inventory");
-          }}
-          className={`ui-soft-panel rounded-xl border p-3 text-left transition-colors ${
-            isDark
-              ? "border-slate-700 bg-slate-900/80 hover:border-cyan-300/40"
-              : "border-slate-200 bg-white hover:border-cyan-300"
-          }`}
-        >
-          <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            Inventory Pending
-          </p>
-          <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-cyan-200" : "text-cyan-700"}`}>
-            {metrics.pendingInventory}
-          </p>
-        </button>
-        {userRole === "ADMIN" ? (
-          <button
-            type="button"
-            onClick={() => {
-              setApprovalFilter("ALL");
-              scrollToSection("user-delete");
-            }}
-            className={`ui-soft-panel rounded-xl border p-3 text-left transition-colors ${
-              isDark
-                ? "border-slate-700 bg-slate-900/80 hover:border-rose-300/40"
-                : "border-slate-200 bg-white hover:border-rose-300"
-            }`}
-          >
-            <p className={`text-[10px] uppercase tracking-[0.14em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              User Delete
-            </p>
-            <p className={`mt-1 text-2xl font-semibold ${isDark ? "text-rose-200" : "text-rose-700"}`}>
-              {metrics.pendingUserDelete}
-            </p>
-          </button>
-        ) : null}
-      </div>
-
-      <div className={`ui-soft-panel rounded-xl border p-3 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-          <div className="relative md:col-span-2">
-            <Search size={14} className={`absolute left-3 top-1/2 -translate-y-1/2 ${isDark ? "text-slate-500" : "text-slate-400"}`} />
+      {/* Page header */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <h1 className={`text-2xl font-black tracking-tight sm:text-3xl ${titleCls}`}>Notifications</h1>
+          <p className={`mt-1 text-sm ${mutedCls}`}>Review alerts, payment approvals and inventory requests</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[180px] flex-1 sm:max-w-[260px]">
+            <Search size={16} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${mutedCls}`} />
             <input
               type="text"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search by lead, property, docs, executive, payment ref..."
-              className={`h-10 w-full rounded-lg border pl-9 pr-3 text-sm ${
-                isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-300 bg-white text-slate-700"
-              }`}
+              aria-label="Search notifications"
+              placeholder="Search notifications..."
+              className={`h-10 w-full rounded-xl border pl-9 pr-3 text-sm ${inputCls}`}
             />
           </div>
-          <select
-            value={approvalFilter}
-            onChange={(event) => setApprovalFilter(event.target.value)}
-            className={`h-10 rounded-lg border px-3 text-sm ${
-              isDark ? "border-slate-700 bg-slate-950 text-slate-200" : "border-slate-300 bg-white text-slate-700"
+          <button
+            type="button"
+            onClick={handleMarkAllRead}
+            className={`flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3.5 text-sm font-semibold ${
+              isDark ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-sky-200 bg-white text-sky-700 hover:border-sky-300"
             }`}
           >
-            {APPROVAL_FILTERS.map((filter) => (
-              <option key={filter.value} value={filter.value}>
-                {filter.label}
-              </option>
-            ))}
-          </select>
+            <Check size={16} /> Mark all as read
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowInboxFilters((value) => !value)}
+            aria-pressed={showInboxFilters}
+            className={`flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3.5 text-sm font-semibold ${
+              showInboxFilters ? accentCls : btnCls
+            }`}
+          >
+            <Filter size={16} /> Filter
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate("/settings")}
+            title="Settings"
+            aria-label="Settings"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border ${btnCls}`}
+          >
+            <SettingsIcon size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={() => loadNotifications(true)}
+            disabled={refreshing}
+            title="Refresh"
+            aria-label="Refresh"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border disabled:opacity-60 ${btnCls}`}
+          >
+            {refreshing ? <Loader size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+          </button>
         </div>
       </div>
 
-      <ToastNotice message={error} type="error" />
-      <ToastNotice message={success} type="success" />
+      {/* Summary tiles */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          {
+            key: "unread",
+            label: "Unread",
+            value: tabCounts.unread,
+            icon: Mail,
+            tint: isDark ? "bg-sky-500/10 text-sky-300" : "bg-sky-50 text-sky-600",
+            surface: cardCls,
+            onClick: () => setInboxTab("unread"),
+          },
+          {
+            key: "alerts",
+            label: "Realtime Alerts",
+            value: recentAdminRequests.length,
+            icon: Radio,
+            tint: isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600",
+            surface: cardCls,
+            onClick: () => setInboxTab("system"),
+          },
+          {
+            key: "payments",
+            label: "Payment Requests",
+            value: leadRequests.length,
+            icon: IndianRupee,
+            tint: isDark ? "bg-amber-500/10 text-amber-300" : "bg-amber-100 text-amber-700",
+            surface: isDark ? "border-amber-500/25 bg-amber-500/5" : "border-amber-200 bg-amber-50/70",
+            onClick: () => setInboxTab("payments"),
+          },
+          {
+            key: "inventory",
+            label: "Inventory Requests",
+            value: metrics.pendingInventory,
+            icon: Building2,
+            tint: isDark ? "bg-violet-500/10 text-violet-300" : "bg-violet-50 text-violet-600",
+            surface: cardCls,
+            onClick: () => setInboxTab("inventory"),
+          },
+        ].map((tile) => (
+          <button
+            key={tile.key}
+            type="button"
+            onClick={tile.onClick}
+            className={`flex items-center gap-3 rounded-2xl border p-4 text-left transition-colors ${tile.surface}`}
+          >
+            <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${tile.tint}`}>
+              <tile.icon size={20} />
+            </span>
+            <span className="min-w-0">
+              <span className={`block truncate text-sm font-semibold ${mutedCls}`}>{tile.label}</span>
+              <span className={`block text-2xl font-black ${titleCls}`}>{tile.value}</span>
+            </span>
+          </button>
+        ))}
+      </div>
 
-      <section className={`ui-soft-panel rounded-2xl border p-4 ${
-        isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"
-      }`}>
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-2">
-            <BellRing size={16} className={isDark ? "text-cyan-300" : "text-cyan-700"} />
-            <h2 className={`text-base font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-              Realtime Alert Feed
-            </h2>
-          </div>
-          <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-            {filteredRecentAlerts.length}
-          </span>
-        </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,430px)_minmax(0,1fr)]">
+        {/* Inbox */}
+        <section className={`flex min-w-0 flex-col gap-3 rounded-2xl border p-4 ${cardCls}`}>
+          <h2 className={`text-lg font-black ${titleCls}`}>Inbox</h2>
 
-        {filteredRecentAlerts.length === 0 ? (
-          <div className={`rounded-xl border p-3 text-sm ${
-            isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500"
-          }`}>
-            No realtime alerts found.
-          </div>
-        ) : (
-          <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1 custom-scrollbar">
-            {filteredRecentAlerts.map((alert) => {
-              const payload = alert?.payload || {};
-              const source = String(alert?.source || "").toLowerCase();
-              const requestType = String(alert?.requestType || payload?.requestType || "").toUpperCase();
-              const isLeadDealClosedAlert =
-                source === "lead" && requestType === "LEAD_DEAL_CLOSED";
-              const isLeadRemainingCollectedAlert =
-                source === "lead" && requestType === "LEAD_REMAINING_PAYMENT_COLLECTED";
-              const inventoryLabel = getInventoryUnitLabel(payload?.inventory || payload?.inventoryId || {});
-              const leadName = String(payload?.lead?.name || "").trim();
-              const requestTag = source === "lead"
-                ? (
-                  isLeadDealClosedAlert
-                    ? "Deal Closed"
-                    : isLeadRemainingCollectedAlert
-                      ? "Remaining Collected"
-                      : "Payment Request"
-                )
-                : `${String(payload?.inventoryRequestType || payload?.type || "UPDATE").toUpperCase()} Inventory Request`;
-              const openAlertTarget = () => handleOpenAlertTarget(alert);
-              const handleAlertCardClick = (event) => {
-                if (isDirectInteractiveTarget(event.target)) return;
-                openAlertTarget();
-              };
-              const handleAlertCardKeyDown = (event) => {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                openAlertTarget();
-              };
-
+          <div className={`flex flex-wrap items-center gap-x-4 border-b ${isDark ? "border-white/5" : "border-slate-100"}`}>
+            {INBOX_TABS.map((tab) => {
+              const isActiveTab = inboxTab === tab.id;
               return (
-                <div
-                  key={alert.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={handleAlertCardClick}
-                  onKeyDown={handleAlertCardKeyDown}
-                  className={`cursor-pointer rounded-xl border p-3 transition-colors ${
-                  isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
-                }`}>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-                      {alert.preview || "New request received"}
-                    </p>
-                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                      isDark
-                        ? "border-cyan-400/35 bg-cyan-500/10 text-cyan-200"
-                        : "border-cyan-200 bg-cyan-50 text-cyan-700"
-                    }`}>
-                      {requestTag}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-1 gap-1 text-[11px] sm:grid-cols-2">
-                    <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Source:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{source === "lead" ? "Lead" : "Inventory"}</span></div>
-                    <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Received:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatDate(alert?.createdAt)}</span></div>
-                    {source === "lead" ? (
-                      <>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Lead:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{leadName || "-"}</span></div>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Phone:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.lead?.phone || "-"}</span></div>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Project:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.lead?.projectInterested || "-"}</span></div>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Status:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.status || payload?.lead?.status || "-"}</span></div>
-                        {isLeadDealClosedAlert ? (
-                          <div className="sm:col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Closed By:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.closedBy?.name || "-"}</span></div>
-                        ) : isLeadRemainingCollectedAlert ? (
-                          <>
-                            <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Prev Remaining:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatAmount(payload?.payment?.previousRemainingAmount)}</span></div>
-                            <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Current Remaining:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatAmount(payload?.payment?.remainingAmount)}</span></div>
-                            <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Mode/Type:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatPaymentMode(payload?.payment?.mode)} / {formatPaymentType(payload?.payment?.paymentType)}</span></div>
-                            <div className="sm:col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Collected By:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.collectedBy?.name || "-"}</span></div>
-                          </>
-                        ) : (
-                          <>
-                            <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Mode/Type:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatPaymentMode(payload?.payment?.mode)} / {formatPaymentType(payload?.payment?.paymentType)}</span></div>
-                            <div className="sm:col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Reference:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.payment?.paymentReference || "-"}</span></div>
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Request Id:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.requestId || alert?.requestId || "-"}</span></div>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Inventory:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{inventoryLabel || "-"}</span></div>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Requested By:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{payload?.requestedBy?.name || "-"}</span></div>
-                        <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Type:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{String(payload?.inventoryRequestType || payload?.type || "-").toUpperCase()}</span></div>
-                      </>
-                    )}
-                  </div>
-
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={openAlertTarget}
-                      className={`h-7 rounded-lg border px-2 text-[10px] font-semibold ${
-                        isDark
-                          ? "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-300/40"
-                          : "border-slate-300 bg-white text-slate-700 hover:border-cyan-300"
-                      }`}
-                    >
-                      Open Request
-                    </button>
-                  </div>
-                </div>
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setInboxTab(tab.id)}
+                  aria-pressed={isActiveTab}
+                  className={`-mb-px flex items-center gap-1.5 border-b-2 pb-2 text-sm font-semibold transition-colors ${
+                    isActiveTab
+                      ? `border-sky-500 ${isDark ? "text-sky-300" : "text-sky-700"}`
+                      : `border-transparent ${mutedCls}`
+                  }`}
+                >
+                  {tab.label}
+                  <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-black ${
+                    isActiveTab ? (isDark ? "bg-sky-500/20 text-sky-200" : "bg-sky-100 text-sky-700") : chipCls
+                  }`}>
+                    {tabCounts[tab.id]}
+                  </span>
+                </button>
               );
             })}
           </div>
-        )}
-      </section>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <section ref={leadSectionRef} className={`rounded-2xl border p-4 ${
-          isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"
-        }`}>
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-2">
-              <CircleDollarSign size={16} className={isDark ? "text-amber-300" : "text-amber-700"} />
-              <h2 className={`text-base font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                Lead Payment Requests
-              </h2>
-            </div>
-            <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              {filteredLeadRequests.length}
-            </span>
+          <div className="relative">
+            <Search size={16} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${mutedCls}`} />
+            <input
+              type="text"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label="Search the inbox"
+              placeholder="Search notifications..."
+              className={`h-10 w-full rounded-xl border pl-9 pr-3 text-sm ${inputCls}`}
+            />
           </div>
 
-          {loading ? (
-            <div className={`h-28 flex items-center justify-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              <Loader size={14} className="animate-spin" />
-              Loading payment requests...
+          {showInboxFilters && (
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <select
+                aria-label="Filter requests by decision"
+                value={approvalFilter}
+                onChange={(event) => setApprovalFilter(event.target.value)}
+                className={`h-10 rounded-xl border px-3 text-sm font-semibold ${inputCls}`}
+              >
+                {APPROVAL_FILTERS.map((filter) => (
+                  <option key={filter.value} value={filter.value}>
+                    {filter.value === "ALL" ? "All Status" : filter.label}
+                  </option>
+                ))}
+              </select>
+              <div className="relative">
+                <CalendarDays size={15} className={`pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 ${mutedCls}`} />
+                <select
+                  aria-label="Filter by date"
+                  value={dateFilter}
+                  onChange={(event) => setDateFilter(event.target.value)}
+                  className={`h-10 w-full rounded-xl border pl-9 pr-3 text-sm font-semibold ${inputCls}`}
+                >
+                  {DATE_FILTERS.map((filter) => (
+                    <option key={filter.value} value={filter.value}>{filter.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-          ) : filteredLeadRequests.length === 0 ? (
-            <div className={`rounded-xl border p-3 text-sm ${isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500"}`}>
-              No payment requests found for current filter.
+          )}
+
+          {loading ? (
+            <div className={`flex h-32 items-center justify-center gap-2 text-sm ${mutedCls}`}>
+              <Loader size={14} className="animate-spin" /> Loading notifications...
             </div>
           ) : (
-            <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 custom-scrollbar">
-              {filteredLeadRequests.map((lead) => {
-                const approvalStatus = String(lead?.dealPayment?.approvalStatus || "PENDING").toUpperCase();
-                const isPendingApproval = approvalStatus === "PENDING";
-                const isReviewingLead = reviewingLeadId === String(lead?._id || "");
-                const closureDocuments = Array.isArray(lead?.closureDocuments) ? lead.closureDocuments : [];
-                const propertyRows = getLeadPropertyRows(lead);
-                const soldProperties = propertyRows.filter((inventoryLike) =>
-                  isSoldInventoryStatus(inventoryLike?.status));
-                const primaryProperty = propertyRows[0] || null;
-                const executiveDetails = [
-                  { label: "Assigned To", user: lead?.assignedTo },
-                  { label: "Manager", user: lead?.assignedManager },
-                  { label: "Executive", user: lead?.assignedExecutive },
-                  { label: "Field Executive", user: lead?.assignedFieldExecutive },
-                  { label: "Created By", user: lead?.createdBy },
-                ];
-                const openLeadDetails = () => {
-                  const leadId = String(lead?._id || "");
-                  if (!leadId) return;
-                  navigate(`/leads/${leadId}`);
-                };
-                const handleLeadCardClick = (event) => {
-                  if (isDirectInteractiveTarget(event.target)) return;
-                  openLeadDetails();
-                };
-                const handleLeadCardKeyDown = (event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  openLeadDetails();
-                };
+            <div className="space-y-2">
+              {visibleItems.map((item) => {
+                const isSelected = selectedItem?.id === item.id;
+                const isUnread = !readIds.has(item.id);
+                const ItemIcon = item.icon;
                 return (
                   <div
-                    key={lead._id}
+                    key={item.id}
                     role="button"
                     tabIndex={0}
-                    onClick={handleLeadCardClick}
-                    onKeyDown={handleLeadCardKeyDown}
-                    className={`cursor-pointer rounded-xl border p-3 transition-colors ${
-                    isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
-                  }`}>
-                    <div className="mb-2 flex items-start justify-between gap-2">
-                      <div>
-                        <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-                          {lead.name || "Lead"}
-                        </p>
-                        <p className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {lead.phone || "-"} | {lead.projectInterested || "-"}
-                        </p>
-                      </div>
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${getApprovalTone(approvalStatus, isDark)}`}>
-                        {approvalStatus}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Lead Status:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{lead.status || "-"}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Mode:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatPaymentMode(lead?.dealPayment?.mode)}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Type:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatPaymentType(lead?.dealPayment?.paymentType)}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Remaining:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatAmount(lead?.dealPayment?.remainingAmount)}</span></div>
-                      <div className="col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Reference:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{lead?.dealPayment?.paymentReference || "-"}</span></div>
-                      <div className="col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Requested By:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{lead?.dealPayment?.approvalRequestedBy?.name || "-"}</span></div>
-                      <div className="col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Admin Note:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{lead?.dealPayment?.approvalNote || "-"}</span></div>
-                    </div>
-
-                    <div className={`mt-2 rounded-lg border p-2 ${
-                      isDark ? "border-slate-700 bg-slate-900/65" : "border-slate-200 bg-white"
+                    onClick={() => handleSelectItem(item)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      handleSelectItem(item);
+                    }}
+                    className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors ${
+                      isSelected
+                        ? (isDark ? "border-sky-500/50 border-l-4 border-l-sky-500 bg-sky-500/5" : "border-sky-200 border-l-4 border-l-sky-500 bg-sky-50/70")
+                        : (isDark ? "border-slate-800 hover:border-slate-700" : "border-slate-200 hover:border-slate-300")
+                    }`}
+                  >
+                    <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${isUnread ? "bg-sky-500" : "bg-transparent"}`} />
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${
+                      item.category === "payments"
+                        ? (isDark ? "bg-amber-500/10 text-amber-300" : "bg-amber-100 text-amber-700")
+                        : item.category === "inventory"
+                          ? (isDark ? "bg-violet-500/10 text-violet-300" : "bg-violet-50 text-violet-600")
+                          : (isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600")
                     }`}>
-                      <div className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                        isDark ? "text-slate-400" : "text-slate-500"
-                      }`}>
-                        <Building2 size={11} />
-                        Sold Property Details
+                      <ItemIcon size={16} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className={`min-w-0 truncate text-sm font-bold ${titleCls}`}>{item.title}</p>
+                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${getApprovalTone(item.status, isDark)}`}>
+                          {item.status}
+                        </span>
                       </div>
-                      <div className="mt-1 space-y-1 text-[11px]">
-                        <div>
-                          <span className={isDark ? "text-slate-400" : "text-slate-500"}>Primary Property:</span>{" "}
-                          <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                            {primaryProperty ? getInventoryUnitLabel(primaryProperty) || "-" : "-"}
-                          </span>
-                        </div>
-                        <div>
-                          <span className={isDark ? "text-slate-400" : "text-slate-500"}>Primary Status:</span>{" "}
-                          <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                            {formatInventoryStatusLabel(primaryProperty?.status)}
-                          </span>
-                        </div>
-                        <div>
-                          <span className={isDark ? "text-slate-400" : "text-slate-500"}>Sold Properties:</span>{" "}
-                          <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                            {soldProperties.length}
-                          </span>
-                        </div>
-                        {soldProperties.length > 0 ? (
-                          <div className="space-y-1">
-                            {soldProperties.map((inventoryLike) => (
-                              <div
-                                key={toObjectIdString(inventoryLike)}
-                                className={`rounded border px-2 py-1 ${
-                                  isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
-                                }`}
-                              >
-                                <div className={isDark ? "text-slate-100" : "text-slate-800"}>
-                                  {getInventoryUnitLabel(inventoryLike) || "-"}
-                                </div>
-                                <div className={isDark ? "text-slate-400" : "text-slate-500"}>
-                                  {inventoryLike?.location || "-"} | {formatAmount(inventoryLike?.price)}
-                                </div>
-                                <div className={isDark ? "text-slate-400" : "text-slate-500"}>
-                                  {Array.isArray(inventoryLike?.images) ? inventoryLike.images.length : 0} images
-                                  {" | "}
-                                  {Array.isArray(inventoryLike?.documents) ? inventoryLike.documents.length : 0} docs
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
+                      <p className={`truncate text-xs font-semibold ${titleCls}`}>{item.subtitle}</p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className={`min-w-0 truncate text-[11px] ${mutedCls}`}>{item.context}</p>
+                        <span className={`shrink-0 text-[11px] ${mutedCls}`}>{formatWhen(item.at)}</span>
                       </div>
-                    </div>
-
-                    <div className={`mt-2 rounded-lg border p-2 ${
-                      isDark ? "border-slate-700 bg-slate-900/65" : "border-slate-200 bg-white"
-                    }`}>
-                      <div className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                        isDark ? "text-slate-400" : "text-slate-500"
-                      }`}>
-                        <UserRound size={11} />
-                        Executive Details
-                      </div>
-                      <div className="mt-1 grid grid-cols-1 gap-1 text-[11px] sm:grid-cols-2">
-                        {executiveDetails.map((detail) => (
-                          <div
-                            key={`${lead._id}:${detail.label}`}
-                            className={`rounded border px-2 py-1 ${
-                              isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
-                            }`}
-                          >
-                            <div>
-                              <span className={isDark ? "text-slate-400" : "text-slate-500"}>{detail.label}:</span>{" "}
-                              <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                                {formatUserWithRole(detail.user)}
-                              </span>
-                            </div>
-                            <div className={isDark ? "text-slate-400" : "text-slate-500"}>
-                              Phone: {getUserContactField(detail.user, "phone") || "-"}
-                            </div>
-                            <div className={isDark ? "text-slate-400" : "text-slate-500"}>
-                              Email: {getUserContactField(detail.user, "email") || "-"}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className={`mt-2 rounded-lg border p-2 ${
-                      isDark ? "border-slate-700 bg-slate-900/65" : "border-slate-200 bg-white"
-                    }`}>
-                      <div className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                        isDark ? "text-slate-400" : "text-slate-500"
-                      }`}>
-                        <FileText size={11} />
-                        Submitted Documents ({closureDocuments.length})
-                      </div>
-                      {closureDocuments.length === 0 ? (
-                        <div className={`mt-1 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          No documents submitted yet.
-                        </div>
-                      ) : (
-                        <div className="mt-1 space-y-1">
-                          {closureDocuments.map((doc, index) => (
-                            <a
-                              key={`${lead._id}:${doc?.url || index}`}
-                              href={doc?.url || "#"}
-                              target="_blank"
-                              rel="noreferrer"
-                              className={`block rounded border px-2 py-1 text-[11px] ${
-                                isDark
-                                  ? "border-slate-700 bg-slate-950/70 text-cyan-200 hover:border-cyan-300/40"
-                                  : "border-slate-200 bg-slate-50 text-cyan-700 hover:border-cyan-300"
-                              }`}
-                            >
-                              <div className="font-semibold">
-                                {doc?.name || `Document ${index + 1}`}
-                              </div>
-                              <div className={isDark ? "text-slate-400" : "text-slate-500"}>
-                                {String(doc?.kind || "file").toUpperCase()} | {formatDate(doc?.uploadedAt)}
-                              </div>
-                              <div className={isDark ? "text-slate-400" : "text-slate-500"}>
-                                Uploaded By: {formatUserWithRole(doc?.uploadedBy)}
-                              </div>
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                      <div className={`inline-flex items-center gap-1 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                        <Clock3 size={11} />
-                        {formatDate(lead?.dealPayment?.approvalRequestedAt || lead?.updatedAt)}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {isPendingApproval ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleApproveLeadRequest(lead)}
-                              disabled={isReviewingLead}
-                              className={`h-7 rounded-lg border px-2 text-[10px] font-semibold inline-flex items-center gap-1 ${
-                                isDark
-                                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/55"
-                                  : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300"
-                              } disabled:opacity-60`}
-                            >
-                              {isReviewingLead ? <Loader size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
-                              Approve
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRejectLeadRequest(lead)}
-                              disabled={isReviewingLead}
-                              className={`h-7 rounded-lg border px-2 text-[10px] font-semibold inline-flex items-center gap-1 ${
-                                isDark
-                                  ? "border-rose-500/40 bg-rose-500/10 text-rose-200 hover:border-rose-300/55"
-                                  : "border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300"
-                              } disabled:opacity-60`}
-                            >
-                              <XCircle size={11} />
-                              Reject
-                            </button>
-                          </>
-                        ) : null}
-                        <button
-                          type="button"
-                          onClick={() => navigate("/leads")}
-                          className={`h-7 rounded-lg border px-2 text-[10px] font-semibold ${
-                            isDark
-                              ? "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-300/40"
-                              : "border-slate-300 bg-white text-slate-700 hover:border-cyan-300"
-                          }`}
-                        >
-                          Open Lead Matrix
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/leads/${lead._id}`)}
-                          className={`h-7 rounded-lg border px-2 text-[10px] font-semibold ${
-                            isDark
-                              ? "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-300/40"
-                              : "border-slate-300 bg-white text-slate-700 hover:border-cyan-300"
-                          }`}
-                        >
-                          Open Lead Details
-                        </button>
-                      </div>
+                      {item.meta ? (
+                        <p className={`mt-1 truncate text-[11px] font-semibold ${titleCls}`}>{item.meta}</p>
+                      ) : null}
                     </div>
                   </div>
                 );
               })}
+
+              {inboxTab === "all" && tabCounts.inventory === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setInboxTab("inventory")}
+                  className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${
+                    isDark ? "border-slate-800 hover:border-slate-700" : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${chipCls}`}>
+                    <Package size={16} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-sm font-bold ${titleCls}`}>Inventory requests</span>
+                    <span className={`block truncate text-xs ${mutedCls}`}>No inventory requests yet</span>
+                  </span>
+                  <ChevronRight size={16} className={mutedCls} />
+                </button>
+              ) : null}
+
+              {inboxTab === "all" && tabCounts.system === 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setInboxTab("system")}
+                  className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left ${
+                    isDark ? "border-slate-800 hover:border-slate-700" : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${chipCls}`}>
+                    <BellRing size={16} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className={`block truncate text-sm font-bold ${titleCls}`}>System notifications</span>
+                    <span className={`block truncate text-xs ${mutedCls}`}>No system notifications yet</span>
+                  </span>
+                  <ChevronRight size={16} className={mutedCls} />
+                </button>
+              ) : null}
+
+              <div className={`flex flex-col items-center gap-1 rounded-2xl border p-6 text-center ${
+                isDark ? "border-sky-500/20 bg-sky-500/5" : "border-sky-100 bg-sky-50/60"
+              }`}>
+                <CheckCircle2 size={26} className={isDark ? "text-emerald-400" : "text-emerald-500"} />
+                <p className={`text-sm font-bold ${titleCls}`}>
+                  {visibleItems.length === 0 ? "Nothing here right now" : "You're all caught up"}
+                </p>
+                <p className={`text-xs ${mutedCls}`}>No more notifications at the moment.</p>
+              </div>
             </div>
           )}
         </section>
 
-        <section ref={inventorySectionRef} className={`rounded-2xl border p-4 ${
-          isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"
-        }`}>
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-2">
-              <Building2 size={16} className={isDark ? "text-cyan-300" : "text-cyan-700"} />
-              <h2 className={`text-base font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                Inventory Requests
-              </h2>
+        {/* Detail panel */}
+        <section className={`min-w-0 rounded-2xl border p-4 ${cardCls}`}>
+          {!selectedItem ? (
+            <div className={`flex h-full min-h-[240px] flex-col items-center justify-center gap-2 text-center ${mutedCls}`}>
+              <BellRing size={26} />
+              <p className="text-sm font-semibold">Select a notification to see its details</p>
             </div>
-            <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              {filteredInventoryRequests.length}
-            </span>
-          </div>
+          ) : selectedItem.category === "payments" ? (
+            (() => {
+              const lead = selectedItem.lead || {};
+              const deal = lead?.dealPayment || {};
+              const property = selectedItem.property;
+              const images = Array.isArray(property?.images) ? property.images : [];
+              const documents = Array.isArray(property?.documents) ? property.documents : [];
+              const executive = lead?.assignedExecutive || lead?.assignedTo;
+              const manager = lead?.assignedManager;
+              const isPendingApproval = selectedItem.status === "PENDING";
+              const isReviewingLead = reviewingLeadId === String(lead?._id || "");
+              const decisionLabel = selectedItem.status === "APPROVED"
+                ? "Approved"
+                : selectedItem.status === "REJECTED" ? "Rejected" : "Pending";
+              return (
+                <>
+                  {renderPanelHeader(
+                    IndianRupee,
+                    isDark ? "bg-amber-500/10 text-amber-300" : "bg-amber-100 text-amber-700",
+                    "Payment request details",
+                    selectedItem.status === "APPROVED"
+                      ? "Lead payment has been approved"
+                      : selectedItem.status === "REJECTED"
+                        ? "Lead payment has been rejected"
+                        : "Lead payment is awaiting your decision",
+                    <span className={`rounded-full border px-3 py-1 text-[11px] font-bold ${getApprovalTone(selectedItem.status, isDark)}`}>
+                      {selectedItem.status}
+                    </span>,
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/leads/${toObjectIdString(lead?._id)}`)}
+                      className={`flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold ${btnCls}`}
+                    >
+                      <ExternalLink size={14} /> Open lead
+                    </button>,
+                  )}
 
-          {loading ? (
-            <div className={`h-28 flex items-center justify-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              <Loader size={14} className="animate-spin" />
-              Loading inventory requests...
-            </div>
-          ) : filteredInventoryRequests.length === 0 ? (
-            <div className={`rounded-xl border p-3 text-sm ${isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500"}`}>
-              No pending inventory requests found.
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-[560px] overflow-y-auto pr-1 custom-scrollbar">
-              {filteredInventoryRequests.map((request) => {
-                const inventoryId = String(request?.inventoryId?._id || "");
-                const requestId = String(request?._id || "");
-                const requestType = String(request?.type || "").toUpperCase();
-                const requestedByName = request?.requestedBy?.name || "-";
-                const requestedByRole = request?.requestedBy?.role || "-";
-                const isReviewingInventory = reviewingInventoryRequestId === requestId;
-                const isCreateRequest = String(request?.type || "").toLowerCase() === "create";
-                const proposedData = request?.proposedData || {};
-                const currentInventory = request?.inventoryId || {};
-                const currentStatusLabel = formatInventoryStatusLabel(currentInventory?.status);
-                const requestedStatusLabel = formatInventoryStatusLabel(proposedData?.status || currentInventory?.status || "Available");
-                const requestedFields = !isCreateRequest
-                  ? Object.entries(proposedData).filter(([key]) => REQUEST_FIELD_LABELS[key])
-                  : [];
-                const detailSource = isCreateRequest ? proposedData : currentInventory;
-                const detailImages = Array.isArray(detailSource?.images) ? detailSource.images : [];
-                const detailDocs = Array.isArray(detailSource?.documents) ? detailSource.documents : [];
-                const inventoryLabel = [
-                  request?.inventoryId?.projectName,
-                  request?.inventoryId?.towerName,
-                  request?.inventoryId?.unitNumber,
-                ]
-                  .map((value) => String(value || "").trim())
-                  .filter(Boolean)
-                  .join(" - ");
-                const openInventoryDetails = () => {
-                  if (!inventoryId) return;
-                  navigate(`/inventory/${inventoryId}`);
-                };
-                const handleInventoryCardClick = (event) => {
-                  if (isDirectInteractiveTarget(event.target)) return;
-                  openInventoryDetails();
-                };
-                const handleInventoryCardKeyDown = (event) => {
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  openInventoryDetails();
-                };
+                  <div className="mt-4 space-y-3">
+                    {renderSection(FileText, "Overview", renderFieldGrid(
+                      [
+                        ["Lead", lead?.name || "-"],
+                        ["Lead status", lead?.status || "-"],
+                        ["Payment type", formatPaymentType(deal.paymentType)],
+                      ],
+                      [
+                        ["Mode", formatPaymentMode(deal.mode)],
+                        ["Reference", deal.paymentReference || "-"],
+                        ["Remaining", formatAmount(deal.remainingAmount)],
+                      ],
+                    ))}
 
-                return (
-                  <div
-                    key={request._id}
-                    role={inventoryId ? "button" : undefined}
-                    tabIndex={inventoryId ? 0 : undefined}
-                    onClick={inventoryId ? handleInventoryCardClick : undefined}
-                    onKeyDown={inventoryId ? handleInventoryCardKeyDown : undefined}
-                    className={`rounded-xl border p-3 ${
-                    isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
-                  } ${inventoryId ? "cursor-pointer transition-colors" : ""}`}
-                  >
-                    <div className="mb-2 flex items-start justify-between">
-                      <div>
-                        <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-                          {requestType || "UPDATE"} request
-                        </p>
-                        <p className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {requestedByName} ({requestedByRole})
-                        </p>
-                      </div>
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
-                        isDark
-                          ? "border-cyan-400/35 bg-cyan-500/10 text-cyan-200"
-                          : "border-cyan-200 bg-cyan-50 text-cyan-700"
-                      }`}>
-                        PENDING
-                      </span>
-                    </div>
+                    {renderSection(Building2, "Property details", renderFieldGrid(
+                      [
+                        ["Property", property ? (getInventoryUnitLabel(property) || "-") : "-"],
+                        ["Address", property?.location || "-"],
+                        ["Status", (
+                          <span className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-bold ${
+                            isDark ? "bg-emerald-500/10 text-emerald-300" : "bg-emerald-50 text-emerald-700"
+                          }`}>
+                            {formatInventoryStatusLabel(property?.status)}
+                          </span>
+                        )],
+                      ],
+                      [
+                        ["Sale value", formatAmount(property?.price)],
+                        ["Sold properties", selectedItem.soldCount],
+                        ["Images", images.length],
+                        ["Documents", documents.length],
+                      ],
+                    ))}
 
-                    <div className="space-y-1 text-[11px]">
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Inventory:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{inventoryLabel || getInventoryUnitLabel(proposedData) || "New inventory create request"}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Team:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{request?.teamId?.name || "-"}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Requested At:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatDate(request?.createdAt)}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Status Move:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{isCreateRequest ? requestedStatusLabel : `${currentStatusLabel} -> ${requestedStatusLabel}`}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Location:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{detailSource?.location || "-"}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Coordinates:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatCoordinates(detailSource?.siteLocation)}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Price:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatAmount(detailSource?.price)}</span></div>
-                      <div><span className={isDark ? "text-slate-400" : "text-slate-500"}>Media:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{detailImages.length} images, {detailDocs.length} docs</span></div>
-                      {String(requestedStatusLabel || "").toLowerCase() === "sold" && detailSource?.saleDetails ? (
-                        <div className="col-span-2"><span className={isDark ? "text-slate-400" : "text-slate-500"}>Sold Details:</span> <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatRequestValue("saleDetails", detailSource?.saleDetails)}</span></div>
-                      ) : null}
-                    </div>
+                    {renderSection(Users, "People", renderFieldGrid(
+                      [
+                        ["Executive", formatUserWithRole(executive)],
+                        ["Phone", getUserContactField(executive, "phone") || "-"],
+                        ["Email", getUserContactField(executive, "email") || "-"],
+                      ],
+                      [
+                        ["Manager", formatUserWithRole(manager)],
+                        ["Phone", getUserContactField(manager, "phone") || "-"],
+                        ["Email", getUserContactField(manager, "email") || "-"],
+                      ],
+                    ))}
 
-                    {!isCreateRequest && requestedFields.length > 0 ? (
-                      <div className={`mt-2 rounded-lg border p-2 ${
-                        isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"
-                      }`}>
-                        <p className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${
-                          isDark ? "text-slate-400" : "text-slate-500"
-                        }`}>
-                          Requested Changes
-                        </p>
-                        <div className="mt-1 grid grid-cols-1 gap-1 text-[11px] sm:grid-cols-2">
-                          {requestedFields.map(([key, value]) => (
-                            <p key={`${requestId}:${key}`}>
-                              <span className={isDark ? "text-slate-400" : "text-slate-500"}>{REQUEST_FIELD_LABELS[key] || key}:</span>{" "}
-                              <span className={isDark ? "text-slate-200" : "text-slate-700"}>{formatRequestValue(key, value)}</span>
-                            </p>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
+                    {renderSection(Clock3, "Activity timeline", renderTimeline([
+                      {
+                        label: "Requested",
+                        text: deal.approvalRequestedBy?.name
+                          ? `Payment request created by ${deal.approvalRequestedBy.name}`
+                          : "Payment request created",
+                        at: deal.approvalRequestedAt,
+                        done: Boolean(deal.approvalRequestedAt),
+                      },
+                      {
+                        label: "Reviewed",
+                        text: deal.approvalReviewedBy?.name
+                          ? `Reviewed by ${deal.approvalReviewedBy.name}`
+                          : "Awaiting review",
+                        at: deal.approvalReviewedAt,
+                        done: Boolean(deal.approvalReviewedAt),
+                      },
+                      {
+                        label: decisionLabel,
+                        text: deal.approvalNote || (isPendingApproval ? "Decision pending" : `Payment ${decisionLabel.toLowerCase()}`),
+                        at: isPendingApproval ? null : deal.approvalReviewedAt,
+                        done: !isPendingApproval,
+                      },
+                    ]))}
+                  </div>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleApproveInventoryRequest(requestId)}
-                        disabled={isReviewingInventory}
-                        className={`h-7 rounded-lg border px-2 text-[10px] font-semibold inline-flex items-center gap-1 ${
-                          isDark
-                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/55"
-                            : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300"
-                        } disabled:opacity-60`}
-                      >
-                        {isReviewingInventory ? <Loader size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRejectInventoryRequest(requestId)}
-                        disabled={isReviewingInventory}
-                        className={`h-7 rounded-lg border px-2 text-[10px] font-semibold inline-flex items-center gap-1 ${
-                          isDark
-                            ? "border-rose-500/40 bg-rose-500/10 text-rose-200 hover:border-rose-300/55"
-                            : "border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300"
-                        } disabled:opacity-60`}
-                      >
-                        <XCircle size={11} />
-                        Reject
-                      </button>
-                      {inventoryId ? (
+                  <div className={`mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4 ${
+                    isDark ? "border-white/5" : "border-slate-100"
+                  }`}>
+                    {isPendingApproval ? (
+                      <>
                         <button
                           type="button"
-                          onClick={() => navigate(`/inventory/${inventoryId}`)}
-                          className={`h-7 rounded-lg border px-2 text-[10px] font-semibold ${
+                          onClick={() => handleApproveLeadRequest(lead)}
+                          disabled={isReviewingLead}
+                          className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
                             isDark
-                              ? "border-slate-600 bg-slate-900 text-slate-200 hover:border-cyan-300/40"
-                              : "border-slate-300 bg-white text-slate-700 hover:border-cyan-300"
+                              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                              : "border-emerald-200 bg-emerald-50 text-emerald-700"
                           }`}
                         >
-                          Open Inventory
+                          {isReviewingLead ? <Loader size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                          Approve
                         </button>
-                      ) : null}
-                    </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRejectLeadRequest(lead)}
+                          disabled={isReviewingLead}
+                          className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
+                            isDark ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
+                          }`}
+                        >
+                          <XCircle size={14} /> Reject
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => navigate("/leads")}
+                      className={`h-10 rounded-xl border px-4 text-sm font-semibold ${btnCls}`}
+                    >
+                      Lead matrix
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/leads/${toObjectIdString(lead?._id)}`)}
+                      className="flex h-10 items-center gap-1.5 rounded-xl bg-sky-600 px-4 text-sm font-semibold text-white hover:bg-sky-500"
+                    >
+                      <ExternalLink size={14} /> Open lead
+                    </button>
                   </div>
-                );
-              })}
-            </div>
+                </>
+              );
+            })()
+          ) : selectedItem.category === "inventory" ? (
+            (() => {
+              const request = selectedItem.request || {};
+              const detailSource = request?.proposedData || request?.inventoryId || {};
+              const requestedFields = Object.entries(request?.proposedData || {}).filter(
+                ([key]) => Object.prototype.hasOwnProperty.call(REQUEST_FIELD_LABELS, key),
+              );
+              const inventoryId = toObjectIdString(request?.inventoryId?._id || request?.inventoryId);
+              const isReviewing = reviewingInventoryRequestId === selectedItem.requestId;
+              const detailImages = Array.isArray(detailSource?.images) ? detailSource.images : [];
+              const detailDocs = Array.isArray(detailSource?.documents) ? detailSource.documents : [];
+              return (
+                <>
+                  {renderPanelHeader(
+                    Building2,
+                    isDark ? "bg-violet-500/10 text-violet-300" : "bg-violet-50 text-violet-600",
+                    "Inventory request details",
+                    `${String(request?.type || "UPDATE").toUpperCase()} request awaiting your decision`,
+                    <span className={`rounded-full border px-3 py-1 text-[11px] font-bold ${getApprovalTone("PENDING", isDark)}`}>
+                      PENDING
+                    </span>,
+                    inventoryId ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/inventory/${inventoryId}`)}
+                        className={`flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold ${btnCls}`}
+                      >
+                        <ExternalLink size={14} /> Open inventory
+                      </button>
+                    ) : null,
+                  )}
+
+                  <div className="mt-4 space-y-3">
+                    {renderSection(FileText, "Overview", renderFieldGrid(
+                      [
+                        ["Requested by", formatUserWithRole(request?.requestedBy)],
+                        ["Team", request?.teamId?.name || "-"],
+                        ["Requested at", formatDate(request?.createdAt)],
+                      ],
+                      [
+                        ["Unit", selectedItem.context || "-"],
+                        ["Type", String(request?.type || "UPDATE").toUpperCase()],
+                        ["Status", formatInventoryStatusLabel(detailSource?.status)],
+                      ],
+                    ))}
+
+                    {renderSection(Package, "Unit details", renderFieldGrid(
+                      [
+                        ["Location", detailSource?.location || "-"],
+                        ["Coordinates", formatCoordinates(detailSource?.siteLocation)],
+                        ["Price", formatAmount(detailSource?.price)],
+                      ],
+                      [
+                        ["Images", detailImages.length],
+                        ["Documents", detailDocs.length],
+                        ["Category", detailSource?.category || "-"],
+                      ],
+                    ))}
+
+                    {requestedFields.length > 0
+                      ? renderSection(FileText, "Requested changes", (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          {requestedFields.map(([key, value]) => (
+                            <div key={key} className="grid grid-cols-[104px_minmax(0,1fr)] gap-x-3">
+                              <span className={`text-xs ${mutedCls}`}>{REQUEST_FIELD_LABELS[key] || key}</span>
+                              <span className={`min-w-0 break-words text-xs font-semibold ${titleCls}`}>
+                                {formatRequestValue(key, value)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ))
+                      : null}
+
+                    {renderSection(Clock3, "Activity timeline", renderTimeline([
+                      { label: "Requested", text: "Inventory request created", at: request?.createdAt, done: true },
+                      { label: "Pending", text: "Waiting for admin decision", at: null, done: false },
+                    ]))}
+                  </div>
+
+                  <div className={`mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4 ${
+                    isDark ? "border-white/5" : "border-slate-100"
+                  }`}>
+                    <button
+                      type="button"
+                      onClick={() => handleApproveInventoryRequest(selectedItem.requestId)}
+                      disabled={isReviewing}
+                      className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
+                        isDark ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      {isReviewing ? <Loader size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRejectInventoryRequest(selectedItem.requestId)}
+                      disabled={isReviewing}
+                      className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
+                        isDark ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
+                      }`}
+                    >
+                      <XCircle size={14} /> Reject
+                    </button>
+                  </div>
+                </>
+              );
+            })()
+          ) : selectedItem.alert ? (
+            (() => {
+              const alert = selectedItem.alert;
+              return (
+                <>
+                  {renderPanelHeader(
+                    BellRing,
+                    chipCls,
+                    "Realtime alert",
+                    `${selectedItem.subtitle} · ${selectedItem.context}`,
+                    <span className={`rounded-full border px-3 py-1 text-[11px] font-bold ${getApprovalTone("ALERT", isDark)}`}>
+                      ALERT
+                    </span>,
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAlertTarget(alert)}
+                      className={`flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold ${btnCls}`}
+                    >
+                      <ExternalLink size={14} /> Open target
+                    </button>,
+                  )}
+                  <div className="mt-4 space-y-3">
+                    {renderSection(FileText, "Overview", renderFieldGrid(
+                      [
+                        ["Source", String(alert?.source || "-").toUpperCase()],
+                        ["Type", String(alert?.requestType || "-")],
+                      ],
+                      [
+                        ["Received", formatWhen(alert?.createdAt)],
+                        ["Reference", toObjectIdString(alert?.requestId) || "-"],
+                      ],
+                    ))}
+                    {renderSection(BellRing, "Message", (
+                      <p className={`text-xs ${titleCls}`}>{alert?.preview || "-"}</p>
+                    ))}
+                  </div>
+                </>
+              );
+            })()
+          ) : (
+            (() => {
+              const request = selectedItem.request || {};
+              const target = selectedItem.target || {};
+              const isReviewing = reviewingUserDeleteRequestId === selectedItem.requestId;
+              return (
+                <>
+                  {renderPanelHeader(
+                    UserRound,
+                    isDark ? "bg-rose-500/10 text-rose-300" : "bg-rose-50 text-rose-600",
+                    "Account delete request",
+                    `${target?.name || "User"} is queued for deletion`,
+                    <span className={`rounded-full border px-3 py-1 text-[11px] font-bold ${getApprovalTone("PENDING", isDark)}`}>
+                      PENDING
+                    </span>,
+                    null,
+                  )}
+
+                  <div className="mt-4 space-y-3">
+                    {renderSection(FileText, "Overview", renderFieldGrid(
+                      [
+                        ["User", target?.name || "-"],
+                        ["Role", target?.role || "-"],
+                        ["Email", target?.email || "-"],
+                      ],
+                      [
+                        ["Phone", target?.phone || "-"],
+                        ["Requested by", formatUserWithRole(request?.requestedBy)],
+                        ["Requested at", formatDate(request?.createdAt)],
+                      ],
+                    ))}
+                    {renderSection(FileText, "Reason", (
+                      <p className={`text-xs ${titleCls}`}>{request?.reason || "-"}</p>
+                    ))}
+                    {renderSection(Clock3, "Activity timeline", renderTimeline([
+                      { label: "Requested", text: "Delete request created", at: request?.createdAt, done: true },
+                      { label: "Pending", text: "Waiting for admin decision", at: null, done: false },
+                    ]))}
+                  </div>
+
+                  <div className={`mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4 ${
+                    isDark ? "border-white/5" : "border-slate-100"
+                  }`}>
+                    <button
+                      type="button"
+                      onClick={() => handleApproveUserDeleteRequest(selectedItem.requestId)}
+                      disabled={isReviewing}
+                      className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
+                        isDark ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      }`}
+                    >
+                      {isReviewing ? <Loader size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRejectUserDeleteRequest(selectedItem.requestId)}
+                      disabled={isReviewing}
+                      className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
+                        isDark ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
+                      }`}
+                    >
+                      <XCircle size={14} /> Reject
+                    </button>
+                  </div>
+                </>
+              );
+            })()
           )}
         </section>
       </div>
-
-      {userRole === "ADMIN" ? (
-        <section ref={userDeleteSectionRef} className={`mt-5 rounded-2xl border p-4 ${
-          isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"
-        }`}>
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <div className="inline-flex items-center gap-2">
-              <UserRound size={16} className={isDark ? "text-rose-300" : "text-rose-700"} />
-              <h2 className={`text-base font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                User Delete Requests
-              </h2>
-            </div>
-            <span className={`text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              {filteredUserDeleteRequests.length}
-            </span>
-          </div>
-
-          {loading ? (
-            <div className={`h-24 flex items-center justify-center gap-2 text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              <Loader size={14} className="animate-spin" />
-              Loading user delete requests...
-            </div>
-          ) : filteredUserDeleteRequests.length === 0 ? (
-            <div className={`rounded-xl border p-3 text-sm ${isDark ? "border-slate-700 text-slate-400" : "border-slate-200 text-slate-500"}`}>
-              No pending user delete requests found.
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1 custom-scrollbar">
-              {filteredUserDeleteRequests.map((request) => {
-                const requestId = String(request?._id || "");
-                const target = request?.targetUser || request?.snapshot || {};
-                const snapshot = request?.snapshot || {};
-                const isReviewingUserDelete = reviewingUserDeleteRequestId === requestId;
-                const targetName = target?.name || snapshot?.name || "User";
-                const targetRole = target?.role || snapshot?.role || "-";
-                const targetEmail = target?.email || snapshot?.email || "-";
-
-                return (
-                  <div
-                    key={requestId}
-                    className={`rounded-xl border p-3 ${
-                      isDark ? "border-slate-700 bg-slate-950/70" : "border-slate-200 bg-slate-50"
-                    }`}
-                  >
-                    <div className="mb-2 flex items-start justify-between">
-                      <div>
-                        <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-                          Delete {targetName}
-                        </p>
-                        <p className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                          {targetRole} | {targetEmail}
-                        </p>
-                      </div>
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
-                        isDark
-                          ? "border-rose-400/35 bg-rose-500/10 text-rose-200"
-                          : "border-rose-200 bg-rose-50 text-rose-700"
-                      }`}>
-                        PENDING
-                      </span>
-                    </div>
-
-                    <div className="space-y-1 text-[11px]">
-                      <div>
-                        <span className={isDark ? "text-slate-400" : "text-slate-500"}>Requested By:</span>{" "}
-                        <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                          {formatUserWithRole(request?.requestedBy)}
-                        </span>
-                      </div>
-                      <div>
-                        <span className={isDark ? "text-slate-400" : "text-slate-500"}>Requested At:</span>{" "}
-                        <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                          {formatDate(request?.createdAt)}
-                        </span>
-                      </div>
-                      <div>
-                        <span className={isDark ? "text-slate-400" : "text-slate-500"}>Reason:</span>{" "}
-                        <span className={isDark ? "text-slate-200" : "text-slate-700"}>
-                          {request?.reason || "-"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleApproveUserDeleteRequest(requestId)}
-                        disabled={isReviewingUserDelete}
-                        className={`h-7 rounded-lg border px-2 text-[10px] font-semibold inline-flex items-center gap-1 ${
-                          isDark
-                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200 hover:border-emerald-300/55"
-                            : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300"
-                        } disabled:opacity-60`}
-                      >
-                        {isReviewingUserDelete ? <Loader size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleRejectUserDeleteRequest(requestId)}
-                        disabled={isReviewingUserDelete}
-                        className={`h-7 rounded-lg border px-2 text-[10px] font-semibold inline-flex items-center gap-1 ${
-                          isDark
-                            ? "border-rose-500/40 bg-rose-500/10 text-rose-200 hover:border-rose-300/55"
-                            : "border-rose-200 bg-rose-50 text-rose-700 hover:border-rose-300"
-                        } disabled:opacity-60`}
-                      >
-                        <XCircle size={11} />
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      ) : null}
-
-      {!loading && !error && (
-        <div className={`mt-5 rounded-xl border px-3 py-2 text-xs ${
-          isDark ? "border-slate-700 bg-slate-900/70 text-slate-400" : "border-slate-200 bg-white text-slate-500"
-        }`}>
-          <span className="inline-flex items-center gap-1">
-            <BellRing size={12} />
-            All requests are visible on this alert page with detailed context.
-          </span>
-          {recentAdminRequests.length > 0 ? (
-            <span className={`mt-2 inline-flex items-center gap-1 ${isDark ? "text-cyan-300" : "text-cyan-700"}`}>
-              <Clock3 size={12} />
-              Realtime alerts captured: {recentAdminRequests.length}
-            </span>
-          ) : null}
-        </div>
-      )}
     </div>
   );
 };

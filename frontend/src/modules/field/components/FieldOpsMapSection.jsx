@@ -7,8 +7,12 @@ import {
   Popup,
   TileLayer,
   useMap,
+  ZoomControl,
 } from "react-leaflet";
 import { EmptyState } from "./FieldOpsShared";
+
+const MAP_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const MAP_TILE_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 
 const MapViewportController = ({ target }) => {
   const map = useMap();
@@ -34,10 +38,10 @@ const FieldOpsMapSection = ({
   propertyMarkerIcon,
   formatDateTime,
 }) => (
-  <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
-    <div className="flex flex-wrap items-start justify-between gap-3">
+  <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-3">
       <div>
-        <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
+        <h2 className="text-[13px] font-bold uppercase tracking-[0.14em] text-slate-700">
           Executive Coverage Map
         </h2>
         <p className="mt-1 text-xs text-slate-500">
@@ -45,10 +49,10 @@ const FieldOpsMapSection = ({
         </p>
       </div>
       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em]">
-        <span className="whitespace-nowrap rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-cyan-700">
+        <span className="inline-flex h-8 items-center whitespace-nowrap rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 text-cyan-700">
           {mapExecutives.length} Executives
         </span>
-        <span className="whitespace-nowrap rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">
+        <span className="inline-flex h-8 items-center whitespace-nowrap rounded-lg border border-amber-200 bg-amber-50 px-2.5 text-amber-700">
           {mapProperties.length} Properties
         </span>
       </div>
@@ -57,16 +61,22 @@ const FieldOpsMapSection = ({
     {mapExecutives.length === 0 && mapProperties.length === 0 ? (
       <EmptyState text="No live executives or property coordinates found for your access scope." />
     ) : (
-      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <div className="h-[270px] overflow-hidden rounded-lg border border-slate-200 sm:h-[330px] lg:h-[390px]">
+      <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
+        <div className="field-ops-map h-[270px] overflow-hidden sm:h-[330px] lg:h-[390px]">
           <MapContainer
             center={mapCenter}
             zoom={9}
+            zoomControl={false}
             scrollWheelZoom
             className="h-full w-full"
-            attributionControl={false}
+            attributionControl
           >
-            <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <TileLayer
+              url={MAP_TILE_URL}
+              attribution={MAP_TILE_ATTRIBUTION}
+              maxZoom={19}
+            />
+            <ZoomControl position="topright" />
             <MapViewportController target={mapFocusTarget} />
 
             {mapExecutives.map((row) => {
@@ -80,10 +90,11 @@ const FieldOpsMapSection = ({
                   center={row.markerPosition}
                   radius={active ? 11 : 8}
                   pathOptions={{
-                    color: "#0f172a",
-                    fillColor: active ? "#0f172a" : "#06b6d4",
-                    fillOpacity: active ? 0.95 : 0.78,
-                    weight: active ? 3 : 2,
+                    color: active ? "#083344" : "#ffffff",
+                    fillColor: active ? "#0891b2" : "#06b6d4",
+                    fillOpacity: active ? 0.98 : 0.88,
+                    opacity: 1,
+                    weight: active ? 4 : 3,
                   }}
                   eventHandlers={{
                     click: () => onExecutiveSelect(row),
@@ -159,12 +170,12 @@ const FieldOpsMapSection = ({
             })}
           </MapContainer>
         </div>
-        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-500">
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
+        <div className="flex flex-wrap gap-2 border-t border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500">
+          <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1">
             <span className="h-2 w-2 rounded-full bg-cyan-500" />
             Executive markers
           </span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
+          <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1">
             <span className="h-2 w-2 rounded-full bg-amber-500" />
             Property markers
           </span>

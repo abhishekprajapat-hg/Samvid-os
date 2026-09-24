@@ -53,9 +53,17 @@ const taskSchema = new mongoose.Schema(
     subtasks: [
       {
         title: { type: String, required: true, trim: true },
-        isCompleted: { type: Boolean, default: false }
+        isCompleted: { type: Boolean, default: false },
+        description: { type: String, default: "", maxlength: 5000 },
+        dueDate: { type: Date, default: null }
       }
     ],
+    assignmentHistory: [{
+      fromUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      toUser: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+      actor: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+      at: { type: Date, default: Date.now },
+    }],
     tags: [
       {
         type: String,

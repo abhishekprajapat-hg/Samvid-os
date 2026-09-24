@@ -1,17 +1,32 @@
+import AttendanceViolations from "./AttendanceViolations";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  CalendarCheck2,
+  BarChart3,
+  CalendarDays,
+  ChevronDown,
+  ChevronRight,
   ClipboardCheck,
   CheckCircle2,
-  Clock3,
+  Clock,
+  Coffee,
+  FileText,
+  Gauge,
+  Hourglass,
+  Info,
+  Lightbulb,
   Loader2,
   LogIn,
   LogOut,
   MapPin,
+  MoreVertical,
   PauseCircle,
   PlayCircle,
   RefreshCw,
+  Save,
+  Send,
+  Sparkles,
+  Timer,
   Users,
 } from "lucide-react";
 import {
@@ -24,6 +39,7 @@ import {
   getAttendancePolicy,
   getMyLeaveRequests,
   getMyAttendance,
+  manageUserBreak,
   reviewLeaveRequest,
   startBreakAttendance,
   updateAttendancePolicy,
@@ -31,6 +47,7 @@ import {
 } from "../../services/attendanceService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
+import BreakCorrectionDialog from "./BreakCorrectionDialog";
 
 const ADMIN_VIEW_ROLES = new Set([
   "ADMIN",
@@ -71,19 +88,6 @@ const toLocalDateInputValue = (value = new Date()) => {
 const toMonthInputValue = (value = new Date()) =>
   toLocalDateInputValue(value).slice(0, 7);
 
-const formatDateTime = (value) => {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
 const formatDateLabel = (value) => {
   if (!value) return "-";
   const [yearRaw, monthRaw, dayRaw] = String(value).split("-");
@@ -102,12 +106,122 @@ const formatDateLabel = (value) => {
   });
 };
 
+const formatDateShort = (value) => {
+  if (!value) return "-";
+  const [yearRaw, monthRaw, dayRaw] = String(value).split("-");
+  const year = Number.parseInt(yearRaw, 10);
+  const month = Number.parseInt(monthRaw, 10);
+  const day = Number.parseInt(dayRaw, 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return formatDateLabel(value);
+  }
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return formatDateLabel(value);
+  return date.toLocaleDateString("en-IN", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+};
+
+const formatTimeOnly = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
 const formatDuration = (minutes) => {
   const safeMinutes = Math.max(0, Number(minutes || 0));
   const hours = Math.floor(safeMinutes / 60);
   const mins = safeMinutes % 60;
   return `${hours}h ${mins}m`;
 };
+
+const minutesBetween = (from, to) => {
+  const start = new Date(from).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(to)) return 0;
+  return Math.max(0, Math.floor((to - start) / 60000));
+};
+
+const BREAK_TYPE_LABELS = { LUNCH: "Lunch", TEA: "Tea", COFFEE: "Coffee", UTILITY: "Utility" };
+const formatBreakType = (value) => BREAK_TYPE_LABELS[value] || "Utility";
+
+// A stable colour per person so the same face keeps the same badge between
+// loads. Derived from the name rather than the row index, which would reshuffle
+// every time the list is filtered or sorted.
+const AVATAR_TONES = ["bg-blue-500", "bg-emerald-500", "bg-violet-500", "bg-amber-500", "bg-rose-500", "bg-cyan-600", "bg-indigo-500", "bg-teal-600"];
+const avatarTone = (name = "") => {
+  const text = String(name || "?");
+  let hash = 0;
+  for (let index = 0; index < text.length; index += 1) hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
+  return AVATAR_TONES[hash % AVATAR_TONES.length];
+};
+
+const getInitials = (name = "") => {
+  const parts = String(name || "-").trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "-";
+};
+
+const statCardClass = "rounded-xl border border-slate-200 bg-white p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04)]";
+const cardClass = "rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]";
+const cardHeaderClass = "flex flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-3.5";
+const cardBodyClass = "p-5";
+
+/*
+ * One vocabulary for the page: every heading, stat and tile is an icon in a
+ * soft tinted square next to its label. Tints carry meaning rather than
+ * decoration - green is attendance, amber is lateness, rose is leave, violet is
+ * an average, blue is neutral information - so a glance at the colour already
+ * says which family a number belongs to.
+ */
+const TONES = {
+  blue: "bg-blue-50 text-blue-600",
+  green: "bg-emerald-50 text-emerald-600",
+  amber: "bg-amber-50 text-amber-600",
+  rose: "bg-rose-50 text-rose-600",
+  violet: "bg-violet-50 text-violet-600",
+  slate: "bg-slate-100 text-slate-500",
+};
+
+const IconBox = ({ icon, tone = "blue", boxSize = "h-9 w-9", iconSize = 17 }) => {
+  const Glyph = icon;
+  return (
+    <span className={`grid ${boxSize} shrink-0 place-items-center rounded-lg ${TONES[tone] || TONES.blue}`}>
+      <Glyph size={iconSize} aria-hidden="true" />
+    </span>
+  );
+};
+
+const SectionHeader = ({ icon, tone, title, subtitle, children }) => (
+  <div className={cardHeaderClass}>
+    <IconBox icon={icon} tone={tone} />
+    <div className="min-w-0 flex-1">
+      <h4 className="text-[14px] font-semibold leading-tight text-slate-900">{title}</h4>
+      {subtitle ? <p className="mt-0.5 text-[12px] text-slate-500">{subtitle}</p> : null}
+    </div>
+    {children}
+  </div>
+);
+
+// Which icon and tint each summary figure wears, keyed by the card's own key so
+// the personal and team variants stay in step without a second table.
+const STAT_META = {
+  presentDays: { icon: Users, tone: "green" },
+  checkedIn: { icon: Users, tone: "green" },
+  lateDays: { icon: Clock, tone: "amber" },
+  onBreak: { icon: Clock, tone: "amber" },
+  leaveDays: { icon: CalendarDays, tone: "rose" },
+  leave: { icon: CalendarDays, tone: "rose" },
+  averageHours: { icon: BarChart3, tone: "violet" },
+};
+const fieldClass = "h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+const secondaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
+const primaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-lg border border-blue-700 bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
+const selectControlClass = "h-9 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm outline-none";
 
 const statusBadgeClass = (status) =>
   STATUS_STYLES[status] || "bg-slate-100 text-slate-700 border-slate-200";
@@ -120,9 +234,6 @@ const formatAttendanceStatus = (status) => {
   if (normalized === "LATE") return "Working";
   return normalized.replaceAll("_", " ");
 };
-
-const checkInTimeClass = (isLate) =>
-  isLate ? "text-sm font-semibold text-rose-700" : "text-sm text-slate-700";
 
 const EMPTY_POLICY_FORM = {
   geofenceEnabled: false,
@@ -208,6 +319,17 @@ const AttendanceHub = () => {
   const [viewerRole] = useState(getRoleFromStorage);
   const isAdminViewer = ADMIN_VIEW_ROLES.has(viewerRole);
   const canUsePersonalAttendance = viewerRole !== "ADMIN";
+  const [showTeamHistory, setShowTeamHistory] = useState(viewerRole === "ADMIN");
+  const showPersonalHistory = canUsePersonalAttendance && !showTeamHistory;
+  const [breakCorrectionRow, setBreakCorrectionRow] = useState(null);
+  const [breakType, setBreakType] = useState("LUNCH");
+  const [breakReason, setBreakReason] = useState("");
+  // Break type chosen per teammate in the team list, keyed by user id.
+  const [teamBreakTypes, setTeamBreakTypes] = useState({});
+  const [teamBreakAction, setTeamBreakAction] = useState("");
+  const [openRowMenu, setOpenRowMenu] = useState("");
+  const [liveNow, setLiveNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setLiveNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
 
   const [month, setMonth] = useState(toMonthInputValue(new Date()));
   const [myLoading, setMyLoading] = useState(true);
@@ -386,6 +508,21 @@ const AttendanceHub = () => {
     loadMyAttendance();
   }, [loadMyAttendance]);
 
+  /*
+   * A manager can start or end this employee's break from the team list, so the
+   * page cannot assume its own actions are the only thing that changes the
+   * record. Refreshing quietly every half minute is what makes that appear here
+   * without the employee reloading. Skipped while the tab is hidden - nobody is
+   * reading it, and a background tab polling all day is pure waste.
+   */
+  useEffect(() => {
+    if (!canUsePersonalAttendance) return undefined;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") loadMyAttendance({ quiet: true });
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [canUsePersonalAttendance, loadMyAttendance]);
+
   useEffect(() => {
     if (!isAdminViewer) return;
     loadAdminAttendance();
@@ -470,7 +607,7 @@ const AttendanceHub = () => {
       setAttendanceAction("checkout");
       setMyError("");
       const location = await requestAttendanceLocation({
-        required: Boolean(myData.policy?.geofenceEnabled),
+        required: false,
       });
       const result = await checkOutAttendance({
         source: "WEB",
@@ -552,8 +689,9 @@ const AttendanceHub = () => {
     try {
       setAttendanceAction("breakstart");
       setMyError("");
-      const result = await startBreakAttendance({ source: "WEB" });
+      const result = await startBreakAttendance({ source: "WEB", breakType, note: breakReason });
       setMySuccess(result.message || "Break started");
+      setBreakReason("");
       await loadMyAttendance({ quiet: true });
       if (isAdminViewer) {
         await loadAdminAttendance({ quiet: true });
@@ -562,6 +700,34 @@ const AttendanceHub = () => {
       setMyError(toErrorMessage(error, "Failed to start break"));
     } finally {
       setAttendanceAction("");
+    }
+  };
+
+  // Starts or ends a teammate's break as of now. The employee's own page reads
+  // the same attendance record, so it shows up there on its next refresh.
+  // A row is busy while either of its two writes is in flight.
+  const rowBusy = (row) =>
+    manualStatusAction === `${String(row.user?._id || "").trim()}:${String(adminData.date || adminDate || "").trim()}`
+    || teamBreakAction === String(row.user?._id || "");
+
+  const handleTeamBreak = async (row, action) => {
+    const userId = String(row.user?._id || "");
+    if (!userId) return;
+    try {
+      setTeamBreakAction(userId);
+      setAdminError("");
+      const result = await manageUserBreak(userId, {
+        action,
+        ...(action === "START" ? { breakType: teamBreakTypes[userId] || "UTILITY" } : {}),
+      });
+      setMySuccess(result.message || "Break updated");
+      await loadAdminAttendance({ quiet: true });
+      // A manager can act on their own row, so refresh the personal panel too.
+      if (canUsePersonalAttendance) await loadMyAttendance({ quiet: true });
+    } catch (error) {
+      setAdminError(toErrorMessage(error, "Failed to update the break"));
+    } finally {
+      setTeamBreakAction("");
     }
   };
 
@@ -688,804 +854,889 @@ const AttendanceHub = () => {
 
   const todayStatus = todayAttendance?.status || "ABSENT";
   const todayWorkedMinutes = Number(todayAttendance?.workedMinutes || 0);
-  const todayBreakMinutes = Number(todayAttendance?.totalBreakMinutes || 0);
   const todayBreakSessions = Array.isArray(todayAttendance?.breakSessions)
     ? todayAttendance.breakSessions
     : [];
 
+  // The stored workedMinutes only advances on check-out, so the live panel ticks
+  // its own total from check-in minus every break taken so far.
+  const activeBreak = isOnBreak ? todayBreakSessions.at(-1) || null : null;
+  const activeBreakMinutes = activeBreak?.startAt
+    ? minutesBetween(activeBreak.startAt, liveNow)
+    : 0;
+  const liveWorkedMinutes =
+    todayAttendance?.checkInAt && !todayAttendance?.checkOutAt
+      ? Math.max(
+          0,
+          minutesBetween(todayAttendance.checkInAt, liveNow)
+            - todayBreakSessions.reduce(
+              (total, session) => total + minutesBetween(session.startAt, session.endAt ? new Date(session.endAt).getTime() : liveNow),
+              0,
+            ),
+        )
+      : todayWorkedMinutes;
+
   const mySummaryCards = useMemo(() => {
     const summary = myData.summary || {};
+    const totalDays = Number(summary.totalDays || 0);
+    const presentDays = Number(summary.presentDays || 0);
+    const workingDays = totalDays || Number(summary.workingDays || 0);
+    const averageHours = presentDays
+      ? (Number(summary.totalWorkedHours || 0) / presentDays).toFixed(1)
+      : "0.0";
     return [
       {
-        key: "totalDays",
-        label: "Days in View",
-        value: Number(summary.totalDays || 0),
-      },
-      {
         key: "presentDays",
-        label: "Present Days",
-        value: Number(summary.presentDays || 0),
+        label: "Present",
+        value: presentDays,
+        detail: `of ${workingDays || totalDays} working days`,
       },
       {
         key: "lateDays",
-        label: "Late Days",
+        label: "Late",
         value: Number(summary.lateDays || 0),
-      },
-      {
-        key: "halfDays",
-        label: "Half Days",
-        value: Number(summary.halfDays || 0),
-      },
-      {
-        key: "absentDays",
-        label: "Absent Days",
-        value: Number(summary.absentDays || 0),
+        detail: "After 9:30 AM",
       },
       {
         key: "leaveDays",
-        label: "Leave Days",
+        label: "Leave taken",
         value: Number(summary.leaveDays || 0),
+        detail: `${Math.max(0, 10 - Number(summary.leaveDays || 0))} remaining`,
       },
       {
-        key: "pendingDays",
-        label: "Pending Days",
-        value: Number(summary.pendingDays || 0),
-      },
-      {
-        key: "workedHours",
-        label: "Total Hours",
-        value: Number(summary.totalWorkedHours || 0),
-      },
-      {
-        key: "breakHours",
-        label: "Break Hours",
-        value: Number(summary.totalBreakHours || 0),
+        key: "averageHours",
+        label: "Avg. hours",
+        value: averageHours,
+        detail: "Target 9.0",
       },
     ];
   }, [myData.summary]);
 
+  /*
+   * Three readings of today's team, each a percentage so the bars are
+   * comparable. Everything here comes off the rows already loaded - no extra
+   * request, and no number that cannot be traced back to the table below it.
+   */
+  const todayInsights = useMemo(() => {
+    const rows = adminData.attendance || [];
+    const checkedIn = rows.filter((row) => row.attendance?.checkInAt);
+    const onTime = checkedIn.filter((row) => !row.attendance?.isLateCheckIn).length;
+    const onTimeRate = checkedIn.length ? Math.round((onTime / checkedIn.length) * 100) : 0;
+
+    const totalUsers = Number(adminData.summary?.totalUsers || 0) || rows.length;
+    const attendanceRate = totalUsers ? Math.round((checkedIn.length / totalUsers) * 100) : 0;
+
+    const targetMinutes = 9 * 60;
+    const workedRatios = checkedIn.map((row) => Math.min(1, Number(row.attendance?.workedMinutes || 0) / targetMinutes));
+    const productivity = workedRatios.length
+      ? Math.round((workedRatios.reduce((sum, value) => sum + value, 0) / workedRatios.length) * 100)
+      : 0;
+
+    return [
+      { label: "On time arrival rate", percent: onTimeRate, value: `${onTimeRate}%`, tone: onTimeRate >= 80 ? "bg-emerald-500" : onTimeRate >= 50 ? "bg-amber-500" : "bg-rose-500" },
+      { label: "Attendance vs target", percent: attendanceRate, value: `${attendanceRate}%`, tone: attendanceRate >= 80 ? "bg-emerald-500" : attendanceRate >= 50 ? "bg-amber-500" : "bg-blue-500" },
+      { label: "Hours vs 9h target", percent: productivity, value: `${productivity}%`, tone: productivity >= 80 ? "bg-emerald-500" : productivity >= 50 ? "bg-amber-500" : "bg-blue-500" },
+    ];
+  }, [adminData.attendance, adminData.summary]);
+
+  const adminSummaryCards = useMemo(() => {
+    const summary = adminData.summary || {};
+    const totalUsers = Number(summary.totalUsers || 0);
+    const checkedIn = Number(summary.checkedIn || 0);
+    const leave = Number(summary.leave || 0);
+    const absent = Number(summary.absent || 0);
+    const onBreak = Number(summary.onBreak || 0);
+    const workedRows = adminData.attendance
+      .map((row) => Number(row.attendance?.workedMinutes || 0))
+      .filter((minutes) => minutes > 0);
+    const averageHours = workedRows.length
+      ? (workedRows.reduce((sum, minutes) => sum + minutes, 0) / workedRows.length / 60).toFixed(1)
+      : "0.0";
+
+    return [
+      {
+        key: "checkedIn",
+        label: "Present",
+        value: checkedIn,
+        detail: `of ${totalUsers} users`,
+      },
+      {
+        key: "onBreak",
+        label: "Late",
+        value: onBreak,
+        detail: "On break now",
+      },
+      {
+        key: "leave",
+        label: "Leave taken",
+        value: leave,
+        detail: `${absent} absent today`,
+      },
+      {
+        key: "averageHours",
+        label: "Avg. hours",
+        value: averageHours,
+        detail: "Visible team rows",
+      },
+    ];
+  }, [adminData.attendance, adminData.summary]);
+
+  const todayDateKey = toLocalDateInputValue(new Date());
+  const todayClockLabel = formatTimeOnly(todayAttendance?.checkInAt);
+  const pendingAdminLeaveRequests = adminLeaveRequests.filter((row) => row.status === "PENDING");
+  const visibleAdminLeaveRequests = pendingAdminLeaveRequests.length
+    ? pendingAdminLeaveRequests.slice(0, 2)
+    : adminLeaveRequests.slice(0, 2);
+
   return (
-    <div className="ui-page-shell custom-scrollbar relative">
-      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute -left-16 top-4 h-64 w-64 rounded-full bg-cyan-300/35 blur-3xl" />
-        <div className="absolute right-0 top-24 h-72 w-72 rounded-full bg-emerald-300/35 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-56 w-56 rounded-full bg-indigo-300/25 blur-3xl" />
+    <div className="attendance-doc-screen ui-page-shell custom-scrollbar bg-slate-50/70 text-slate-900">
+      <ToastNotice message={myError} type="error" />
+      <ToastNotice message={mySuccess} type="success" />
+      <ToastNotice message={adminError} type="error" />
+
+      {/* The command bar above already carries the page title, so this row adds
+          only what it does not: where you are, and whose view this is. */}
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[12px] text-slate-400">
+          <button type="button" onClick={() => navigate("/")} className="hover:text-slate-600">Home</button>
+          <ChevronRight size={13} aria-hidden="true" />
+          <span className="font-medium text-slate-600">Attendance</span>
+        </nav>
+        {isAdminViewer ? (
+          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-[12px] font-semibold text-violet-700">
+            <Sparkles size={13} aria-hidden="true" />
+            Admin View
+          </span>
+        ) : null}
       </div>
 
-      {canUsePersonalAttendance ? (
-        <>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <input
-              type="month"
-              value={month}
-              onChange={(event) => setMonth(event.target.value)}
-              className="h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-            />
-            <button
-              type="button"
-              onClick={() => loadMyAttendance({ quiet: true })}
-              disabled={myLoading || myRefreshing}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {myRefreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              Refresh
-            </button>
-          </div>
-
-          <ToastNotice message={myError} type="error" />
-          <ToastNotice message={mySuccess} type="success" />
-
-          {myLoading ? (
-            <div className="flex h-40 items-center justify-center rounded-3xl border border-slate-200 bg-white text-slate-500 shadow-sm">
-              <Loader2 size={18} className="mr-2 animate-spin" />
-              Loading attendance...
-            </div>
-          ) : (
-            <>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.35)] lg:col-span-2">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    Today
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold text-slate-900">
-                    {formatDateLabel(toLocalDateInputValue(new Date()))}
-                  </h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(todayStatus)}`}>
-                    {formatAttendanceStatus(todayStatus)}
-                  </span>
-                  {isOnBreak ? (
-                    <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-100 px-2.5 py-1 text-xs font-semibold text-indigo-700">
-                      On Break
+      {myLoading && canUsePersonalAttendance ? (
+        <div className={`${cardClass} flex h-40 items-center justify-center text-sm text-slate-500`}>
+          <Loader2 size={18} className="mr-2 animate-spin" />
+          Loading attendance...
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">
+          <div className="flex flex-col gap-4">
+            <section className={cardClass}>
+              <div className={`${cardBodyClass} flex flex-wrap items-center gap-5`}>
+                <div className="min-w-[240px] flex-1">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <IconBox icon={CalendarDays} tone="blue" boxSize="h-8 w-8" iconSize={15} />
+                    <span className="text-[14px] font-semibold text-slate-900">
+                      Today · {formatDateShort(todayDateKey)}
                     </span>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/85 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Check In</p>
-                  <p className={`mt-1 ${checkInTimeClass(todayAttendance?.isLateCheckIn)}`}>
-                    {formatDateTime(todayAttendance?.checkInAt)}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/85 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Check Out</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-800">{formatDateTime(todayAttendance?.checkOutAt)}</p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/85 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Worked</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-800">{formatDuration(todayWorkedMinutes)}</p>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/85 px-3 py-2.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Break Time</p>
-                  <p className="mt-1 text-sm font-semibold text-slate-800">{formatDuration(todayBreakMinutes)}</p>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleCheckIn}
-                  disabled={!canCheckIn || Boolean(attendanceAction)}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 text-sm font-semibold text-white transition hover:from-emerald-700 hover:to-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {attendanceAction === "checkin" ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <LogIn size={14} />
-                  )}
-                  Check In
-                </button>
-                <button
-                  type="button"
-                  onClick={handleStartBreak}
-                  disabled={!canStartBreak || Boolean(attendanceAction)}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 text-sm font-semibold text-white transition hover:from-indigo-700 hover:to-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {attendanceAction === "breakstart" ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <PauseCircle size={14} />
-                  )}
-                  Start Break
-                </button>
-                <button
-                  type="button"
-                  onClick={handleEndBreak}
-                  disabled={!canEndBreak || Boolean(attendanceAction)}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-900 to-indigo-700 px-4 text-sm font-semibold text-white transition hover:from-indigo-800 hover:to-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {attendanceAction === "breakend" ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <PlayCircle size={14} />
-                  )}
-                  End Break
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCheckOut}
-                  disabled={!canCheckOut || Boolean(attendanceAction)}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-slate-900 to-slate-700 px-4 text-sm font-semibold text-white transition hover:from-slate-800 hover:to-slate-600 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {attendanceAction === "checkout" ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <LogOut size={14} />
-                  )}
-                  Check Out
-                </button>
-              </div>
-
-              {isOnBreak && todayAttendance?.activeBreakStartedAt ? (
-                <p className="mt-3 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">
-                  Break running since {formatDateTime(todayAttendance.activeBreakStartedAt)}
-                </p>
-              ) : null}
-
-              {(todayAttendance?.checkInLocation || todayAttendance?.checkOutLocation) ? (
-                <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 px-3 py-2.5">
-                    <p className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                      <MapPin size={12} />
-                      Check In Distance
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-emerald-900">
-                      {formatDistance(todayAttendance?.checkInLocation?.distanceMeters)}
-                    </p>
+                    <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-semibold ${statusBadgeClass(todayStatus)}`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                      {canUsePersonalAttendance ? formatAttendanceStatus(todayStatus) : "Admin view"}
+                    </span>
+                    {isOnBreak ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11.5px] font-semibold text-amber-700">
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        On Break
+                      </span>
+                    ) : null}
                   </div>
-                  <div className="rounded-2xl border border-cyan-100 bg-cyan-50/80 px-3 py-2.5">
-                    <p className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-700">
-                      <MapPin size={12} />
-                      Check Out Distance
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-cyan-900">
-                      {formatDistance(todayAttendance?.checkOutLocation?.distanceMeters)}
-                    </p>
-                  </div>
-                </div>
-              ) : null}
 
-              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/80 p-3">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Break Sessions Today
-                </p>
-                {todayBreakSessions.length === 0 ? (
-                  <p className="mt-1 text-sm text-slate-500">No breaks recorded today.</p>
-                ) : (
-                  <div className="mt-2 space-y-1.5">
-                    {todayBreakSessions.map((session, index) => (
-                      <div key={`${session.startAt || "break"}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                        <span className="text-xs font-semibold text-slate-700">
-                          Break {index + 1}
-                        </span>
-                        <span className="text-xs text-slate-600">
-                          {formatDateTime(session.startAt)} - {session.endAt ? formatDateTime(session.endAt) : "Running..."}
-                        </span>
-                        <span className="text-xs font-semibold text-slate-800">
-                          {formatDuration(session.durationMinutes || 0)}
-                        </span>
-                      </div>
-                    ))}
+                  <div className="mt-3 font-mono text-[34px] font-semibold leading-none tracking-tight text-slate-950">
+                    {canUsePersonalAttendance ? todayClockLabel : formatDateShort(adminDate)}
                   </div>
-                )}
-              </div>
-            </div>
 
-            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.35)]">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                Summary
-              </p>
-              <div className="mt-3 space-y-2">
-                {mySummaryCards.map((card) => (
-                  <div key={card.key} className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/85 px-3 py-2.5">
-                    <span className="text-xs font-semibold text-slate-500">{card.label}</span>
-                    <span className="text-sm font-semibold text-slate-900">{card.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_18px_45px_-34px_rgba(15,23,42,0.35)]">
-            <div className="border-b border-slate-200 px-4 py-3">
-              <p className="text-sm font-semibold text-slate-900">My Daily Records</p>
-              <p className="mt-0.5 text-[11px] uppercase tracking-[0.12em] text-slate-500">
-                Attendance month: {month}
-              </p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50/85">
-                  <tr className="text-left text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Check In</th>
-                    <th className="px-4 py-3">Check Out</th>
-                    <th className="px-4 py-3">Geofence</th>
-                    <th className="px-4 py-3">Break</th>
-                    <th className="px-4 py-3">Duration</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {myData.attendance.length === 0 ? (
-                    <tr>
-                      <td className="px-4 py-4 text-sm text-slate-500" colSpan={7}>
-                        No attendance records found for selected month.
-                      </td>
-                    </tr>
-                  ) : (
-                    myData.attendance.map((row) => (
-                      <tr key={String(row._id || row.attendanceDate)} className="bg-white hover:bg-slate-50/70 transition-colors">
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-900">
-                          {formatDateLabel(row.attendanceDate)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${statusBadgeClass(row.status)}`}>
-                            {formatAttendanceStatus(row.status)}
+                  <div className="mt-3.5 flex flex-wrap items-center gap-x-6 gap-y-2">
+                    {canUsePersonalAttendance ? (
+                      <>
+                        <span className="flex items-center gap-2">
+                          <MapPin size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                          <span className="leading-tight">
+                            <span className="block text-[11px] text-slate-400">Office radius</span>
+                            <strong className="font-mono text-[13px] text-slate-800">
+                              {formatDistance(todayAttendance?.checkInLocation?.distanceMeters)}
+                            </strong>
                           </span>
-                        </td>
-                        <td className={`px-4 py-3 ${checkInTimeClass(row.isLateCheckIn)}`}>
-                          {formatDateTime(row.checkInAt)}
-                        </td>
-                        <td className="px-4 py-3 text-sm text-slate-700">{formatDateTime(row.checkOutAt)}</td>
-                        <td className="px-4 py-3 text-xs font-semibold text-slate-600">
-                          <div>In: {formatDistance(row.checkInLocation?.distanceMeters)}</div>
-                          <div>Out: {formatDistance(row.checkOutLocation?.distanceMeters)}</div>
-                        </td>
-                        <td className="px-4 py-3 text-sm font-semibold text-indigo-700">
-                          {formatDuration(row.totalBreakMinutes || 0)}
-                        </td>
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-900">
-                          {formatDuration(row.workedMinutes)}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.35)]">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="inline-flex items-center gap-2">
-                  <CalendarCheck2 size={16} className="text-emerald-600" />
-                  <h3 className="text-base font-semibold text-slate-900">Leave Requests</h3>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <Timer size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                          <span className="leading-tight">
+                            <span className="block text-[11px] text-slate-400">Elapsed</span>
+                            <strong className="font-mono text-[13px] text-slate-800">{formatDuration(liveWorkedMinutes)}</strong>
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <Users size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                        <span className="text-[12px] text-slate-500">
+                          Team attendance · {Number(adminData.summary?.totalUsers || 0)} users
+                        </span>
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={loadLeaveRequestsData}
-                  disabled={leaveLoading}
-                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {leaveLoading ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-                  Refresh
-                </button>
-              </div>
 
-              <form className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={handleSubmitLeaveRequest}>
-                <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  From Date
-                  <input
-                    type="date"
-                    value={leaveForm.fromDate}
-                    onChange={(event) =>
-                      setLeaveForm((prev) => ({ ...prev, fromDate: event.target.value }))}
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                  />
-                </label>
-                <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  To Date
-                  <input
-                    type="date"
-                    value={leaveForm.toDate}
-                    onChange={(event) =>
-                      setLeaveForm((prev) => ({ ...prev, toDate: event.target.value }))}
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                  />
-                </label>
-                <label className="sm:col-span-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Leave Type
-                  <select
-                    value={leaveForm.leaveType}
-                    onChange={(event) =>
-                      setLeaveForm((prev) => ({ ...prev, leaveType: event.target.value }))}
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                  >
-                    {LEAVE_TYPE_OPTIONS.map((type) => (
-                      <option key={type} value={type}>{type}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="sm:col-span-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Reason
-                  <textarea
-                    value={leaveForm.reason}
-                    onChange={(event) =>
-                      setLeaveForm((prev) => ({ ...prev, reason: event.target.value }))}
-                    rows={3}
-                    placeholder="Why do you need leave?"
-                    className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                  />
-                </label>
-                <div className="sm:col-span-2">
-                  <button
-                    type="submit"
-                    disabled={leaveSubmitting}
-                    className="inline-flex h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 px-4 text-sm font-semibold text-white transition hover:from-emerald-700 hover:to-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {leaveSubmitting ? <Loader2 size={14} className="animate-spin" /> : <ClipboardCheck size={14} />}
-                    Submit Leave Request
-                  </button>
-                </div>
-              </form>
-
-              <div className="mt-4 max-h-64 space-y-2 overflow-y-auto pr-1">
-                {leaveRequests.length === 0 ? (
-                  <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
-                    No leave requests yet.
-                  </p>
+                {canUsePersonalAttendance ? (
+                  <div className="flex flex-wrap gap-2">
+                    {canCheckIn ? (
+                      <button type="button" onClick={handleCheckIn} disabled={Boolean(attendanceAction)} className={primaryButtonClass}>
+                        {attendanceAction === "checkin" ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+                        Check in
+                      </button>
+                    ) : null}
+                    {canStartBreak ? (
+                      <>
+                        <select
+                          aria-label="Break type"
+                          value={breakType}
+                          onChange={(event) => setBreakType(event.target.value)}
+                          className={selectControlClass}
+                        >
+                          <option value="LUNCH">Lunch - 30 minutes</option>
+                          <option value="TEA">Tea - 15 minutes</option>
+                          <option value="COFFEE">Coffee - 15 minutes</option>
+                          <option value="UTILITY">Utility - other reasons</option>
+                        </select>
+                        {breakType === "UTILITY" ? (
+                          <input
+                            aria-label="Utility break reason"
+                            placeholder="Reason for break"
+                            value={breakReason}
+                            maxLength={240}
+                            onChange={(event) => setBreakReason(event.target.value)}
+                            className={selectControlClass}
+                          />
+                        ) : null}
+                      </>
+                    ) : null}
+                    {canStartBreak ? (
+                      <button type="button" onClick={handleStartBreak} disabled={Boolean(attendanceAction)} className={secondaryButtonClass}>
+                        {attendanceAction === "breakstart" ? <Loader2 size={14} className="animate-spin" /> : <PauseCircle size={14} />}
+                        Start break
+                      </button>
+                    ) : null}
+                    {canEndBreak ? (
+                      <button type="button" onClick={handleEndBreak} disabled={Boolean(attendanceAction)} className={secondaryButtonClass}>
+                        {attendanceAction === "breakend" ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />}
+                        End break
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={handleCheckOut} disabled={!canCheckOut || Boolean(attendanceAction)} className={secondaryButtonClass}>
+                      {attendanceAction === "checkout" ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
+                      Check out
+                    </button>
+                  </div>
                 ) : (
-                  leaveRequests.map((row) => (
-                    <div key={String(row._id)} className="rounded-xl border border-slate-200 bg-slate-50/85 p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${statusBadgeClass(row.status)}`}>
-                          {String(row.status || "PENDING").replaceAll("_", " ")}
-                        </span>
-                        <span className="text-xs font-semibold text-slate-500">
-                          {formatDateLabel(row.fromDate)} - {formatDateLabel(row.toDate)}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        {row.leaveType || "CASUAL"} | {Number(row.totalDays || 0)} day(s)
-                      </p>
-                      <p className="mt-1 text-sm text-slate-700">{row.reason || "-"}</p>
-                    </div>
-                  ))
+                  <button
+                    type="button"
+                    onClick={() => loadAdminAttendance({ quiet: true, date: adminDate, status: adminStatus })}
+                    disabled={adminLoading || adminRefreshing}
+                    className={secondaryButtonClass}
+                  >
+                    {adminRefreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                    Refresh
+                  </button>
                 )}
               </div>
             </section>
 
-          </div>
-
-            </>
-          )}
-        </>
-      ) : null}
-
-      {isAdminViewer ? (
-        <>
-          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.35)]">
-            <form onSubmit={handleSaveAttendancePolicy} className="flex flex-col gap-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <h2 className="text-xl font-semibold text-slate-900">Attendance Geofence</h2>
-                  <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">
-                    Office range for check-in and check-out
-                  </p>
-                </div>
-                <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(policyForm.geofenceEnabled)}
-                    onChange={(event) =>
-                      setPolicyForm((prev) => ({ ...prev, geofenceEnabled: event.target.checked }))}
-                    className="h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500"
-                  />
-                  Enable geofence
-                </label>
-              </div>
-
-              <ToastNotice message={policyError} type="error" />
-
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
-                <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Latitude
-                  <input
-                    type="number"
-                    step="any"
-                    value={policyForm.officeLatitude}
-                    onChange={(event) =>
-                      setPolicyForm((prev) => ({ ...prev, officeLatitude: event.target.value }))}
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                  />
-                </label>
-                <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Longitude
-                  <input
-                    type="number"
-                    step="any"
-                    value={policyForm.officeLongitude}
-                    onChange={(event) =>
-                      setPolicyForm((prev) => ({ ...prev, officeLongitude: event.target.value }))}
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                  />
-                </label>
-                <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                  Radius
-                  <input
-                    type="number"
-                    min="10"
-                    max="5000"
-                    value={policyForm.officeRadiusMeters}
-                    onChange={(event) =>
-                      setPolicyForm((prev) => ({ ...prev, officeRadiusMeters: event.target.value }))}
-                    className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                  />
-                </label>
-                <div className="flex items-end gap-2">
-                  <button
-                    type="button"
-                    onClick={handleUseCurrentOfficeLocation}
-                    disabled={policyLoading || policySaving}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white text-cyan-700 transition hover:border-cyan-300 hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    title="Use current location"
-                  >
-                    <MapPin size={15} />
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={policyLoading || policySaving}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-600 to-emerald-600 px-4 text-sm font-semibold text-white transition hover:from-cyan-700 hover:to-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {policySaving ? <Loader2 size={14} className="animate-spin" /> : <MapPin size={14} />}
-                    Save
-                  </button>
-                </div>
-              </div>
-            </form>
-          </section>
-
-          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.35)]">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">Team Daily Attendance</h2>
-              <p className="mt-1 text-xs uppercase tracking-[0.14em] text-slate-500">
-                View all users attendance by date
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                aria-label="Attendance report date"
-                type="date"
-                value={adminDate}
-                onChange={(event) => setAdminDate(event.target.value)}
-                className="h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+            {canUsePersonalAttendance && <section className={cardClass}>
+              <SectionHeader
+                icon={Gauge}
+                tone="blue"
+                title="Live Attendance Summary"
+                subtitle="Your work hours and break details for today"
               />
-              <select
-                aria-label="Attendance status filter"
-                value={adminStatus}
-                onChange={(event) => setAdminStatus(event.target.value)}
-                className="h-10 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-              >
-                <option value="">All Statuses</option>
-                <option value="WORKING">Working</option>
-                <option value="BREAK">Break</option>
-                <option value="PRESENT">Present</option>
-                <option value="HALF_DAY">Half Day</option>
-                <option value="PENDING">Pending</option>
-                <option value="LEAVE">Leave</option>
-                <option value="ABSENT">Absent</option>
-              </select>
-              <button
-                type="button"
-                onClick={() =>
-                  loadAdminAttendance({
-                    quiet: true,
-                    date: adminDate,
-                    status: adminStatus,
-                  })}
-                disabled={adminLoading || adminRefreshing}
-                className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {adminRefreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          <ToastNotice message={adminError} type="error" />
-
-          {adminLoading ? (
-            <div className="mt-4 flex h-32 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-500">
-              <Loader2 size={18} className="mr-2 animate-spin" />
-              Loading team attendance...
-            </div>
-          ) : (
-            <>
-              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-5">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/85 px-3 py-3">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Total Users</p>
-                  <p className="mt-1 text-xl font-semibold text-slate-900">{Number(adminData.summary?.totalUsers || 0)}</p>
+              <div className={`${cardBodyClass} grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4`}>
+                <div className="flex items-center gap-2.5">
+                  <IconBox icon={Clock} tone="blue" boxSize="h-8 w-8" iconSize={15} />
+                  <div className="min-w-0">
+                    <p className="text-[11.5px] text-slate-500">Logged hours</p>
+                    <strong className="font-mono text-[15px] text-slate-900">{formatDuration(liveWorkedMinutes)}</strong>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-3">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-700">Active Login</p>
-                  <p className="mt-1 text-xl font-semibold text-emerald-800">
-                    {Number(adminData.summary?.activeLogins ?? adminData.summary?.checkedIn ?? 0)}
-                  </p>
+                <div className="flex items-center gap-2.5">
+                  <IconBox icon={Coffee} tone="violet" boxSize="h-8 w-8" iconSize={15} />
+                  <div className="min-w-0">
+                    <p className="text-[11.5px] text-slate-500">Daily breaks</p>
+                    <strong className="font-mono text-[15px] text-slate-900">{todayBreakSessions.length}</strong>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-cyan-200 bg-cyan-50 px-3 py-3">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-cyan-700">Checked Out</p>
-                  <p className="mt-1 text-xl font-semibold text-cyan-800">{Number(adminData.summary?.checkedOut || 0)}</p>
+                <div className="flex items-center gap-2.5">
+                  <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${activeBreak ? TONES.amber : TONES.green}`}>
+                    <span className="h-2 w-2 rounded-full bg-current" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[11.5px] text-slate-500">Current status</p>
+                    <strong className="text-[14px] text-slate-900">
+                      {activeBreak ? `On ${formatBreakType(activeBreak.breakType).toLowerCase()} break` : "Not on break"}
+                    </strong>
+                  </div>
                 </div>
-                <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-3">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-indigo-700">On Break</p>
-                  <p className="mt-1 text-xl font-semibold text-indigo-800">{Number(adminData.summary?.onBreak || 0)}</p>
-                </div>
-                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-rose-700">Absent</p>
-                  <p className="mt-1 text-xl font-semibold text-rose-800">{Number(adminData.summary?.absent || 0)}</p>
+                <div className="flex items-center gap-2.5">
+                  <IconBox icon={Hourglass} tone={activeBreak?.expectedMinutes && activeBreakMinutes > activeBreak.expectedMinutes ? "rose" : "slate"} boxSize="h-8 w-8" iconSize={15} />
+                  <div className="min-w-0">
+                    <p className="text-[11.5px] text-slate-500">Elapsed break</p>
+                    <strong className={`font-mono text-[15px] ${activeBreak?.expectedMinutes && activeBreakMinutes > activeBreak.expectedMinutes ? "text-rose-700" : "text-slate-900"}`}>
+                      {activeBreak ? `${activeBreakMinutes}m${activeBreak.expectedMinutes ? ` / ${activeBreak.expectedMinutes}m` : ""}` : "—"}
+                    </strong>
+                  </div>
                 </div>
               </div>
+            </section>}
 
-              <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50/85">
-                      <tr className="text-left text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                        <th className="px-4 py-3">User</th>
-                        <th className="px-4 py-3">Role</th>
-                        <th className="px-4 py-3">Status</th>
-                        <th className="px-4 py-3">Check In</th>
-                        <th className="px-4 py-3">Check Out</th>
-                        <th className="px-4 py-3">Geofence</th>
-                        <th className="px-4 py-3">Break</th>
-                        <th className="px-4 py-3">Duration</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {adminData.attendance.length === 0 ? (
-                        <tr>
-                          <td className="px-4 py-4 text-sm text-slate-500" colSpan={8}>
-                            No users found for selected filters.
-                          </td>
-                        </tr>
-                      ) : (
-                        adminData.attendance.map((row) => (
-                          <tr key={String(row.user?._id || "")} className="bg-white hover:bg-slate-50/70 transition-colors">
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <Users size={14} className="text-slate-400" />
-                                <div>
-                                  <p className="text-sm font-semibold text-slate-900">{row.user?.name || "-"}</p>
-                                  <p className="text-xs text-slate-500">{row.user?.email || "-"}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              {row.user?._id ? (
-                                <button
-                                  type="button"
-                                  onClick={() => openUserProfile(row.user?._id)}
-                                  className="text-left text-xs font-semibold text-cyan-700 underline-offset-2 transition hover:text-cyan-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2"
-                                  title="Open profile"
-                                >
-                                  {row.user?.role || "-"}
-                                </button>
-                              ) : (
-                                <span className="text-xs font-semibold text-slate-600">{row.user?.role || "-"}</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <div className="flex flex-col gap-1">
-                                <span className={`inline-flex w-fit items-center rounded-full border px-2 py-1 text-xs font-semibold ${statusBadgeClass(row.attendance?.status)}`}>
-                                  {formatAttendanceStatus(row.attendance?.status)}
-                                </span>
-                                <select
-                                  value={
-                                    MANUAL_ATTENDANCE_STATUS_OPTIONS.some((option) => option.value === row.attendance?.status)
-                                      ? row.attendance?.status
-                                      : ""
-                                  }
-                                  onChange={(event) => handleManualStatusChange(row, event.target.value)}
-                                  disabled={manualStatusAction === `${String(row.user?._id || "").trim()}:${String(adminData.date || adminDate || "").trim()}`}
-                                  className="h-8 w-32 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100 disabled:cursor-not-allowed disabled:opacity-60"
-                                  title="Manual status"
-                                >
-                                  <option value="">Manual</option>
-                                  {MANUAL_ATTENDANCE_STATUS_OPTIONS.map((option) => (
-                                    <option key={option.value} value={option.value}>
-                                      {option.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            </td>
-                            <td className={`px-4 py-3 ${checkInTimeClass(row.attendance?.isLateCheckIn)}`}>
-                              {formatDateTime(row.attendance?.checkInAt)}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-slate-700">
-                              {formatDateTime(row.attendance?.checkOutAt)}
-                            </td>
-                            <td className="px-4 py-3 text-xs font-semibold text-slate-600">
-                              <div>In: {formatDistance(row.attendance?.checkInLocation?.distanceMeters)}</div>
-                              <div>Out: {formatDistance(row.attendance?.checkOutLocation?.distanceMeters)}</div>
-                            </td>
-                            <td className="px-4 py-3 text-sm font-semibold text-indigo-700">
-                              {formatDuration(row.attendance?.totalBreakMinutes || 0)}
-                            </td>
-                            <td className="px-4 py-3 text-sm font-semibold text-slate-900">
-                              {formatDuration(row.attendance?.workedMinutes || 0)}
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </>
-          )}
-          </section>
-
-          <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.35)]">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h3 className="text-lg font-semibold text-slate-900">Approval Queue</h3>
-              <p className="mt-0.5 text-xs uppercase tracking-[0.12em] text-slate-500">
-                Review leave requests
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={loadAdminWorkflowData}
-              disabled={adminWorkflowLoading}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {adminWorkflowLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              Refresh Queue
-            </button>
-          </div>
-
-          <div className="mt-4 grid grid-cols-1 gap-4">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/85 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="inline-flex items-center gap-2">
-                  <CalendarCheck2 size={15} className="text-emerald-600" />
-                  <h4 className="text-sm font-semibold text-slate-900">Leave Approvals</h4>
-                </div>
-                <select
-                  aria-label="Leave approval status filter"
-                  value={adminLeaveStatusFilter}
-                  onChange={(event) => setAdminLeaveStatusFilter(event.target.value)}
-                  className="h-9 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
+            {canUsePersonalAttendance && todayBreakSessions.length ? (
+              <section className={cardClass}>
+                <SectionHeader
+                  icon={Coffee}
+                  tone="violet"
+                  title="Break Sessions Today"
+                  subtitle={`${todayBreakSessions.length} break${todayBreakSessions.length === 1 ? "" : "s"} · ${formatDuration(todayAttendance?.totalBreakMinutes || 0)} total`}
                 >
-                  <option value="">All</option>
-                  <option value="PENDING">Pending</option>
-                  <option value="APPROVED">Approved</option>
-                  <option value="REJECTED">Rejected</option>
-                  <option value="CANCELLED">Cancelled</option>
-                </select>
-              </div>
+                  <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11.5px] font-semibold text-blue-700">
+                    Total Break Time
+                    <span className="font-mono">{formatDuration(todayAttendance?.totalBreakMinutes || 0)}</span>
+                  </span>
+                </SectionHeader>
+                <div className={cardBodyClass}>
+                  {/* A timeline rather than a table: these are moments in a day,
+                      and the rail makes the sequence readable at a glance. */}
+                  <ol className="relative flex flex-col">
+                    {todayBreakSessions.map((session, index) => {
+                      const minutes = Number(session.durationMinutes || 0);
+                      const overran = session.expectedMinutes && minutes > session.expectedMinutes;
+                      const running = !session.endAt;
+                      return (
+                        <li key={`${session.startAt || "break"}-${index}`} className="relative flex flex-wrap items-center gap-3 py-2.5 pl-6 text-[12.8px]">
+                          {index < todayBreakSessions.length - 1 ? (
+                            <span aria-hidden="true" className="absolute left-[4.5px] top-6 h-full w-px bg-slate-200" />
+                          ) : null}
+                          <span aria-hidden="true" className={`absolute left-0 top-4 h-2.5 w-2.5 rounded-full ring-2 ring-white ${running ? "bg-amber-500" : "bg-blue-500"}`} />
+                          <span className="min-w-[150px] flex-1 font-semibold text-slate-800">
+                            {formatBreakType(session.breakType)} break
+                            {/* A break a manager recorded should not read as one
+                                this person logged themselves. */}
+                            {session.correctedByName ? (
+                              <span className="block text-[11px] font-normal text-slate-400">Recorded by {session.correctedByName}</span>
+                            ) : null}
+                          </span>
+                          <span className="font-mono text-slate-500">
+                            {formatTimeOnly(session.startAt)} &ndash; {running ? "Running" : formatTimeOnly(session.endAt)}
+                          </span>
+                          <span className={`ml-auto font-mono font-semibold tabular-nums ${overran ? "text-rose-700" : "text-slate-900"}`}>
+                            {formatDuration(minutes)}
+                            {session.expectedMinutes ? <span className="font-normal text-slate-400"> / {session.expectedMinutes}m</span> : null}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              </section>
+            ) : null}
 
-              <div className="mt-3 space-y-2">
-                {adminLeaveRequests.length === 0 ? (
-                  <p className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500">
-                    No leave requests found.
+            <section className={cardClass}>
+              <div className={cardHeaderClass}>
+                <IconBox icon={CalendarDays} tone="blue" />
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-[14px] font-semibold leading-tight text-slate-900">
+                    {showPersonalHistory ? "Daily Attendance History" : "Team Daily Attendance History"}
+                  </h4>
+                  <p className="mt-0.5 text-[12px] text-slate-500">
+                    {showPersonalHistory ? "View your daily check-in and work hours" : "Check-in, hours and status for your team"}
                   </p>
+                </div>
+                {isAdminViewer && canUsePersonalAttendance && (
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setShowTeamHistory(false)} aria-pressed={!showTeamHistory} className={secondaryButtonClass}>My attendance</button>
+                    <button type="button" onClick={() => setShowTeamHistory(true)} aria-pressed={showTeamHistory} className={secondaryButtonClass}>Team attendance</button>
+                  </div>
+                )}
+                {showPersonalHistory ? (
+                  <div className="ml-auto flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                    <input
+                      type="month"
+                      value={month}
+                      onChange={(event) => setMonth(event.target.value)}
+                      className="h-8 rounded-md border-0 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => loadMyAttendance({ quiet: true })}
+                      disabled={myRefreshing}
+                      className="inline-flex h-8 items-center justify-center rounded-md px-2 text-slate-500 transition hover:text-blue-700 disabled:opacity-60"
+                      title="Refresh"
+                    >
+                      {myRefreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                    </button>
+                  </div>
                 ) : (
-                  adminLeaveRequests.map((row) => (
-                    <div key={String(row._id)} className="rounded-xl border border-slate-200 bg-white p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{row.user?.name || "-"}</p>
-                          <p className="text-xs text-slate-500">{row.user?.email || "-"}</p>
-                        </div>
-                        <span className={`inline-flex items-center rounded-full border px-2 py-1 text-xs font-semibold ${statusBadgeClass(row.status)}`}>
-                          {String(row.status || "PENDING").replaceAll("_", " ")}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">
-                        {formatDateLabel(row.fromDate)} - {formatDateLabel(row.toDate)} | {row.leaveType || "CASUAL"}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-700">{row.reason || "-"}</p>
-
-                      {row.status === "PENDING" ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleReviewLeave(row._id, "APPROVED")}
-                            disabled={Boolean(reviewAction)}
-                            className="inline-flex h-8 items-center rounded-lg bg-gradient-to-r from-emerald-600 to-emerald-500 px-3 text-xs font-semibold text-white transition hover:from-emerald-700 hover:to-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleReviewLeave(row._id, "REJECTED")}
-                            disabled={Boolean(reviewAction)}
-                            className="inline-flex h-8 items-center rounded-lg bg-gradient-to-r from-rose-600 to-rose-500 px-3 text-xs font-semibold text-white transition hover:from-rose-700 hover:to-rose-600 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      ) : (
-                        <p className="mt-2 text-xs text-slate-500">
-                          Reviewed: {formatDateTime(row.reviewedAt)} {row.reviewNote ? `| ${row.reviewNote}` : ""}
-                        </p>
-                      )}
-                    </div>
-                  ))
+                  <div className="ml-auto flex flex-wrap gap-2">
+                    <input type="date" value={adminDate} onChange={(event) => setAdminDate(event.target.value)} className={fieldClass} />
+                    <select value={adminStatus} onChange={(event) => setAdminStatus(event.target.value)} className={fieldClass}>
+                      <option value="">All Statuses</option>
+                      <option value="WORKING">Working</option>
+                      <option value="BREAK">Break</option>
+                      <option value="PRESENT">Present</option>
+                      <option value="HALF_DAY">Half Day</option>
+                      <option value="PENDING">Pending</option>
+                      <option value="LEAVE">Leave</option>
+                      <option value="ABSENT">Absent</option>
+                    </select>
+                  </div>
                 )}
               </div>
-            </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-separate border-spacing-0 text-[13px]">
+                  <thead>
+                    <tr className="bg-slate-50 text-left text-[10.5px] font-bold uppercase tracking-[0.07em] text-slate-400">
+                      {showPersonalHistory ? (
+                        <>
+                          <th className="border-b border-slate-200 px-3 py-2.5">Date</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5">In</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5">Out</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5">Hours</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5">Status</th>
+                          {isAdminViewer ? <th className="border-b border-slate-200 px-3 py-2.5">Location</th> : null}
+                        </>
+                      ) : (
+                        <>
+                          <th className="border-b border-slate-200 px-3 py-2.5">User</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5">In</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5">Out</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5">Hours</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5">Status</th>
+                          <th className="border-b border-slate-200 px-3 py-2.5 text-right">Actions</th>
+                        </>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {showPersonalHistory ? (
+                      myData.attendance.length === 0 ? (
+                        <tr>
+                          <td className="px-3 py-4 text-sm text-slate-500" colSpan={isAdminViewer ? 6 : 5}>No attendance records found for selected month.</td>
+                        </tr>
+                      ) : (
+                        myData.attendance.map((row) => (
+                          <tr key={String(row._id || row.attendanceDate)} className="transition hover:bg-slate-50">
+                            <td className="border-b border-slate-100 px-3 py-2.5 font-semibold text-slate-900">{formatDateShort(row.attendanceDate)}</td>
+                            <td className={`border-b border-slate-100 px-3 py-2.5 font-mono ${row.isLateCheckIn ? "font-semibold text-rose-700" : "text-slate-700"}`}>{formatTimeOnly(row.checkInAt)}</td>
+                            <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-500">{formatTimeOnly(row.checkOutAt)}</td>
+                            <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-600">{formatDuration(row.workedMinutes)}</td>
+                            <td className="border-b border-slate-100 px-3 py-2.5">
+                              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(row.status)}`}>
+                                <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                                {formatAttendanceStatus(row.status)}
+                              </span>
+                            </td>
+                            {isAdminViewer ? (
+                              <td className="border-b border-slate-100 px-3 py-2.5 text-xs text-slate-500">
+                                In {formatDistance(row.checkInLocation?.distanceMeters)} · Out {formatDistance(row.checkOutLocation?.distanceMeters)}
+                              </td>
+                            ) : null}
+                          </tr>
+                        ))
+                      )
+                    ) : adminLoading ? (
+                      <tr>
+                        <td className="px-3 py-4 text-sm text-slate-500" colSpan={6}>
+                          <Loader2 size={16} className="mr-2 inline animate-spin" />
+                          Loading team attendance...
+                        </td>
+                      </tr>
+                    ) : adminData.attendance.length === 0 ? (
+                      <tr>
+                        <td className="px-3 py-4 text-sm text-slate-500" colSpan={6}>No users found for selected filters.</td>
+                      </tr>
+                    ) : (
+                      adminData.attendance.map((row) => (
+                        <tr key={String(row.user?._id || "")} className="transition hover:bg-slate-50">
+                          <td className="border-b border-slate-100 px-3 py-2.5">
+                            <div className="flex items-center gap-2.5">
+                              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[11.5px] font-bold text-white ${avatarTone(row.user?.name)}`}>
+                                {getInitials(row.user?.name)}
+                              </span>
+                              <div className="min-w-0">
+                                <button type="button" onClick={() => openUserProfile(row.user?._id)} className="block max-w-[170px] truncate text-left font-semibold text-slate-900 transition hover:text-blue-700">
+                                  {row.user?.name || "-"}
+                                </button>
+                                {/* Role reads as a label under the name; it used to be
+                                    the placeholder of the status select, where a long
+                                    one truncated to "PRODUCT". */}
+                                <span className="block max-w-[170px] truncate text-[11px] capitalize text-slate-400">
+                                  {String(row.user?.role || "").replaceAll("_", " ").toLowerCase() || "-"}
+                                </span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className={`border-b border-slate-100 px-3 py-2.5 font-mono ${row.attendance?.isLateCheckIn ? "font-semibold text-rose-700" : "text-slate-700"}`}>{formatTimeOnly(row.attendance?.checkInAt)}</td>
+                          <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-500">{formatTimeOnly(row.attendance?.checkOutAt)}</td>
+                          <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-600">{formatDuration(row.attendance?.workedMinutes || 0)}</td>
+                          <td className="border-b border-slate-100 px-3 py-2.5">
+                            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(row.attendance?.status)}`}>
+                              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                              {formatAttendanceStatus(row.attendance?.status)}
+                            </span>
+                          </td>
+                          <td className="border-b border-slate-100 px-3 py-2.5">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {row.attendance?.checkInAt ? (
+                                /* Native select arrows are sized by the browser and
+                                   were clipping the label, so the chevron is ours. */
+                                <span className="relative inline-flex">
+                                  <select
+                                    value={MANUAL_ATTENDANCE_STATUS_OPTIONS.some((option) => option.value === row.attendance?.status) ? row.attendance?.status : ""}
+                                    onChange={(event) => handleManualStatusChange(row, event.target.value)}
+                                    disabled={rowBusy(row)}
+                                    className="h-8 appearance-none rounded-lg border border-blue-600 bg-blue-600 pl-3 pr-7 text-xs font-semibold text-white outline-none disabled:opacity-60"
+                                    title="Set attendance manually"
+                                  >
+                                    <option value="">Set Status</option>
+                                    {MANUAL_ATTENDANCE_STATUS_OPTIONS.map((option) => (
+                                      <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                  </select>
+                                  <ChevronDown aria-hidden="true" size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-white" />
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleManualStatusChange(row, "PRESENT")}
+                                  disabled={rowBusy(row)}
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                                  title="Mark this employee present for the day"
+                                >
+                                  {rowBusy(row) ? <Loader2 size={12} className="animate-spin" /> : null}
+                                  Mark Present
+                                </button>
+                              )}
+
+                              {/* Break controls live behind the kebab: they matter
+                                  on a handful of rows, and inline they crowded out
+                                  the column on every one. */}
+                              <span className="relative inline-flex">
+                                <button
+                                  type="button"
+                                  aria-label={`More actions for ${row.user?.name || "employee"}`}
+                                  aria-expanded={openRowMenu === String(row.user?._id || "")}
+                                  onClick={() => setOpenRowMenu((current) => (current === String(row.user?._id || "") ? "" : String(row.user?._id || "")))}
+                                  className="grid h-8 w-8 place-items-center rounded-lg border border-slate-300 bg-white text-slate-500 transition hover:bg-slate-50"
+                                >
+                                  <MoreVertical size={15} />
+                                </button>
+                                {openRowMenu === String(row.user?._id || "") ? (
+                                  <>
+                                    <button type="button" aria-label="Close menu" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpenRowMenu("")} />
+                                    <div className="absolute right-0 top-9 z-20 w-56 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-lg">
+                                      {!row.attendance?.checkInAt ? (
+                                        <p className="px-2 py-1.5 text-[11.5px] text-slate-400">Not checked in today.</p>
+                                      ) : null}
+
+                                      {row.attendance?.checkInAt && !row.attendance?.checkOutAt ? (
+                                        row.attendance?.isOnBreak ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => { setOpenRowMenu(""); handleTeamBreak(row, "END"); }}
+                                            disabled={teamBreakAction === String(row.user?._id || "")}
+                                            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                          >
+                                            <PlayCircle size={14} />
+                                            End break
+                                            <span className="ml-auto font-mono text-[11.5px] font-normal tabular-nums text-slate-400">
+                                              {minutesBetween(row.attendance?.activeBreakStartedAt, liveNow)}m
+                                            </span>
+                                          </button>
+                                        ) : (
+                                          <div className="px-2 py-1.5">
+                                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">Start a break</span>
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="relative inline-flex flex-1">
+                                                <select
+                                                  aria-label={`Break type for ${row.user?.name || "employee"}`}
+                                                  value={teamBreakTypes[String(row.user?._id || "")] || "UTILITY"}
+                                                  onChange={(event) => setTeamBreakTypes((value) => ({ ...value, [String(row.user?._id || "")]: event.target.value }))}
+                                                  className="h-8 w-full appearance-none rounded-lg border border-slate-300 bg-white pl-2 pr-6 text-xs font-semibold text-slate-700 outline-none"
+                                                >
+                                                  <option value="UTILITY">Utility</option>
+                                                  <option value="LUNCH">Lunch</option>
+                                                  <option value="TEA">Tea</option>
+                                                  <option value="COFFEE">Coffee</option>
+                                                </select>
+                                                <ChevronDown aria-hidden="true" size={12} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={() => { setOpenRowMenu(""); handleTeamBreak(row, "START"); }}
+                                                disabled={teamBreakAction === String(row.user?._id || "")}
+                                                className="inline-flex h-8 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 disabled:opacity-60"
+                                              >
+                                                <PauseCircle size={13} />
+                                                Start
+                                              </button>
+                                            </div>
+                                          </div>
+                                        )
+                                      ) : null}
+
+                                      {row.attendance?.checkInAt ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => { setOpenRowMenu(""); setBreakCorrectionRow(row); }}
+                                          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                                        >
+                                          <Timer size={14} className="text-slate-400" />
+                                          Manage breaks
+                                        </button>
+                                      ) : null}
+
+                                      <button
+                                        type="button"
+                                        onClick={() => { setOpenRowMenu(""); openUserProfile(row.user?._id); }}
+                                        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                                      >
+                                        <Users size={14} className="text-slate-400" />
+                                        Open profile
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : null}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <AttendanceViolations month={month} canReview={isAdminViewer} />
+
+            {breakCorrectionRow && isAdminViewer && (
+              <BreakCorrectionDialog
+                row={breakCorrectionRow}
+                date={adminData.date || adminDate}
+                onClose={() => setBreakCorrectionRow(null)}
+                onSaved={() => {
+                  setBreakCorrectionRow(null);
+                  setMySuccess("Break saved. The correction has been recorded in the audit history.");
+                  loadAdminAttendance({ quiet: true });
+                  if (canUsePersonalAttendance) loadMyAttendance({ quiet: true });
+                }}
+              />
+            )}
 
           </div>
-          </section>
-        </>
-      ) : (
-        <div className="flex items-start gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 shadow-sm">
-          <Clock3 size={16} className="mt-0.5 text-slate-500" />
-          Your role has personal attendance access only. Admin or management can view all users attendance.
+
+          <div className="flex flex-col gap-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {(canUsePersonalAttendance ? mySummaryCards : adminSummaryCards).map((card) => {
+                const meta = STAT_META[card.key] || { icon: Gauge, tone: "blue" };
+                return (
+                  <div key={card.key} className={`${statCardClass} flex items-start gap-3`}>
+                    <IconBox icon={meta.icon} tone={meta.tone} boxSize="h-10 w-10" iconSize={18} />
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-slate-500">{card.label}</div>
+                      <div className="mt-1 font-mono text-[24px] font-semibold leading-none tracking-normal text-slate-950">{card.value}</div>
+                      <div className="mt-1.5 truncate text-[11.5px] text-slate-400">{card.detail}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {canUsePersonalAttendance ? (
+              <section className={cardClass}>
+                <SectionHeader
+                  icon={FileText}
+                  tone="blue"
+                  title="Leave Requests"
+                  subtitle="Apply for leave or view your recent requests"
+                >
+                  <button type="button" onClick={loadLeaveRequestsData} disabled={leaveLoading} className="ml-auto text-xs font-semibold text-blue-600 transition hover:text-blue-800 disabled:opacity-60">
+                    {leaveLoading ? "Loading" : "New request"}
+                  </button>
+                </SectionHeader>
+                <div className={cardBodyClass}>
+                  <form className="grid grid-cols-1 gap-2 sm:grid-cols-2" onSubmit={handleSubmitLeaveRequest}>
+                    <input type="date" value={leaveForm.fromDate} onChange={(event) => setLeaveForm((prev) => ({ ...prev, fromDate: event.target.value }))} className={fieldClass} aria-label="Leave from date" />
+                    <input type="date" value={leaveForm.toDate} onChange={(event) => setLeaveForm((prev) => ({ ...prev, toDate: event.target.value }))} className={fieldClass} aria-label="Leave to date" />
+                    <select value={leaveForm.leaveType} onChange={(event) => setLeaveForm((prev) => ({ ...prev, leaveType: event.target.value }))} className={`${fieldClass} sm:col-span-2`} aria-label="Leave type">
+                      {LEAVE_TYPE_OPTIONS.map((type) => (<option key={type} value={type}>{type}</option>))}
+                    </select>
+                    <textarea
+                      value={leaveForm.reason}
+                      onChange={(event) => setLeaveForm((prev) => ({ ...prev, reason: event.target.value }))}
+                      rows={2}
+                      placeholder="Reason"
+                      className="sm:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+                    <button type="submit" disabled={leaveSubmitting} className={`${primaryButtonClass} sm:col-span-2`}>
+                      {leaveSubmitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                      Submit Request
+                    </button>
+                  </form>
+
+                  <div className="mt-4 flex flex-col divide-y divide-slate-100">
+                    {leaveRequests.length === 0 ? (
+                      <div className="py-2 text-[12.8px] text-slate-500">No leave requests yet.</div>
+                    ) : (
+                      leaveRequests.slice(0, 3).map((row) => (
+                        <div key={String(row._id)} className="flex items-center gap-3 py-2">
+                          <div className="min-w-0">
+                            <b className="block truncate text-[12.8px] font-semibold text-slate-900">{String(row.leaveType || "CASUAL").replaceAll("_", " ")} · {formatDateShort(row.fromDate)}</b>
+                            <div className="truncate text-[11.5px] text-slate-500">{row.reason || "-"}</div>
+                          </div>
+                          <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(row.status)}`}>
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                            {String(row.status || "PENDING").replaceAll("_", " ")}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {isAdminViewer ? (
+              <section className={cardClass}>
+                <div className={cardHeaderClass}>
+                  <h4 className="flex-1 text-[14px] font-semibold text-slate-900">Team Approvals</h4>
+                  {/* Two tabs rather than a five-option select: pending is the
+                      queue you act on, everything else is history. */}
+                  <div className="inline-flex rounded-lg bg-slate-100 p-0.5" role="group" aria-label="Approval view">
+                    {[["PENDING", "Pending"], ["", "History"]].map(([value, label]) => (
+                      <button
+                        key={label}
+                        type="button"
+                        aria-pressed={adminLeaveStatusFilter === value}
+                        onClick={() => setAdminLeaveStatusFilter(value)}
+                        className={`rounded-md px-3 py-1 text-[12px] font-semibold transition ${
+                          adminLeaveStatusFilter === value ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                        }`}
+                      >
+                        {label}
+                        {value === "PENDING" && pendingAdminLeaveRequests.length ? (
+                          <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-[10.5px] text-amber-700">{pendingAdminLeaveRequests.length}</span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className={cardBodyClass}>
+                  <div className="flex flex-col divide-y divide-slate-100">
+                    {adminWorkflowLoading ? (
+                      <div className="py-2 text-[12.8px] text-slate-500"><Loader2 size={16} className="mr-2 inline animate-spin" />Loading approvals...</div>
+                    ) : visibleAdminLeaveRequests.length === 0 ? (
+                      <div className="flex flex-col items-center gap-2 py-8 text-center">
+                        <span className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-slate-400">
+                          <FileText size={22} aria-hidden="true" />
+                        </span>
+                        <p className="text-[12.8px] font-semibold text-slate-600">No leave requests found.</p>
+                        <p className="text-[11.5px] text-slate-400">
+                          {adminLeaveStatusFilter === "PENDING" ? "All team members are in office today." : "Nothing in the history for this filter."}
+                        </p>
+                      </div>
+                    ) : (
+                      visibleAdminLeaveRequests.map((row) => (
+                        <div key={String(row._id)} className="flex flex-wrap items-center gap-3 py-2">
+                          <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-100 text-[9px] font-bold text-blue-700">{getInitials(row.user?.name)}</div>
+                          <div className="min-w-[120px] flex-1">
+                            <b className="block text-[12.5px] font-semibold text-slate-900">{row.user?.name || "-"}</b>
+                            <div className="text-[11.5px] text-slate-500">{String(row.leaveType || "CASUAL").replaceAll("_", " ")} · {formatDateShort(row.fromDate)}</div>
+                          </div>
+                          {row.status === "PENDING" ? (
+                            <div className="ml-auto flex gap-1.5">
+                              <button type="button" onClick={() => handleReviewLeave(row._id, "APPROVED")} disabled={Boolean(reviewAction)} className="rounded-lg border border-blue-700 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60">Approve</button>
+                              <button type="button" onClick={() => handleReviewLeave(row._id, "REJECTED")} disabled={Boolean(reviewAction)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-700 disabled:opacity-60">Reject</button>
+                            </div>
+                          ) : (
+                            <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(row.status)}`}>
+                              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                              {String(row.status || "PENDING").replaceAll("_", " ")}
+                            </span>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {isAdminViewer ? (
+              <section className={cardClass}>
+                <form onSubmit={handleSaveAttendancePolicy}>
+                  <div className={cardHeaderClass}>
+                    <h4 className="flex-1 text-[14px] font-semibold text-slate-900">Attendance Policy</h4>
+                    <label className="inline-flex items-center gap-2 text-[12px] font-semibold text-slate-600">
+                      <input type="checkbox" checked={Boolean(policyForm.geofenceEnabled)} onChange={(event) => setPolicyForm((prev) => ({ ...prev, geofenceEnabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                      Geofence
+                    </label>
+                  </div>
+                  <div className={`${cardBodyClass} space-y-3`}>
+                    <ToastNotice message={policyError} type="error" />
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="mb-1 block text-[11.5px] text-slate-500">Office Latitude</span>
+                        <input type="number" step="any" value={policyForm.officeLatitude} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeLatitude: event.target.value }))} className={fieldClass} aria-label="Office latitude" />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[11.5px] text-slate-500">Office Longitude</span>
+                        <input type="number" step="any" value={policyForm.officeLongitude} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeLongitude: event.target.value }))} className={fieldClass} aria-label="Office longitude" />
+                      </label>
+                    </div>
+                    <label className="block">
+                      <span className="mb-1 block text-[11.5px] text-slate-500">Allowed Radius (meters)</span>
+                      <input type="number" min="10" max="5000" value={policyForm.officeRadiusMeters} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeRadiusMeters: event.target.value }))} className={fieldClass} aria-label="Office radius" />
+                    </label>
+                    <div className="flex gap-2">
+                      <button type="button" onClick={handleUseCurrentOfficeLocation} disabled={policyLoading || policySaving} className={secondaryButtonClass}>
+                        <MapPin size={14} />
+                        Use current
+                      </button>
+                      <button type="submit" disabled={policyLoading || policySaving} className={`${primaryButtonClass} flex-1`}>
+                        {policySaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              </section>
+            ) : null}
+
+            {isAdminViewer ? (
+              <section className={cardClass}>
+                <div className={cardHeaderClass}>
+                  <IconBox icon={Lightbulb} tone="amber" boxSize="h-8 w-8" iconSize={15} />
+                  <h4 className="text-[14px] font-semibold text-slate-900">Today&rsquo;s Insights</h4>
+                </div>
+                <div className={`${cardBodyClass} space-y-3`}>
+                  {todayInsights.map((insight) => (
+                    <div key={insight.label} className="flex items-center gap-3">
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] text-slate-600">{insight.label}</span>
+                      <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
+                        <span className={`block h-full rounded-full ${insight.tone}`} style={{ width: `${insight.percent}%` }} />
+                      </span>
+                      <span className="w-12 shrink-0 text-right font-mono text-[12px] font-semibold text-slate-800">{insight.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </div>
         </div>
       )}
+
+      {isAdminViewer ? (
+        <p className="mt-4 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3.5 text-[12.5px] text-blue-900">
+          <Info size={15} className="mt-px shrink-0" aria-hidden="true" />
+          <span>
+            Tip: team members can only check in within the allowed office radius.
+            Break time is excluded from total working hours, and check-out works from anywhere.
+          </span>
+        </p>
+      ) : null}
     </div>
   );
 };

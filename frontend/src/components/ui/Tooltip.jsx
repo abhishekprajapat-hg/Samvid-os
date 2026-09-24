@@ -12,8 +12,8 @@ const Tooltip = ({ label, children, className, side = "bottom" }) => (
     {children}
     <span
       className={cn(
-        "pointer-events-none absolute z-50 hidden whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-700 opacity-0 shadow-lg transition",
-        "group-hover/tooltip:block group-hover/tooltip:opacity-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
+        "pointer-events-none absolute z-50 hidden whitespace-nowrap rounded-lg bg-slate-900 px-2 py-1 text-[11.5px] font-semibold text-white opacity-0 shadow-crm-panel transition",
+        "group-hover/tooltip:block group-hover/tooltip:opacity-100 dark:bg-slate-700 dark:text-slate-50",
         positions[side] || positions.bottom,
       )}
     >

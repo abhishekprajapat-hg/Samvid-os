@@ -14,18 +14,20 @@ const EmptyState = ({
 }) => (
   <div
     className={cn(
-      "rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500",
-      "dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-400",
+      "rounded-xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center",
+      "dark:border-slate-700 dark:bg-slate-900",
       className,
     )}
   >
-    <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-400 dark:border-slate-700 dark:bg-slate-950">
-      {React.createElement(Icon, { "aria-hidden": "true", size: 18 })}
+    <div className="mx-auto mb-3 flex h-[42px] w-[42px] items-center justify-center rounded-xl bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+      {React.createElement(Icon, { "aria-hidden": "true", size: 19 })}
     </div>
-    <p className="font-semibold text-slate-800 dark:text-slate-100">{text || title}</p>
-    {description ? <p className="mx-auto mt-1 max-w-sm text-xs leading-5">{description}</p> : null}
+    <p className="text-[14.5px] font-semibold text-slate-900 dark:text-slate-100">{text || title}</p>
+    {description ? (
+      <p className="mx-auto mt-1.5 max-w-sm text-[13px] leading-5 text-slate-600 dark:text-slate-400">{description}</p>
+    ) : null}
     {actionLabel && onAction ? (
-      <Button className="mt-4" size="sm" onClick={onAction}>
+      <Button className="mt-4" size="sm" variant="secondary" onClick={onAction}>
         {actionLabel}
       </Button>
     ) : null}

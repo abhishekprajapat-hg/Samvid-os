@@ -56,6 +56,12 @@ const formatBrokerageSummary = (config = null) => {
     : `${formatCurrency(normalized.value)} per closed deal`;
 };
 
+const formatRoleType = (value) =>
+  String(value || "").trim().toUpperCase() === "BOTH" ? "Both" :
+  String(value || "").trim().toUpperCase() === "RESIDENTIAL"
+    ? "Residential"
+    : "Commercial";
+
 const roleBadgeTone = (role, isDarkTheme) => {
   if (role === "MANAGER") {
     return isDarkTheme
@@ -67,7 +73,12 @@ const roleBadgeTone = (role, isDarkTheme) => {
       ? "border-amber-400/40 bg-amber-500/15 text-amber-100"
       : "border-amber-200 bg-amber-50 text-amber-700";
   }
-  if (role === "PRODUCTION_EXECUTIVE") {
+  if (role === "COWORKING_ADMIN") {
+    return isDarkTheme
+      ? "border-blue-400/40 bg-blue-500/15 text-blue-100"
+      : "border-blue-200 bg-blue-50 text-blue-700";
+  }
+  if (role === "PRODUCTION_EXECUTIVE" || role === "COMMUNITY_MANAGER") {
     return isDarkTheme
       ? "border-violet-400/40 bg-violet-500/15 text-violet-100"
       : "border-violet-200 bg-violet-50 text-violet-700";
@@ -140,7 +151,9 @@ export const TeamLeadOverviewCards = ({
     { key: "EXECUTIVE", label: "Executives" },
     { key: "FIELD_EXECUTIVE", label: "Field Executives" },
     { key: "PRODUCTION_EXECUTIVE", label: "Production Executives" },
+    { key: "COMMUNITY_MANAGER", label: "Community Managers" },
     { key: "CHANNEL_PARTNER", label: "Channel Partners" },
+    { key: "COWORKING_ADMIN", label: "Coworking admins" },
   ];
 
   return (
@@ -290,6 +303,7 @@ const TeamUserCard = ({
   const initials = getUserInitials(user.name);
   const brokerageSummary = isChannelPartner ? formatBrokerageSummary(user.brokerageConfig) : "";
   const brokerageNotes = String(user?.brokerageConfig?.notes || "").trim();
+  const roleTypeLabel = formatRoleType(user?.roleType);
 
   return (
     <Motion.div
@@ -371,6 +385,13 @@ const TeamUserCard = ({
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${roleBadgeTone(user.role, isDarkTheme)}`}>
           {roleLabels[user.role] || user.role}
+        </span>
+        <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+          isDarkTheme
+            ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700"
+        }`}>
+          {roleTypeLabel}
         </span>
         <span className={`inline-flex items-center gap-1 text-[11px] ${
           isDarkTheme ? "text-slate-400" : "text-slate-500"

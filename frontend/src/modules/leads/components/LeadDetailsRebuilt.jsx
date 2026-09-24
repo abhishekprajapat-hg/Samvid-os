@@ -1,7 +1,8 @@
+import BrokerPhoneHint from "./BrokerPhoneHint";
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import { createInventoryShareLink } from "../../../services/inventoryService";
-import { uploadChatFile } from "../../../services/chatService";
+import { uploadFile } from "../../../services/uploadService";
 import {
   ArrowLeft,
   Building2,
@@ -11,6 +12,7 @@ import {
   Download,
   Eye,
   FileText,
+  Flame,
   History,
   Image,
   Loader,
@@ -19,6 +21,7 @@ import {
   Mic,
   MicOff,
   Phone,
+  PencilLine,
   Plus,
   Save,
   Send,
@@ -32,6 +35,9 @@ import {
 } from "../../../services/taskService";
 import {
   FURNISHING_OPTIONS,
+  PLOT_LOCATION_OPTIONS,
+  PLOT_OCCUPANCY_OPTIONS,
+  PLOT_PURPOSE_OPTIONS,
   getPropertySubtypeConfig,
   getPropertySubtypeLabel,
   getPropertySubtypeOptions,
@@ -49,7 +55,7 @@ const RequirementAdornedInput = ({
   <div className="relative">
     <input
       {...inputProps}
-      className={`${inputClassName} ${adornmentPosition === "left" ? "pl-8" : "pr-10"}`}
+      className={`${inputClassName} ${adornmentPosition === "left" ? "pl-8" : "pr-14"}`}
     />
     <span
       className={`pointer-events-none absolute top-1/2 -translate-y-1/2 text-xs font-bold ${
@@ -60,6 +66,54 @@ const RequirementAdornedInput = ({
     </span>
   </div>
 );
+
+const CUSTOM_BUDGET_RANGE_VALUE = "__CUSTOM_BUDGET__";
+
+const SALE_BUDGET_RANGE_OPTIONS = [
+  { value: "", label: "Budget Range", min: "", max: "" },
+  { value: "0-2500000", label: "Under 25 Lakh", min: "0", max: "2500000" },
+  { value: "2500000-5000000", label: "25 Lakh - 50 Lakh", min: "2500000", max: "5000000" },
+  { value: "5000000-7500000", label: "50 Lakh - 75 Lakh", min: "5000000", max: "7500000" },
+  { value: "7500000-10000000", label: "75 Lakh - 1 Cr", min: "7500000", max: "10000000" },
+  { value: "10000000-20000000", label: "1 Cr - 2 Cr", min: "10000000", max: "20000000" },
+  { value: "20000000-50000000", label: "2 Cr - 5 Cr", min: "20000000", max: "50000000" },
+  { value: "50000000-", label: "5 Cr+", min: "50000000", max: "" },
+  { value: CUSTOM_BUDGET_RANGE_VALUE, label: "Custom", min: "", max: "" },
+];
+
+const RENT_LEASE_BUDGET_RANGE_OPTIONS = [
+  { value: "", label: "Budget Range", min: "", max: "" },
+  { value: "0-25000", label: "Under 25,000", min: "0", max: "25000" },
+  { value: "25000-50000", label: "25,000 - 50,000", min: "25000", max: "50000" },
+  { value: "50000-100000", label: "50,000 - 1 Lakh", min: "50000", max: "100000" },
+  { value: "100000-200000", label: "1 Lakh - 2 Lakh", min: "100000", max: "200000" },
+  { value: "200000-500000", label: "2 Lakh - 5 Lakh", min: "200000", max: "500000" },
+  { value: "500000-", label: "5 Lakh+", min: "500000", max: "" },
+  { value: CUSTOM_BUDGET_RANGE_VALUE, label: "Custom", min: "", max: "" },
+];
+
+const getBudgetRangeOptions = (transactionType) =>
+  ["RENT", "LEASE"].includes(String(transactionType || "").trim().toUpperCase())
+    ? RENT_LEASE_BUDGET_RANGE_OPTIONS
+    : SALE_BUDGET_RANGE_OPTIONS;
+
+const getBudgetRangeOptionValue = (min, max, options = SALE_BUDGET_RANGE_OPTIONS) => {
+  const minText = String(min || "").trim();
+  const maxText = String(max || "").trim();
+  if (!minText && !maxText) return "";
+  const value = `${minText}-${maxText}`;
+  return options.some((option) => option.value === value) ? value : CUSTOM_BUDGET_RANGE_VALUE;
+};
+
+const toPositivePlotMeasure = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const formatCalculatedPlotArea = (area) =>
+  Number.isInteger(area) ? String(area) : String(Number(area.toFixed(2)));
+
+const PLOT_INLINE_FIELD_KEYS = new Set(["plotLocation", "plotOccupancy", "plotPurpose"]);
 
 const approvalLabel = (status) => {
   if (status === "APPROVED") return "Approved";
@@ -418,6 +472,7 @@ const LeadDetailsRebuiltContent = ({
   setRelatedInventoryDraft,
   linkingProperty,
   onLinkPropertyToLead,
+  onOpenEditLeadForm,
   leadStatuses,
   nameDraft,
   setNameDraft,
@@ -429,6 +484,8 @@ const LeadDetailsRebuiltContent = ({
   setCityDraft,
   projectInterestedDraft,
   setProjectInterestedDraft,
+  clientProfessionDraft,
+  setClientProfessionDraft,
   statusDraft,
   setStatusDraft,
   requirementsDraft,
@@ -459,6 +516,7 @@ const LeadDetailsRebuiltContent = ({
   closureDocumentsDraft,
   setClosureDocumentsDraft,
   canReviewDealPayment,
+  canEditLead = true,
   siteLatDraft,
   setSiteLatDraft,
   siteLngDraft,
@@ -475,6 +533,7 @@ const LeadDetailsRebuiltContent = ({
   setExecutiveDraft,
   executives,
   transferReasonDraft,
+  onToggleHotClient,
   setTransferReasonDraft,
   assigneeSearchDraft,
   setAssigneeSearchDraft,
@@ -681,6 +740,7 @@ const LeadDetailsRebuiltContent = ({
   const [visibleDiaryCount, setVisibleDiaryCount] = React.useState(INITIAL_DIARY_RENDER_COUNT);
   const [visibleActivityCount, setVisibleActivityCount] = React.useState(INITIAL_ACTIVITY_RENDER_COUNT);
   const [customNumberFields, setCustomNumberFields] = React.useState({});
+  const [isManualBudgetRange, setIsManualBudgetRange] = React.useState(false);
   const proposalMessageTimerRef = React.useRef(null);
   const pdfImageSourceCacheRef = React.useRef(new Map());
   const normalizedRequirementInventoryType = String(
@@ -699,12 +759,62 @@ const LeadDetailsRebuiltContent = ({
   const furnishingValue = furnishingOptions.some((option) => option.value === requirementsDraft?.furnishingStatus)
     ? requirementsDraft?.furnishingStatus
     : "";
+  const isPlotRequirement = normalizedRequirementPropertySubtype === "PLOT";
+  const isFlatRequirement = normalizedRequirementPropertySubtype === "APARTMENT";
+  const budgetRangeOptions = getBudgetRangeOptions(requirementsDraft?.transactionType);
+  const budgetRangeValue = getBudgetRangeOptionValue(
+    requirementsDraft?.budgetMin,
+    requirementsDraft?.budgetMax,
+    budgetRangeOptions,
+  );
+  const isCustomBudgetRange = isManualBudgetRange || budgetRangeValue === CUSTOM_BUDGET_RANGE_VALUE;
+  const selectedBudgetRangeValue = isCustomBudgetRange ? CUSTOM_BUDGET_RANGE_VALUE : budgetRangeValue;
+  const plotLocationValue = String(requirementsDraft?.subtypeData?.plotLocation || "");
+  const plotOccupancyValue = String(requirementsDraft?.subtypeData?.plotOccupancy || "");
+  const plotPurposeValue = String(requirementsDraft?.subtypeData?.plotPurpose || "");
 
   const updateRequirementRootField = React.useCallback(
     (field, value) => {
       setRequirementsDraft((prev) => ({
         ...(prev || {}),
         [field]: value,
+      }));
+    },
+    [setRequirementsDraft],
+  );
+
+  const updateBudgetRange = React.useCallback(
+    (value) => {
+      if (value === CUSTOM_BUDGET_RANGE_VALUE) {
+        setIsManualBudgetRange(true);
+        setRequirementsDraft((prev) => ({
+          ...(prev || {}),
+          budgetMin: "",
+          budgetMax: "",
+        }));
+        return;
+      }
+
+      const selectedRange = budgetRangeOptions.find((option) => option.value === value)
+        || budgetRangeOptions[0];
+      setIsManualBudgetRange(false);
+      setRequirementsDraft((prev) => ({
+        ...(prev || {}),
+        budgetMin: selectedRange.min,
+        budgetMax: selectedRange.max,
+      }));
+    },
+    [budgetRangeOptions, setRequirementsDraft],
+  );
+
+  const updateTransactionType = React.useCallback(
+    (value) => {
+      setIsManualBudgetRange(false);
+      setRequirementsDraft((prev) => ({
+        ...(prev || {}),
+        transactionType: value,
+        budgetMin: "",
+        budgetMax: "",
       }));
     },
     [setRequirementsDraft],
@@ -747,13 +857,25 @@ const LeadDetailsRebuiltContent = ({
 
   const updateRequirementSubtypeField = React.useCallback(
     (field, value) => {
-      setRequirementsDraft((prev) => ({
-        ...(prev || {}),
-        subtypeData: {
+      setRequirementsDraft((prev) => {
+        const nextSubtypeData = {
           ...(prev?.subtypeData || {}),
           [field]: value,
-        },
-      }));
+        };
+
+        if (["plotLength", "plotWidth"].includes(field)) {
+          const length = toPositivePlotMeasure(nextSubtypeData.plotLength);
+          const width = toPositivePlotMeasure(nextSubtypeData.plotWidth);
+          if (length !== null && width !== null) {
+            nextSubtypeData.plotArea = formatCalculatedPlotArea(length * width);
+          }
+        }
+
+        return {
+          ...(prev || {}),
+          subtypeData: nextSubtypeData,
+        };
+      });
     },
     [setRequirementsDraft],
   );
@@ -833,6 +955,20 @@ const LeadDetailsRebuiltContent = ({
               placeholder={field.placeholder || field.label}
               rows={3}
               className={`min-h-24 w-full rounded-lg border px-2.5 py-2 text-sm ${input}`}
+            />
+          ) : field.unit ? (
+            <RequirementAdornedInput
+              type={field.type === "date" ? "date" : field.type === "number" ? "number" : "text"}
+              min={field.min}
+              max={field.max}
+              step={field.step || (field.type === "number" ? "any" : undefined)}
+              value={value}
+              onChange={(event) => updateRequirementSubtypeField(field.key, event.target.value)}
+              placeholder={field.placeholder || field.label}
+              adornment={field.unit}
+              adornmentPosition="right"
+              inputClassName={inputClassName}
+              isDark={isDark}
             />
           ) : (
             <input
@@ -962,13 +1098,13 @@ const LeadDetailsRebuiltContent = ({
   }, []);
 
   const uploadClosureDocumentFile = React.useCallback(async (file) => {
-    const payload = await uploadChatFile(file);
+    const payload = await uploadFile(file, "lead-documents");
 
     const uploaded = sanitizeClosureDocument({
-      url: payload?.fileUrl,
-      mimeType: payload?.mimeType || file.type,
-      name: payload?.fileName || file.name,
-      size: payload?.size || file.size,
+      url: payload.url,
+      mimeType: file.type,
+      name: file.name,
+      size: file.size,
       kind: detectClosureDocumentKind(file.type),
     });
 
@@ -1254,7 +1390,7 @@ const LeadDetailsRebuiltContent = ({
     lines.push("");
     lines.push(`Validity: ${validityDays} day(s)`);
     if (proposalSpecialNote) lines.push(`Special Note: ${proposalSpecialNote}`);
-    lines.push("", "Regards,", "Samvid OS");
+    lines.push("", "Regards,", "The Office on Rent");
 
     if (!selectedProposalProperties.length) {
       return [
@@ -1268,8 +1404,10 @@ const LeadDetailsRebuiltContent = ({
   }, [
     proposalSpecialNote,
     proposalValidityDays,
+    selectedLead?.assignedTo?.name,
     selectedLead?.city,
     selectedLead?.name,
+    selectedLead?.phone,
     selectedLead?.projectInterested,
     selectedPropertyCount,
     selectedProposalProperties,
@@ -1586,7 +1724,7 @@ const LeadDetailsRebuiltContent = ({
     doc.text("Regards,", 36, cursorY);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(15, 118, 110);
-    doc.text("Samvid OS", 36, cursorY + 15);
+    doc.text("The Office on Rent", 36, cursorY + 15);
 
     // Apply Page Numbers on all pages
     const totalPages = doc.internal.getNumberOfPages();
@@ -1596,7 +1734,7 @@ const LeadDetailsRebuiltContent = ({
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
       doc.text(`Page ${p} of ${totalPages}`, 500, 815);
-      doc.text("Generated by Samvid OS", 36, 815);
+      doc.text("Generated by The Office On Rent", 36, 815);
     }
 
     return doc.output("blob");
@@ -1914,12 +2052,47 @@ const LeadDetailsRebuiltContent = ({
             <p className={`mt-1 truncate text-xs sm:text-sm ${isDark ? "text-slate-300" : "text-slate-600"}`}>
               {String(projectInterestedDraft || "").trim() || selectedLead?.projectInterested || "Project not tagged yet"}
             </p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              <span className={`rounded-full border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] sm:px-2.5 sm:text-[10px] ${
-                isDark ? "border-sky-300/45 bg-sky-500/15 text-sky-100" : "border-sky-300 bg-sky-50 text-sky-700"
-              }`}>
-                {statusLabel(statusDraft || selectedLead?.status || "NEW")}
-              </span>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <button
+                type="button"
+                disabled={!canEditLead}
+                aria-pressed={Boolean(selectedLead?.hotClient)}
+                onClick={onToggleHotClient}
+                title="High-intent client who is ready to transact and mainly needs the right inventory"
+                className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
+                  selectedLead?.hotClient
+                    ? "border-orange-300 bg-orange-100 text-orange-800"
+                    : isDark
+                      ? "border-slate-700 text-slate-300"
+                      : "border-slate-300 text-slate-600"
+                }`}
+              >
+                <Flame size={13} className={selectedLead?.hotClient ? "" : "opacity-50"} />
+                Hot Client
+              </button>
+              <BrokerPhoneHint phone={phoneDraft} />
+              {canAssignLead && <button type="button" onClick={() => document.getElementById("lead-transfer-panel")?.scrollIntoView({ behavior: "smooth", block: "center" })} className="rounded-xl border px-3 py-2 text-xs font-semibold">Transfer</button>}
+              {selectedLead?.brokerContactId && <span className="text-xs font-semibold text-violet-600">Known broker</span>}
+
+              <label className="min-w-[168px]">
+                <span className={`mb-1 block text-[9px] font-bold uppercase tracking-[0.14em] ${
+                  isDark ? "text-slate-400" : "text-slate-500"
+                }`}>
+                  Status
+                </span>
+                <select
+                  value={statusDraft}
+                  disabled={!canEditLead}
+                  onChange={(event) => setStatusDraft(event.target.value)}
+                  className={`h-9 w-full rounded-xl border px-3 text-xs font-bold uppercase tracking-[0.08em] ${input}`}
+                >
+                  {leadStatuses.map((status) => (
+                    <option key={status} value={status} disabled={!canReviewDealPayment && status === "REQUESTED"}>
+                      {String(status).replaceAll("_", " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <span className={`rounded-full border px-2 py-1 text-[9px] font-semibold sm:px-2.5 sm:text-[10px] ${
                 isDark ? "border-slate-700 bg-slate-800 text-slate-300" : "border-slate-300 bg-white text-slate-600"
               }`}>
@@ -1927,14 +2100,33 @@ const LeadDetailsRebuiltContent = ({
               </span>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className={`inline-flex h-9 items-center gap-1 rounded-xl border px-3 text-[11px] font-semibold uppercase tracking-[0.1em] sm:px-3.5 sm:text-xs sm:tracking-[0.12em] ${button}`}
-          >
-            <ArrowLeft size={12} />
-            Back
-          </button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className={`inline-flex h-9 items-center gap-1 rounded-xl border px-3 text-[11px] font-semibold uppercase tracking-[0.1em] sm:px-3.5 sm:text-xs sm:tracking-[0.12em] ${button}`}
+            >
+              <ArrowLeft size={12} />
+              Back
+            </button>
+            {canEditLead ? <button
+              type="button"
+              onClick={onOpenEditLeadForm}
+              className={`inline-flex h-9 items-center gap-1 rounded-xl border px-3 text-[11px] font-semibold uppercase tracking-[0.1em] sm:px-3.5 sm:text-xs sm:tracking-[0.12em] ${button}`}
+            >
+              <PencilLine size={12} />
+              Edit Lead
+            </button> : null}
+            {canEditLead ? <button
+              type="button"
+              onClick={onUpdateLead}
+              disabled={savingUpdates}
+              className={`inline-flex h-9 items-center gap-1 rounded-xl px-3 text-[11px] font-semibold uppercase tracking-[0.1em] text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 sm:px-3.5 sm:text-xs sm:tracking-[0.12em] ${primaryBtn}`}
+            >
+              {savingUpdates ? <Loader size={12} className="animate-spin" /> : <Save size={12} />}
+              {savingUpdates ? "Saving..." : "Save"}
+            </button> : null}
+          </div>
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-3">
@@ -2038,18 +2230,6 @@ const LeadDetailsRebuiltContent = ({
                   className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
                 />
               </label>
-              <label className="space-y-1">
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Project
-                </span>
-                <input
-                  type="text"
-                  value={projectInterestedDraft}
-                  onChange={(event) => setProjectInterestedDraft(event.target.value)}
-                  placeholder="Project interested"
-                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
-                />
-              </label>
             </div>
           </section>
 
@@ -2100,13 +2280,13 @@ const LeadDetailsRebuiltContent = ({
                 </span>
                 <select
                   value={requirementsDraft?.transactionType || ""}
-                  onChange={(event) => updateRequirementRootField("transactionType", event.target.value)}
+                  onChange={(event) => updateTransactionType(event.target.value)}
                   className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
                 >
                   <option value="">Any</option>
                   <option value="SALE">Purchase</option>
+                  {isFlatRequirement ? <option value="RENT">Rent</option> : null}
                   <option value="LEASE">Lease</option>
-                  <option value="RENT">Rent</option>
                 </select>
               </label>
               {showFurnishing ? (
@@ -2127,36 +2307,180 @@ const LeadDetailsRebuiltContent = ({
                   </select>
                 </label>
               ) : null}
-              <label className="space-y-1">
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Budget Min
-                </span>
-                <RequirementAdornedInput
-                  type="number"
-                  step="any"
-                  adornment="₹"
-                  inputClassName={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
-                  isDark={isDark}
-                  value={requirementsDraft?.budgetMin || ""}
-                  onChange={(event) => updateRequirementRootField("budgetMin", event.target.value)}
-                  placeholder="Minimum budget"
-                />
-              </label>
-              <label className="space-y-1">
-                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                  Budget Max
-                </span>
-                <RequirementAdornedInput
-                  type="number"
-                  step="any"
-                  adornment="₹"
-                  inputClassName={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
-                  isDark={isDark}
-                  value={requirementsDraft?.budgetMax || ""}
-                  onChange={(event) => updateRequirementRootField("budgetMax", event.target.value)}
-                  placeholder="Maximum budget"
-                />
-              </label>
+              {isPlotRequirement ? (
+                <>
+                  <label className="space-y-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Project Interested
+                    </span>
+                    <input
+                      type="text"
+                      value={projectInterestedDraft}
+                      onChange={(event) => setProjectInterestedDraft(event.target.value)}
+                      placeholder="Project Interested"
+                      className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Client's Profession
+                    </span>
+                    <input
+                      type="text"
+                      value={clientProfessionDraft}
+                      onChange={(event) => setClientProfessionDraft(event.target.value)}
+                      placeholder="Client's Profession"
+                      className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Budget Range
+                    </span>
+                    <select
+                      value={selectedBudgetRangeValue}
+                      onChange={(event) => updateBudgetRange(event.target.value)}
+                      className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    >
+                      {budgetRangeOptions.map((option) => (
+                        <option key={option.value || "any-plot-budget"} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {isCustomBudgetRange ? (
+                    <>
+                      <label className="space-y-1">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Budget Min
+                        </span>
+                        <input
+                          type="number"
+                          step="any"
+                          value={requirementsDraft?.budgetMin || ""}
+                          onChange={(event) => updateRequirementRootField("budgetMin", event.target.value)}
+                          placeholder="Budget Min"
+                          className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Budget Max
+                        </span>
+                        <input
+                          type="number"
+                          step="any"
+                          value={requirementsDraft?.budgetMax || ""}
+                          onChange={(event) => updateRequirementRootField("budgetMax", event.target.value)}
+                          placeholder="Budget Max"
+                          className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                        />
+                      </label>
+                    </>
+                  ) : null}
+                  <label className="space-y-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Location
+                    </span>
+                    <select
+                      value={plotLocationValue}
+                      onChange={(event) => updateRequirementSubtypeField("plotLocation", event.target.value)}
+                      className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    >
+                      <option value="">Location</option>
+                      {PLOT_LOCATION_OPTIONS.map((location) => (
+                        <option key={location} value={location}>
+                          {location}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Occupancy
+                    </span>
+                    <select
+                      value={plotOccupancyValue}
+                      onChange={(event) => updateRequirementSubtypeField("plotOccupancy", event.target.value)}
+                      className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    >
+                      <option value="">Occupancy</option>
+                      {PLOT_OCCUPANCY_OPTIONS.map((occupancy) => (
+                        <option key={occupancy} value={occupancy}>
+                          {occupancy}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Purpose
+                    </span>
+                    <select
+                      value={plotPurposeValue}
+                      onChange={(event) => updateRequirementSubtypeField("plotPurpose", event.target.value)}
+                      className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    >
+                      <option value="">Purpose</option>
+                      {PLOT_PURPOSE_OPTIONS.map((purpose) => (
+                        <option key={purpose} value={purpose}>
+                          {purpose}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label className="space-y-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                      Budget Range
+                    </span>
+                    <select
+                      value={selectedBudgetRangeValue}
+                      onChange={(event) => updateBudgetRange(event.target.value)}
+                      className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    >
+                      {budgetRangeOptions.map((option) => (
+                        <option key={option.value || "any-budget"} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {isCustomBudgetRange ? (
+                    <>
+                      <label className="space-y-1">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Budget Min
+                        </span>
+                        <input
+                          type="number"
+                          step="any"
+                          value={requirementsDraft?.budgetMin || ""}
+                          onChange={(event) => updateRequirementRootField("budgetMin", event.target.value)}
+                          placeholder="Budget Min"
+                          className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                          Budget Max
+                        </span>
+                        <input
+                          type="number"
+                          step="any"
+                          value={requirementsDraft?.budgetMax || ""}
+                          onChange={(event) => updateRequirementRootField("budgetMax", event.target.value)}
+                          placeholder="Budget Max"
+                          className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                        />
+                      </label>
+                    </>
+                  ) : null}
+                </>
+              )}
             </div>
 
             {propertySubtypeConfig ? (
@@ -2166,12 +2490,12 @@ const LeadDetailsRebuiltContent = ({
                 </div>
                 <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                   {(propertySubtypeConfig.fields || [])
-                    .filter((field) => field.type !== "checkbox")
+                    .filter((field) => field.type !== "checkbox" && !PLOT_INLINE_FIELD_KEYS.has(field.key))
                     .map(renderSubtypeField)}
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {(propertySubtypeConfig.fields || [])
-                    .filter((field) => field.type === "checkbox")
+                    .filter((field) => field.type === "checkbox" && !PLOT_INLINE_FIELD_KEYS.has(field.key))
                     .map(renderSubtypeField)}
                 </div>
               </div>
@@ -2594,149 +2918,6 @@ const LeadDetailsRebuiltContent = ({
             )}
           </section>
 
-          {canAssignLead ? (
-            <section className={`rounded-3xl border p-4 ${card}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>Assign / Transfer Lead</div>
-                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                    Current owner: <span className={isDark ? "font-semibold text-slate-100" : "font-semibold text-slate-800"}>{currentOwnerName}</span>
-                    {currentOwnerRole ? ` (${statusLabel(currentOwnerRole)})` : ""}
-                  </p>
-                </div>
-              </div>
-              {showQualifiedTransferHelper ? (
-                <div className={`mt-3 rounded-2xl border px-3 py-2 text-xs font-medium ${
-                  isDark ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-100" : "border-emerald-200 bg-emerald-50 text-emerald-800"
-                }`}>
-                  This lead is qualified. You can assign it to a Field Executive for site visit or deal handling.
-                </div>
-              ) : null}
-              <input
-                type="search"
-                value={assigneeSearchDraft}
-                onChange={(event) => setAssigneeSearchDraft(event.target.value)}
-                placeholder="Search by name or role"
-                className={`mt-3 h-11 w-full rounded-xl border px-3 text-sm ${input}`}
-              />
-              <select
-                value={executiveDraft}
-                onChange={(event) => setExecutiveDraft(event.target.value)}
-                className={`mt-2 h-11 w-full rounded-xl border px-3 text-sm ${input}`}
-              >
-                <option value="">Select user</option>
-                {filteredAssignees.map((user) => (
-                  <option key={user._id} value={user._id}>
-                    {user.name} ({statusLabel(user.role)})
-                    {user.lastAssignedAt ? ` - last ${formatDate(user.lastAssignedAt)}` : ""}
-                  </option>
-                ))}
-              </select>
-              <textarea
-                value={transferReasonDraft}
-                onChange={(event) => setTransferReasonDraft(event.target.value)}
-                placeholder="Transfer reason (optional)"
-                rows={3}
-                className={`mt-2 min-h-24 w-full resize-y rounded-xl border px-3 py-2 text-sm ${input}`}
-              />
-              <div className="sticky bottom-0 -mx-1 mt-3 flex gap-2 bg-inherit pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setExecutiveDraft(selectedLead?.assignedTo?._id || "");
-                    setTransferReasonDraft("");
-                    setAssigneeSearchDraft("");
-                  }}
-                  className={`h-11 flex-1 rounded-xl border text-sm font-semibold ${button}`}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={onAssignLead}
-                  disabled={!executiveDraft || assigning}
-                  className={`inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border text-sm font-semibold disabled:opacity-60 ${button}`}
-                >
-                  {assigning ? <Loader size={14} className="animate-spin" /> : <Send size={14} />}
-                  {assigning ? "Transferring..." : "Save Transfer"}
-                </button>
-              </div>
-            </section>
-          ) : null}
-
-          <section className={`rounded-3xl border p-4 ${card}`}>
-            <div className={`mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-              <History size={12} /> Assignment History
-            </div>
-            {assignmentHistoryEvents.length === 0 ? (
-              <div className={`rounded-2xl border border-dashed px-3 py-4 text-sm ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
-                No assignment history yet
-              </div>
-            ) : (
-              <div className="space-y-0">
-                {assignmentHistoryEvents.map((event, index) => {
-                  const hasConnector = index < assignmentHistoryEvents.length - 1;
-                  const fromUser = getUserDisplayName(event.fromUser);
-                  const toUser = getUserDisplayName(event.toUser);
-                  const createdBy = getUserDisplayName(event.createdBy, event.synthetic ? "System" : "-");
-                  const reason = String(event.reason || "").trim();
-                  const statusAtTransfer = String(event.statusAtTransfer || "").trim();
-
-                  return (
-                    <div key={event._id || `${event.action}-${index}`} className="grid grid-cols-[18px_minmax(0,1fr)] gap-3">
-                      <div className="flex flex-col items-center">
-                        <span className={`mt-1 h-3 w-3 rounded-full border-2 ${
-                          isDark ? "border-cyan-300 bg-slate-950" : "border-cyan-600 bg-white"
-                        }`} />
-                        {hasConnector ? (
-                          <span className={`mt-1 h-full min-h-12 w-px ${isDark ? "bg-slate-700" : "bg-slate-200"}`} />
-                        ) : null}
-                      </div>
-
-                      <div className={`min-w-0 pb-3 ${hasConnector ? "" : "pb-0"}`}>
-                        <div className={`rounded-2xl border p-3 ${softCard}`}>
-                          <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0">
-                              <div className={`text-sm font-bold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
-                                {getAssignmentActionLabel(event.action)}
-                              </div>
-                              <div className={`mt-0.5 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                                {formatDate(event.createdAt)}
-                              </div>
-                            </div>
-                            {statusAtTransfer ? (
-                              <span className={`w-fit rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${
-                                isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-white text-slate-600"
-                              }`}>
-                                {statusLabel(statusAtTransfer)}
-                              </span>
-                            ) : null}
-                          </div>
-
-                          <div className="mt-2 grid min-w-0 grid-cols-1 gap-1.5 text-[11px] sm:grid-cols-2">
-                            <div className={isDark ? "text-slate-400" : "text-slate-500"}>
-                              From: <span className={isDark ? "font-semibold text-slate-200" : "font-semibold text-slate-700"}>{fromUser}</span>
-                            </div>
-                            <div className={isDark ? "text-slate-400" : "text-slate-500"}>
-                              To: <span className={isDark ? "font-semibold text-slate-200" : "font-semibold text-slate-700"}>{toUser}</span>
-                            </div>
-                            <div className={`min-w-0 sm:col-span-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                              Created by: <span className={isDark ? "font-semibold text-slate-200" : "font-semibold text-slate-700"}>{createdBy}</span>
-                            </div>
-                            {reason ? (
-                              <div className={`min-w-0 break-words sm:col-span-2 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
-                                Reason: {reason}
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
         </div>
 
         <div className="space-y-4 xl:col-span-7">
@@ -2822,17 +3003,6 @@ const LeadDetailsRebuiltContent = ({
                   </div>
                 )}
               </div>
-            </div>
-
-            <div className="mt-3">
-              <label className={`text-[10px] uppercase tracking-wider font-bold ${isDark ? "text-slate-400" : "text-slate-500"}`}>Status</label>
-              <select value={statusDraft} onChange={(event) => setStatusDraft(event.target.value)} className={`mt-1 h-10 w-full rounded-xl border px-3 text-sm ${input}`}>
-                {leadStatuses.map((status) => (
-                  <option key={status} value={status} disabled={!canReviewDealPayment && status === "REQUESTED"}>
-                    {String(status).replaceAll("_", " ")}
-                  </option>
-                ))}
-              </select>
             </div>
 
             {isClosedStatusSelected ? (
@@ -3026,9 +3196,6 @@ const LeadDetailsRebuiltContent = ({
               </div>
             ) : null}
 
-            <button type="button" onClick={onUpdateLead} disabled={savingUpdates} className={`mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl text-sm font-semibold text-white disabled:opacity-60 ${primaryBtn}`}>
-              {savingUpdates ? <Loader size={14} className="animate-spin" /> : <Save size={14} />} Save Lead Update
-            </button>
           </section>
 
           {/* Lead Tasks integration */}
@@ -3177,6 +3344,150 @@ const LeadDetailsRebuiltContent = ({
                 })
               )}
             </div>
+          </section>
+
+          {canAssignLead ? (
+            <section id="lead-transfer-panel" className={`rounded-3xl border p-4 ${card}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className={`text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>Assign / Transfer Lead</div>
+                  <p className={`mt-1 text-xs ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                    Current owner: <span className={isDark ? "font-semibold text-slate-100" : "font-semibold text-slate-800"}>{currentOwnerName}</span>
+                    {currentOwnerRole ? ` (${statusLabel(currentOwnerRole)})` : ""}
+                  </p>
+                </div>
+              </div>
+              {showQualifiedTransferHelper ? (
+                <div className={`mt-3 rounded-2xl border px-3 py-2 text-xs font-medium ${
+                  isDark ? "border-emerald-400/35 bg-emerald-500/10 text-emerald-100" : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                }`}>
+                  This lead is qualified. You can assign it to a Field Executive for site visit or deal handling.
+                </div>
+              ) : null}
+              <input
+                type="search"
+                value={assigneeSearchDraft}
+                onChange={(event) => setAssigneeSearchDraft(event.target.value)}
+                placeholder="Search by name or role"
+                className={`mt-3 h-11 w-full rounded-xl border px-3 text-sm ${input}`}
+              />
+              <select
+                value={executiveDraft}
+                onChange={(event) => setExecutiveDraft(event.target.value)}
+                className={`mt-2 h-11 w-full rounded-xl border px-3 text-sm ${input}`}
+              >
+                <option value="">Select user</option>
+                {filteredAssignees.map((user) => (
+                  <option key={user._id} value={user._id}>
+                    {user.name} ({statusLabel(user.role)})
+                    {user.lastAssignedAt ? ` - last ${formatDate(user.lastAssignedAt)}` : ""}
+                  </option>
+                ))}
+              </select>
+              <textarea
+                value={transferReasonDraft}
+                onChange={(event) => setTransferReasonDraft(event.target.value)}
+                placeholder="Transfer reason (optional)"
+                rows={3}
+                className={`mt-2 min-h-24 w-full resize-y rounded-xl border px-3 py-2 text-sm ${input}`}
+              />
+              <div className="sticky bottom-0 -mx-1 mt-3 flex gap-2 bg-inherit pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExecutiveDraft(selectedLead?.assignedTo?._id || "");
+                    setTransferReasonDraft("");
+                    setAssigneeSearchDraft("");
+                  }}
+                  className={`h-11 flex-1 rounded-xl border text-sm font-semibold ${button}`}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={onAssignLead}
+                  disabled={!executiveDraft || assigning}
+                  className={`inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border text-sm font-semibold disabled:opacity-60 ${button}`}
+                >
+                  {assigning ? <Loader size={14} className="animate-spin" /> : <Send size={14} />}
+                  {assigning ? "Transferring..." : "Save Transfer"}
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          <section className={`rounded-3xl border p-4 ${card}`}>
+            <div className={`mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <History size={12} /> Assignment History
+            </div>
+            {assignmentHistoryEvents.length === 0 ? (
+              <div className={`rounded-2xl border border-dashed px-3 py-4 text-sm ${isDark ? "border-slate-700 text-slate-400" : "border-slate-300 text-slate-500"}`}>
+                No assignment history yet
+              </div>
+            ) : (
+              <div className="space-y-0">
+                {assignmentHistoryEvents.map((event, index) => {
+                  const hasConnector = index < assignmentHistoryEvents.length - 1;
+                  const fromUser = getUserDisplayName(event.fromUser);
+                  const toUser = getUserDisplayName(event.toUser);
+                  const createdBy = getUserDisplayName(event.createdBy, event.synthetic ? "System" : "-");
+                  const reason = String(event.reason || "").trim();
+                  const statusAtTransfer = String(event.statusAtTransfer || "").trim();
+
+                  return (
+                    <div key={event._id || `${event.action}-${index}`} className="grid grid-cols-[18px_minmax(0,1fr)] gap-3">
+                      <div className="flex flex-col items-center">
+                        <span className={`mt-1 h-3 w-3 rounded-full border-2 ${
+                          isDark ? "border-cyan-300 bg-slate-950" : "border-cyan-600 bg-white"
+                        }`} />
+                        {hasConnector ? (
+                          <span className={`mt-1 h-full min-h-12 w-px ${isDark ? "bg-slate-700" : "bg-slate-200"}`} />
+                        ) : null}
+                      </div>
+
+                      <div className={`min-w-0 pb-3 ${hasConnector ? "" : "pb-0"}`}>
+                        <div className={`rounded-2xl border p-3 ${softCard}`}>
+                          <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                            <div className="min-w-0">
+                              <div className={`text-sm font-bold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+                                {getAssignmentActionLabel(event.action)}
+                              </div>
+                              <div className={`mt-0.5 text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                                {formatDate(event.createdAt)}
+                              </div>
+                            </div>
+                            {statusAtTransfer ? (
+                              <span className={`w-fit rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${
+                                isDark ? "border-slate-700 bg-slate-950 text-slate-300" : "border-slate-200 bg-white text-slate-600"
+                              }`}>
+                                {statusLabel(statusAtTransfer)}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          <div className="mt-2 grid min-w-0 grid-cols-1 gap-1.5 text-[11px] sm:grid-cols-2">
+                            <div className={isDark ? "text-slate-400" : "text-slate-500"}>
+                              From: <span className={isDark ? "font-semibold text-slate-200" : "font-semibold text-slate-700"}>{fromUser}</span>
+                            </div>
+                            <div className={isDark ? "text-slate-400" : "text-slate-500"}>
+                              To: <span className={isDark ? "font-semibold text-slate-200" : "font-semibold text-slate-700"}>{toUser}</span>
+                            </div>
+                            <div className={`min-w-0 sm:col-span-2 ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                              Created by: <span className={isDark ? "font-semibold text-slate-200" : "font-semibold text-slate-700"}>{createdBy}</span>
+                            </div>
+                            {reason ? (
+                              <div className={`min-w-0 break-words sm:col-span-2 ${isDark ? "text-slate-300" : "text-slate-600"}`}>
+                                Reason: {reason}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </section>
 
           <section

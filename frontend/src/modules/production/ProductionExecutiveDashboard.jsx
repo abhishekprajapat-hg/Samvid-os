@@ -29,8 +29,7 @@ const formatDate = (value) => {
 const statusLabel = (value) =>
   String(value || "Not marked").replace(/_/g, " ").toLowerCase();
 
-const Metric = ({ label, value, icon, tone = "cyan" }) => {
-  const Icon = icon;
+const Metric = ({ label, value, icon: Icon, tone = "cyan" }) => {
   const toneClass = {
     cyan: "bg-cyan-50 text-cyan-700",
     emerald: "bg-emerald-50 text-emerald-700",
@@ -45,7 +44,7 @@ const Metric = ({ label, value, icon, tone = "cyan" }) => {
           {label}
         </p>
         <span className={`rounded-lg p-2 ${toneClass}`}>
-          <Icon size={16} />
+          {React.createElement(Icon, { size: 16 })}
         </span>
       </div>
       <p className="mt-4 text-3xl font-semibold text-slate-950">{value}</p>
@@ -53,28 +52,28 @@ const Metric = ({ label, value, icon, tone = "cyan" }) => {
   );
 };
 
-const ActionCard = ({ to, icon, title, subtitle }) => {
-  const Icon = icon;
-
-  return (
-    <Link
-      to={to}
-      className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-cyan-200 hover:shadow-md"
-    >
-      <div className="flex items-start gap-3">
-        <span className="rounded-lg bg-slate-100 p-2 text-slate-700">
-          <Icon size={16} />
-        </span>
-        <div>
-          <p className="text-sm font-semibold text-slate-950">{title}</p>
-          <p className="mt-1 text-xs leading-5 text-slate-500">{subtitle}</p>
-        </div>
+const ActionCard = ({ to, icon: Icon, title, subtitle }) => (
+  <Link
+    to={to}
+    className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-cyan-200 hover:shadow-md"
+  >
+    <div className="flex items-start gap-3">
+      <span className="rounded-lg bg-slate-100 p-2 text-slate-700">
+        {React.createElement(Icon, { size: 16 })}
+      </span>
+      <div>
+        <p className="text-sm font-semibold text-slate-950">{title}</p>
+        <p className="mt-1 text-xs leading-5 text-slate-500">{subtitle}</p>
       </div>
-    </Link>
-  );
-};
+    </div>
+  </Link>
+);
 
 const ProductionExecutiveDashboard = ({ mode = "home" }) => {
+  const currentRole = String(localStorage.getItem("role") || "").trim().toUpperCase();
+  const isCommunityManager = currentRole === "COMMUNITY_MANAGER";
+  const workspaceLabel = isCommunityManager ? "Community Workspace" : "Production Workspace";
+  const dashboardLabel = isCommunityManager ? "Community Manager Dashboard" : "Production Executive Dashboard";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stats, setStats] = useState(null);
@@ -99,7 +98,7 @@ const ProductionExecutiveDashboard = ({ mode = "home" }) => {
         setTasks(Array.isArray(taskRows) ? taskRows : []);
         setAttendance(attendanceData?.today || null);
       } catch (err) {
-        if (alive) setError(toErrorMessage(err, "Failed to load production dashboard"));
+        if (alive) setError(toErrorMessage(err, "Failed to load workspace dashboard"));
       } finally {
         if (alive) setLoading(false);
       }
@@ -128,25 +127,24 @@ const ProductionExecutiveDashboard = ({ mode = "home" }) => {
   }, [tasks]);
 
   const completionRate = pct(stats?.COMPLETED, stats?.total);
-  const heading =
-    mode === "performance" ? "Performance Dashboard" : "Production Executive Dashboard";
+  const heading = mode === "performance" ? "Performance Dashboard" : dashboardLabel;
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center text-sm font-semibold text-slate-500">
-        Loading production workspace...
+      <div className="dashboard-doc-screen flex min-h-[60vh] items-center justify-center text-sm font-semibold text-slate-500">
+        Loading {isCommunityManager ? "community" : "production"} workspace...
       </div>
     );
   }
 
   return (
-    <div className="min-h-full overflow-y-auto bg-slate-50 px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
+    <div className="dashboard-doc-screen min-h-full overflow-y-auto bg-slate-50 px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-5">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-cyan-700">
-                Production Workspace
+                {workspaceLabel}
               </p>
               <h1 className="mt-2 text-2xl font-semibold text-slate-950 sm:text-3xl">
                 {heading}

@@ -63,3 +63,8 @@ export const getTaskStats = async (): Promise<any> => {
   const res = await api.get("/tasks/stats");
   return res.data || null;
 };
+
+export const getTaskStatsByUser = async (): Promise<Record<string, any>> => {
+  const res = await api.get("/tasks/stats/by-user");
+  return res.data || {};
+};

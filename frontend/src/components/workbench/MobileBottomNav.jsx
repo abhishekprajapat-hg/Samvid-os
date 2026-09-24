@@ -1,82 +1,89 @@
 import { Link, useLocation } from "react-router-dom";
-import { MoreHorizontal } from "lucide-react";
+import { Building2, Home, MessageSquare, MoreHorizontal, Users } from "lucide-react";
 import { cn } from "../ui";
-import { getActiveSectionId, getVisibleMenuGroups, getVisibleSections } from "./workbenchNavigation";
+import { getVisibleSidebarGroups } from "./workbenchNavigation";
 
-const getSectionTarget = (sectionId, userRole, user) => {
-  const groups = getVisibleMenuGroups(sectionId, userRole, user);
-  return groups[0]?.items[0]?.path || "/dashboard";
-};
+/**
+ * Four destinations for the phone: what you are doing today, the pipeline, the
+ * stock you are selling, and the people you work with. Everything else lives
+ * behind More, which opens the navigation drawer.
+ *
+ * Each target is filtered through the same role rules as the sidebar, so a role
+ * never sees a tab it cannot open.
+ */
+const MOBILE_DESTINATIONS = [
+  { label: "Today", paths: ["/dashboard"], icon: Home },
+  { label: "Leads", paths: ["/my-leads", "/leads"], icon: Users },
+  { label: "Inventory", paths: ["/inventory"], icon: Building2 },
+  { label: "Chat", paths: ["/chat"], icon: MessageSquare },
+];
 
-const DEFAULT_PRIORITY_SECTIONS = ["leads", "inventory", "chat", "calendar"];
-const PRODUCTION_PRIORITY_SECTIONS = ["dashboard", "reports", "chat", "settings"];
-
-const MobileBottomNav = ({
-  userRole,
-  user,
-  unreadAlerts = 0,
-  onMore,
-}) => {
+const MobileBottomNav = ({ userRole, user, unreadAlerts = 0, unreadChats = 0, onMore }) => {
   const location = useLocation();
-  const sections = getVisibleSections(userRole, user);
-  const activeSectionId = getActiveSectionId(location.pathname, userRole, user);
-  const prioritySectionIds =
-    userRole === "PRODUCTION_EXECUTIVE"
-      ? PRODUCTION_PRIORITY_SECTIONS
-      : DEFAULT_PRIORITY_SECTIONS;
-  const priority = prioritySectionIds
-    .map((id) => sections.find((section) => section.id === id))
-    .filter(Boolean)
-    .slice(0, 4);
-  const priorityIds = priority.map((section) => section.id);
-  const moreActive = !priorityIds.includes(activeSectionId);
+  const allowed = new Set(
+    getVisibleSidebarGroups(userRole, user).flatMap((group) => group.items.map((item) => item.path)),
+  );
+
+  const destinations = MOBILE_DESTINATIONS.map((destination) => {
+    const path = destination.paths.find((candidate) => allowed.has(candidate));
+    return path ? { ...destination, path } : null;
+  }).filter(Boolean);
+
+  const activePath = destinations.find(
+    (destination) =>
+      location.pathname === destination.path || location.pathname.startsWith(`${destination.path}/`),
+  )?.path;
 
   return (
     <nav
-      aria-label="Mobile workbench"
-      className="shrink-0 border-b border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/95 md:hidden"
+      aria-label="Mobile navigation"
+      className="shrink-0 border-t border-slate-200 bg-white px-2 py-1 dark:border-slate-800 dark:bg-slate-900 md:hidden"
     >
-      <div className="mx-auto grid max-w-md grid-cols-5 gap-1">
-        {priority.map((section) => {
-          const Icon = section.icon;
-          const active = section.id === activeSectionId;
-          const showAlert = section.id === "admin" && unreadAlerts > 0;
+      <div className="mx-auto flex max-w-md items-stretch justify-between gap-1">
+        {destinations.map((destination) => {
+          const Icon = destination.icon;
+          const active = destination.path === activePath;
+          const badge = destination.path === "/chat" ? unreadChats : 0;
 
           return (
             <Link
-              key={section.id}
-              to={getSectionTarget(section.id, userRole, user)}
+              key={destination.label}
+              to={destination.path}
+              aria-current={active ? "page" : undefined}
               className={cn(
-                "relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-1 text-[10px] font-bold outline-none transition",
-                "focus-visible:ring-2 focus-visible:ring-blue-500/40",
+                // 44x44 minimum tap target.
+                "relative flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1",
+                "text-[10px] font-semibold outline-none transition focus-visible:ring-2 focus-visible:ring-blue-500/40",
                 active
                   ? "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200"
-                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100",
+                  : "text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100",
               )}
             >
               <Icon aria-hidden="true" size={18} />
-              <span className="max-w-full truncate">{section.label}</span>
-              {showAlert ? (
-                <span className="absolute right-2 top-1 h-2 w-2 rounded-full bg-rose-500" />
+              <span className="max-w-full truncate">{destination.label}</span>
+              {badge > 0 ? (
+                <span aria-hidden="true" className="absolute right-2 top-1 h-2 w-2 rounded-full bg-rose-500" />
               ) : null}
             </Link>
           );
         })}
+
+        {/* Not a destination - the drawer holds everything the four tabs omit. */}
         <button
           type="button"
           onClick={onMore}
+          aria-label="More navigation"
           className={cn(
-            "relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-1 text-[10px] font-bold outline-none transition",
-            "focus-visible:ring-2 focus-visible:ring-blue-500/40",
-            moreActive
-              ? "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-200"
-              : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100",
+            "relative flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 py-1",
+            "text-[10px] font-semibold text-slate-500 outline-none transition",
+            "hover:bg-slate-50 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-blue-500/40",
+            "dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100",
           )}
         >
           <MoreHorizontal aria-hidden="true" size={18} />
           <span>More</span>
           {unreadAlerts > 0 ? (
-            <span className="absolute right-2 top-1 h-2 w-2 rounded-full bg-rose-500" />
+            <span aria-hidden="true" className="absolute right-2 top-1 h-2 w-2 rounded-full bg-rose-500" />
           ) : null}
         </button>
       </div>

@@ -8,12 +8,12 @@ const FieldOpsTaskQueueSection = ({
   getLiveCoordinates,
 }) => (
   <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-    <div className="flex items-center justify-between gap-3">
-      <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
+    <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+      <h2 className="text-[13px] font-bold uppercase tracking-[0.14em] text-slate-700">
         Executive Task Queue
       </h2>
       {selectedExecutive ? (
-        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
+        <span className="inline-flex h-8 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
           {selectedExecutive.assignedRows.length} Active
         </span>
       ) : null}
@@ -23,7 +23,7 @@ const FieldOpsTaskQueueSection = ({
       <EmptyState text="Select an executive from coverage grid to inspect assignments." />
     ) : (
       <>
-        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <p className="text-sm font-semibold text-slate-900">
@@ -38,8 +38,8 @@ const FieldOpsTaskQueueSection = ({
                   : "Live location unavailable"}
               </p>
             </div>
-            <span className="inline-flex w-fit rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700">
-              FIELD_EXECUTIVE
+            <span className="inline-flex w-fit rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-700">
+              Field Executive
             </span>
           </div>
 
@@ -55,7 +55,7 @@ const FieldOpsTaskQueueSection = ({
             <EmptyState text="No active leads assigned to this executive." />
           ) : (
             selectedExecutive.assignedRows.slice(0, 8).map((lead) => (
-              <div key={lead._id} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+              <div key={lead._id} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div>
                     <p className="text-sm font-medium text-slate-800">{lead.name || "-"}</p>

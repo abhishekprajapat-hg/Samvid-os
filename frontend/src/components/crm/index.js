@@ -1,6 +1,15 @@
+export { default as ActivityFeed } from "./ActivityFeed";
+export { default as Breadcrumbs } from "./Breadcrumbs";
+export { default as DataTable } from "./DataTable";
 export { default as DataTableShell } from "./DataTableShell";
 export { default as DetailDrawer } from "./DetailDrawer";
+export { default as DetailPanel } from "./DetailPanel";
+export { default as FilterBar } from "./FilterBar";
+export { default as FilterChips } from "./FilterChips";
 export { default as MetricCard } from "./MetricCard";
 export { default as PageToolbar } from "./PageToolbar";
+export { default as StatCard } from "./StatCard";
 export { default as StatusBadge } from "./StatusBadge";
+export { default as StatusStepper } from "./StatusStepper";
+export { LEAD_STEPS, statusToStep } from "./leadStatusSteps";
 export { getStatusMeta, normalizeStatusKey, STATUS_STYLES } from "./statusStyles";

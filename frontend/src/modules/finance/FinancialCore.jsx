@@ -1,16 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  BarChart3,
-  Building2,
-  ChevronRight,
-  CheckCircle2,
-  Clock3,
-  IndianRupee,
-  RefreshCw,
-  TrendingUp,
-  Users,
-} from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
@@ -152,19 +142,19 @@ const formatCurrency = (value) =>
     maximumFractionDigits: 0,
   }).format(Number(value) || 0);
 
+const formatCurrencyCompact = (value) => {
+  const amount = Number(value) || 0;
+  if (Math.abs(amount) >= 100000) {
+    const lakhs = amount / 100000;
+    return `₹${lakhs.toFixed(lakhs >= 10 ? 1 : 2).replace(/\.0+$/, "")} L`;
+  }
+  return formatCurrency(amount);
+};
+
 const formatDecimal = (value) =>
   new Intl.NumberFormat("en-IN", {
     maximumFractionDigits: 2,
   }).format(Number(value) || 0);
-
-const formatDateTime = (value) => {
-  const parsed = toDate(value);
-  if (!parsed) return "-";
-  return parsed.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-};
 
 const toObjectIdString = (value) => {
   if (!value) return "";
@@ -189,15 +179,6 @@ const getRecordedBrokerageDistributed = (lead = {}) => {
   const amount = toAmountNumber(lead?.brokerageDistributed);
   return amount === null ? 0 : Math.max(0, amount);
 };
-
-const getLeadClosingDate = (lead = {}) =>
-  lead?.brokerageClosedAt || lead?.updatedAt || lead?.createdAt;
-
-const getLeadClosingExecutiveName = (lead = {}) =>
-  lead?.brokerageClosedBy?.name
-  || lead?.dealPayment?.approvalReviewedBy?.name
-  || lead?.assignedTo?.name
-  || "Unassigned";
 
 const normalizeBrokerageConfig = (config = null) => {
   const mode = String(config?.mode || "").trim().toUpperCase() === "PERCENTAGE"
@@ -227,6 +208,21 @@ const formatBrokerageRule = (config = null) => {
 const getLeadBroker = (lead = {}) => {
   const creatorRole = String(lead?.createdBy?.role || "").trim().toUpperCase();
   return creatorRole === "CHANNEL_PARTNER" ? lead.createdBy : null;
+};
+
+const getLeadBrokerLabel = (lead = {}) => {
+  const broker = getLeadBroker(lead);
+  if (!broker) {
+    return {
+      name: "Direct",
+      detail: "No broker mapped",
+    };
+  }
+
+  return {
+    name: broker.name || "Channel Partner",
+    detail: broker.partnerCode || formatBrokerageRule(broker.brokerageConfig),
+  };
 };
 
 const getBrokerageAmountsForSaleEntry = (entry, brokerageConfig) => {
@@ -340,11 +336,74 @@ const getLeadSaleEntries = (lead = {}) => {
   return saleEntries;
 };
 
+const getDealPaymentApproval = (lead = {}) =>
+  String(lead?.dealPayment?.approvalStatus || lead?.dealPayment?.status || "")
+    .trim()
+    .toUpperCase();
+
+const getDealPaymentMode = (lead = {}) =>
+  String(lead?.dealPayment?.mode || lead?.dealPayment?.paymentMode || "")
+    .trim()
+    .toUpperCase();
+
+const hasDealPaymentRecord = (lead = {}) =>
+  Boolean(
+    getDealPaymentMode(lead)
+      || String(lead?.dealPayment?.paymentType || "").trim()
+      || getDealPaymentApproval(lead)
+      || String(lead?.dealPayment?.paymentReference || "").trim()
+      || toAmountNumber(lead?.dealPayment?.remainingAmount) !== null,
+  );
+
+const getDealPaymentAmount = (lead = {}) => {
+  const explicitAmount = toAmountNumber(lead?.dealPayment?.amount);
+  if (explicitAmount !== null) return Math.max(0, explicitAmount);
+
+  const brokerageReceived = getRecordedBrokerageReceived(lead);
+  if (brokerageReceived > 0) return brokerageReceived;
+
+  return getLeadSaleEntries(lead).reduce((sum, entry) => {
+    const collected = Math.max(0, Number(entry.totalAmount || 0) - Number(entry.remainingAmount || 0));
+    return sum + collected;
+  }, 0);
+};
+
+const getLeadPropertyLabel = (lead = {}) => {
+  const inventory = getLeadRelatedInventories(lead)[0] || {};
+  const code =
+    inventory.propertyId
+    || inventory.unitNumber
+    || inventory.inventoryId
+    || (lead?._id ? `PRP-${String(lead._id).slice(-4).toUpperCase()}` : "-");
+  const name =
+    inventory.projectName
+    || inventory.buildingName
+    || inventory.title
+    || lead.projectInterested
+    || "Property not mapped";
+
+  return { code, name };
+};
+
+const getPaymentModeBucket = (mode = "") => {
+  const normalized = String(mode || "").trim().toUpperCase();
+  if (normalized === "UPI") return "UPI";
+  if (normalized === "CASH") return "Cash";
+  if (normalized === "CHECK" || normalized === "CHEQUE") return "Cheque";
+  if (normalized.includes("NEFT") || normalized.includes("RTGS") || normalized.includes("IMPS") || normalized.includes("NET")) {
+    return "NEFT / RTGS";
+  }
+  return "Other";
+};
+
+const getMonthKey = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
 const FinancialCore = () => {
   const navigate = useNavigate();
   const [leadWorkspaceBasePath, setLeadWorkspaceBasePath] = useState("/leads");
-  const [rangeKey, setRangeKey] = useState("30D");
-  const [customRange, setCustomRange] = useState(() => {
+  const [rangeKey] = useState("THIS_MONTH");
+  const [customRange] = useState(() => {
     const now = new Date();
     const start = new Date(now);
     start.setDate(start.getDate() - 9);
@@ -354,7 +413,6 @@ const FinancialCore = () => {
     };
   });
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [leads, setLeads] = useState([]);
   const [, setLastUpdatedAt] = useState(null);
@@ -369,9 +427,7 @@ const FinancialCore = () => {
 
   const loadFinanceData = useCallback(async (silent = false) => {
     try {
-      if (silent) {
-        setRefreshing(true);
-      } else {
+      if (!silent) {
         setLoading(true);
       }
 
@@ -383,7 +439,6 @@ const FinancialCore = () => {
       setError(toErrorMessage(fetchError, "Failed to load finance data"));
       setLeads([]);
     } finally {
-      setRefreshing(false);
       setLoading(false);
     }
   }, []);
@@ -595,66 +650,6 @@ const FinancialCore = () => {
     };
   }, [scopedLeads]);
 
-  const brokerOverviewCards = useMemo(
-    () => [
-      {
-        label: "Active Brokers",
-        value: brokerDashboard.brokerCount,
-        helper: `${brokerDashboard.brokerLeadCount} leads from partners`,
-      },
-      {
-        label: "Broker Closures",
-        value: brokerDashboard.brokerClosedDeals,
-        helper: `Sell value ${formatCurrency(brokerDashboard.totalBrokerSellValue)}`,
-      },
-      {
-        label: "Realized Brokerage",
-        value: formatCurrency(brokerDashboard.realizedBrokerageTotal),
-        helper: `Collected base ${formatCurrency(brokerDashboard.totalBrokerCollectedValue)}`,
-      },
-      {
-        label: "Pending Brokerage",
-        value: formatCurrency(brokerDashboard.pendingBrokerageTotal),
-        helper: `Pending collection ${formatCurrency(brokerDashboard.totalBrokerPendingCollection)}`,
-      },
-    ],
-    [brokerDashboard],
-  );
-
-  const topBroker = brokerDashboard.rows[0] || null;
-
-  const recentClosures = useMemo(
-    () =>
-      scopedLeads
-        .filter((lead) => String(lead.status || "") === "CLOSED")
-        .sort((a, b) => new Date(getLeadClosingDate(b)) - new Date(getLeadClosingDate(a)))
-        .slice(0, 12),
-    [scopedLeads],
-  );
-
-  const recentClosureTotals = useMemo(
-    () =>
-      recentClosures.reduce(
-        (acc, lead) => {
-          acc.received += getRecordedBrokerageReceived(lead);
-          acc.distributed += getRecordedBrokerageDistributed(lead);
-          return acc;
-        },
-        { received: 0, distributed: 0 },
-      ),
-    [recentClosures],
-  );
-
-  const statusRows = useMemo(
-    () =>
-      PIPELINE_STATUSES.map((status) => {
-        const count = dashboard.statusCount[status.key] || 0;
-        const share = dashboard.totalLeads > 0 ? Math.round((count / dashboard.totalLeads) * 100) : 0;
-        return { ...status, count, share };
-      }),
-    [dashboard.statusCount, dashboard.totalLeads],
-  );
-
   const openLeadWorkspace = useCallback(
     ({ status = "", query = "", leadId = "" } = {}) => {
       const normalizedStatus = String(status || "").trim().toUpperCase();
@@ -679,77 +674,141 @@ const FinancialCore = () => {
     [leadWorkspaceBasePath, navigate],
   );
 
-  const statCards = useMemo(
-    () => [
-      {
-        title: "Leads In Scope",
-        value: dashboard.totalLeads,
-        helper: "Filtered by selected range",
-        icon: Users,
-        onClick: () => openLeadWorkspace({ status: "ALL" }),
-      },
-      {
-        title: "Active Pipeline",
-        value: dashboard.activePipeline,
-        helper: "New to Site Visit stages",
-        icon: TrendingUp,
-        onClick: () => openLeadWorkspace({ status: "INTERESTED" }),
-      },
-      {
-        title: "Closed Deals",
-        value: dashboard.closedDeals,
-        helper: `Win rate ${dashboard.winRate}%`,
-        icon: CheckCircle2,
-        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
-      },
-      {
-        title: "Total Sell Value",
-        value: formatCurrency(dashboard.totalSellAmount),
-        helper: `Collected ${formatCurrency(dashboard.collectedSellValue)} | Pending ${formatCurrency(dashboard.pendingSellCollection)}`,
-        icon: IndianRupee,
-        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
-      },
-      {
-        title: "Remaining Amount",
-        value: formatCurrency(dashboard.pendingSellCollection),
-        helper: "Pending collection on partial closures",
-        icon: Clock3,
-        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
-      },
-      {
-        title: "Conversion Rate",
-        value: `${dashboard.conversionRate}%`,
-        helper: `${dashboard.lostDeals} leads lost`,
-        icon: BarChart3,
-        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
-      },
-      {
-        title: "Company Brokerage Revenue",
-        value: formatCurrency(dashboard.companyBrokerageRevenue),
-        helper: `Avg ${formatCurrency(dashboard.avgBrokeragePerClosed)} per closed deal`,
-        icon: IndianRupee,
-        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
-      },
-      {
-        title: "Brokerage Distributed",
-        value: formatCurrency(dashboard.brokerageDistributedTotal),
-        helper: "Shown separately, not counted as revenue",
-        icon: IndianRupee,
-        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
-      },
-      {
-        title: "Brokerage Payable",
-        value: formatCurrency(brokerDashboard.totalBrokeragePayable),
-        helper:
-          brokerDashboard.brokerCount > 0
-            ? `${brokerDashboard.brokerCount} brokers | Realized ${formatCurrency(brokerDashboard.realizedBrokerageTotal)}`
-            : "No broker closures in range",
-        icon: IndianRupee,
-        onClick: () => openLeadWorkspace({ status: "CLOSED" }),
-      },
-    ],
-    [brokerDashboard, dashboard, openLeadWorkspace],
+  const currentRole = typeof window === "undefined"
+    ? ""
+    : String(window.localStorage.getItem("role") || "").trim().toUpperCase();
+  const isManagerView = currentRole === "MANAGER";
+  const monthLabel = new Date().toLocaleString("en-IN", { month: "short" });
+  const pendingPayments = scopedLeads.filter((lead) =>
+    hasDealPaymentRecord(lead) && getDealPaymentApproval(lead) === "PENDING",
   );
+  const approvedPayments = scopedLeads.filter((lead) =>
+    hasDealPaymentRecord(lead) && getDealPaymentApproval(lead) === "APPROVED",
+  );
+  const rejectedPayments = scopedLeads.filter((lead) =>
+    hasDealPaymentRecord(lead) && getDealPaymentApproval(lead) === "REJECTED",
+  );
+  const billedAmount = isManagerView
+    ? dashboard.totalSellAmount
+    : brokerDashboard.totalBrokerSellValue;
+  const collectedAmount = isManagerView
+    ? dashboard.collectedSellValue
+    : brokerDashboard.totalBrokerCollectedValue;
+  const outstandingAmount = isManagerView
+    ? dashboard.pendingSellCollection
+    : brokerDashboard.totalBrokerPendingCollection;
+  const collectedPercent = billedAmount > 0
+    ? Math.round((collectedAmount / billedAmount) * 100)
+    : 0;
+  const financeStats = [
+    {
+      key: isManagerView ? `Revenue - ${monthLabel}` : `My earnings - ${monthLabel}`,
+      value: isManagerView
+        ? formatCurrencyCompact(dashboard.companyBrokerageRevenue)
+        : formatCurrencyCompact(brokerDashboard.realizedBrokerageTotal),
+      detail: "Current month",
+    },
+    {
+      key: "Collected",
+      value: isManagerView
+        ? formatCurrencyCompact(dashboard.collectedSellValue)
+        : formatCurrencyCompact(brokerDashboard.totalBrokerCollectedValue),
+      detail: billedAmount > 0 ? `${collectedPercent}% of billed` : "No billed deals",
+    },
+    {
+      key: "Outstanding",
+      value: formatCurrencyCompact(outstandingAmount),
+      detail: `${pendingPayments.length} deals pending`,
+      alert: true,
+    },
+    {
+      key: "Approvals waiting",
+      value: pendingPayments.length,
+      detail: "Deal payments",
+    },
+  ];
+  const dealPaymentRows = [
+    ...pendingPayments,
+    ...approvedPayments,
+  ].slice(0, 3);
+  const paymentModeMix = useMemo(() => {
+    const rows = scopedLeads.filter(hasDealPaymentRecord);
+    const totals = new Map([
+      ["NEFT / RTGS", 0],
+      ["UPI", 0],
+      ["Cheque", 0],
+      ["Cash", 0],
+      ["Other", 0],
+    ]);
+
+    rows.forEach((lead) => {
+      const bucket = getPaymentModeBucket(getDealPaymentMode(lead));
+      totals.set(bucket, (totals.get(bucket) || 0) + Math.max(1, getDealPaymentAmount(lead)));
+    });
+
+    const total = [...totals.values()].reduce((sum, value) => sum + value, 0);
+    const colors = {
+      "NEFT / RTGS": "var(--b500)",
+      UPI: "var(--ok500)",
+      Cheque: "var(--wa500)",
+      Cash: "var(--vi500)",
+      Other: "var(--muted)",
+    };
+    let cursor = 0;
+    const rowsWithPercent = [...totals.entries()]
+      .filter(([, value]) => value > 0)
+      .map(([label, value]) => {
+        const percent = total > 0 ? Math.round((value / total) * 100) : 0;
+        const start = cursor;
+        cursor += percent;
+        return { label, percent, color: colors[label], start, end: cursor };
+      });
+
+    const gradient = rowsWithPercent.length
+      ? `conic-gradient(${rowsWithPercent
+        .map((row) => `${row.color} ${row.start}% ${row.end}%`)
+        .join(", ")})`
+      : "conic-gradient(var(--line) 0 100%)";
+
+    return { rows: rowsWithPercent, gradient };
+  }, [scopedLeads]);
+  const collectionChart = useMemo(() => {
+    const now = new Date();
+    const months = Array.from({ length: 6 }, (_, index) =>
+      new Date(now.getFullYear(), now.getMonth() - 5 + index, 1),
+    );
+    const monthTotals = new Map(months.map((month) => [getMonthKey(month), 0]));
+
+    leads.forEach((lead) => {
+      const collectionDate = toDate(lead?.brokerageClosedAt || lead?.updatedAt || lead?.createdAt);
+      if (!collectionDate) return;
+      const key = getMonthKey(collectionDate);
+      if (!monthTotals.has(key)) return;
+
+      const collected = getLeadSaleEntries(lead).reduce(
+        (sum, entry) => sum + Math.max(0, Number(entry.totalAmount || 0) - Number(entry.remainingAmount || 0)),
+        0,
+      );
+      monthTotals.set(key, (monthTotals.get(key) || 0) + collected);
+    });
+
+    const maxValue = Math.max(...monthTotals.values(), 0);
+    const bars = months.map((month) => {
+      const value = monthTotals.get(getMonthKey(month)) || 0;
+      return {
+        label: month.toLocaleString("en-IN", { month: "short" }),
+        value,
+        height: maxValue > 0 ? Math.max(8, Math.round((value / maxValue) * 100)) : 8,
+        isCurrentMonth: getMonthKey(month) === getMonthKey(now),
+      };
+    });
+
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    return {
+      bars,
+      hint: `${now.toLocaleString("en-IN", { month: "long" })} is partial - ${now.getDate()} of ${daysInMonth} days.`,
+    };
+  }, [leads]);
 
   if (loading) {
     return (
@@ -761,468 +820,126 @@ const FinancialCore = () => {
   }
 
   return (
-    <div className="ui-page-shell custom-scrollbar space-y-5">
-      <div className="flex flex-col items-stretch gap-2 sm:items-end">
-        <div className="ui-soft-panel flex w-full flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm sm:w-auto">
-          <div className="grid w-full grid-cols-2 gap-1 rounded-xl bg-slate-100/90 p-1 sm:inline-flex sm:w-auto sm:flex-wrap">
-              {RANGE_OPTIONS.map((range) => (
-                <button
-                  key={range.key}
-                  type="button"
-                  onClick={() => setRangeKey(range.key)}
-                  className={`h-9 rounded-lg px-3 text-xs font-semibold transition-all ${
-                    rangeKey === range.key
-                      ? "bg-cyan-600 text-white shadow-sm"
-                      : "bg-transparent text-slate-700 hover:bg-white hover:text-cyan-700"
-                  }`}
-                >
-                  {range.label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => loadFinanceData(true)}
-              disabled={refreshing}
-              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-60 sm:w-auto"
-            >
-              <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
-              Refresh
-            </button>
-          </div>
-
-          {rangeKey === "CUSTOM" ? (
-            <div className="ui-soft-panel flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
-              <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-600">
-                From
-                <input
-                  type="date"
-                  value={customRange.startDate}
-                  onChange={(event) => {
-                    const nextStart = event.target.value;
-                    setCustomRange((prev) => ({
-                      startDate: nextStart,
-                      endDate:
-                        prev.endDate && nextStart && prev.endDate < nextStart
-                          ? nextStart
-                          : prev.endDate,
-                    }));
-                  }}
-                  className="h-9 bg-transparent text-slate-700 outline-none"
-                />
-              </label>
-              <label className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-600">
-                To
-                <input
-                  type="date"
-                  value={customRange.endDate}
-                  onChange={(event) => {
-                    const nextEnd = event.target.value;
-                    setCustomRange((prev) => ({
-                      startDate:
-                        prev.startDate && nextEnd && prev.startDate > nextEnd
-                          ? nextEnd
-                          : prev.startDate,
-                      endDate: nextEnd,
-                    }));
-                  }}
-                  className="h-9 bg-transparent text-slate-700 outline-none"
-                />
-              </label>
-            </div>
-          ) : null}
-      </div>
-
+    <div className="finance-doc-screen ui-page-shell custom-scrollbar">
       <ToastNotice message={error} type="error" />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {statCards.map((card) => (
-          <StatCard
-            key={card.title}
-            title={card.title}
-            value={card.value}
-            helper={card.helper}
-            icon={card.icon}
-            onClick={card.onClick}
-          />
+      <div className="finance-statgrid">
+        {financeStats.map((stat) => (
+          <button
+            key={stat.key}
+            type="button"
+            onClick={() => openLeadWorkspace({ status: stat.key === "Approvals waiting" ? "REQUESTED" : "CLOSED" })}
+            className={`finance-stat ${stat.alert ? "is-alert" : ""}`}
+          >
+            <div className="finance-k">{stat.key}</div>
+            <div className="finance-v">{stat.value}</div>
+            <div className="finance-d">{stat.detail}</div>
+          </button>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.5fr_1fr]">
-        <section className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
-            Pipeline Breakdown
-          </h2>
-          <div className="mt-3 space-y-3">
-            {statusRows.map((row) => (
-              <button
-                key={row.key}
-                type="button"
-                onClick={() => openLeadWorkspace({ status: row.key })}
-                className="w-full space-y-1.5 rounded-lg px-2 py-1 text-left transition-colors hover:bg-slate-50"
-              >
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-slate-700">{row.label}</span>
-                  <span className="text-slate-500">
-                    {row.count} ({row.share}%)
-                  </span>
-                </div>
-                <div className="h-2 w-full rounded-full bg-slate-100">
-                  <div
-                    className="h-full rounded-full bg-slate-900"
-                    style={{ width: `${Math.min(row.share, 100)}%` }}
-                  />
-                </div>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
-            Source Mix
-          </h2>
-          <div className="mt-4 grid grid-cols-1 gap-3">
-            <SourceCard
-              label="Meta Leads"
-              count={dashboard.sourceCount.META}
-              total={dashboard.totalLeads}
-              onClick={() => openLeadWorkspace({ query: "META" })}
-            />
-            <SourceCard
-              label="Manual Leads"
-              count={dashboard.sourceCount.MANUAL}
-              total={dashboard.totalLeads}
-              onClick={() => openLeadWorkspace({ query: "MANUAL" })}
-            />
-            <SourceCard
-              label="Other Sources"
-              count={dashboard.sourceCount.OTHER}
-              total={dashboard.totalLeads}
-              onClick={() => openLeadWorkspace({ query: "OTHER" })}
-            />
-          </div>
-        </section>
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.5fr_1fr]">
-        <section className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
-              Brokerage Management
-            </h2>
-            <span className="text-xs text-slate-500">
-              Broker wise charge, sell value and payable split
-            </span>
-          </div>
-
-          {brokerDashboard.rows.length === 0 ? (
-            <EmptyState text="No broker-managed leads found in selected range." />
-          ) : (
-            <div className="mt-3 overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider text-slate-500">
-                    <th className="py-2 pr-3">Broker</th>
-                    <th className="py-2 pr-3">Charge</th>
-                    <th className="py-2 pr-3">Scope</th>
-                    <th className="py-2 pr-3">Sell Value</th>
-                    <th className="py-2 pr-3">Brokerage</th>
-                    <th className="py-2">Last Closure</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {brokerDashboard.rows.map((broker) => (
-                    <tr
-                      key={broker.id}
-                      className="cursor-pointer border-t border-slate-100 hover:bg-slate-50"
-                      onClick={() =>
-                        broker.searchToken
-                          ? openLeadWorkspace({ query: broker.searchToken })
-                          : openLeadWorkspace({ status: "CLOSED" })}
-                    >
-                      <td className="py-2 pr-3 text-slate-800">
-                        <div className="font-medium">{broker.name}</div>
-                        <div className="text-xs text-slate-500">
-                          {broker.partnerCode || "Channel partner"}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-3 text-slate-700">
-                        <div className="font-medium">{formatBrokerageRule(broker.brokerageConfig)}</div>
-                        <div className="text-xs text-slate-500">
-                          {broker.brokerageConfig.notes || "Applied on linked closures"}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-3 text-slate-700">
-                        <div>{broker.totalLeads} leads</div>
-                        <div className="text-xs text-slate-500">{broker.closedLeads} closed</div>
-                      </td>
-                      <td className="py-2 pr-3 text-slate-700">
-                        <div className="font-medium">{formatCurrency(broker.totalSellValue)}</div>
-                        <div className="text-xs text-slate-500">
-                          Collected {formatCurrency(broker.collectedSellValue)} | Pending {formatCurrency(broker.pendingCollection)}
-                        </div>
-                      </td>
-                      <td className="py-2 pr-3 text-slate-700">
-                        <div className="font-medium">{formatCurrency(broker.brokeragePayable)}</div>
-                        <div className="text-xs text-slate-500">
-                          Realized {formatCurrency(broker.realizedBrokerage)} | Pending {formatCurrency(broker.pendingBrokerage)}
-                        </div>
-                      </td>
-                      <td className="py-2 text-slate-600">
-                        {formatDateTime(broker.lastClosureAt || broker.lastActivityAt)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      <div className="finance-split">
+        <div className="finance-card">
+          <div className="finance-card-h">
+            <h4>Deal payments</h4>
+            <div className="finance-seg">
+              <button type="button" className="on">Pending <b>{pendingPayments.length}</b></button>
+              <button type="button">Approved <b>{approvedPayments.length}</b></button>
+              <button type="button">Rejected <b>{rejectedPayments.length}</b></button>
             </div>
-          )}
-        </section>
+          </div>
+          <div className="finance-table-wrap">
+            <table className="finance-tbl">
+              <thead>
+                <tr>
+                  <th>Lead</th>
+                  <th>Property</th>
+                  <th>Amount</th>
+                  <th>Mode</th>
+                  <th>Approval</th>
+                  {isManagerView ? <th /> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {dealPaymentRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={isManagerView ? 6 : 5} className="finance-empty-row">
+                      No deal payments found for this month.
+                    </td>
+                  </tr>
+                ) : null}
+                {dealPaymentRows.map((lead) => {
+                  const broker = getLeadBrokerLabel(lead);
+                  const property = getLeadPropertyLabel(lead);
+                  const amount = getDealPaymentAmount(lead);
+                  const remaining = Math.max(0, toAmountNumber(lead?.dealPayment?.remainingAmount) ?? 0);
+                  const paymentType = String(lead?.dealPayment?.paymentType || "").toUpperCase();
+                  const mode = getPaymentModeBucket(getDealPaymentMode(lead));
+                  const approval = getDealPaymentApproval(lead);
+                  return (
+                    <tr key={lead._id}>
+                      <td><b>{lead.name || "Unnamed Lead"}</b><br /><small>{broker.name}</small></td>
+                      <td><span className="finance-mono">{property.code}</span><br /><span>{property.name}</span></td>
+                      <td className="finance-num"><b>{formatCurrency(amount)}</b><br /><small>{paymentType === "PARTIAL" ? `Partial - ${formatCurrency(remaining)} left` : paymentType || "Payment type not set"}</small></td>
+                      <td><span className="finance-pill t-dead">{mode}</span></td>
+                      <td><span className={`finance-pill ${approval === "APPROVED" ? "t-won" : "t-warm"}`}><i />{approval === "APPROVED" ? "Approved" : "Pending"}</span></td>
+                      {isManagerView ? (
+                        <td>
+                          {approval === "APPROVED" ? null : (
+                            <div className="finance-actions">
+                              <button type="button" className="finance-btn finance-btn-pri finance-btn-sm" onClick={() => openLeadWorkspace({ leadId: lead._id })}>Approve</button>
+                              <button type="button" className="finance-btn finance-btn-sec finance-btn-sm" onClick={() => openLeadWorkspace({ leadId: lead._id })}>Reject</button>
+                            </div>
+                          )}
+                        </td>
+                      ) : null}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-        <section className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4">
-          <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
-            Brokerage Overview
-          </h2>
-
-          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {brokerOverviewCards.map((card) => (
-              <div key={card.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  {card.label}
-                </p>
-                <p className="mt-2 text-xl font-semibold text-slate-900">{card.value}</p>
-                <p className="mt-1 text-xs text-slate-500">{card.helper}</p>
+        <div className="finance-side">
+          <div className="finance-card">
+            <div className="finance-card-h"><h4>Collections - 6 months</h4></div>
+            <div className="finance-card-b">
+              <div className="finance-bars">
+                {collectionChart.bars.map((bar) => (
+                  <div key={bar.label} title={formatCurrency(bar.value)}>
+                    <i
+                      style={{
+                        height: `${bar.height}%`,
+                        background: bar.isCurrentMonth ? "var(--b300)" : "var(--b500)",
+                      }}
+                    />
+                    <span>{bar.label}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+              <p className="finance-hint">{collectionChart.hint}</p>
+            </div>
           </div>
 
-          {topBroker ? (
-            <button
-              type="button"
-              onClick={() =>
-                topBroker.searchToken
-                  ? openLeadWorkspace({ query: topBroker.searchToken })
-                  : openLeadWorkspace({ status: "CLOSED" })}
-              className="mt-4 w-full rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-slate-300 hover:bg-white"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    Top Broker
-                  </p>
-                  <p className="mt-1 text-base font-semibold text-slate-900">{topBroker.name}</p>
-                  <p className="text-xs text-slate-500">
-                    {topBroker.partnerCode || "Channel partner"} | {formatBrokerageRule(topBroker.brokerageConfig)}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-slate-900">
-                    {formatCurrency(topBroker.brokeragePayable)}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {topBroker.closedLeads} closed | {topBroker.brokerageShare}% share
-                  </p>
-                </div>
+          <div className="finance-card">
+            <div className="finance-card-h"><h4>By payment mode</h4></div>
+            <div className="finance-card-b finance-payment-mix">
+              <div className="finance-donut" style={{ background: paymentModeMix.gradient }} />
+              <div className="finance-legend">
+                {paymentModeMix.rows.length === 0 ? (
+                  <div><i style={{ background: "var(--line)" }} />No payment modes<b>0%</b></div>
+                ) : null}
+                {paymentModeMix.rows.map((row) => (
+                  <div key={row.label}><i style={{ background: row.color }} />{row.label}<b>{row.percent}%</b></div>
+                ))}
               </div>
-
-              {topBroker.brokerageConfig.notes ? (
-                <p className="mt-3 text-xs text-slate-500">
-                  Note: {topBroker.brokerageConfig.notes}
-                </p>
-              ) : null}
-            </button>
-          ) : (
-            <EmptyState text="Broker insights will appear once partner leads enter this range." />
-          )}
-        </section>
+            </div>
+          </div>
+        </div>
       </div>
-
-      <section className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
-              Recent Closed Deals
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Latest 12 closures with brokerage collection and payout status.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 font-semibold text-emerald-700">
-              Received {formatCurrency(recentClosureTotals.received)}
-            </span>
-            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 font-semibold text-indigo-700">
-              Distributed {formatCurrency(recentClosureTotals.distributed)}
-            </span>
-            <button
-              type="button"
-              onClick={() => openLeadWorkspace({ status: "CLOSED" })}
-              className="rounded-full border border-slate-300 bg-white px-3 py-1 font-semibold text-slate-600 hover:border-slate-500 hover:text-slate-900"
-            >
-              Open Closed Leads
-            </button>
-          </div>
-        </div>
-
-        {recentClosures.length === 0 ? (
-          <EmptyState text="No closed deals in selected range." />
-        ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 xl:grid-cols-2">
-            {recentClosures.map((lead) => {
-              const brokerageReceived = getRecordedBrokerageReceived(lead);
-              const brokerageDistributed = getRecordedBrokerageDistributed(lead);
-              return (
-                <button
-                  key={lead._id}
-                  type="button"
-                  onClick={() => openLeadWorkspace({ leadId: lead._id })}
-                  className="group rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-slate-300 hover:bg-white"
-                >
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-slate-900">
-                        {lead.name || "Unnamed Client"}
-                      </p>
-                      <p className="mt-1 break-words text-xs text-slate-500">
-                        {lead.projectInterested || "Project not set"}
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.08em]">
-                        <span className="rounded-full bg-white px-2.5 py-1 text-slate-600 ring-1 ring-slate-200">
-                          {String(lead._id || "").slice(-8) || "No ID"}
-                        </span>
-                        <span className="rounded-full bg-white px-2.5 py-1 text-slate-600 ring-1 ring-slate-200">
-                          {lead.phone || "No phone"}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left sm:text-right">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Closed
-                      </p>
-                      <p className="mt-1 text-xs font-semibold text-slate-800">
-                        {formatDateTime(getLeadClosingDate(lead))}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">
-                        Received
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">
-                        {formatCurrency(brokerageReceived)}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-indigo-700">
-                        Distributed
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">
-                        {formatCurrency(brokerageDistributed)}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
-                        Revenue Counted
-                      </p>
-                      <p className="mt-1 text-sm font-semibold text-slate-900">
-                        {formatCurrency(brokerageReceived)}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex flex-col gap-1 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-                    <span>{lead.email || "No email"}</span>
-                    <span className="font-medium text-slate-600">
-                      Executive: {getLeadClosingExecutiveName(lead)}
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-600">
-          Quick Actions
-        </h2>
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => openLeadWorkspace({ status: "ALL" })}
-            className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-slate-500 inline-flex items-center justify-center gap-2"
-          >
-            <Users size={15} />
-            Open Leads Management
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate("/inventory")}
-            className="h-11 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 hover:border-slate-500 inline-flex items-center justify-center gap-2"
-          >
-            <Building2 size={15} />
-            Open Inventory
-          </button>
-        </div>
-      </section>
     </div>
   );
 };
-
-const StatCard = (props) => {
-  const IconComponent = props.icon;
-
-  return (
-    <button
-      type="button"
-      onClick={props.onClick}
-      className="group ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4 text-left transition-all hover:border-cyan-300 hover:shadow-sm"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{props.title}</p>
-        <div className="rounded-lg bg-cyan-50 p-2 text-cyan-700">
-          <IconComponent size={14} />
-        </div>
-      </div>
-      <p className="mt-3 text-2xl font-semibold text-slate-900">{props.value}</p>
-      <div className="mt-1 flex items-center justify-between gap-2">
-        <p className="text-xs text-slate-500">{props.helper}</p>
-        <ChevronRight size={14} className="text-cyan-500 transition-transform group-hover:translate-x-0.5" />
-      </div>
-    </button>
-  );
-};
-
-const SourceCard = ({ label, count, total, onClick }) => {
-  const share = total > 0 ? Math.round((count / total) * 100) : 0;
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-left transition-colors hover:border-cyan-300 hover:bg-cyan-50/60"
-    >
-      <div className="flex items-center justify-between text-sm">
-        <span className="font-medium text-slate-700">{label}</span>
-        <span className="text-slate-600">
-          {count} ({share}%)
-        </span>
-      </div>
-      <div className="mt-2 h-2 w-full rounded-full bg-slate-200">
-        <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-sky-500" style={{ width: `${Math.min(share, 100)}%` }} />
-      </div>
-    </button>
-  );
-};
-
-const EmptyState = ({ text }) => (
-  <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-    {text}
-  </div>
-);
 
 export default FinancialCore;

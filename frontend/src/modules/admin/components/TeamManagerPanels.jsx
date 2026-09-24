@@ -23,10 +23,15 @@ export const UserFormPanel = ({
   error,
   isDarkTheme,
   roleOptions,
+  selectedBaseRole = "",
   reportingParentRoles,
 }) => {
-  const needsReporting = Boolean(reportingParentRoles[formData.role]?.length);
-  const isChannelPartner = formData.role === "CHANNEL_PARTNER";
+  const needsReporting = Boolean(reportingParentRoles[selectedBaseRole]?.length);
+  const isChannelPartner = selectedBaseRole === "CHANNEL_PARTNER";
+  const fieldLabelClass = `text-xs font-semibold ${isDarkTheme ? "text-slate-300" : "text-slate-600"}`;
+  const fieldControlClass = `w-full border rounded-lg px-3 py-2 ${
+    isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""
+  }`;
 
   return (
     <AnimatePresence>
@@ -60,71 +65,80 @@ export const UserFormPanel = ({
             </div>
 
             <div className="mobile-modal-scroll flex-1 space-y-3">
-              <input
-                type="text"
-                placeholder="Full name"
-                value={formData.name}
-                onChange={(event) => setFormData({ ...formData, name: event.target.value })}
-                className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
-              />
-              <input
-                type="email"
-                placeholder="Email"
-                value={formData.email}
-                onChange={(event) => setFormData({ ...formData, email: event.target.value })}
-                className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
-              />
-              <input
-                type="text"
-                placeholder="Phone"
-                value={formData.phone}
-                onChange={(event) => setFormData({ ...formData, phone: event.target.value })}
-                className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                value={formData.password}
-                onChange={(event) => setFormData({ ...formData, password: event.target.value })}
-                className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
-              />
+              <label className="block space-y-1">
+                <span className={fieldLabelClass}>Full Name</span>
+                <input
+                  type="text"
+                  placeholder="Enter full name"
+                  value={formData.name}
+                  onChange={(event) => setFormData({ ...formData, name: event.target.value })}
+                  className={fieldControlClass}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className={fieldLabelClass}>Email</span>
+                <input
+                  type="email"
+                  placeholder="Enter email"
+                  value={formData.email}
+                  onChange={(event) => setFormData({ ...formData, email: event.target.value })}
+                  className={fieldControlClass}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className={fieldLabelClass}>Phone</span>
+                <input
+                  type="text"
+                  placeholder="Enter phone"
+                  value={formData.phone}
+                  onChange={(event) => setFormData({ ...formData, phone: event.target.value })}
+                  className={fieldControlClass}
+                />
+              </label>
+              <label className="block space-y-1">
+                <span className={fieldLabelClass}>Password</span>
+                <input
+                  type="password"
+                  placeholder="Enter password"
+                  value={formData.password}
+                  onChange={(event) => setFormData({ ...formData, password: event.target.value })}
+                  className={fieldControlClass}
+                />
+              </label>
 
-              <select
-                value={formData.role}
-                onChange={(event) => {
-                  const nextRole = event.target.value;
-                  setFormData({
-                    ...formData,
-                    role: nextRole,
-                    reportingToId: "",
-                    canViewInventory:
-                      nextRole === "CHANNEL_PARTNER" ? formData.canViewInventory : false,
-                  });
-                }}
-                className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
-              >
-                {roleOptions.map((roleOption) => (
-                  <option key={roleOption.value} value={roleOption.value}>
-                    {roleOption.label}
-                  </option>
-                ))}
-              </select>
+              <label className="block space-y-1">
+                <span className={fieldLabelClass}>Business category</span>
+                <select value={formData.roleType} onChange={(event) => setFormData({ ...formData, roleType: event.target.value })} className={fieldControlClass}>
+                  <option value="COMMERCIAL">Commercial</option>
+                  <option value="RESIDENTIAL">Residential</option>
+                  <option value="BOTH">Both</option>
+                </select>
+              </label>
+              <label className="block space-y-1">
+                <span className={fieldLabelClass}>Role</span>
+                <select value={formData.role} onChange={(event) => setFormData({ ...formData, role: event.target.value, reportingToId: "", canViewInventory: false })} className={fieldControlClass}>
+                  {roleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
 
               {needsReporting && (
-                <select
-                  value={formData.reportingToId}
-                  onChange={(event) => setFormData({ ...formData, reportingToId: event.target.value })}
-                  className={`w-full border rounded-lg px-3 py-2 ${isDarkTheme ? "bg-slate-900 border-slate-700 text-slate-100" : ""}`}
-                >
-                  <option value="">
-                    Auto assign {reportingLabel || "reporting manager"} (least-loaded)
-                  </option>
-                  {reportingCandidates.map((manager) => (
-                    <option key={manager._id} value={manager._id}>
-                      {manager.name} ({manager.email})
+                <label className="block space-y-1">
+                  <span className={fieldLabelClass}>{reportingLabel || "Reporting Manager"}</span>
+                  <select
+                    value={formData.reportingToId}
+                    onChange={(event) => setFormData({ ...formData, reportingToId: event.target.value })}
+                    className={fieldControlClass}
+                  >
+                    <option value="">
+                      Auto assign {reportingLabel || "reporting manager"} (least-loaded)
                     </option>
-                  ))}
-                </select>
+                    {reportingCandidates.map((manager) => (
+                      <option key={manager._id} value={manager._id}>
+                        {manager.name} ({manager.email})
+                      </option>
+                    ))}
+                  </select>
+                </label>
               )}
 
               {isChannelPartner ? (

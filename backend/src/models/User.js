@@ -25,6 +25,10 @@ const brokerageConfigSchema = new mongoose.Schema(
 
 const userSchema = new mongoose.Schema(
   {
+    // Null inherits the role. Entries may be legacy page-key strings or the
+    // action-aware shape { pageKey, actions }, so existing employee grants
+    // keep working while new grants can restrict create/edit/delete/etc.
+    pageAccessOverride: { type: [mongoose.Schema.Types.Mixed], default: null },
     name: {
       type: String,
       required: true,
@@ -43,6 +47,15 @@ const userSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+
+    // Legacy vertical, unchanged: lead routing and inventory ownership have
+    // key off these three values.
+    roleType: {
+      type: String,
+      enum: ["COMMERCIAL", "RESIDENTIAL", "BOTH"],
+      default: "COMMERCIAL",
+    },
+
     profileImageUrl: {
       type: String,
       trim: true,
@@ -100,6 +113,38 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+
+    department: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 80,
+    },
+
+    branch: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 80,
+    },
+
+    shiftTiming: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 60,
+    },
+
+    monthlyTarget: {
+      type: Number,
+      min: 0,
+      default: 10,
+    },
+
+    lastLoginAt: {
+      type: Date,
+      default: null,
     },
 
     lastAssignedIndex: {

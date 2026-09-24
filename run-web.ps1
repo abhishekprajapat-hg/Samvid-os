@@ -32,7 +32,11 @@ $mongoDataPath = Join-Path $root "backend\.mongo-data"
 $mongoLogPath = Join-Path $root "backend\.mongo-log"
 
 if (-not (Test-LocalPort -HostName $mongoHost -Port $mongoPort)) {
-  if ((Test-Path -LiteralPath $mongoExe) -and (Test-Path -LiteralPath $mongoDataPath)) {
+  if (Test-Path -LiteralPath $mongoExe) {
+    if (-not (Test-Path -LiteralPath $mongoDataPath)) {
+      New-Item -ItemType Directory -Path $mongoDataPath | Out-Null
+    }
+
     if (-not (Test-Path -LiteralPath $mongoLogPath)) {
       New-Item -ItemType Directory -Path $mongoLogPath | Out-Null
     }

@@ -1,0 +1,1779 @@
+<!doctype html>
+<html lang="en" data-role="MANAGER" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Office on Rent — All Screens</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --n0:#ffffff; --n25:#fbfcfe; --n50:#f5f7fa; --n100:#edf0f5; --n200:#e0e5ed;
+  --n300:#c8d0dd; --n400:#98a3b5; --n500:#6c7789; --n600:#4e5867; --n700:#39424f;
+  --n800:#242b35; --n900:#161c24; --n950:#0d1219;
+  --b50:#eef3ff; --b100:#dde6ff; --b200:#bcd0ff; --b300:#8fb0ff; --b400:#5c87fb;
+  --b500:#3a63f0; --b600:#2549d6; --b700:#1c37ab; --b800:#1a3088; --b900:#182a6d;
+  --ok50:#e8f7f0; --ok100:#cdeee0; --ok500:#12a06a; --ok600:#0d8055; --ok700:#0a6544;
+  --wa50:#fdf4e3; --wa100:#fbe9c4; --wa500:#c88a09; --wa600:#a26f06; --wa700:#7d5605;
+  --dg50:#fdedec; --dg100:#fbd9d7; --dg500:#d64545; --dg600:#b83232; --dg700:#942626;
+  --vi50:#f2eefe; --vi100:#e6ddfd; --vi500:#7a5af5; --vi600:#6440dd; --vi700:#4f31b0;
+  --in50:#e9f4fb; --in100:#d2e9f7; --in500:#2b7fbf; --in600:#1f6499; --in700:#184f79;
+
+  --bg:var(--n50); --bg-elevated:var(--n0);
+  --surface:var(--n0); --surface-2:var(--n50); --surface-3:var(--n100);
+  --line:var(--n200); --line-strong:var(--n300);
+  --ink:var(--n900); --ink-2:var(--n600); --ink-3:var(--n500); --ink-4:var(--n400);
+  --accent:var(--b600); --accent-ink:var(--b700); --accent-soft:var(--b50);
+  --focus:0 0 0 3px rgba(37,73,214,.22);
+  --e1:0 1px 2px rgba(16,24,40,.05);
+  --e2:0 1px 2px rgba(16,24,40,.06), 0 8px 20px -12px rgba(16,24,40,.24);
+  --e3:0 12px 36px -14px rgba(16,24,40,.28), 0 2px 6px rgba(16,24,40,.06);
+  --r-xs:5px; --r-sm:7px; --r-md:10px; --r-lg:14px; --r-xl:20px; --r-full:999px;
+  --font:'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+  --mono:'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s8:32px; --s10:40px; --s12:48px;
+}
+html[data-theme="dark"]{
+  --bg:var(--n950); --bg-elevated:var(--n900);
+  --surface:#141a22; --surface-2:#1b222b; --surface-3:#232b35;
+  --line:#2a323d; --line-strong:#3a434f;
+  --ink:#e8ecf2; --ink-2:#a9b4c2; --ink-3:#8b96a5; --ink-4:#6c7686;
+  --accent:#6b93ff; --accent-ink:#a5c0ff; --accent-soft:rgba(92,135,251,.14);
+  --focus:0 0 0 3px rgba(107,147,255,.28);
+  --e1:0 1px 2px rgba(0,0,0,.4);
+  --e2:0 1px 2px rgba(0,0,0,.4), 0 8px 20px -12px rgba(0,0,0,.7);
+  --e3:0 14px 40px -16px rgba(0,0,0,.8), 0 2px 6px rgba(0,0,0,.5);
+  --ok50:rgba(18,160,106,.13); --ok100:rgba(18,160,106,.26); --ok500:#3ecf94; --ok600:#3ecf94; --ok700:#8ae5c1;
+  --wa50:rgba(200,138,9,.14);  --wa100:rgba(200,138,9,.28);  --wa500:#e6ae3c; --wa600:#e6ae3c; --wa700:#f2cf86;
+  --dg50:rgba(214,69,69,.14);  --dg100:rgba(214,69,69,.28);  --dg500:#f07070; --dg600:#f07070; --dg700:#f7a9a9;
+  --vi50:rgba(122,90,245,.15); --vi100:rgba(122,90,245,.3);  --vi500:#a289ff; --vi600:#a289ff; --vi700:#c6b6ff;
+  --in50:rgba(43,127,191,.15); --in100:rgba(43,127,191,.3);  --in500:#5fb0e5; --in600:#5fb0e5; --in700:#a3d3f0;
+  --b50:rgba(92,135,251,.13);  --b100:rgba(92,135,251,.26);
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+h1,h2,h3,h4,h5{margin:0;font-weight:650;letter-spacing:-.018em;line-height:1.22}
+p{margin:0} img{max-width:100%}
+button{font:inherit;color:inherit}
+code,.mono{font-family:var(--mono);font-size:.86em;overflow-wrap:anywhere}
+[hidden]{display:none!important}
+
+/* ===== doc chrome ===== */
+.masthead{border-bottom:1px solid var(--line);background:var(--bg-elevated);position:sticky;top:0;z-index:60}
+.masthead-in{max-width:1560px;margin:0 auto;padding:var(--s3) var(--s5);display:flex;align-items:center;gap:var(--s4);flex-wrap:wrap}
+.brandmark{display:flex;align-items:center;gap:10px}
+.brandmark .glyph{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(145deg,var(--b500),var(--b700));color:#fff;font-weight:700;font-size:13px}
+.brandmark b{font-size:14.5px;font-weight:650;letter-spacing:-.02em;display:block;line-height:1.25}
+.brandmark span{font-size:11.5px;color:var(--ink-3);font-weight:500}
+.rolebar{display:flex;align-items:center;gap:var(--s2);margin-left:auto;flex-wrap:wrap}
+.rolebar .lbl{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-4)}
+.roleseg{display:flex;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:2px;gap:2px;flex-wrap:wrap}
+.roleseg button{border:0;background:transparent;padding:5px 9px;border-radius:var(--r-sm);font-size:12px;font-weight:580;color:var(--ink-3);cursor:pointer;white-space:nowrap}
+.roleseg button.on{background:var(--b600);color:#fff;font-weight:640}
+html[data-theme="dark"] .roleseg button.on{background:var(--b500);color:#0d1219}
+.themebtn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--surface);border-radius:var(--r-md);padding:6px 11px;cursor:pointer;font-size:12.5px;font-weight:550;color:var(--ink-2)}
+
+.wrap{max-width:1560px;margin:0 auto;padding:var(--s5);display:grid;grid-template-columns:236px 1fr;gap:var(--s5);align-items:start}
+@media(max-width:1080px){.wrap{grid-template-columns:1fr}}
+
+/* route index */
+.index{position:sticky;top:76px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s3);box-shadow:var(--e1);max-height:calc(100vh - 100px);overflow:auto}
+.index h5{font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-4);padding:var(--s3) var(--s2) 5px}
+.idx{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:var(--r-sm);font-size:12.5px;font-weight:520;color:var(--ink-2);cursor:pointer;border:0;background:0;width:100%;text-align:left}
+.idx:hover{background:var(--surface-2);color:var(--ink)}
+.idx.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:640}
+.idx .rt{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--ink-4)}
+.idx.locked{opacity:.4}
+.idx.locked .rt::after{content:" 🔒"}
+
+.stage{min-width:0}
+.stagehead{display:flex;align-items:baseline;gap:var(--s3);margin-bottom:var(--s3);flex-wrap:wrap}
+.stagehead h2{font-size:20px}
+.stagehead .path{font-family:var(--mono);font-size:12px;color:var(--ink-3);background:var(--surface-2);border:1px solid var(--line);padding:2px 7px;border-radius:5px}
+.stagehead .file{font-size:11.5px;color:var(--ink-4);margin-left:auto}
+.notebox{margin-top:var(--s3);display:flex;flex-wrap:wrap;gap:10px;font-size:12.8px;color:var(--ink-2);padding:11px var(--s4);background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md)}
+.notebox b{color:var(--ink);font-weight:650}
+@media(min-width:700px){.notebox b{white-space:nowrap;flex:0 0 auto}}
+.notebox span{min-width:0}
+
+/* ===== app frame ===== */
+.frame{border:1px solid var(--line-strong);border-radius:var(--r-xl);overflow:hidden;background:var(--bg-elevated);box-shadow:var(--e3)}
+.frame-bar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.frame-bar .dots{display:flex;gap:6px}
+.frame-bar .dots i{width:9px;height:9px;border-radius:50%;background:var(--line-strong);display:block}
+.frame-bar .caption{font-size:11.5px;color:var(--ink-3);font-weight:600;margin-left:6px}
+.frame-body{background:var(--bg);overflow-x:auto}
+.app{display:flex;min-width:1080px;min-height:640px}
+
+.side{width:206px;flex:0 0 206px;background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:var(--s3) 0}
+.side-brand{display:flex;align-items:center;gap:9px;padding:4px var(--s4) var(--s4)}
+.side-brand .glyph{width:27px;height:27px;border-radius:8px;background:linear-gradient(145deg,var(--b500),var(--b700));color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700;flex:0 0 auto}
+.side-brand b{font-size:13px;font-weight:650;display:block;line-height:1.25}
+.side-brand small{font-size:10.5px;color:var(--ink-4);font-weight:500}
+.side-group{padding:var(--s3) var(--s3) 2px;font-size:10px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-4)}
+.navitem{display:flex;align-items:center;gap:10px;margin:1px var(--s2);padding:7px 10px;border-radius:var(--r-sm);font-size:12.8px;font-weight:520;color:var(--ink-2);cursor:pointer;position:relative}
+.navitem:hover{background:var(--surface-2);color:var(--ink)}
+.navitem.active{background:var(--accent-soft);color:var(--accent-ink);font-weight:620}
+.navitem.active::before{content:"";position:absolute;left:-8px;top:7px;bottom:7px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.navitem svg{width:16px;height:16px;flex:0 0 auto;stroke-width:1.9}
+.navitem .count{margin-left:auto;font-size:10.5px;font-weight:700;background:var(--surface-3);color:var(--ink-3);padding:1px 6px;border-radius:var(--r-full)}
+.navitem .count.hot{background:var(--dg50);color:var(--dg600)}
+.side-foot{margin-top:auto;padding:var(--s3) var(--s4) 0;border-top:1px solid var(--line)}
+.userchip{display:flex;align-items:center;gap:9px;padding:7px;border-radius:var(--r-md)}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--b100);color:var(--b700);display:grid;place-items:center;font-size:11px;font-weight:700;flex:0 0 auto}
+html[data-theme="dark"] .avatar{background:rgba(92,135,251,.2);color:var(--b300)}
+.userchip b{font-size:12.5px;font-weight:600;display:block;line-height:1.3}
+.userchip small{font-size:10.5px;color:var(--ink-4)}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column}
+.topbar{display:flex;align-items:center;gap:var(--s3);padding:10px var(--s5);background:var(--surface);border-bottom:1px solid var(--line)}
+.crumbs{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-3);min-width:0}
+.crumbs b{color:var(--ink);font-weight:620;font-size:14px;white-space:nowrap}
+.omnibox{margin-left:auto;display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:6px 10px;min-width:190px;color:var(--ink-4);font-size:12.5px}
+.omnibox kbd{margin-left:auto;font-family:var(--mono);font-size:10px;background:var(--surface);border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;color:var(--ink-3)}
+.canvas{padding:var(--s5);display:flex;flex-direction:column;gap:var(--s4)}
+
+/* ===== primitives ===== */
+.btn{display:inline-flex;align-items:center;gap:7px;border-radius:var(--r-md);padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid transparent;white-space:nowrap}
+.btn-pri{background:var(--b600);color:#fff;box-shadow:var(--e1)}
+html[data-theme="dark"] .btn-pri{background:var(--b500);color:#0d1219}
+.btn-sec{background:var(--surface);color:var(--ink);border-color:var(--line-strong)}
+.btn-ghost{background:transparent;color:var(--ink-2)}
+.btn-danger{background:var(--dg600);color:#fff}
+html[data-theme="dark"] .btn-danger{background:transparent;color:var(--dg500);border-color:var(--dg500)}
+.btn-sm{padding:5px 10px;font-size:12px;border-radius:var(--r-sm)}
+.btn-icon{padding:7px;border-radius:var(--r-sm)}
+.iconbtn{width:27px;height:27px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;cursor:pointer;color:var(--ink-3)}
+.iconbtn svg{width:14px;height:14px;stroke-width:1.9}
+.input{border:1px solid var(--line-strong);background:var(--surface);color:var(--ink);border-radius:var(--r-md);padding:8px 11px;font-size:13.5px;font-family:inherit;width:100%}
+.input::placeholder{color:var(--ink-4)}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-size:11.5px;font-weight:600;color:var(--ink-2)}
+.hint{font-size:11.5px;color:var(--ink-3)}
+.muted{color:var(--ink-3)}
+.num{font-variant-numeric:tabular-nums}
+
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:var(--r-full);padding:3px 9px 3px 7px;font-size:11.5px;font-weight:600;border:1px solid transparent;white-space:nowrap}
+.pill .dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:0 0 auto}
+.t-open{background:var(--in50);color:var(--in700);border-color:var(--in100)}
+.t-warm{background:var(--wa50);color:var(--wa700);border-color:var(--wa100)}
+.t-sched{background:var(--vi50);color:var(--vi700);border-color:var(--vi100)}
+.t-risk{background:var(--dg50);color:var(--dg700);border-color:var(--dg100)}
+.t-won{background:var(--ok50);color:var(--ok700);border-color:var(--ok100)}
+.t-dead{background:var(--surface-3);color:var(--ink-3);border-color:var(--line)}
+.t-party{background:transparent;color:var(--ink-2);border-color:var(--line-strong);border-style:dashed}
+html[data-theme="dark"] .t-open{color:var(--in500)} html[data-theme="dark"] .t-warm{color:var(--wa500)}
+html[data-theme="dark"] .t-sched{color:var(--vi500)} html[data-theme="dark"] .t-risk{color:var(--dg500)}
+html[data-theme="dark"] .t-won{color:var(--ok500)}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--e1)}
+.card-h{padding:12px var(--s4);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.card-h h4{font-size:13.5px;font-weight:650}
+.card-b{padding:var(--s4)}
+.more{margin-left:auto;font-size:12px;color:var(--accent);font-weight:600;cursor:pointer}
+
+.statgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:var(--s3)}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s4);box-shadow:var(--e1);position:relative;overflow:hidden}
+.stat .k{font-size:11px;font-weight:650;color:var(--ink-3);letter-spacing:.04em;text-transform:uppercase}
+.stat .v{font-size:25px;font-weight:680;letter-spacing:-.03em;margin-top:8px;line-height:1;font-variant-numeric:tabular-nums}
+.stat .d{display:flex;align-items:center;gap:6px;margin-top:9px;font-size:11.5px;color:var(--ink-3)}
+.delta{font-weight:650} .delta.up{color:var(--ok600)} .delta.down{color:var(--dg600)}
+.stat.is-alert{border-color:var(--dg100)}
+.stat.is-alert::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dg500)}
+
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.tbl th{text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-4);padding:9px var(--s3);border-bottom:1px solid var(--line);background:var(--surface-2);white-space:nowrap}
+.tbl td{padding:10px var(--s3);border-bottom:1px solid var(--line);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:var(--surface-2)}
+.cellname{display:flex;align-items:center;gap:10px}
+.cellname b{font-weight:620;font-size:13.2px;display:block;line-height:1.3;white-space:nowrap}
+.cellname small{font-size:11.5px;color:var(--ink-3);font-family:var(--mono);white-space:nowrap}
+.due{font-weight:620} .due.over{color:var(--dg600)} .due.today{color:var(--wa600)}
+.rowacts{display:flex;gap:3px;opacity:0}
+.tbl tbody tr:hover .rowacts{opacity:1}
+
+.toolbar{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.seg{display:flex;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);padding:2px;gap:2px;flex-wrap:wrap}
+.seg button{border:0;background:transparent;padding:5px 11px;border-radius:var(--r-sm);font-size:12.5px;font-weight:580;color:var(--ink-3);cursor:pointer;white-space:nowrap}
+.seg button.on{background:var(--surface);color:var(--ink);box-shadow:var(--e1)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px dashed var(--line-strong);border-radius:var(--r-full);padding:4px 10px;font-size:12px;font-weight:550;color:var(--ink-2);cursor:pointer;background:var(--surface);white-space:nowrap}
+.chip.on{border-style:solid;border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink);font-weight:620}
+.chip x{cursor:pointer;font-style:normal;color:var(--ink-4);font-weight:700}
+
+.split{display:grid;grid-template-columns:1.5fr 1fr;gap:var(--s4)}
+.split-even{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
+.rowlist{display:flex;flex-direction:column}
+.rowlist>div{display:flex;align-items:center;gap:var(--s3);padding:9px 0;border-bottom:1px solid var(--line);font-size:12.8px}
+.rowlist>div:last-child{border-bottom:0}
+.bar-mini{height:5px;border-radius:3px;background:var(--surface-3);flex:1;overflow:hidden;min-width:40px}
+.bar-mini i{display:block;height:100%;background:var(--accent);border-radius:3px}
+
+.funnel{display:flex;flex-direction:column;gap:7px}
+.fstage{display:flex;align-items:center;gap:var(--s3);font-size:12.5px}
+.fstage .lbl{flex:0 0 108px;color:var(--ink-2);font-weight:550}
+.fbar{flex:1;height:23px;border-radius:var(--r-sm);background:var(--surface-3);overflow:hidden;min-width:60px}
+.fbar i{display:block;height:100%;border-radius:var(--r-sm)}
+.fstage .cnt{flex:0 0 52px;text-align:right;font-weight:650;font-variant-numeric:tabular-nums}
+.fstage .pct{flex:0 0 40px;text-align:right;font-size:11.5px;color:var(--ink-4);font-variant-numeric:tabular-nums}
+
+.tl{position:relative;padding-left:22px}
+.tl::before{content:"";position:absolute;left:6px;top:5px;bottom:5px;width:1.5px;background:var(--line)}
+.tlitem{position:relative;padding-bottom:14px}
+.tlitem:last-child{padding-bottom:0}
+.tlitem::before{content:"";position:absolute;left:-19px;top:5px;width:9px;height:9px;border-radius:50%;background:var(--surface);border:2px solid var(--line-strong)}
+.tlitem.hi::before{border-color:var(--accent);background:var(--accent)}
+.tlitem p{font-size:12.8px}
+.tlitem time{font-size:11px;color:var(--ink-4)}
+
+.invgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(198px,1fr));gap:var(--s3)}
+.invcard{border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--surface);box-shadow:var(--e1);cursor:pointer}
+.invthumb{height:96px;position:relative;background:linear-gradient(135deg,var(--surface-3),var(--surface-2));display:grid;place-items:center;color:var(--ink-4)}
+.invthumb .badge{position:absolute;top:8px;left:8px}
+.invthumb .pid{position:absolute;bottom:8px;right:8px;font-family:var(--mono);font-size:10px;background:rgba(13,18,25,.72);color:#fff;padding:2px 6px;border-radius:4px}
+.invmeta{padding:11px}
+.invmeta b{font-size:13px;font-weight:620;display:block;line-height:1.3}
+.invmeta small{font-size:11.5px;color:var(--ink-3);display:block;margin-top:2px}
+.invmeta .price{margin-top:9px;display:flex;align-items:baseline;gap:5px}
+.invmeta .price b{font-size:15px;font-weight:680}
+.invmeta .price small{font-size:11px;margin:0}
+.invfoot{display:flex;gap:9px;padding:8px 11px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-3);flex-wrap:wrap}
+
+.kv{display:grid;grid-template-columns:118px 1fr;gap:7px var(--s3);font-size:12.8px}
+.kv dt{color:var(--ink-3)} .kv dd{margin:0;font-weight:550}
+.tabs{display:flex;gap:var(--s4);padding:0 var(--s4);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tabs button{border:0;background:0;padding:10px 0;font-size:12.5px;font-weight:600;color:var(--ink-3);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
+.sectitle{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-4);margin-bottom:9px}
+
+/* calendar */
+.cal{display:grid;grid-template-columns:repeat(7,1fr);border-left:1px solid var(--line);border-top:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.cal .dow{background:var(--surface-2);padding:7px;font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-4);border-right:1px solid var(--line);border-bottom:1px solid var(--line);text-align:center}
+.cal .day{min-height:82px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:6px;background:var(--surface);display:flex;flex-direction:column;gap:3px}
+.cal .day.dim{background:var(--surface-2);color:var(--ink-4)}
+.cal .day.today{background:var(--accent-soft)}
+.cal .day .n{font-size:11px;font-weight:650;color:var(--ink-3)}
+.cal .day.today .n{color:var(--accent-ink)}
+.ev{font-size:10.5px;font-weight:600;padding:2px 5px;border-radius:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev.v{background:var(--vi50);color:var(--vi700)} .ev.w{background:var(--wa50);color:var(--wa700)}
+.ev.o{background:var(--in50);color:var(--in700)} .ev.g{background:var(--ok50);color:var(--ok700)}
+
+/* kanban */
+.kan{display:grid;grid-template-columns:repeat(4,minmax(178px,1fr));gap:var(--s3)}
+.kancol{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-lg);padding:var(--s3);display:flex;flex-direction:column;gap:8px}
+.kanhead{display:flex;align-items:center;gap:7px;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.kanhead .n{margin-left:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-full);padding:0 7px;font-size:10.5px}
+.task{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);padding:10px;box-shadow:var(--e1);cursor:pointer}
+.task b{font-size:12.5px;font-weight:600;display:block;line-height:1.35}
+.task .m{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:10.5px;color:var(--ink-4)}
+
+/* chat */
+.chatwrap{display:grid;grid-template-columns:212px 1fr 0;height:520px;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;background:var(--surface)}
+.chatlist{border-right:1px solid var(--line);overflow:auto;background:var(--surface-2)}
+.chatrow{display:flex;gap:9px;padding:10px var(--s3);border-bottom:1px solid var(--line);cursor:pointer;align-items:flex-start}
+.chatrow.on{background:var(--surface)}
+.chatrow b{font-size:12.5px;font-weight:620;display:block}
+.chatrow small{font-size:11px;color:var(--ink-3);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px}
+.chatpane{display:flex;flex-direction:column;min-width:0}
+.msgs{flex:1;overflow:auto;padding:var(--s4);display:flex;flex-direction:column;gap:11px;background:var(--bg)}
+.msg{max-width:64%;padding:9px 12px;border-radius:12px;font-size:12.8px;background:var(--surface);border:1px solid var(--line);box-shadow:var(--e1)}
+.msg time{display:block;font-size:10px;color:var(--ink-4);margin-top:4px}
+.msg.me{align-self:flex-end;background:var(--b600);color:#fff;border-color:var(--b600)}
+.msg.me time{color:rgba(255,255,255,.7)}
+html[data-theme="dark"] .msg.me{background:var(--b500);color:#0d1219}
+.composer{display:flex;gap:8px;padding:var(--s3);border-top:1px solid var(--line);background:var(--surface)}
+
+/* map */
+.mapbox{position:relative;height:400px;border-radius:var(--r-lg);border:1px solid var(--line);overflow:hidden;background:
+  linear-gradient(0deg,rgba(37,73,214,.04),rgba(37,73,214,.04)),
+  repeating-linear-gradient(0deg,transparent 0 38px,var(--line) 38px 39px),
+  repeating-linear-gradient(90deg,transparent 0 46px,var(--line) 46px 47px),var(--surface-2)}
+.mpin{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer}
+.mpin i{width:13px;height:13px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);display:block;border:2px solid var(--surface);box-shadow:var(--e2)}
+.mpin span{font-size:10px;font-weight:650;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-full);padding:1px 6px;white-space:nowrap;box-shadow:var(--e1)}
+
+/* charts */
+.bars{display:flex;align-items:flex-end;gap:7px;height:150px;padding-top:var(--s3)}
+.bars>div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;height:100%}
+.bars i{display:block;width:100%;border-radius:5px 5px 0 0;background:var(--b500)}
+.bars span{font-size:10px;color:var(--ink-4);font-weight:600}
+.donut{width:118px;height:118px;border-radius:50%;flex:0 0 auto}
+.legend{display:flex;flex-direction:column;gap:7px;font-size:12.2px}
+.legend div{display:flex;align-items:center;gap:8px}
+.legend i{width:9px;height:9px;border-radius:3px;flex:0 0 auto}
+.legend b{margin-left:auto;font-variant-numeric:tabular-nums}
+.spark{display:block;width:100%;height:38px}
+
+/* misc blocks */
+.emptybox{text-align:center;padding:var(--s10) var(--s5);border:1px dashed var(--line-strong);border-radius:var(--r-lg);background:var(--surface)}
+.emptybox h4{font-size:14.5px;margin-bottom:5px}
+.emptybox p{font-size:13px;color:var(--ink-2);margin-bottom:14px}
+.noaccess{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:11px;min-height:420px;text-align:center;padding:var(--s8)}
+.noaccess .ic{width:46px;height:46px;border-radius:14px;background:var(--surface-3);display:grid;place-items:center;color:var(--ink-4)}
+.noaccess h3{font-size:16px}
+.noaccess p{font-size:13.5px;color:var(--ink-2);max-width:44ch}
+.gridform{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:var(--s3)}
+.switchrow{display:flex;align-items:center;gap:var(--s3);padding:11px 0;border-bottom:1px solid var(--line)}
+.switchrow:last-child{border-bottom:0}
+.switchrow b{font-size:13px;font-weight:600;display:block}
+.switchrow small{font-size:11.5px;color:var(--ink-3)}
+.sw{width:36px;height:20px;border-radius:var(--r-full);background:var(--line-strong);position:relative;flex:0 0 auto;margin-left:auto;cursor:pointer}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:var(--e1);transition:left .15s}
+.sw.on{background:var(--ok500)} .sw.on::after{left:18px}
+.login{display:grid;place-items:center;min-height:640px;padding:var(--s8);background:
+  radial-gradient(circle at 15% 0%,var(--accent-soft),transparent 42%),var(--bg)}
+.logincard{width:100%;max-width:376px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-xl);padding:var(--s8);box-shadow:var(--e3)}
+.avstack{display:flex}
+.avstack .avatar{width:24px;height:24px;font-size:9px;border:2px solid var(--surface);margin-left:-7px}
+.avstack .avatar:first-child{margin-left:0}
+footer{max-width:1560px;margin:0 auto;padding:var(--s6) var(--s5) var(--s12);color:var(--ink-3);font-size:12.5px;border-top:1px solid var(--line)}
+</style>
+</head>
+<body>
+
+<div class="masthead">
+  <div class="masthead-in">
+    <div class="brandmark">
+      <div class="glyph">OR</div>
+      <div><b>The Office on Rent</b><span>All core screens · 26 routes · 8 roles</span></div>
+    </div>
+    <div class="rolebar">
+      <span class="lbl">Viewing as</span>
+      <div class="roleseg" id="roleseg">
+        <button data-role="ADMIN">Admin</button>
+        <button data-role="MANAGER" class="on">Manager</button>
+        <button data-role="INSIDE_EXECUTIVE">Inside Exec</button>
+        <button data-role="EXECUTIVE">Executive</button>
+        <button data-role="FIELD_EXECUTIVE">Field Exec</button>
+        <button data-role="PRODUCTION_EXECUTIVE">Production</button>
+        <button data-role="COMMUNITY_MANAGER">Community Mgr</button>
+        <button data-role="CHANNEL_PARTNER">Channel Partner</button>
+      </div>
+      <button class="themebtn" id="themeToggle">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <span id="themeLabel">Dark</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <aside class="index" id="routeIndex"></aside>
+
+  <main class="stage">
+    <div class="stagehead">
+      <h2 id="scrTitle">Dashboard</h2>
+      <span class="path" id="scrPath">/dashboard</span>
+      <span class="file" id="scrFile"></span>
+    </div>
+
+    <div class="frame">
+      <div class="frame-bar"><div class="dots"><i></i><i></i><i></i></div><span class="caption" id="frameCaption">Manager · /dashboard</span></div>
+      <div class="frame-body">
+        <div class="app">
+          <aside class="side" id="sideNav"></aside>
+          <div class="main">
+            <div class="topbar" id="topBar"></div>
+            <div class="canvas" id="canvasHost"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="notebox" id="scrNote"></div>
+  </main>
+</div>
+
+<footer>
+  <p>28 core routes from <code>frontend/src/App.jsx</code>, rendered per role. Role gating mirrors the <code>canAccess()</code> checks in that file — a route shown as locked is one this role is actually redirected away from. Coworking's 24 routes follow in a second file. Sample data is fictional.</p>
+</footer>
+
+<div id="screenStore" hidden></div>
+<script type="text/html" id="tpl-store">
+
+<!-- ============ /dashboard ============ -->
+<div data-screen="dashboard">
+  <div data-only="ADMIN MANAGER">
+    <div class="statgrid">
+      <div class="stat is-alert"><div class="k">Needs action</div><div class="v">27</div><div class="d">18 overdue · 9 due today</div></div>
+      <div class="stat"><div class="k">Site visits today</div><div class="v">6</div><div class="d">4 confirmed · 2 pending</div></div>
+      <div class="stat"><div class="k">Open pipeline</div><div class="v">342</div><div class="d"><span class="delta up">▲ 8.4%</span> vs Aug</div></div>
+      <div class="stat"><div class="k">Closed — Sep</div><div class="v">11</div><div class="d"><span class="delta up">▲ 3</span> vs Aug</div></div>
+      <div class="stat"><div class="k">Approvals waiting</div><div class="v">4</div><div class="d">2 payment · 2 inventory</div></div>
+    </div>
+    <div class="split">
+      <div class="card">
+        <div class="card-h"><h4>Team queue</h4><span class="pill t-risk"><i class="dot"></i>18 overdue</span><span class="more">Open pipeline →</span></div>
+        <table class="tbl">
+          <thead><tr><th>Lead</th><th>Status</th><th>Owner</th><th>Follow-up</th></tr></thead>
+          <tbody>
+            <tr><td><div class="cellname"><div class="avatar" style="width:26px;height:26px;font-size:10px">RM</div><div><b>Rohan Mehta</b><small>+91 98213 44120</small></div></div></td><td><span class="pill t-risk"><i class="dot"></i>Visit Overdue</span></td><td class="muted">Priya N.</td><td><span class="due over">4 days late</span></td></tr>
+            <tr><td><div class="cellname"><div class="avatar" style="width:26px;height:26px;font-size:10px">SK</div><div><b>Sneha Kulkarni</b><small>+91 90045 77210</small></div></div></td><td><span class="pill t-risk"><i class="dot"></i>Not Picking</span></td><td class="muted">Amit R.</td><td><span class="due over">2 days late</span></td></tr>
+            <tr><td><div class="cellname"><div class="avatar" style="width:26px;height:26px;font-size:10px">VJ</div><div><b>Vikram Joshi</b><small>+91 88790 21004</small></div></div></td><td><span class="pill t-sched"><i class="dot"></i>Visit Scheduled</span></td><td class="muted">Priya N.</td><td><span class="due today">Today, 4:00 PM</span></td></tr>
+            <tr><td><div class="cellname"><div class="avatar" style="width:26px;height:26px;font-size:10px">AD</div><div><b>Aarti Desai</b><small>+91 99303 18877</small></div></div></td><td><span class="pill t-warm"><i class="dot"></i>Interested</span></td><td class="muted">Kunal M.</td><td><span class="due today">Today, 6:30 PM</span></td></tr>
+            <tr><td><div class="cellname"><div class="avatar" style="width:26px;height:26px;font-size:10px">MI</div><div><b>Mohd Irfan</b><small>+91 70212 90066</small></div></div></td><td><span class="pill t-open"><i class="dot"></i>New</span></td><td><span class="chip" style="padding:2px 8px;font-size:11px">Assign</span></td><td class="muted">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--s4)">
+        <div class="card"><div class="card-h"><h4>Pipeline this month</h4></div><div class="card-b">
+          <div class="funnel">
+            <div class="fstage"><span class="lbl">New</span><span class="fbar"><i style="width:100%;background:var(--in500)"></i></span><span class="cnt">418</span><span class="pct">—</span></div>
+            <div class="fstage"><span class="lbl">Contacted</span><span class="fbar"><i style="width:74%;background:var(--in500)"></i></span><span class="cnt">309</span><span class="pct">74%</span></div>
+            <div class="fstage"><span class="lbl">Interested</span><span class="fbar"><i style="width:41%;background:var(--wa500)"></i></span><span class="cnt">171</span><span class="pct">55%</span></div>
+            <div class="fstage"><span class="lbl">Visit done</span><span class="fbar"><i style="width:22%;background:var(--vi500)"></i></span><span class="cnt">92</span><span class="pct">54%</span></div>
+            <div class="fstage"><span class="lbl">Closed</span><span class="fbar"><i style="width:6%;background:var(--ok500)"></i></span><span class="cnt">26</span><span class="pct">28%</span></div>
+          </div>
+          <p class="hint" style="margin-top:12px">Biggest drop: Contacted → Interested. 138 leads stalled there.</p>
+        </div></div>
+        <div class="card"><div class="card-h"><h4>Team today</h4><span class="more">Manage →</span></div><div class="card-b">
+          <div class="rowlist">
+            <div><div class="avatar" style="width:24px;height:24px;font-size:9.5px">PN</div><span style="font-weight:550">Priya N.</span><span class="bar-mini"><i style="width:82%"></i></span><span class="muted num">14/17</span></div>
+            <div><div class="avatar" style="width:24px;height:24px;font-size:9.5px">AR</div><span style="font-weight:550">Amit R.</span><span class="bar-mini"><i style="width:55%;background:var(--wa500)"></i></span><span class="muted num">11/20</span></div>
+            <div><div class="avatar" style="width:24px;height:24px;font-size:9.5px">KM</div><span style="font-weight:550">Kunal M.</span><span class="bar-mini"><i style="width:30%;background:var(--dg500)"></i></span><span class="muted num">4/13</span></div>
+            <div><div class="avatar" style="width:24px;height:24px;font-size:9.5px">SB</div><span style="font-weight:550">Sana B.</span><span class="bar-mini"><i style="width:95%;background:var(--ok500)"></i></span><span class="muted num">19/20</span></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <div data-only="EXECUTIVE">
+    <div class="statgrid">
+      <div class="stat is-alert"><div class="k">My follow-ups</div><div class="v">9</div><div class="d">5 overdue · 4 today</div></div>
+      <div class="stat"><div class="k">My open leads</div><div class="v">47</div><div class="d">6 interested</div></div>
+      <div class="stat"><div class="k">Visits this week</div><div class="v">3</div><div class="d">1 today</div></div>
+      <div class="stat"><div class="k">Closed — Sep</div><div class="v">2</div><div class="d">Target 4</div></div>
+    </div>
+    <div class="split">
+      <div class="card">
+        <div class="card-h"><h4>Call these first</h4><span class="more">My leads →</span></div>
+        <table class="tbl">
+          <thead><tr><th>Lead</th><th>Status</th><th>Requirement</th><th>Follow-up</th></tr></thead>
+          <tbody>
+            <tr><td><div class="cellname"><div class="avatar" style="width:26px;height:26px;font-size:10px">RM</div><div><b>Rohan Mehta</b><small>+91 98213 44120</small></div></div></td><td><span class="pill t-risk"><i class="dot"></i>Visit Overdue</span></td><td class="muted">Comm · Lease · 1,200 sq ft</td><td><span class="due over">4 days late</span></td></tr>
+            <tr><td><div class="cellname"><div class="avatar" style="width:26px;height:26px;font-size:10px">AD</div><div><b>Aarti Desai</b><small>+91 99303 18877</small></div></div></td><td><span class="pill t-warm"><i class="dot"></i>Interested</span></td><td class="muted">Comm · Rent · Lower Parel</td><td><span class="due today">Today 6:30 PM</span></td></tr>
+            <tr><td><div class="cellname"><div class="avatar" style="width:26px;height:26px;font-size:10px">NP</div><div><b>Nikhil Pawar</b><small>+91 93244 55018</small></div></div></td><td><span class="pill t-warm"><i class="dot"></i>Requested</span></td><td class="muted">Comm · Lease · Andheri E</td><td>Tomorrow 11 AM</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--s4)">
+        <div class="card"><div class="card-h"><h4>My target — September</h4></div><div class="card-b">
+          <div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:30px;font-weight:680;letter-spacing:-.03em">2</span><span class="muted">of 4 closures</span></div>
+          <div class="bar-mini" style="height:8px;margin-top:11px"><i style="width:50%"></i></div>
+          <p class="hint" style="margin-top:9px">21 days remaining. Pace needed: one closure per 10 days.</p>
+        </div></div>
+        <div class="card"><div class="card-h"><h4>Today</h4></div><div class="card-b">
+          <div class="tl">
+            <div class="tlitem hi"><p><b>Site visit</b> — Aarti Desai at Trade Link Plaza</p><time>6:30 PM</time></div>
+            <div class="tlitem"><p>Follow-up call — Nikhil Pawar</p><time>Tomorrow, 11:00 AM</time></div>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <div data-only="FIELD_EXECUTIVE">
+    <div class="statgrid">
+      <div class="stat"><div class="k">Checked in</div><div class="v" style="font-size:20px">9:12 AM</div><div class="d">Andheri branch</div></div>
+      <div class="stat is-alert"><div class="k">Visits today</div><div class="v">3</div><div class="d">1 needs reschedule</div></div>
+      <div class="stat"><div class="k">Assigned leads</div><div class="v">18</div><div class="d">4 need a follow-up</div></div>
+      <div class="stat"><div class="k">Visits this month</div><div class="v">22</div><div class="d">Target 30</div></div>
+    </div>
+    <div class="split">
+      <div class="card">
+        <div class="card-h"><h4>Today's route</h4><span class="more">Open map →</span></div>
+        <div class="card-b" style="display:flex;flex-direction:column;gap:11px">
+          <div style="border:1px solid var(--accent);border-radius:var(--r-md);padding:12px;box-shadow:var(--e2)">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><b style="font-size:13.5px">Vikram Joshi</b><div class="muted" style="font-size:12px">Solitaire Corporate · Tower B · Andheri E</div></div><span class="pill t-sched"><i class="dot"></i>4:00 PM</span></div>
+            <div style="display:flex;gap:7px;margin-top:11px"><button class="btn btn-pri btn-sm">Navigate</button><button class="btn btn-sec btn-sm">Call</button><button class="btn btn-sec btn-sm">Check in</button></div>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:var(--r-md);padding:12px">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><b style="font-size:13.5px">Aarti Desai</b><div class="muted" style="font-size:12px">Trade Link Plaza · Marol</div></div><span class="pill t-sched"><i class="dot"></i>6:30 PM</span></div>
+          </div>
+          <div style="border:1px solid var(--dg100);background:var(--dg50);border-radius:var(--r-md);padding:12px">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><b style="font-size:13.5px">Rohan Mehta</b><div style="font-size:12px;color:var(--dg700)">No-show on 28 Aug · needs reschedule</div></div><span class="pill t-risk"><i class="dot"></i>Overdue</span></div>
+            <div style="display:flex;gap:7px;margin-top:11px"><button class="btn btn-sec btn-sm">Call</button><button class="btn btn-sec btn-sm">Reschedule</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="card"><div class="card-h"><h4>Log an outcome</h4></div><div class="card-b">
+        <p class="hint" style="margin-bottom:11px">One tap writes the status, stamps the diary and asks for the next follow-up date.</p>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <span class="chip">Visit done</span><span class="chip">Client no-show</span><span class="chip">Not picking</span><span class="chip">Reschedule</span><span class="chip">Interested</span><span class="chip">Not interested</span>
+        </div>
+      </div></div>
+    </div>
+  </div>
+
+  <div data-only="PRODUCTION_EXECUTIVE COMMUNITY_MANAGER">
+    <div class="statgrid">
+      <div class="stat"><div class="k">Open tasks</div><div class="v">12</div><div class="d">3 due today</div></div>
+      <div class="stat"><div class="k">Completed this week</div><div class="v">19</div><div class="d"><span class="delta up">▲ 4</span> vs last week</div></div>
+      <div class="stat"><div class="k">Attendance</div><div class="v" style="font-size:20px">9:04 AM</div><div class="d">Checked in</div></div>
+      <div class="stat"><div class="k">Unread messages</div><div class="v">5</div><div class="d">2 mentions</div></div>
+    </div>
+    <div class="split">
+      <div class="card"><div class="card-h"><h4>My tasks</h4><span class="more">Task board →</span></div>
+        <table class="tbl">
+          <thead><tr><th>Task</th><th>Status</th><th>Due</th></tr></thead>
+          <tbody>
+            <tr><td><b style="font-weight:600">Shoot photos — Solitaire Tower B</b></td><td><span class="pill t-warm"><i class="dot"></i>In Progress</span></td><td><span class="due today">Today</span></td></tr>
+            <tr><td><b style="font-weight:600">Edit walkthrough video — Boomerang</b></td><td><span class="pill t-open"><i class="dot"></i>Open</span></td><td>3 Sep</td></tr>
+            <tr><td><b style="font-weight:600">Update floor plans — Trade Link</b></td><td><span class="pill t-open"><i class="dot"></i>Open</span></td><td>5 Sep</td></tr>
+            <tr><td><b style="font-weight:600">Community post — September listings</b></td><td><span class="pill t-won"><i class="dot"></i>Done</span></td><td class="muted">31 Aug</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card"><div class="card-h"><h4>Performance</h4></div><div class="card-b">
+        <div class="bars">
+          <div><i style="height:52%"></i><span>W22</span></div><div><i style="height:66%"></i><span>W23</span></div>
+          <div><i style="height:44%"></i><span>W24</span></div><div><i style="height:78%"></i><span>W25</span></div>
+          <div><i style="height:90%"></i><span>W26</span></div>
+        </div>
+        <p class="hint" style="margin-top:9px">Tasks completed per week.</p>
+      </div></div>
+    </div>
+  </div>
+
+  <div data-only="CHANNEL_PARTNER" class="noaccess">
+    <div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+    <h3>Redirected to Pipeline</h3>
+    <p>Channel partners have no dashboard — <code>DashboardByRole</code> sends them straight to <code>/leads</code>. Worth building them a small landing view instead: leads they submitted, conversion rate, payouts.</p>
+  </div>
+
+  <div data-only="INSIDE_EXECUTIVE" class="noaccess">
+    <div class="ic" style="background:var(--dg50);color:var(--dg600)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></div>
+    <h3 style="color:var(--dg700)">This role gets logged out</h3>
+    <p><code>INSIDE_EXECUTIVE</code> exists in <code>role.constants.js</code> and is listed as a <code>LEAD_OWNER_ROLE</code>, but it is missing from the <code>DashboardByRole</code> switch and from every route gate in <code>App.jsx</code>. The default branch redirects it to <code>/login</code>, so a user with this role cannot use the app at all.</p>
+  </div>
+</div>
+
+<!-- ============ /leads ============ -->
+<div data-screen="leads">
+  <div class="toolbar">
+    <div class="seg"><button class="on">Needs action <b style="color:var(--dg600)">27</b></button><button>All</button><button data-only="ADMIN MANAGER">Unassigned <span class="muted">14</span></button><button>Closed</button></div>
+    <span class="chip on">At risk <x>×</x></span>
+    <span class="chip on">Commercial <x>×</x></span>
+    <span class="chip">+ Budget</span><span class="chip">+ Location</span><span class="chip">+ Source</span>
+    <span class="chip" data-only="ADMIN MANAGER">+ Executive</span>
+    <div style="margin-left:auto;display:flex;gap:6px;align-items:center"><span class="hint">Sort</span>
+      <div class="seg"><button class="on">Follow-up</button><button>Recent</button><button>Name</button></div></div>
+  </div>
+  <div class="card" style="overflow:hidden">
+    <table class="tbl">
+      <thead><tr><th style="width:24px"><input type="checkbox" aria-label="all"></th><th>Lead</th><th>Status</th><th>Requirement</th><th>Budget</th><th>Source</th><th data-only="ADMIN MANAGER">Assigned</th><th>Next follow-up</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><input type="checkbox" aria-label="r"></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">RM</div><div><b>Rohan Mehta</b><small>+91 98213 44120</small></div></div></td><td><span class="pill t-risk"><i class="dot"></i>Visit Overdue</span></td><td class="muted">Commercial · Lease<br><span style="font-size:11.5px">Office · 1,200 sq ft</span></td><td class="num">₹1.2–1.6 L<span class="muted" style="font-size:11px">/mo</span></td><td><span class="pill t-dead" style="font-size:10.5px">Meta</span></td><td class="muted" data-only="ADMIN MANAGER">Priya N.</td><td><span class="due over">28 Aug · 4d late</span></td><td><div class="rowacts"><button class="iconbtn" title="Call"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg></button><button class="iconbtn" title="WhatsApp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M21 11.5a8.4 8.4 0 0 1-12.6 7.3L3 21l2.3-5.3A8.4 8.4 0 1 1 21 11.5Z"/></svg></button><button class="iconbtn" title="Log"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></div></td></tr>
+        <tr><td><input type="checkbox" aria-label="r"></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">SK</div><div><b>Sneha Kulkarni</b><small>+91 90045 77210</small></div></div></td><td><span class="pill t-risk"><i class="dot"></i>Not Picking</span></td><td class="muted">Residential · Rent<br><span style="font-size:11.5px">2 BHK · Powai</span></td><td class="num">₹65–80 K<span class="muted" style="font-size:11px">/mo</span></td><td><span class="pill t-dead" style="font-size:10.5px">Manual</span></td><td class="muted" data-only="ADMIN MANAGER">Amit R.</td><td><span class="due over">30 Aug · 2d late</span></td><td></td></tr>
+        <tr><td><input type="checkbox" aria-label="r"></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">VJ</div><div><b>Vikram Joshi</b><small>+91 88790 21004</small></div></div></td><td><span class="pill t-sched"><i class="dot"></i>Visit Scheduled</span></td><td class="muted">Commercial · Sale<br><span style="font-size:11.5px">40 seats · 4 cabins</span></td><td class="num">₹2.4–3.0 Cr</td><td><span class="pill t-dead" style="font-size:10.5px">Meta</span></td><td class="muted" data-only="ADMIN MANAGER">Priya N.</td><td><span class="due today">Today · 4:00 PM</span></td><td></td></tr>
+        <tr><td><input type="checkbox" aria-label="r"></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">AD</div><div><b>Aarti Desai</b><small>+91 99303 18877</small></div></div></td><td><span class="pill t-warm"><i class="dot"></i>Interested</span></td><td class="muted">Commercial · Rent<br><span style="font-size:11.5px">Lower Parel · 2,000 sq ft</span></td><td class="num">₹2.8–3.5 L<span class="muted" style="font-size:11px">/mo</span></td><td><span class="pill t-dead" style="font-size:10.5px">Manual</span></td><td class="muted" data-only="ADMIN MANAGER">Kunal M.</td><td><span class="due today">Today · 6:30 PM</span></td><td></td></tr>
+        <tr><td><input type="checkbox" aria-label="r"></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">NP</div><div><b>Nikhil Pawar</b><small>+91 93244 55018</small></div></div></td><td><span class="pill t-warm"><i class="dot"></i>Requested</span></td><td class="muted">Commercial · Lease<br><span style="font-size:11.5px">Andheri E · 3,500 sq ft</span></td><td class="num">₹4.0–5.2 L<span class="muted" style="font-size:11px">/mo</span></td><td><span class="pill t-dead" style="font-size:10.5px">Meta</span></td><td class="muted" data-only="ADMIN MANAGER">Sana B.</td><td>Tomorrow · 11 AM</td><td></td></tr>
+        <tr><td><input type="checkbox" aria-label="r"></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">MI</div><div><b>Mohd Irfan</b><small>+91 70212 90066</small></div></div></td><td><span class="pill t-open"><i class="dot"></i>New</span></td><td class="muted">Not captured yet</td><td class="muted">—</td><td><span class="pill t-dead" style="font-size:10.5px">Meta</span></td><td data-only="ADMIN MANAGER"><span class="chip" style="padding:2px 8px;font-size:11px">Assign</span></td><td class="muted">—</td><td></td></tr>
+        <tr><td><input type="checkbox" aria-label="r"></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">GT</div><div><b>Gaurav Thakur</b><small>+91 98675 33291</small></div></div></td><td><span class="pill t-party">Broker</span></td><td class="muted">Represents 3 clients</td><td class="muted">—</td><td><span class="pill t-dead" style="font-size:10.5px">Manual</span></td><td class="muted" data-only="ADMIN MANAGER">Amit R.</td><td class="muted">—</td><td></td></tr>
+      </tbody>
+    </table>
+    <div style="display:flex;align-items:center;gap:var(--s3);padding:11px var(--s4);border-top:1px solid var(--line);font-size:12.5px;color:var(--ink-3);flex-wrap:wrap">
+      <span data-only="ADMIN MANAGER"><b style="color:var(--ink)">Bulk:</b> assign · change status · export</span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center"><span>1–100 of 342</span><button class="btn btn-sec btn-sm">Prev</button><button class="btn btn-sec btn-sm">Next</button></div>
+    </div>
+  </div>
+  <div class="notebox" data-only="CHANNEL_PARTNER" style="margin:0"><b>Partner view:</b><span>Only leads this partner submitted. Assignment, bulk actions and the executive filter are hidden — but note the route gate lets partners reach <code>/leads</code> itself, so the scoping must come from the query, not the UI.</span></div>
+</div>
+
+<!-- ============ /my-leads ============ -->
+<div data-screen="my-leads">
+  <div class="statgrid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr))">
+    <div class="stat is-alert"><div class="k">Overdue</div><div class="v">5</div><div class="d">Oldest 6 days</div></div>
+    <div class="stat"><div class="k">Due today</div><div class="v">4</div><div class="d">2 calls · 2 visits</div></div>
+    <div class="stat"><div class="k">My open leads</div><div class="v">47</div><div class="d">6 interested</div></div>
+    <div class="stat"><div class="k">Closed — Sep</div><div class="v">2</div><div class="d">Target 4</div></div>
+  </div>
+  <div class="toolbar">
+    <div class="seg"><button class="on">Needs action <b style="color:var(--dg600)">9</b></button><button>All mine</button><button>Site visits</button><button>Closed</button></div>
+    <span class="chip">+ Status</span><span class="chip">+ Requirement</span><span class="chip">+ Location</span>
+  </div>
+  <div class="card" style="overflow:hidden">
+    <table class="tbl">
+      <thead><tr><th>Lead</th><th>Status</th><th>Requirement</th><th>Budget</th><th>Last touch</th><th>Next follow-up</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">RM</div><div><b>Rohan Mehta</b><small>+91 98213 44120</small></div></div></td><td><span class="pill t-risk"><i class="dot"></i>Visit Overdue</span></td><td class="muted">Comm · Lease · 1,200 sq ft</td><td class="num">₹1.2–1.6 L</td><td class="muted">28 Aug · call</td><td><span class="due over">4d late</span></td><td><div class="rowacts"><button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg></button></div></td></tr>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">AD</div><div><b>Aarti Desai</b><small>+91 99303 18877</small></div></div></td><td><span class="pill t-warm"><i class="dot"></i>Interested</span></td><td class="muted">Comm · Rent · Lower Parel</td><td class="num">₹2.8–3.5 L</td><td class="muted">31 Aug · WhatsApp</td><td><span class="due today">Today 6:30 PM</span></td><td></td></tr>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">NP</div><div><b>Nikhil Pawar</b><small>+91 93244 55018</small></div></div></td><td><span class="pill t-warm"><i class="dot"></i>Requested</span></td><td class="muted">Comm · Lease · Andheri E</td><td class="num">₹4.0–5.2 L</td><td class="muted">30 Aug · call</td><td>Tomorrow 11 AM</td><td></td></tr>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">SP</div><div><b>Suresh Patil</b><small>+91 98191 40023</small></div></div></td><td><span class="pill t-open"><i class="dot"></i>Contacted</span></td><td class="muted">Res · Sale · Chembur</td><td class="num">₹1.8–2.2 Cr</td><td class="muted">29 Aug · call</td><td>4 Sep</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ /leads/:leadId ============ -->
+<div data-screen="lead-detail">
+  <div style="display:grid;grid-template-columns:1fr 366px;gap:var(--s4)">
+    <div style="display:flex;flex-direction:column;gap:var(--s4);min-width:0">
+      <div class="card">
+        <div class="card-h"><h4>Matched properties</h4><span class="muted" style="font-size:12px">4 of 61 match</span><span class="more">Refine →</span></div>
+        <div class="card-b"><div class="invgrid">
+          <div class="invcard"><div class="invthumb"><span class="badge pill t-won" style="font-size:10px"><i class="dot"></i>Available</span><span class="pid">PRP-1042</span></div><div class="invmeta"><b>Solitaire Corporate</b><small>Tower B · Andheri E</small><div class="price"><b>₹1.45 L</b><small>/mo · 1,250 sq ft</small></div></div></div>
+          <div class="invcard"><div class="invthumb"><span class="badge pill t-won" style="font-size:10px"><i class="dot"></i>Available</span><span class="pid">PRP-0987</span></div><div class="invmeta"><b>Trade Link Plaza</b><small>Tower A · Marol</small><div class="price"><b>₹1.28 L</b><small>/mo · 1,100 sq ft</small></div></div></div>
+          <div class="invcard"><div class="invthumb"><span class="badge pill t-warm" style="font-size:10px"><i class="dot"></i>Blocked</span><span class="pid">PRP-1120</span></div><div class="invmeta"><b>Kanakia Wall St.</b><small>Tower C · Chakala</small><div class="price"><b>₹1.60 L</b><small>/mo · 1,400 sq ft</small></div></div></div>
+        </div></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h4>Diary</h4><span class="more">Add entry</span></div>
+        <div class="card-b"><div class="tl">
+          <div class="tlitem hi"><p><b>Site visit no-show.</b> Client didn't reach Solitaire; will confirm a new slot by evening.</p><time>28 Aug, 4:40 PM · Priya N.</time></div>
+          <div class="tlitem"><p>Shared 3 shortlisted options on WhatsApp.</p><time>26 Aug, 11:12 AM · Priya N.</time></div>
+          <div class="tlitem"><p>Status changed <span class="pill t-warm" style="font-size:10.5px"><i class="dot"></i>Interested</span> → <span class="pill t-sched" style="font-size:10.5px"><i class="dot"></i>Visit Scheduled</span></p><time>24 Aug, 6:02 PM · system</time></div>
+          <div class="tlitem"><p>Budget revised up to ₹1.6 L after board approval.</p><time>22 Aug, 3:15 PM · Priya N.</time></div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="card" style="align-self:start">
+      <div style="padding:var(--s4);border-bottom:1px solid var(--line)">
+        <div style="display:flex;align-items:flex-start;gap:11px">
+          <div class="avatar" style="width:42px;height:42px;font-size:14px">RM</div>
+          <div style="flex:1;min-width:0"><h4 style="font-size:16px">Rohan Mehta</h4><p class="muted mono" style="font-size:12px;margin-top:2px">+91 98213 44120</p>
+            <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><span class="pill t-risk"><i class="dot"></i>Site Visit Overdue</span><span class="pill t-dead" style="font-size:10.5px">Meta lead</span></div></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:14px;flex-wrap:wrap">
+          <button class="btn btn-pri btn-sm" style="flex:1;justify-content:center">Call</button>
+          <button class="btn btn-sec btn-sm" style="flex:1;justify-content:center">WhatsApp</button>
+          <button class="btn btn-sec btn-sm" style="flex:1;justify-content:center">Log</button>
+          <button class="btn btn-sec btn-sm" data-only="ADMIN MANAGER">Reassign</button>
+        </div>
+      </div>
+      <div class="tabs"><button class="on">Overview</button><button>Requirement</button><button>Properties</button><button>Activity</button></div>
+      <div class="card-b" style="display:flex;flex-direction:column;gap:var(--s4)">
+        <div style="border:1px solid var(--dg100);background:var(--dg50);border-radius:var(--r-md);padding:12px">
+          <b style="font-size:12.5px;color:var(--dg700);display:block;margin-bottom:8px">Follow-up 4 days overdue</b>
+          <div style="display:flex;gap:6px"><input class="input" style="padding:6px 9px;font-size:12.5px" value="3 Sep, 11:00 AM"><button class="btn btn-pri btn-sm">Save</button></div>
+        </div>
+        <div><div class="sectitle">Requirement</div>
+          <dl class="kv"><dt>Type</dt><dd>Commercial · Lease</dd><dt>Subtype</dt><dd>Office space</dd><dt>Area</dt><dd class="num">1,000 – 1,400 sq ft</dd><dt>Budget</dt><dd class="num">₹1.2 L – ₹1.6 L / mo</dd><dt>Locations</dt><dd>Andheri E, Marol, Chakala</dd><dt>Furnishing</dt><dd>Semi-furnished+</dd><dt>Seats / cabins</dt><dd class="num">28 seats · 2 cabins</dd></dl></div>
+        <div><div class="sectitle">Ownership</div>
+          <dl class="kv"><dt>Executive</dt><dd>Priya Nair</dd><dt>Manager</dt><dd>Abhishek S.</dd><dt>Field exec</dt><dd class="muted">Not assigned</dd><dt>Created</dt><dd>14 Aug 2026 · Meta form</dd></dl></div>
+        <div data-only="ADMIN MANAGER"><div class="sectitle">Deal payment</div>
+          <dl class="kv"><dt>Approval</dt><dd><span class="pill t-warm"><i class="dot"></i>Pending</span></dd><dt>Mode</dt><dd>UPI · Partial</dd><dt>Remaining</dt><dd class="num">₹42,000</dd></dl>
+          <div style="display:flex;gap:6px;margin-top:11px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /inventory ============ -->
+<div data-screen="inventory">
+  <div class="toolbar">
+    <div class="seg"><button class="on">Available <span class="muted">418</span></button><button>Blocked <span class="muted">72</span></button><button>Sold <span class="muted">128</span></button></div>
+    <span class="chip on">Commercial <x>×</x></span><span class="chip on">Andheri E <x>×</x></span>
+    <span class="chip">+ Rent range</span><span class="chip">+ Area</span><span class="chip">+ Furnishing</span>
+    <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+      <div class="seg"><button class="on">Grid</button><button>Table</button><button>Map</button></div>
+      <button class="btn btn-sec btn-sm">Share list</button>
+    </div>
+  </div>
+  <div class="invgrid">
+    <div class="invcard"><div class="invthumb"><span class="badge pill t-won" style="font-size:10px"><i class="dot"></i>Available</span><span class="pid">PRP-1042</span></div><div class="invmeta"><b>Solitaire Corporate</b><small>Tower B · Unit 704 · Andheri E</small><div class="price"><b>₹1.45 L</b><small>/mo</small></div></div><div class="invfoot"><span>1,250 sq ft</span><span>·</span><span>Furnished</span><span style="margin-left:auto">7th fl</span></div></div>
+    <div class="invcard"><div class="invthumb"><span class="badge pill t-won" style="font-size:10px"><i class="dot"></i>Available</span><span class="pid">PRP-0987</span></div><div class="invmeta"><b>Trade Link Plaza</b><small>Tower A · Unit 302 · Marol</small><div class="price"><b>₹1.28 L</b><small>/mo</small></div></div><div class="invfoot"><span>1,100 sq ft</span><span>·</span><span>Semi-furn.</span><span style="margin-left:auto">3rd fl</span></div></div>
+    <div class="invcard"><div class="invthumb"><span class="badge pill t-warm" style="font-size:10px"><i class="dot"></i>Blocked</span><span class="pid">PRP-1120</span></div><div class="invmeta"><b>Kanakia Wall Street</b><small>Tower C · Unit 1105 · Chakala</small><div class="price"><b>₹1.60 L</b><small>/mo</small></div></div><div class="invfoot"><span>1,400 sq ft</span><span>·</span><span style="color:var(--wa600);font-weight:600">Held till 4 Sep</span></div></div>
+    <div class="invcard"><div class="invthumb"><span class="badge pill t-won" style="font-size:10px"><i class="dot"></i>Available</span><span class="pid">PRP-1198</span></div><div class="invmeta"><b>Boomerang</b><small>Wing B · Unit 210 · Chandivali</small><div class="price"><b>₹2.10 L</b><small>/mo</small></div></div><div class="invfoot"><span>1,850 sq ft</span><span>·</span><span>Bare shell</span><span style="margin-left:auto">2nd fl</span></div></div>
+    <div class="invcard"><div class="invthumb"><span class="badge pill t-dead" style="font-size:10px"><i class="dot"></i>Sold</span><span class="pid">PRP-0844</span></div><div class="invmeta" style="opacity:.62"><b>Times Square</b><small>Tower D · Unit 508 · Marol</small><div class="price"><b>₹3.20 Cr</b><small>sale</small></div></div><div class="invfoot"><span>2,200 sq ft</span><span>·</span><span>Closed 12 Aug</span></div></div>
+    <div class="invcard" data-not="CHANNEL_PARTNER" style="border-style:dashed;box-shadow:none;display:grid;place-items:center;min-height:180px;color:var(--ink-4)"><div style="text-align:center;padding:var(--s4)"><div style="font-size:22px;line-height:1;margin-bottom:8px">+</div><div style="font-size:12.5px;font-weight:600">Add property</div><div style="font-size:11px;margin-top:3px">or drop a spreadsheet</div></div></div>
+  </div>
+  <div class="notebox" data-only="CHANNEL_PARTNER" style="margin:0"><b>Partner view:</b><span>Owner name, owner number and key-manager contact are hidden. Adding and editing are unavailable, and this route is additionally gated on <code>canChannelPartnerViewInventory</code>.</span></div>
+</div>
+
+<!-- ============ /inventory/:id ============ -->
+<div data-screen="inventory-detail">
+  <div style="display:grid;grid-template-columns:1fr 328px;gap:var(--s4)">
+    <div style="display:flex;flex-direction:column;gap:var(--s4);min-width:0">
+      <div class="card" style="overflow:hidden">
+        <div style="height:220px;background:linear-gradient(135deg,var(--surface-3),var(--surface-2));display:grid;place-items:center;color:var(--ink-4);position:relative">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M10 6h4M10 10h4M10 14h4"/></svg>
+          <div style="position:absolute;left:12px;top:12px;display:flex;gap:6px"><span class="pill t-won"><i class="dot"></i>Available</span><span class="pill t-dead" style="font-size:10.5px">Commercial · Rent</span></div>
+          <div style="position:absolute;right:12px;bottom:12px;display:flex;gap:6px"><span class="pill t-dead" style="font-size:10.5px">8 photos</span><span class="pill t-dead" style="font-size:10.5px">2 floor plans</span><span class="pill t-dead" style="font-size:10.5px">1 video</span></div>
+        </div>
+        <div class="card-b">
+          <div style="display:flex;align-items:flex-start;gap:var(--s3);flex-wrap:wrap">
+            <div><h4 style="font-size:19px">Solitaire Corporate — Tower B</h4><p class="muted" style="font-size:13px;margin-top:3px">Unit 704 · 7th floor · Andheri East, Mumbai 400069 · <span class="mono">PRP-1042</span></p></div>
+            <div style="margin-left:auto;text-align:right"><div style="font-size:22px;font-weight:680;letter-spacing:-.03em">₹1.45 L<span class="muted" style="font-size:13px;font-weight:500">/mo</span></div><div class="hint">Deposit ₹8.7 L · 6 months</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="tabs"><button class="on">Specification</button><button>Documents</button><button>Activity</button><button data-only="ADMIN MANAGER">Approvals</button></div>
+        <div class="card-b">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(216px,1fr));gap:var(--s5)">
+            <div><div class="sectitle">Area</div><dl class="kv" style="grid-template-columns:100px 1fr"><dt>Total</dt><dd class="num">1,250 sq ft</dd><dt>Carpet</dt><dd class="num">980 sq ft</dd><dt>Built-up</dt><dd class="num">1,120 sq ft</dd><dt>Super built-up</dt><dd class="num">1,250 sq ft</dd></dl></div>
+            <div><div class="sectitle">Commercial</div><dl class="kv" style="grid-template-columns:100px 1fr"><dt>Seats</dt><dd class="num">40</dd><dt>Cabins</dt><dd class="num">4</dd><dt>Conference</dt><dd class="num">1 · 12 seats</dd><dt>Furnishing</dt><dd>Fully furnished</dd></dl></div>
+            <div><div class="sectitle">Building</div><dl class="kv" style="grid-template-columns:100px 1fr"><dt>Floor</dt><dd class="num">7 of 14</dd><dt>Lifts</dt><dd class="num">4</dd><dt>Power backup</dt><dd>Full</dd><dt>Central AC</dt><dd>Yes</dd></dl></div>
+            <div><div class="sectitle">Lease terms</div><dl class="kv" style="grid-template-columns:100px 1fr"><dt>Agreement</dt><dd class="num">3 years</dd><dt>Lock-in</dt><dd class="num">1 year</dd><dt>Maintenance</dt><dd class="num">₹12/sq ft</dd><dt>GST</dt><dd>Applicable</dd></dl></div>
+          </div>
+          <div style="margin-top:var(--s5)"><div class="sectitle">Amenities</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap"><span class="chip">Parking</span><span class="chip">Pantry</span><span class="chip">Reception</span><span class="chip">Cafeteria</span><span class="chip">Fire safety</span><span class="chip">Server room</span><span class="chip">Breakout area</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:9px">
+        <button class="btn btn-pri" style="justify-content:center">Share with client</button>
+        <button class="btn btn-sec" style="justify-content:center" data-not="CHANNEL_PARTNER">Block for a lead</button>
+        <button class="btn btn-sec" style="justify-content:center" data-not="CHANNEL_PARTNER">Edit details</button>
+        <p class="hint" style="text-align:center;margin-top:2px">Share creates a tokenised public link</p>
+      </div></div>
+      <div class="card" data-not="CHANNEL_PARTNER"><div class="card-h"><h4>Owner</h4></div><div class="card-b">
+        <dl class="kv" style="grid-template-columns:96px 1fr"><dt>Name</dt><dd>Ramesh Agarwal</dd><dt>Type</dt><dd>1st owner</dd><dt>Phone</dt><dd class="mono">+91 98200 11223</dd><dt>WhatsApp</dt><dd class="mono">+91 98200 11223</dd><dt>Key manager</dt><dd>Sunil (watchman)</dd><dt>Key phone</dt><dd class="mono">+91 91670 88991</dd></dl>
+      </div></div>
+      <div class="card" data-only="CHANNEL_PARTNER"><div class="card-b" style="text-align:center;padding:var(--s6)"><div class="hint">Owner and key-manager contacts are hidden for channel partners.</div></div></div>
+      <div class="card"><div class="card-h"><h4>Interested leads</h4></div><div class="card-b"><div class="rowlist">
+        <div><div class="avatar" style="width:24px;height:24px;font-size:9px">RM</div><span style="font-weight:550">Rohan Mehta</span><span class="pill t-risk" style="margin-left:auto"><i class="dot"></i>Overdue</span></div>
+        <div><div class="avatar" style="width:24px;height:24px;font-size:9px">VJ</div><span style="font-weight:550">Vikram Joshi</span><span class="pill t-sched" style="margin-left:auto"><i class="dot"></i>Visit</span></div>
+      </div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /projects ============ -->
+<div data-screen="projects">
+  <div class="toolbar">
+    <div class="seg"><button class="on">All <span class="muted">24</span></button><button>Active</button><button>Completed</button></div>
+    <span class="chip">+ City</span><span class="chip">+ Developer</span><span class="chip">+ Type</span>
+    <button class="btn btn-sec btn-sm" style="margin-left:auto">Export</button>
+  </div>
+  <div class="invgrid" style="grid-template-columns:repeat(auto-fill,minmax(244px,1fr))">
+    <div class="invcard"><div class="invthumb" style="height:110px"><span class="badge pill t-won" style="font-size:10px"><i class="dot"></i>Active</span><span class="pid">PRJ-018</span></div>
+      <div class="invmeta"><b>Solitaire Corporate Park</b><small>Andheri East · Rustomjee</small>
+        <div style="display:flex;gap:var(--s4);margin-top:11px"><div><div class="hint">Units</div><b class="num" style="font-size:15px">86</b></div><div><div class="hint">Available</div><b class="num" style="font-size:15px;color:var(--ok600)">31</b></div><div><div class="hint">Sold</div><b class="num" style="font-size:15px">55</b></div></div>
+        <div class="bar-mini" style="margin-top:11px;height:6px"><i style="width:64%;background:var(--ok500)"></i></div></div>
+      <div class="invfoot"><span>4 towers</span><span>·</span><span>14 floors</span><span style="margin-left:auto">64% sold</span></div></div>
+    <div class="invcard"><div class="invthumb" style="height:110px"><span class="badge pill t-won" style="font-size:10px"><i class="dot"></i>Active</span><span class="pid">PRJ-022</span></div>
+      <div class="invmeta"><b>Trade Link Plaza</b><small>Marol · Kanakia</small>
+        <div style="display:flex;gap:var(--s4);margin-top:11px"><div><div class="hint">Units</div><b class="num" style="font-size:15px">54</b></div><div><div class="hint">Available</div><b class="num" style="font-size:15px;color:var(--ok600)">22</b></div><div><div class="hint">Sold</div><b class="num" style="font-size:15px">32</b></div></div>
+        <div class="bar-mini" style="margin-top:11px;height:6px"><i style="width:59%;background:var(--ok500)"></i></div></div>
+      <div class="invfoot"><span>2 towers</span><span>·</span><span>9 floors</span><span style="margin-left:auto">59% sold</span></div></div>
+    <div class="invcard"><div class="invthumb" style="height:110px"><span class="badge pill t-warm" style="font-size:10px"><i class="dot"></i>Under construction</span><span class="pid">PRJ-031</span></div>
+      <div class="invmeta"><b>Boomerang Phase 2</b><small>Chandivali · Sanghvi</small>
+        <div style="display:flex;gap:var(--s4);margin-top:11px"><div><div class="hint">Units</div><b class="num" style="font-size:15px">120</b></div><div><div class="hint">Available</div><b class="num" style="font-size:15px;color:var(--ok600)">98</b></div><div><div class="hint">Sold</div><b class="num" style="font-size:15px">22</b></div></div>
+        <div class="bar-mini" style="margin-top:11px;height:6px"><i style="width:18%;background:var(--wa500)"></i></div></div>
+      <div class="invfoot"><span>3 wings</span><span>·</span><span>Ready Mar 2027</span></div></div>
+  </div>
+</div>
+
+<!-- ============ /projects/:id ============ -->
+<div data-screen="project-detail">
+  <div class="card">
+    <div class="card-b" style="display:flex;gap:var(--s5);flex-wrap:wrap;align-items:flex-start">
+      <div style="flex:1;min-width:210px"><h4 style="font-size:19px">Solitaire Corporate Park</h4><p class="muted" style="font-size:13px;margin-top:3px">Rustomjee Developers · Andheri East, Mumbai · <span class="mono">PRJ-018</span></p>
+        <div style="display:flex;gap:6px;margin-top:11px;flex-wrap:wrap"><span class="pill t-won"><i class="dot"></i>Active</span><span class="pill t-dead" style="font-size:10.5px">Commercial</span><span class="pill t-dead" style="font-size:10.5px">RERA P51800012345</span></div></div>
+      <div class="statgrid" style="flex:2;min-width:280px;grid-template-columns:repeat(4,1fr)">
+        <div class="stat"><div class="k">Units</div><div class="v">86</div></div>
+        <div class="stat"><div class="k">Available</div><div class="v" style="color:var(--ok600)">31</div></div>
+        <div class="stat"><div class="k">Blocked</div><div class="v" style="color:var(--wa600)">6</div></div>
+        <div class="stat"><div class="k">Sold</div><div class="v">49</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-h"><h4>Units</h4><div class="seg" style="margin-left:auto"><button class="on">Tower A</button><button>Tower B</button><button>Tower C</button><button>Tower D</button></div></div>
+    <table class="tbl">
+      <thead><tr><th>Unit</th><th>Floor</th><th>Carpet</th><th>Rent</th><th>Status</th><th>Held for</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><b class="mono" style="font-weight:600">A-704</b></td><td class="num">7</td><td class="num">980 sq ft</td><td class="num">₹1.45 L</td><td><span class="pill t-won"><i class="dot"></i>Available</span></td><td class="muted">—</td><td><div class="rowacts"><button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div></td></tr>
+        <tr><td><b class="mono" style="font-weight:600">A-705</b></td><td class="num">7</td><td class="num">1,120 sq ft</td><td class="num">₹1.62 L</td><td><span class="pill t-warm"><i class="dot"></i>Blocked</span></td><td class="muted">Vikram Joshi · till 4 Sep</td><td></td></tr>
+        <tr><td><b class="mono" style="font-weight:600">A-801</b></td><td class="num">8</td><td class="num">2,040 sq ft</td><td class="num">₹2.95 L</td><td><span class="pill t-dead"><i class="dot"></i>Sold</span></td><td class="muted">Closed 12 Aug</td><td></td></tr>
+        <tr><td><b class="mono" style="font-weight:600">A-802</b></td><td class="num">8</td><td class="num">860 sq ft</td><td class="num">₹1.24 L</td><td><span class="pill t-won"><i class="dot"></i>Available</span></td><td class="muted">—</td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ /finance ============ -->
+<div data-screen="finance">
+  <div class="statgrid">
+    <div class="stat"><div class="k" data-only="MANAGER">Revenue — Sep</div><div class="k" data-not="MANAGER">My earnings — Sep</div><div class="v" data-only="MANAGER">₹42.8 L</div><div class="v" data-not="MANAGER">₹1.84 L</div><div class="d"><span class="delta up">▲ 12%</span> vs Aug</div></div>
+    <div class="stat"><div class="k">Collected</div><div class="v" data-only="MANAGER">₹31.2 L</div><div class="v" data-not="MANAGER">₹1.20 L</div><div class="d">73% of billed</div></div>
+    <div class="stat is-alert"><div class="k">Outstanding</div><div class="v" data-only="MANAGER">₹11.6 L</div><div class="v" data-not="MANAGER">₹64,000</div><div class="d">4 deals pending</div></div>
+    <div class="stat"><div class="k">Approvals waiting</div><div class="v">2</div><div class="d">Deal payments</div></div>
+  </div>
+  <div class="split">
+    <div class="card">
+      <div class="card-h"><h4>Deal payments</h4><div class="seg" style="margin-left:auto"><button class="on">Pending <b style="color:var(--wa600)">2</b></button><button>Approved</button><button>Rejected</button></div></div>
+      <table class="tbl">
+        <thead><tr><th>Lead</th><th>Property</th><th>Amount</th><th>Mode</th><th>Approval</th><th data-only="MANAGER"></th></tr></thead>
+        <tbody>
+          <tr><td><b style="font-weight:600">Vikram Joshi</b><br><small class="muted">Priya N.</small></td><td class="muted"><span class="mono">PRP-1042</span><br><span style="font-size:11.5px">Solitaire B-704</span></td><td class="num"><b>₹2,40,000</b><br><small class="muted">Partial · ₹42,000 left</small></td><td><span class="pill t-dead" style="font-size:10.5px">UPI</span></td><td><span class="pill t-warm"><i class="dot"></i>Pending</span></td><td data-only="MANAGER"><div style="display:flex;gap:5px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></td></tr>
+          <tr><td><b style="font-weight:600">Aarti Desai</b><br><small class="muted">Kunal M.</small></td><td class="muted"><span class="mono">PRP-0987</span><br><span style="font-size:11.5px">Trade Link A-302</span></td><td class="num"><b>₹1,85,000</b><br><small class="muted">Full</small></td><td><span class="pill t-dead" style="font-size:10.5px">NEFT</span></td><td><span class="pill t-warm"><i class="dot"></i>Pending</span></td><td data-only="MANAGER"><div style="display:flex;gap:5px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></td></tr>
+          <tr><td><b style="font-weight:600">Suresh Patil</b><br><small class="muted">Sana B.</small></td><td class="muted"><span class="mono">PRP-0844</span><br><span style="font-size:11.5px">Times Square D-508</span></td><td class="num"><b>₹6,40,000</b><br><small class="muted">Full</small></td><td><span class="pill t-dead" style="font-size:10.5px">Cheque</span></td><td><span class="pill t-won"><i class="dot"></i>Approved</span></td><td data-only="MANAGER"></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-h"><h4>Collections — 6 months</h4></div><div class="card-b">
+        <div class="bars"><div><i style="height:48%"></i><span>Apr</span></div><div><i style="height:62%"></i><span>May</span></div><div><i style="height:55%"></i><span>Jun</span></div><div><i style="height:71%"></i><span>Jul</span></div><div><i style="height:84%"></i><span>Aug</span></div><div><i style="height:12%;background:var(--b300)"></i><span>Sep</span></div></div>
+        <p class="hint" style="margin-top:9px">September is partial — 1 of 30 days.</p>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>By payment mode</h4></div><div class="card-b" style="display:flex;gap:var(--s4);align-items:center;flex-wrap:wrap">
+        <div class="donut" style="background:conic-gradient(var(--b500) 0 42%,var(--ok500) 42% 68%,var(--wa500) 68% 88%,var(--vi500) 88% 100%)"></div>
+        <div class="legend" style="flex:1;min-width:132px">
+          <div><i style="background:var(--b500)"></i>NEFT / RTGS<b>42%</b></div>
+          <div><i style="background:var(--ok500)"></i>UPI<b>26%</b></div>
+          <div><i style="background:var(--wa500)"></i>Cheque<b>20%</b></div>
+          <div><i style="background:var(--vi500)"></i>Cash<b>12%</b></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+  <div class="notebox" data-only="ADMIN" style="margin:0"><b>Gap in the gate:</b><span>The <code>/finance</code> route is <code>canAccess([...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"])</code>, and <code>MANAGEMENT_ROLES</code> is <code>["MANAGER"]</code> only — so <b>Admin is excluded from Finance</b> while every executive can see it. Almost certainly unintended.</span></div>
+</div>
+
+<!-- ============ /map ============ -->
+<div data-screen="map">
+  <div class="toolbar">
+    <div class="seg"><button class="on">Today's visits <span class="muted">6</span></button><button>All properties</button><button data-only="ADMIN MANAGER">Team live</button></div>
+    <span class="chip on">Andheri E <x>×</x></span><span class="chip" data-only="ADMIN MANAGER">+ Executive</span><span class="chip">+ Status</span>
+    <button class="btn btn-sec btn-sm" style="margin-left:auto">Optimise route</button>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 288px;gap:var(--s4)">
+    <div class="mapbox">
+      <div class="mpin" style="left:26%;top:34%"><i style="background:var(--vi500)"></i><span>Solitaire · 4:00 PM</span></div>
+      <div class="mpin" style="left:58%;top:52%"><i style="background:var(--vi500)"></i><span>Trade Link · 6:30 PM</span></div>
+      <div class="mpin" style="left:44%;top:70%"><i style="background:var(--dg500)"></i><span>Kanakia · overdue</span></div>
+      <div class="mpin" style="left:72%;top:26%"><i style="background:var(--ok500)"></i><span>Boomerang</span></div>
+      <div class="mpin" style="left:34%;top:56%" data-only="ADMIN MANAGER"><i style="background:var(--b500);border-radius:50%;transform:none"></i><span>Priya N. · 12 min ago</span></div>
+      <div style="position:absolute;left:12px;bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-md);padding:9px 11px;box-shadow:var(--e2)">
+        <div class="legend" style="font-size:11.5px">
+          <div><i style="background:var(--vi500)"></i>Scheduled visit</div>
+          <div><i style="background:var(--dg500)"></i>Overdue</div>
+          <div><i style="background:var(--ok500)"></i>Available property</div>
+          <div data-only="ADMIN MANAGER"><i style="background:var(--b500);border-radius:50%"></i>Team member</div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="align-self:start"><div class="card-h"><h4>Today's route</h4></div><div class="card-b" style="display:flex;flex-direction:column;gap:10px">
+      <div style="border:1px solid var(--accent);border-radius:var(--r-md);padding:10px"><b style="font-size:12.8px">4:00 PM · Vikram Joshi</b><div class="muted" style="font-size:11.5px;margin-top:2px">Solitaire Corporate, Tower B</div><div style="display:flex;gap:5px;margin-top:9px"><button class="btn btn-pri btn-sm">Navigate</button><button class="btn btn-sec btn-sm">Check in</button></div></div>
+      <div style="border:1px solid var(--line);border-radius:var(--r-md);padding:10px"><b style="font-size:12.8px">6:30 PM · Aarti Desai</b><div class="muted" style="font-size:11.5px;margin-top:2px">Trade Link Plaza, Marol</div><div class="hint" style="margin-top:6px">18 min drive from previous stop</div></div>
+      <div style="border:1px solid var(--dg100);background:var(--dg50);border-radius:var(--r-md);padding:10px"><b style="font-size:12.8px;color:var(--dg700)">Overdue · Rohan Mehta</b><div style="font-size:11.5px;margin-top:2px;color:var(--dg700)">No-show 28 Aug</div></div>
+    </div></div>
+  </div>
+</div>
+
+<!-- ============ /reports ============ -->
+<div data-screen="reports">
+  <div class="toolbar">
+    <div class="seg"><button class="on">This month</button><button>Quarter</button><button>Year</button><button>Custom</button></div>
+    <span class="chip">+ Branch</span><span class="chip">+ Executive</span><span class="chip">+ Source</span>
+    <button class="btn btn-sec btn-sm" style="margin-left:auto">Export CSV</button>
+    <button class="btn btn-sec btn-sm">Schedule email</button>
+  </div>
+  <div class="statgrid">
+    <div class="stat"><div class="k">Leads received</div><div class="v">418</div><div class="d"><span class="delta up">▲ 6%</span> vs Aug</div></div>
+    <div class="stat"><div class="k">Conversion</div><div class="v">6.2%</div><div class="d"><span class="delta down">▼ 0.4pt</span> vs Aug</div></div>
+    <div class="stat"><div class="k">Avg. days to close</div><div class="v">34</div><div class="d"><span class="delta up">▲ 3 days</span> slower</div></div>
+    <div class="stat"><div class="k">Cost per lead</div><div class="v">₹412</div><div class="d">Meta campaigns only</div></div>
+    <div class="stat"><div class="k">Revenue</div><div class="v">₹42.8 L</div><div class="d"><span class="delta up">▲ 12%</span> vs Aug</div></div>
+  </div>
+  <div class="split">
+    <div class="card"><div class="card-h"><h4>Leads and closures by month</h4></div><div class="card-b">
+      <div class="bars" style="height:172px">
+        <div><i style="height:56%"></i><span>Apr</span></div><div><i style="height:64%"></i><span>May</span></div>
+        <div><i style="height:52%"></i><span>Jun</span></div><div><i style="height:73%"></i><span>Jul</span></div>
+        <div><i style="height:88%"></i><span>Aug</span></div><div><i style="height:94%"></i><span>Sep</span></div>
+      </div>
+      <div class="legend" style="flex-direction:row;gap:var(--s4);margin-top:11px;font-size:11.5px"><div><i style="background:var(--b500)"></i>Leads received</div><div><i style="background:var(--ok500)"></i>Closed</div></div>
+    </div></div>
+    <div class="card"><div class="card-h"><h4>Source mix</h4></div><div class="card-b" style="display:flex;gap:var(--s4);align-items:center;flex-wrap:wrap">
+      <div class="donut" style="background:conic-gradient(var(--b500) 0 68%,var(--vi500) 68% 100%)"></div>
+      <div class="legend" style="flex:1;min-width:130px">
+        <div><i style="background:var(--b500)"></i>Meta ads<b>284</b></div>
+        <div><i style="background:var(--vi500)"></i>Manual entry<b>134</b></div>
+      </div>
+    </div></div>
+  </div>
+  <div class="split-even">
+    <div class="card"><div class="card-h"><h4>Executive performance</h4></div>
+      <table class="tbl">
+        <thead><tr><th>Executive</th><th>Leads</th><th>Visits</th><th>Closed</th><th>Conv.</th></tr></thead>
+        <tbody>
+          <tr><td><div class="cellname"><div class="avatar" style="width:24px;height:24px;font-size:9px">SB</div><b>Sana B.</b></div></td><td class="num">92</td><td class="num">31</td><td class="num">8</td><td class="num" style="color:var(--ok600);font-weight:650">8.7%</td></tr>
+          <tr><td><div class="cellname"><div class="avatar" style="width:24px;height:24px;font-size:9px">PN</div><b>Priya N.</b></div></td><td class="num">104</td><td class="num">28</td><td class="num">7</td><td class="num" style="font-weight:650">6.7%</td></tr>
+          <tr><td><div class="cellname"><div class="avatar" style="width:24px;height:24px;font-size:9px">AR</div><b>Amit R.</b></div></td><td class="num">118</td><td class="num">22</td><td class="num">6</td><td class="num" style="font-weight:650">5.1%</td></tr>
+          <tr><td><div class="cellname"><div class="avatar" style="width:24px;height:24px;font-size:9px">KM</div><b>Kunal M.</b></div></td><td class="num">104</td><td class="num">14</td><td class="num">3</td><td class="num" style="color:var(--dg600);font-weight:650">2.9%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="card"><div class="card-h"><h4>Where leads are lost</h4></div><div class="card-b">
+      <div class="rowlist">
+        <div><span style="font-weight:550;min-width:120px">Not picking calls</span><span class="bar-mini"><i style="width:74%;background:var(--dg500)"></i></span><span class="num muted">98</span></div>
+        <div><span style="font-weight:550;min-width:120px">Budget mismatch</span><span class="bar-mini"><i style="width:52%;background:var(--dg500)"></i></span><span class="num muted">69</span></div>
+        <div><span style="font-weight:550;min-width:120px">Visit no-show</span><span class="bar-mini"><i style="width:38%;background:var(--dg500)"></i></span><span class="num muted">51</span></div>
+        <div><span style="font-weight:550;min-width:120px">Chose competitor</span><span class="bar-mini"><i style="width:24%;background:var(--dg500)"></i></span><span class="num muted">32</span></div>
+        <div><span style="font-weight:550;min-width:120px">Invalid number</span><span class="bar-mini"><i style="width:19%;background:var(--dg500)"></i></span><span class="num muted">25</span></div>
+      </div>
+    </div></div>
+  </div>
+</div>
+
+<!-- ============ /leaderboard ============ -->
+<div data-screen="leaderboard">
+  <div class="toolbar">
+    <div class="seg"><button class="on">This month</button><button>This quarter</button><button>All time</button></div>
+    <div class="seg"><button class="on">Closures</button><button>Site visits</button><button>Revenue</button></div>
+  </div>
+  <div class="split">
+    <div class="card"><div class="card-h"><h4>September rankings</h4><span class="muted" style="margin-left:auto;font-size:12px">Updated 10 min ago</span></div>
+      <table class="tbl">
+        <thead><tr><th style="width:44px">#</th><th>Executive</th><th>Closures</th><th>Visits</th><th>Revenue</th><th>Target</th></tr></thead>
+        <tbody>
+          <tr style="background:var(--ok50)"><td><b style="font-size:15px;color:var(--ok600)">1</b></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">SB</div><div><b>Sana Bhatt</b><small style="font-family:var(--font)">Executive</small></div></div></td><td class="num"><b>8</b></td><td class="num">31</td><td class="num">₹14.2 L</td><td><span class="pill t-won"><i class="dot"></i>160%</span></td></tr>
+          <tr><td><b style="font-size:15px">2</b></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">PN</div><div><b>Priya Nair</b><small style="font-family:var(--font)">Executive</small></div></div></td><td class="num"><b>7</b></td><td class="num">28</td><td class="num">₹11.8 L</td><td><span class="pill t-won"><i class="dot"></i>140%</span></td></tr>
+          <tr><td><b style="font-size:15px">3</b></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">AR</div><div><b>Amit Raut</b><small style="font-family:var(--font)">Field Executive</small></div></div></td><td class="num"><b>6</b></td><td class="num">22</td><td class="num">₹9.4 L</td><td><span class="pill t-warm"><i class="dot"></i>75%</span></td></tr>
+          <tr style="background:var(--accent-soft)"><td><b style="font-size:15px">4</b></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">KM</div><div><b>Kunal Mishra</b><small style="font-family:var(--font)">You</small></div></div></td><td class="num"><b>3</b></td><td class="num">14</td><td class="num">₹4.6 L</td><td><span class="pill t-risk"><i class="dot"></i>50%</span></td></tr>
+          <tr><td><b style="font-size:15px">5</b></td><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">RD</div><div><b>Rahul Deshmukh</b><small style="font-family:var(--font)">Channel Partner</small></div></div></td><td class="num"><b>2</b></td><td class="num">9</td><td class="num">₹2.8 L</td><td class="muted">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-h"><h4>Your position</h4></div><div class="card-b" style="text-align:center;padding:var(--s6)">
+        <div style="font-size:42px;font-weight:700;letter-spacing:-.04em;line-height:1">4<span style="font-size:18px;color:var(--ink-3)">th</span></div>
+        <p class="hint" style="margin-top:6px">of 12 · up 2 places this week</p>
+        <div class="bar-mini" style="height:8px;margin-top:14px"><i style="width:50%"></i></div>
+        <p class="hint" style="margin-top:8px">3 of 6 closures toward target</p>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>Team pace</h4></div><div class="card-b">
+        <div class="rowlist" style="font-size:12.5px">
+          <div><span>Team target</span><b class="num" style="margin-left:auto">40 closures</b></div>
+          <div><span>Achieved</span><b class="num" style="margin-left:auto;color:var(--ok600)">26</b></div>
+          <div><span>Days left</span><b class="num" style="margin-left:auto">21</b></div>
+          <div><span>Needed per day</span><b class="num" style="margin-left:auto">0.67</b></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /calendar ============ -->
+<div data-screen="calendar">
+  <div class="toolbar">
+    <div class="seg"><button>Day</button><button>Week</button><button class="on">Month</button><button>Agenda</button></div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <b style="font-size:14px">September 2026</b>
+      <button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg></button>
+      <button class="btn btn-sec btn-sm">Today</button>
+    </div>
+    <span class="chip on">Site visits <x>×</x></span><span class="chip">+ Follow-ups</span><span class="chip">+ Tasks</span>
+    <span class="chip" data-only="ADMIN MANAGER">+ Executive</span>
+    <button class="btn btn-pri btn-sm" style="margin-left:auto">+ New event</button>
+  </div>
+  <div class="cal">
+    <div class="dow">Mon</div><div class="dow">Tue</div><div class="dow">Wed</div><div class="dow">Thu</div><div class="dow">Fri</div><div class="dow">Sat</div><div class="dow">Sun</div>
+    <div class="day dim"><span class="n">31</span><span class="ev o">2 follow-ups</span></div>
+    <div class="day today"><span class="n">1</span><span class="ev v">4:00 Vikram J.</span><span class="ev v">6:30 Aarti D.</span><span class="ev w">9 follow-ups</span></div>
+    <div class="day"><span class="n">2</span><span class="ev v">11:00 Nikhil P.</span><span class="ev w">6 follow-ups</span></div>
+    <div class="day"><span class="n">3</span><span class="ev o">Rohan M. resched.</span><span class="ev w">4 follow-ups</span></div>
+    <div class="day"><span class="n">4</span><span class="ev v">2 site visits</span><span class="ev g">Kanakia hold ends</span></div>
+    <div class="day"><span class="n">5</span><span class="ev w">3 follow-ups</span></div>
+    <div class="day dim"><span class="n">6</span></div>
+    <div class="day"><span class="n">7</span><span class="ev v">3 site visits</span></div>
+    <div class="day"><span class="n">8</span><span class="ev w">5 follow-ups</span></div>
+    <div class="day"><span class="n">9</span><span class="ev v">1 site visit</span><span class="ev o">Team review</span></div>
+    <div class="day"><span class="n">10</span><span class="ev w">7 follow-ups</span></div>
+    <div class="day"><span class="n">11</span><span class="ev v">2 site visits</span></div>
+    <div class="day"><span class="n">12</span><span class="ev g">Month target check</span></div>
+    <div class="day dim"><span class="n">13</span></div>
+  </div>
+  <div class="card"><div class="card-h"><h4>Today · Tuesday 1 September</h4></div><div class="card-b"><div class="tl">
+    <div class="tlitem hi"><p><b>4:00 PM — Site visit</b> · Vikram Joshi at Solitaire Corporate, Tower B</p><time>Priya N. · confirmed</time></div>
+    <div class="tlitem"><p><b>6:30 PM — Site visit</b> · Aarti Desai at Trade Link Plaza</p><time>Kunal M. · awaiting confirmation</time></div>
+    <div class="tlitem"><p><b>All day</b> · 9 follow-up calls due</p><time>5 overdue from previous days</time></div>
+  </div></div></div>
+</div>
+
+<!-- ============ /tasks ============ -->
+<div data-screen="tasks">
+  <div class="toolbar">
+    <div class="seg"><button class="on">Board</button><button>List</button><button>Calendar</button></div>
+    <span class="chip on">Mine <x>×</x></span><span class="chip">+ Due date</span><span class="chip">+ Priority</span>
+    <span class="chip" data-only="ADMIN MANAGER">+ Assignee</span>
+    <button class="btn btn-pri btn-sm" style="margin-left:auto">+ New task</button>
+  </div>
+  <div class="kan">
+    <div class="kancol">
+      <div class="kanhead">Open<span class="n">4</span></div>
+      <div class="task"><b>Call back Sneha Kulkarni — not picking since 30 Aug</b><div class="m"><span class="pill t-risk" style="font-size:10px"><i class="dot"></i>High</span><span>Due today</span><div class="avatar" style="width:19px;height:19px;font-size:8px;margin-left:auto">AR</div></div></div>
+      <div class="task"><b>Collect KYC documents — Vikram Joshi</b><div class="m"><span class="pill t-warm" style="font-size:10px"><i class="dot"></i>Medium</span><span>3 Sep</span><div class="avatar" style="width:19px;height:19px;font-size:8px;margin-left:auto">PN</div></div></div>
+      <div class="task"><b>Shoot photos — Solitaire Tower B unit 705</b><div class="m"><span class="pill t-open" style="font-size:10px"><i class="dot"></i>Low</span><span>5 Sep</span><div class="avatar" style="width:19px;height:19px;font-size:8px;margin-left:auto">DS</div></div></div>
+      <div class="task"><b>Update rent card — Marol cluster</b><div class="m"><span class="pill t-open" style="font-size:10px"><i class="dot"></i>Low</span><span>8 Sep</span></div></div>
+    </div>
+    <div class="kancol">
+      <div class="kanhead">In progress<span class="n">3</span></div>
+      <div class="task"><b>Negotiate deposit terms — Aarti Desai</b><div class="m"><span class="pill t-warm" style="font-size:10px"><i class="dot"></i>Medium</span><span>Today</span><div class="avatar" style="width:19px;height:19px;font-size:8px;margin-left:auto">KM</div></div></div>
+      <div class="task"><b>Edit walkthrough video — Boomerang</b><div class="m"><span class="pill t-open" style="font-size:10px"><i class="dot"></i>Low</span><span>3 Sep</span><div class="avatar" style="width:19px;height:19px;font-size:8px;margin-left:auto">DS</div></div></div>
+      <div class="task"><b>Verify owner documents — PRP-1120</b><div class="m"><span class="pill t-warm" style="font-size:10px"><i class="dot"></i>Medium</span><span>4 Sep</span></div></div>
+    </div>
+    <div class="kancol">
+      <div class="kanhead">Blocked<span class="n">2</span></div>
+      <div class="task" style="border-color:var(--dg100)"><b>Agreement draft — Times Square D-508</b><div class="m"><span class="pill t-risk" style="font-size:10px"><i class="dot"></i>Legal</span><span>Waiting on owner</span></div></div>
+      <div class="task" style="border-color:var(--dg100)"><b>Site access — Kanakia Tower C</b><div class="m"><span class="pill t-risk" style="font-size:10px"><i class="dot"></i>Blocked</span><span>Key manager unreachable</span></div></div>
+    </div>
+    <div class="kancol">
+      <div class="kanhead">Done<span class="n">12</span></div>
+      <div class="task" style="opacity:.62"><b>Share shortlist — Rohan Mehta</b><div class="m"><span>Completed 26 Aug</span></div></div>
+      <div class="task" style="opacity:.62"><b>Community post — September listings</b><div class="m"><span>Completed 31 Aug</span></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /attendance ============ -->
+<div data-screen="attendance">
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-b" style="display:flex;align-items:center;gap:var(--s5);flex-wrap:wrap">
+        <div style="flex:1;min-width:180px">
+          <div class="sectitle" style="margin-bottom:5px">Today · Tue 1 September</div>
+          <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:26px;font-weight:680;letter-spacing:-.03em">9:12 AM</span><span class="pill t-won"><i class="dot"></i>Checked in</span></div>
+          <p class="hint" style="margin-top:7px">Andheri branch · 7h 24m elapsed</p>
+        </div>
+        <button class="btn btn-sec">Check out</button>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>This month</h4>
+        <div class="seg" style="margin-left:auto"><button class="on">September</button><button>August</button></div></div>
+        <table class="tbl">
+          <thead><tr><th>Date</th><th>In</th><th>Out</th><th>Hours</th><th>Status</th><th data-only="ADMIN MANAGER">Location</th></tr></thead>
+          <tbody>
+            <tr><td><b style="font-weight:600">Tue 1 Sep</b></td><td class="num">9:12</td><td class="muted">—</td><td class="num muted">7h 24m</td><td><span class="pill t-won"><i class="dot"></i>Present</span></td><td class="muted" data-only="ADMIN MANAGER">Andheri</td></tr>
+            <tr><td><b style="font-weight:600">Mon 31 Aug</b></td><td class="num">9:48</td><td class="num">7:02</td><td class="num">9h 14m</td><td><span class="pill t-warm"><i class="dot"></i>Late</span></td><td class="muted" data-only="ADMIN MANAGER">Andheri</td></tr>
+            <tr><td><b style="font-weight:600">Fri 28 Aug</b></td><td class="num">9:04</td><td class="num">6:40</td><td class="num">9h 36m</td><td><span class="pill t-won"><i class="dot"></i>Present</span></td><td class="muted" data-only="ADMIN MANAGER">Field · Marol</td></tr>
+            <tr><td><b style="font-weight:600">Thu 27 Aug</b></td><td class="muted">—</td><td class="muted">—</td><td class="muted">—</td><td><span class="pill t-dead"><i class="dot"></i>Leave</span></td><td class="muted" data-only="ADMIN MANAGER">—</td></tr>
+            <tr><td><b style="font-weight:600">Wed 26 Aug</b></td><td class="num">9:01</td><td class="num">6:58</td><td class="num">9h 57m</td><td><span class="pill t-won"><i class="dot"></i>Present</span></td><td class="muted" data-only="ADMIN MANAGER">Andheri</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="statgrid" style="grid-template-columns:1fr 1fr">
+        <div class="stat"><div class="k">Present</div><div class="v">18</div><div class="d">of 21 working days</div></div>
+        <div class="stat"><div class="k">Late</div><div class="v">3</div><div class="d">After 9:30 AM</div></div>
+        <div class="stat"><div class="k">Leave taken</div><div class="v">2</div><div class="d">8 remaining</div></div>
+        <div class="stat"><div class="k">Avg. hours</div><div class="v">9.2</div><div class="d">Target 9.0</div></div>
+      </div>
+      <div class="card"><div class="card-h"><h4>Requests</h4><span class="more">New request</span></div><div class="card-b">
+        <div class="rowlist">
+          <div><div><b style="font-weight:600;font-size:12.8px">Casual leave · 12 Sep</b><div class="hint">Family function</div></div><span class="pill t-warm" style="margin-left:auto"><i class="dot"></i>Pending</span></div>
+          <div><div><b style="font-weight:600;font-size:12.8px">Regularisation · 31 Aug</b><div class="hint">Forgot to check out</div></div><span class="pill t-won" style="margin-left:auto"><i class="dot"></i>Approved</span></div>
+        </div>
+      </div></div>
+      <div class="card" data-only="ADMIN MANAGER"><div class="card-h"><h4>Team approvals</h4><span class="pill t-warm" style="margin-left:auto"><i class="dot"></i>5 pending</span></div><div class="card-b">
+        <div class="rowlist">
+          <div><div class="avatar" style="width:24px;height:24px;font-size:9px">AR</div><div><b style="font-weight:600;font-size:12.5px">Amit R.</b><div class="hint">Sick leave · 2–3 Sep</div></div><div style="margin-left:auto;display:flex;gap:5px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></div>
+          <div><div class="avatar" style="width:24px;height:24px;font-size:9px">KM</div><div><b style="font-weight:600;font-size:12.5px">Kunal M.</b><div class="hint">Regularisation · 29 Aug</div></div><div style="margin-left:auto;display:flex;gap:5px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></div>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /targets ============ -->
+<div data-screen="targets">
+  <div data-not="PRODUCTION_EXECUTIVE COMMUNITY_MANAGER">
+    <div class="statgrid">
+      <div class="stat"><div class="k">Closures</div><div class="v">3 <span style="font-size:14px;color:var(--ink-3);font-weight:500">/ 6</span></div><div class="d">50% · 21 days left</div></div>
+      <div class="stat"><div class="k">Site visits</div><div class="v">14 <span style="font-size:14px;color:var(--ink-3);font-weight:500">/ 25</span></div><div class="d">56%</div></div>
+      <div class="stat"><div class="k">Revenue</div><div class="v" style="font-size:21px">₹4.6 L <span style="font-size:13px;color:var(--ink-3);font-weight:500">/ ₹10 L</span></div><div class="d">46%</div></div>
+      <div class="stat is-alert"><div class="k">Pace</div><div class="v" style="font-size:20px">Behind</div><div class="d">Need 0.14 closures/day</div></div>
+    </div>
+    <div class="split">
+      <div class="card"><div class="card-h"><h4>September targets</h4>
+        <div class="seg" style="margin-left:auto"><button class="on">Me</button><button data-only="ADMIN MANAGER">Team</button></div></div>
+        <div class="card-b" style="display:flex;flex-direction:column;gap:var(--s4)">
+          <div><div style="display:flex;justify-content:space-between;font-size:12.8px;margin-bottom:6px"><b style="font-weight:600">Closures</b><span class="num muted">3 of 6</span></div><div class="bar-mini" style="height:9px"><i style="width:50%"></i></div></div>
+          <div><div style="display:flex;justify-content:space-between;font-size:12.8px;margin-bottom:6px"><b style="font-weight:600">Site visits</b><span class="num muted">14 of 25</span></div><div class="bar-mini" style="height:9px"><i style="width:56%;background:var(--ok500)"></i></div></div>
+          <div><div style="display:flex;justify-content:space-between;font-size:12.8px;margin-bottom:6px"><b style="font-weight:600">Revenue</b><span class="num muted">₹4.6 L of ₹10 L</span></div><div class="bar-mini" style="height:9px"><i style="width:46%;background:var(--wa500)"></i></div></div>
+          <div><div style="display:flex;justify-content:space-between;font-size:12.8px;margin-bottom:6px"><b style="font-weight:600">New leads contacted</b><span class="num muted">88 of 90</span></div><div class="bar-mini" style="height:9px"><i style="width:98%;background:var(--ok500)"></i></div></div>
+        </div>
+      </div>
+      <div class="card"><div class="card-h"><h4>Last 6 months</h4></div><div class="card-b">
+        <div class="bars"><div><i style="height:88%;background:var(--ok500)"></i><span>Apr</span></div><div><i style="height:100%;background:var(--ok500)"></i><span>May</span></div><div><i style="height:62%;background:var(--wa500)"></i><span>Jun</span></div><div><i style="height:94%;background:var(--ok500)"></i><span>Jul</span></div><div><i style="height:78%;background:var(--wa500)"></i><span>Aug</span></div><div><i style="height:50%;background:var(--dg500)"></i><span>Sep</span></div></div>
+        <p class="hint" style="margin-top:9px">Percent of monthly closure target achieved.</p>
+      </div></div>
+    </div>
+  </div>
+  <div data-only="PRODUCTION_EXECUTIVE COMMUNITY_MANAGER">
+    <div class="statgrid">
+      <div class="stat"><div class="k">Tasks completed</div><div class="v">19 <span style="font-size:14px;color:var(--ink-3);font-weight:500">/ 24</span></div><div class="d">This month</div></div>
+      <div class="stat"><div class="k">On-time rate</div><div class="v">86%</div><div class="d"><span class="delta up">▲ 4pt</span> vs Aug</div></div>
+      <div class="stat"><div class="k">Shoots delivered</div><div class="v">11</div><div class="d">Target 12</div></div>
+      <div class="stat"><div class="k">Avg. turnaround</div><div class="v">2.1<span style="font-size:14px;color:var(--ink-3)"> days</span></div><div class="d">Target 2.0</div></div>
+    </div>
+    <div class="card"><div class="card-h"><h4>Weekly output</h4></div><div class="card-b">
+      <div class="bars" style="height:168px"><div><i style="height:52%"></i><span>W22</span></div><div><i style="height:66%"></i><span>W23</span></div><div><i style="height:44%"></i><span>W24</span></div><div><i style="height:78%"></i><span>W25</span></div><div><i style="height:90%"></i><span>W26</span></div><div><i style="height:71%"></i><span>W27</span></div></div>
+      <p class="hint" style="margin-top:9px">This route renders <code>ProductionExecutiveDashboard mode="performance"</code> for production roles — a different component from the sales <code>Performance</code> view.</p>
+    </div></div>
+  </div>
+</div>
+
+<!-- ============ /chat ============ -->
+<div data-screen="chat">
+  <div class="chatwrap">
+    <div class="chatlist">
+      <div style="padding:var(--s3);border-bottom:1px solid var(--line)"><input class="input" style="padding:6px 10px;font-size:12.5px" placeholder="Search people, groups"></div>
+      <div class="chatrow on"><div class="avatar" style="width:32px;height:32px;font-size:11px">SL</div><div style="min-width:0"><b>Sales — Andheri</b><small>Priya: shared the Solitaire deck</small></div><span class="pill t-risk" style="font-size:9.5px;padding:1px 6px;margin-left:auto">3</span></div>
+      <div class="chatrow"><div class="avatar" style="width:32px;height:32px;font-size:11px">PN</div><div style="min-width:0"><b>Priya Nair</b><small>Can you approve the payment?</small></div></div>
+      <div class="chatrow"><div class="avatar" style="width:32px;height:32px;font-size:11px">DS</div><div style="min-width:0"><b>Deepak S.</b><small>Photos uploaded for 705</small></div></div>
+      <div class="chatrow"><div class="avatar" style="width:32px;height:32px;font-size:11px">OP</div><div style="min-width:0"><b>Operations</b><small>Kunal: key manager not picking</small></div><span class="pill t-dead" style="font-size:9.5px;padding:1px 6px;margin-left:auto">2</span></div>
+      <div class="chatrow"><div class="avatar" style="width:32px;height:32px;font-size:11px">AR</div><div style="min-width:0"><b>Amit Raut</b><small>Reaching Marol in 20 min</small></div></div>
+    </div>
+    <div class="chatpane">
+      <div style="display:flex;align-items:center;gap:10px;padding:11px var(--s4);border-bottom:1px solid var(--line)">
+        <div class="avatar" style="width:32px;height:32px;font-size:11px">SL</div>
+        <div><b style="font-size:13.5px;display:block">Sales — Andheri</b><span class="hint">8 members · 5 online</span></div>
+        <div class="avstack" style="margin-left:auto"><div class="avatar">PN</div><div class="avatar">AR</div><div class="avatar">KM</div><div class="avatar">SB</div></div>
+        <button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg></button>
+      </div>
+      <div class="msgs">
+        <div class="msg"><b style="font-size:11.5px;color:var(--accent);display:block;margin-bottom:3px">Priya Nair</b>Rohan Mehta didn't show up at Solitaire again. Third time. Should I mark him lost?<time>4:42 PM</time></div>
+        <div class="msg me">Not yet — call once more tomorrow morning. If he doesn't pick, move him to Not Picking Calls and I'll reassign.<time>4:45 PM</time></div>
+        <div class="msg"><b style="font-size:11.5px;color:var(--accent);display:block;margin-bottom:3px">Priya Nair</b>Got it. Also sharing the Solitaire deck for Vikram's visit at 4.<time>4:46 PM</time></div>
+        <div class="msg" style="border-style:dashed"><div style="display:flex;align-items:center;gap:9px"><div style="width:30px;height:30px;border-radius:7px;background:var(--surface-3);display:grid;place-items:center;color:var(--ink-4)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg></div><div><b style="font-size:12.5px;display:block">Solitaire-B704-deck.pdf</b><span class="hint">2.4 MB</span></div></div><time>4:46 PM</time></div>
+        <div class="msg"><b style="font-size:11.5px;color:var(--accent);display:block;margin-bottom:3px">Amit Raut</b>Reaching Marol in 20 minutes for the Trade Link visit.<time>5:02 PM</time></div>
+      </div>
+      <div class="composer">
+        <button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+        <input class="input" placeholder="Message Sales — Andheri">
+        <button class="btn btn-pri">Send</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /profile ============ -->
+<div data-screen="profile">
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-h"><h4>Personal details</h4><span class="more">Edit</span></div><div class="card-b">
+        <div class="gridform">
+          <div class="field"><label>Full name</label><input class="input" value="Abhishek Sharma"></div>
+          <div class="field"><label>Employee ID</label><input class="input" value="TOR-0042" disabled style="background:var(--surface-2);color:var(--ink-3)"></div>
+          <div class="field"><label>Email</label><input class="input" value="abhishek@theofficeonrent.com"></div>
+          <div class="field"><label>Phone</label><input class="input" value="+91 98765 43210"></div>
+          <div class="field"><label>Branch</label><input class="input" value="Andheri East"></div>
+          <div class="field"><label>Reporting to</label><input class="input" value="Nikhil Verma (Admin)" disabled style="background:var(--surface-2);color:var(--ink-3)"></div>
+        </div>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>Security</h4></div><div class="card-b">
+        <div class="switchrow"><div><b>Change password</b><small>Last changed 3 months ago</small></div><button class="btn btn-sec btn-sm" style="margin-left:auto">Update</button></div>
+        <div class="switchrow"><div><b>Active sessions</b><small>2 devices · Chrome on Windows, Android</small></div><button class="btn btn-sec btn-sm" style="margin-left:auto">Manage</button></div>
+        <div class="switchrow"><div><b>Sign out everywhere</b><small>Revokes all refresh tokens</small></div><button class="btn btn-danger btn-sm" style="margin-left:auto">Sign out all</button></div>
+      </div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-b" style="text-align:center;padding:var(--s6)">
+        <div class="avatar" style="width:72px;height:72px;font-size:24px;margin:0 auto 13px">AS</div>
+        <h4 style="font-size:16px">Abhishek Sharma</h4>
+        <p class="hint" style="margin-top:3px">Manager · Andheri East</p>
+        <div style="display:flex;gap:6px;justify-content:center;margin-top:11px;flex-wrap:wrap"><span class="pill t-open"><i class="dot"></i>Active</span><span class="pill t-dead" style="font-size:10.5px">Joined Mar 2024</span></div>
+        <button class="btn btn-sec btn-sm" style="margin-top:14px">Change photo</button>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>Notifications</h4></div><div class="card-b">
+        <div class="switchrow"><div><b>New lead assigned</b><small>Push and email</small></div><span class="sw on"></span></div>
+        <div class="switchrow"><div><b>Follow-up due</b><small>30 minutes before</small></div><span class="sw on"></span></div>
+        <div class="switchrow"><div><b>Approval requests</b><small>Payments and inventory</small></div><span class="sw on"></span></div>
+        <div class="switchrow"><div><b>Daily summary</b><small>7:00 PM digest</small></div><span class="sw"></span></div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /settings ============ -->
+<div data-screen="settings">
+  <div style="display:grid;grid-template-columns:186px 1fr;gap:var(--s4)">
+    <div class="card" style="align-self:start;padding:var(--s2)">
+      <div class="navitem active" style="margin:1px">Company</div>
+      <div class="navitem" style="margin:1px">Lead routing</div>
+      <div class="navitem" style="margin:1px">Roles &amp; permissions</div>
+      <div class="navitem" style="margin:1px">Attendance policy</div>
+      <div class="navitem" style="margin:1px">Integrations</div>
+      <div class="navitem" style="margin:1px">Subscription</div>
+      <div class="navitem" style="margin:1px">Audit log</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--s4);min-width:0">
+      <div class="card"><div class="card-h"><h4>Company</h4><button class="btn btn-pri btn-sm" style="margin-left:auto">Save changes</button></div><div class="card-b">
+        <div class="gridform">
+          <div class="field"><label>Company name</label><input class="input" value="The Office on Rent"></div>
+          <div class="field"><label>GSTIN</label><input class="input" value="27AABCT1234K1Z9"></div>
+          <div class="field"><label>Primary city</label><input class="input" value="Mumbai"></div>
+          <div class="field"><label>Currency</label><input class="input" value="INR (₹)"></div>
+          <div class="field"><label>Time zone</label><input class="input" value="Asia/Kolkata"></div>
+          <div class="field"><label>Financial year starts</label><input class="input" value="April"></div>
+        </div>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>Lead routing</h4></div><div class="card-b">
+        <div class="switchrow"><div><b>Auto-assign new Meta leads</b><small>Round-robin across executives who are checked in</small></div><span class="sw on"></span></div>
+        <div class="switchrow"><div><b>Reassign after no contact</b><small>Return to pool if untouched for 48 hours</small></div><span class="sw on"></span></div>
+        <div class="switchrow"><div><b>Duplicate detection</b><small>Match on phone number within the company</small></div><span class="sw on"></span></div>
+        <div class="switchrow"><div><b>Require manager approval to close</b><small>Deal payments always need approval regardless</small></div><span class="sw"></span></div>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>Integrations</h4></div><div class="card-b">
+        <div class="switchrow"><div style="display:flex;align-items:center;gap:11px"><div style="width:32px;height:32px;border-radius:8px;background:var(--b50);color:var(--b600);display:grid;place-items:center;font-weight:700;font-size:12px">f</div><div><b>Meta Lead Ads</b><small>2 pages · 4 forms connected</small></div></div><span class="pill t-won" style="margin-left:auto"><i class="dot"></i>Connected</span></div>
+        <div class="switchrow"><div style="display:flex;align-items:center;gap:11px"><div style="width:32px;height:32px;border-radius:8px;background:var(--ok50);color:var(--ok600);display:grid;place-items:center;font-weight:700;font-size:12px">W</div><div><b>WhatsApp Business</b><small>Not configured</small></div></div><button class="btn btn-sec btn-sm" style="margin-left:auto">Connect</button></div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /admin/users ============ -->
+<div data-screen="admin-users">
+  <div class="toolbar">
+    <div class="seg"><button class="on">Active <span class="muted">28</span></button><button>Invited <span class="muted">3</span></button><button>Disabled <span class="muted">6</span></button></div>
+    <span class="chip">+ Role</span><span class="chip">+ Branch</span><span class="chip">+ Reports to</span>
+    <button class="btn btn-sec btn-sm" style="margin-left:auto">Delete requests <span class="pill t-warm" style="font-size:10px;margin-left:4px"><i class="dot"></i>2</span></button>
+    <button class="btn btn-pri btn-sm">+ Add user</button>
+  </div>
+  <div class="card" style="overflow:hidden">
+    <table class="tbl">
+      <thead><tr><th>User</th><th>Role</th><th>Reports to</th><th>Branch</th><th>Leads</th><th>Last active</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">PN</div><div><b>Priya Nair</b><small style="font-family:var(--font)">priya@theofficeonrent.com</small></div></div></td><td><span class="pill t-open"><i class="dot"></i>Executive</span></td><td class="muted">Abhishek S.</td><td class="muted">Andheri E</td><td class="num">104</td><td class="muted">2 min ago</td><td><span class="pill t-won"><i class="dot"></i>Active</span></td><td><div class="rowacts"><button class="iconbtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></div></td></tr>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">AR</div><div><b>Amit Raut</b><small style="font-family:var(--font)">amit@theofficeonrent.com</small></div></div></td><td><span class="pill t-sched"><i class="dot"></i>Field Executive</span></td><td class="muted">Abhishek S.</td><td class="muted">Andheri E</td><td class="num">118</td><td class="muted">18 min ago</td><td><span class="pill t-won"><i class="dot"></i>Active</span></td><td></td></tr>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">DS</div><div><b>Deepak Shetty</b><small style="font-family:var(--font)">deepak@theofficeonrent.com</small></div></div></td><td><span class="pill t-warm"><i class="dot"></i>Production Exec</span></td><td class="muted">Abhishek S.</td><td class="muted">Andheri E</td><td class="muted">—</td><td class="muted">1 hour ago</td><td><span class="pill t-won"><i class="dot"></i>Active</span></td><td></td></tr>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">RD</div><div><b>Rahul Deshmukh</b><small style="font-family:var(--font)">rahul@partner.co</small></div></div></td><td><span class="pill t-party">Channel Partner</span></td><td class="muted">Abhishek S.</td><td class="muted">External</td><td class="num">31</td><td class="muted">Yesterday</td><td><span class="pill t-won"><i class="dot"></i>Active</span></td><td></td></tr>
+        <tr><td><div class="cellname"><div class="avatar" style="width:28px;height:28px;font-size:10px">MJ</div><div><b>Meera Joshi</b><small style="font-family:var(--font)">meera@theofficeonrent.com</small></div></div></td><td><span class="pill t-risk"><i class="dot"></i>Inside Executive</span></td><td class="muted">Abhishek S.</td><td class="muted">Andheri E</td><td class="num">0</td><td class="muted">Never</td><td><span class="pill t-risk"><i class="dot"></i>Cannot log in</span></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="notebox" style="margin:0"><b>Flagged in this table:</b><span>Meera is an <code>INSIDE_EXECUTIVE</code>. That role passes user creation but fails every route gate, so she is redirected to <code>/login</code> on sign-in. The user list should surface that state rather than showing her as a normal active user.</span></div>
+</div>
+
+<!-- ============ /admin/users/:userId ============ -->
+<div data-screen="admin-user-detail">
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-h"><h4>Account</h4><button class="btn btn-pri btn-sm" style="margin-left:auto">Save</button></div><div class="card-b">
+        <div class="gridform">
+          <div class="field"><label>Full name</label><input class="input" value="Priya Nair"></div>
+          <div class="field"><label>Email</label><input class="input" value="priya@theofficeonrent.com"></div>
+          <div class="field"><label>Phone</label><input class="input" value="+91 99201 44556"></div>
+          <div class="field"><label>Employee ID</label><input class="input" value="TOR-0088"></div>
+          <div class="field"><label>Role</label><input class="input" value="Executive"></div>
+          <div class="field"><label>Reports to</label><input class="input" value="Abhishek Sharma (Manager)"></div>
+        </div>
+        <p class="hint" style="margin-top:11px">Allowed parents come from <code>ROLE_PARENT_RULES</code> — an Executive can only report to a Manager.</p>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>Permissions</h4></div><div class="card-b">
+        <div class="switchrow"><div><b>View all company leads</b><small>Otherwise only leads assigned to her</small></div><span class="sw"></span></div>
+        <div class="switchrow"><div><b>Create and edit inventory</b><small>Changes go through the approval queue</small></div><span class="sw on"></span></div>
+        <div class="switchrow"><div><b>Approve deal payments</b><small>Manager-level permission</small></div><span class="sw"></span></div>
+        <div class="switchrow"><div><b>Export data</b><small>CSV downloads from any list</small></div><span class="sw on"></span></div>
+      </div></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-b" style="text-align:center;padding:var(--s6)">
+        <div class="avatar" style="width:64px;height:64px;font-size:21px;margin:0 auto 12px">PN</div>
+        <h4 style="font-size:15.5px">Priya Nair</h4><p class="hint" style="margin-top:3px">Executive · Andheri East</p>
+        <div class="statgrid" style="grid-template-columns:1fr 1fr;margin-top:15px">
+          <div class="stat" style="padding:11px"><div class="k">Leads</div><div class="v" style="font-size:19px">104</div></div>
+          <div class="stat" style="padding:11px"><div class="k">Closed</div><div class="v" style="font-size:19px">7</div></div>
+        </div>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>Recent activity</h4></div><div class="card-b"><div class="tl">
+        <div class="tlitem hi"><p>Logged a diary entry on Rohan Mehta</p><time>28 Aug, 4:40 PM</time></div>
+        <div class="tlitem"><p>Changed status Interested → Visit Scheduled</p><time>24 Aug, 6:02 PM</time></div>
+        <div class="tlitem"><p>Requested inventory edit on PRP-1042</p><time>22 Aug, 1:14 PM</time></div>
+      </div></div></div>
+      <div class="card"><div class="card-b" style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-sec" style="justify-content:center">Reset password</button>
+        <button class="btn btn-sec" style="justify-content:center">Transfer all leads</button>
+        <button class="btn btn-danger" style="justify-content:center">Disable account</button>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /admin/console ============ -->
+<div data-screen="admin-console">
+  <div class="statgrid">
+    <div class="stat"><div class="k">Active users</div><div class="v">28</div><div class="d">19 online now</div></div>
+    <div class="stat"><div class="k">Total leads</div><div class="v">4,182</div><div class="d">342 open</div></div>
+    <div class="stat"><div class="k">Properties</div><div class="v">618</div><div class="d">418 available</div></div>
+    <div class="stat is-alert"><div class="k">Pending approvals</div><div class="v">7</div><div class="d">2 payment · 3 inventory · 2 delete</div></div>
+    <div class="stat"><div class="k">Plan</div><div class="v" style="font-size:19px">Growth</div><div class="d">Renews 12 Oct</div></div>
+  </div>
+  <div class="split">
+    <div class="card"><div class="card-h"><h4>Approval queue</h4>
+      <div class="seg" style="margin-left:auto"><button class="on">All <b>7</b></button><button>Inventory</button><button>Payments</button><button>Deletions</button></div></div>
+      <table class="tbl">
+        <thead><tr><th>Request</th><th>Type</th><th>Raised by</th><th>Age</th><th></th></tr></thead>
+        <tbody>
+          <tr><td><b style="font-weight:600">Edit PRP-1042 — rent ₹1.45 L → ₹1.52 L</b></td><td><span class="pill t-open"><i class="dot"></i>Inventory</span></td><td class="muted">Priya N.</td><td class="muted">2 days</td><td><div style="display:flex;gap:5px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></td></tr>
+          <tr><td><b style="font-weight:600">Deal payment ₹2,40,000 — Vikram Joshi</b></td><td><span class="pill t-warm"><i class="dot"></i>Payment</span></td><td class="muted">Priya N.</td><td class="muted">1 day</td><td><div style="display:flex;gap:5px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></td></tr>
+          <tr><td><b style="font-weight:600">Delete user — Sameer Kadam</b></td><td><span class="pill t-risk"><i class="dot"></i>Deletion</span></td><td class="muted">Abhishek S.</td><td class="muted">4 hours</td><td><div style="display:flex;gap:5px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></td></tr>
+          <tr><td><b style="font-weight:600">Create PRP — Boomerang Wing C, unit 401</b></td><td><span class="pill t-open"><i class="dot"></i>Inventory</span></td><td class="muted">Amit R.</td><td class="muted">6 hours</td><td><div style="display:flex;gap:5px"><button class="btn btn-pri btn-sm">Approve</button><button class="btn btn-sec btn-sm">Reject</button></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:var(--s4)">
+      <div class="card"><div class="card-h"><h4>System health</h4></div><div class="card-b">
+        <div class="rowlist" style="font-size:12.5px">
+          <div><span>Meta webhook</span><span class="pill t-won" style="margin-left:auto"><i class="dot"></i>Healthy</span></div>
+          <div><span>Last lead sync</span><span class="muted" style="margin-left:auto">4 min ago</span></div>
+          <div><span>Failed syncs (24h)</span><span class="pill t-warm" style="margin-left:auto"><i class="dot"></i>3</span></div>
+          <div><span>Storage used</span><span class="muted" style="margin-left:auto">6.2 GB of 20 GB</span></div>
+        </div>
+      </div></div>
+      <div class="card"><div class="card-h"><h4>Audit log</h4><span class="more">View all</span></div><div class="card-b"><div class="tl">
+        <div class="tlitem hi"><p><b>Abhishek S.</b> approved a deal payment of ₹6,40,000</p><time>Today, 11:04 AM</time></div>
+        <div class="tlitem"><p><b>Priya N.</b> changed lead status to Site Visit Overdue</p><time>Today, 9:22 AM</time></div>
+        <div class="tlitem"><p><b>System</b> auto-assigned 14 Meta leads</p><time>Today, 8:00 AM</time></div>
+      </div></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /admin/meta-ads ============ -->
+<div data-screen="admin-meta-ads">
+  <div class="statgrid">
+    <div class="stat"><div class="k">Leads — Sep</div><div class="v">284</div><div class="d"><span class="delta up">▲ 11%</span> vs Aug</div></div>
+    <div class="stat"><div class="k">Spend</div><div class="v">₹1.17 L</div><div class="d">Across 4 campaigns</div></div>
+    <div class="stat"><div class="k">Cost per lead</div><div class="v">₹412</div><div class="d"><span class="delta down">▼ ₹38</span> better</div></div>
+    <div class="stat is-alert"><div class="k">Failed syncs</div><div class="v">3</div><div class="d">Last 24 hours</div></div>
+  </div>
+  <div class="card"><div class="card-h"><h4>Connected pages and forms</h4><button class="btn btn-sec btn-sm" style="margin-left:auto">Re-sync now</button><button class="btn btn-pri btn-sm">Connect page</button></div>
+    <table class="tbl">
+      <thead><tr><th>Page / form</th><th>Form ID</th><th>Leads (30d)</th><th>Cost/lead</th><th>Last sync</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><b style="font-weight:600">Office on Rent — Commercial</b><br><small class="muted">Andheri office enquiry</small></td><td class="mono muted">1094...8821</td><td class="num">142</td><td class="num">₹388</td><td class="muted">4 min ago</td><td><span class="pill t-won"><i class="dot"></i>Healthy</span></td></tr>
+        <tr><td><b style="font-weight:600">Office on Rent — Commercial</b><br><small class="muted">Coworking seats</small></td><td class="mono muted">1094...9034</td><td class="num">68</td><td class="num">₹402</td><td class="muted">4 min ago</td><td><span class="pill t-won"><i class="dot"></i>Healthy</span></td></tr>
+        <tr><td><b style="font-weight:600">TOR Residential</b><br><small class="muted">2 BHK Powai</small></td><td class="mono muted">2210...4417</td><td class="num">51</td><td class="num">₹455</td><td class="muted">4 min ago</td><td><span class="pill t-won"><i class="dot"></i>Healthy</span></td></tr>
+        <tr><td><b style="font-weight:600">TOR Residential</b><br><small class="muted">Chembur launch</small></td><td class="mono muted">2210...5590</td><td class="num">23</td><td class="num">₹601</td><td class="muted">2 days ago</td><td><span class="pill t-risk"><i class="dot"></i>Token expired</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card"><div class="card-h"><h4>Failed lead syncs</h4><span class="pill t-warm" style="margin-left:auto"><i class="dot"></i>3 to review</span></div>
+    <table class="tbl">
+      <thead><tr><th>Meta lead ID</th><th>Form</th><th>Received</th><th>Reason</th><th></th></tr></thead>
+      <tbody>
+        <tr><td class="mono">l:8841902...</td><td class="muted">Chembur launch</td><td class="muted">Yesterday 6:12 PM</td><td><span class="muted">Page access token expired</span></td><td><button class="btn btn-sec btn-sm">Retry</button></td></tr>
+        <tr><td class="mono">l:8841781...</td><td class="muted">Chembur launch</td><td class="muted">Yesterday 3:44 PM</td><td><span class="muted">Page access token expired</span></td><td><button class="btn btn-sec btn-sm">Retry</button></td></tr>
+        <tr><td class="mono">l:8839044...</td><td class="muted">Coworking seats</td><td class="muted">30 Aug 11:20 AM</td><td><span class="muted">Duplicate phone — merged into existing lead</span></td><td><button class="btn btn-sec btn-sm">View lead</button></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ /admin/notifications ============ -->
+<div data-screen="admin-notifications">
+  <div class="toolbar">
+    <div class="seg"><button class="on">Unread <b style="color:var(--dg600)">9</b></button><button>All</button><button>Approvals</button><button>System</button></div>
+    <button class="btn btn-sec btn-sm" style="margin-left:auto">Mark all read</button>
+    <button class="btn btn-pri btn-sm">+ Broadcast</button>
+  </div>
+  <div class="card"><div class="card-b" style="padding:0">
+    <div style="display:flex;gap:var(--s3);padding:13px var(--s4);border-bottom:1px solid var(--line);background:var(--accent-soft)">
+      <div style="width:32px;height:32px;border-radius:9px;background:var(--wa50);color:var(--wa600);display:grid;place-items:center;flex:0 0 auto"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div>
+      <div style="flex:1;min-width:0"><b style="font-size:13px;font-weight:620;display:block">Deal payment awaiting approval — ₹2,40,000</b><p class="hint" style="margin-top:2px">Priya Nair raised this for Vikram Joshi against PRP-1042</p></div>
+      <div style="display:flex;gap:6px;align-items:flex-start"><span class="hint">1 day ago</span><button class="btn btn-pri btn-sm">Review</button></div>
+    </div>
+    <div style="display:flex;gap:var(--s3);padding:13px var(--s4);border-bottom:1px solid var(--line);background:var(--accent-soft)">
+      <div style="width:32px;height:32px;border-radius:9px;background:var(--dg50);color:var(--dg600);display:grid;place-items:center;flex:0 0 auto"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg></div>
+      <div style="flex:1;min-width:0"><b style="font-size:13px;font-weight:620;display:block">Meta page token expired — TOR Residential</b><p class="hint" style="margin-top:2px">3 leads failed to sync since 30 Aug</p></div>
+      <div style="display:flex;gap:6px;align-items:flex-start"><span class="hint">2 days ago</span><button class="btn btn-sec btn-sm">Fix</button></div>
+    </div>
+    <div style="display:flex;gap:var(--s3);padding:13px var(--s4);border-bottom:1px solid var(--line)">
+      <div style="width:32px;height:32px;border-radius:9px;background:var(--in50);color:var(--in600);display:grid;place-items:center;flex:0 0 auto"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M10 6h4M10 10h4"/></svg></div>
+      <div style="flex:1;min-width:0"><b style="font-size:13px;font-weight:620;display:block">Inventory edit request — PRP-1042</b><p class="hint" style="margin-top:2px">Rent change from ₹1.45 L to ₹1.52 L</p></div>
+      <div style="display:flex;gap:6px;align-items:flex-start"><span class="hint">2 days ago</span><button class="btn btn-sec btn-sm">Review</button></div>
+    </div>
+    <div style="display:flex;gap:var(--s3);padding:13px var(--s4)">
+      <div style="width:32px;height:32px;border-radius:9px;background:var(--surface-3);color:var(--ink-3);display:grid;place-items:center;flex:0 0 auto"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+      <div style="flex:1;min-width:0"><b style="font-size:13px;font-weight:620;display:block">14 Meta leads auto-assigned</b><p class="hint" style="margin-top:2px">Round-robin across 4 checked-in executives</p></div>
+      <span class="hint">Today, 8:00 AM</span>
+    </div>
+  </div></div>
+</div>
+
+<!-- ============ /login ============ -->
+<div data-screen="login" data-nochrome="1">
+  <div class="login">
+    <div class="logincard">
+      <div style="display:flex;align-items:center;gap:11px;margin-bottom:var(--s6)">
+        <div style="width:38px;height:38px;border-radius:11px;background:linear-gradient(145deg,var(--b500),var(--b700));color:#fff;display:grid;place-items:center;font-weight:700;font-size:15px">OR</div>
+        <div><b style="font-size:15px;font-weight:650;display:block;letter-spacing:-.02em">The Office on Rent</b><span class="hint">Sign in to your workspace</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--s3)">
+        <div class="field"><label>Email</label><input class="input" placeholder="you@theofficeonrent.com"></div>
+        <div class="field"><label>Password</label><input class="input" type="password" value="password"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px;margin-top:2px">
+          <label style="display:flex;align-items:center;gap:7px;color:var(--ink-2)"><input type="checkbox" checked> Keep me signed in</label>
+          <a href="#" style="font-weight:600">Forgot password?</a>
+        </div>
+        <button class="btn btn-pri" style="justify-content:center;padding:11px;margin-top:var(--s2)">Sign in</button>
+      </div>
+      <p class="hint" style="text-align:center;margin-top:var(--s5)">Administrator? <a href="#" style="font-weight:600">Use the admin sign-in</a></p>
+      <p class="hint" style="text-align:center;margin-top:var(--s5);padding-top:var(--s4);border-top:1px solid var(--line)">By signing in you accept the <a href="#">terms</a> and <a href="#">data use notice</a>.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============ /login/admin ============ -->
+<div data-screen="login-admin" data-nochrome="1">
+  <div class="login">
+    <div class="logincard" style="border-color:var(--line-strong)">
+      <div style="display:flex;align-items:center;gap:11px;margin-bottom:var(--s5)">
+        <div style="width:38px;height:38px;border-radius:11px;background:var(--n800);color:#fff;display:grid;place-items:center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg></div>
+        <div><b style="font-size:15px;font-weight:650;display:block;letter-spacing:-.02em">Administrator sign-in</b><span class="hint">Elevated access</span></div>
+      </div>
+      <div style="background:var(--wa50);border:1px solid var(--wa100);border-radius:var(--r-md);padding:10px 12px;font-size:12.2px;color:var(--wa700);margin-bottom:var(--s4)">
+        This entrance is logged. Every sign-in writes to the audit log with IP and device.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:var(--s3)">
+        <div class="field"><label>Admin email</label><input class="input" placeholder="admin@theofficeonrent.com"></div>
+        <div class="field"><label>Password</label><input class="input" type="password" value="password"></div>
+        <div class="field"><label>Two-factor code</label><input class="input mono" placeholder="000000" style="letter-spacing:.3em"></div>
+        <button class="btn btn-pri" style="justify-content:center;padding:11px;margin-top:var(--s2)">Sign in as administrator</button>
+      </div>
+      <p class="hint" style="text-align:center;margin-top:var(--s5)"><a href="#" style="font-weight:600">← Back to normal sign-in</a></p>
+    </div>
+  </div>
+</div>
+
+</script>
+
+<script>
+(function(){
+"use strict";
+
+var ALL = ["ADMIN","MANAGER","INSIDE_EXECUTIVE","EXECUTIVE","FIELD_EXECUTIVE","PRODUCTION_EXECUTIVE","COMMUNITY_MANAGER","CHANNEL_PARTNER"];
+var SALES = ["ADMIN","MANAGER","EXECUTIVE","FIELD_EXECUTIVE","CHANNEL_PARTNER"];
+var PROD  = ["PRODUCTION_EXECUTIVE","COMMUNITY_MANAGER"];
+
+var USERS = {
+  ADMIN:               {n:"Nikhil Verma",   i:"NV", r:"Admin",              b:"All branches"},
+  MANAGER:             {n:"Abhishek S.",    i:"AS", r:"Manager",            b:"Andheri branch"},
+  INSIDE_EXECUTIVE:    {n:"Meera Joshi",    i:"MJ", r:"Inside Executive",   b:"Andheri branch"},
+  EXECUTIVE:           {n:"Priya Nair",     i:"PN", r:"Executive",          b:"Andheri branch"},
+  FIELD_EXECUTIVE:     {n:"Amit Raut",      i:"AR", r:"Field Executive",    b:"Andheri branch"},
+  PRODUCTION_EXECUTIVE:{n:"Deepak Shetty",  i:"DS", r:"Production Exec",    b:"Andheri branch"},
+  COMMUNITY_MANAGER:   {n:"Riya Kapoor",    i:"RK", r:"Community Manager",  b:"Andheri branch"},
+  CHANNEL_PARTNER:     {n:"Rahul Deshmukh", i:"RD", r:"Channel Partner",    b:"External"}
+};
+
+var ICON = {
+  home:'<path d="M3 9.5 12 3l9 6.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/>',
+  check:'<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  cal:'<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  users:'<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  user:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>',
+  bldg:'<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M10 6h4M10 10h4M10 14h4"/>',
+  layers:'<path d="m12 2 9 5-9 5-9-5Z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/>',
+  map:'<path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3Z"/><path d="M9 3v15M15 6v15"/>',
+  pie:'<path d="M21.2 15.9A10 10 0 1 1 8.1 2.8"/><path d="M22 12A10 10 0 0 0 12 2v10Z"/>',
+  chart:'<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
+  trophy:'<path d="M6 4h12v5a6 6 0 0 1-12 0Z"/><path d="M6 6H4a2 2 0 0 0 2 4M18 6h2a2 2 0 0 1-2 4M9 21h6M12 15v6"/>',
+  target:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  chat:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/>',
+  shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>',
+  cog:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/>',
+  bell:'<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+  meta:'<path d="M4 15c0-4 2-8 4.5-8S12 12 12 12s1-5 3.5-5S20 11 20 15"/>',
+  brief:'<rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>'
+};
+
+// path, title, file, roles, note, actions, search
+var SCREENS = [
+ {id:"login", path:"/login", title:"Sign in", file:"components/auth/LoginPage.jsx", roles:ALL, chrome:false,
+  note:["The change:","One card, four elements, nothing decorative. The admin entrance is a quiet text link rather than a second visible door — it exists at <code>/login/admin</code> but does not advertise itself on the main screen."]},
+ {id:"login-admin", path:"/login/admin", title:"Administrator sign-in", file:"components/auth/AdminLoginPage.jsx", roles:ALL, chrome:false,
+  note:["The change:","Visually distinct from the normal sign-in so nobody uses it by accident, with the audit warning stated up front rather than buried in policy."]},
+
+ {id:"dashboard", path:"/dashboard", title:"Dashboard", file:"ManagerDashboard · ExecutiveDashboard · FieldDashboard · ProductionExecutiveDashboard", roles:ALL, group:"work",
+  actions:'<button class="btn btn-pri btn-sm" data-not="PRODUCTION_EXECUTIVE COMMUNITY_MANAGER INSIDE_EXECUTIVE">+ Add lead</button>', search:"Search leads, properties…",
+  note:["Five different screens:","<code>DashboardByRole</code> dispatches to four components and two redirects. Each answers <i>what do I do now</i> before <i>how are we doing</i>. Switch the role above to see all six outcomes — including the two that aren't dashboards at all."]},
+
+ {id:"leads", path:"/leads", title:"Pipeline", file:"modules/leads/LeadsMatrix.jsx · 3,462 lines", roles:SALES, group:"sales",
+  actions:'<button class="btn btn-sec btn-sm" data-only="ADMIN MANAGER">Bulk upload</button><button class="btn btn-pri btn-sm">+ Add lead</button>', search:"Name, phone, project…",
+  note:["The change:","Filters become removable chips. <b>Needs action</b> is the default tab, not All. Call, WhatsApp and Log appear on row hover so the common task is one click. Assignment columns and bulk actions only exist for Admin and Manager."]},
+
+ {id:"my-leads", path:"/my-leads", title:"My Leads", file:"modules/leads/LeadsMatrix.jsx (scoped)", roles:["EXECUTIVE","FIELD_EXECUTIVE"], group:"sales",
+  actions:'<button class="btn btn-pri btn-sm">+ Add lead</button>', search:"Search my leads…",
+  note:["The change:","Same component as Pipeline, but framed as a personal worklist: four stat tiles about <i>your</i> day, a last-touch column so you know what you said last, and no assignment machinery."]},
+
+ {id:"lead-detail", path:"/leads/:leadId", title:"Lead detail", file:"modules/leads/components/LeadDetailsRebuilt.jsx · 3,506 lines", roles:SALES, group:"sales",
+  actions:'<button class="btn btn-sec btn-sm">Print</button>', search:"Search…",
+  note:["The change:","Identity header never scrolls away. The overdue follow-up is a card you act on, not a field you hunt for. Matched inventory sits left because <i>what do I show this client</i> is why the page gets opened. Deal-payment approval appears only for Admin and Manager."]},
+
+ {id:"inventory", path:"/inventory", title:"Inventory", file:"modules/inventory/AssetVault.jsx · 4,508 lines", roles:SALES, group:"sales",
+  actions:'<button class="btn btn-sec btn-sm" data-not="CHANNEL_PARTNER">Bulk upload</button><button class="btn btn-pri btn-sm" data-not="CHANNEL_PARTNER">+ Add property</button>', search:"Project, tower, PRP-ID…",
+  note:["The change:","Status is the primary filter — the first question is always <i>what can I offer today</i>. Sold units stay visible but dimmed. The server-generated <code>propertyId</code> is on every card because that's what people quote on calls."]},
+
+ {id:"inventory-detail", path:"/inventory/:id", title:"Property detail", file:"modules/inventory/InventoryDetails.jsx", roles:SALES, group:"sales",
+  actions:'<button class="btn btn-sec btn-sm">Share</button>', search:"Search…",
+  note:["The change:","Specification is grouped into four scannable blocks instead of one long form. The owner card — the commercially sensitive part — is a distinct panel, which makes hiding it from channel partners a layout decision rather than a scatter of conditionals."]},
+
+ {id:"projects", path:"/projects", title:"Projects", file:"modules/inventory/Projects.jsx · 1,944 lines", roles:SALES, group:"sales",
+  actions:'<button class="btn btn-pri btn-sm" data-not="CHANNEL_PARTNER">+ New project</button>', search:"Project, developer, city…",
+  note:["The change:","A project is inventory in aggregate, so each card leads with the three numbers that matter — total, available, sold — and a sell-through bar. Everything else is one click deeper."]},
+
+ {id:"project-detail", path:"/projects/:id", title:"Project detail", file:"modules/inventory/ProjectDetails.jsx", roles:SALES, group:"sales",
+  actions:'<button class="btn btn-sec btn-sm">Export units</button>', search:"Unit number…",
+  note:["The change:","Header carries the four counts; the body is a unit table with towers as tabs. Held units show who they're held for and until when, which is the question that actually gets asked."]},
+
+ {id:"finance", path:"/finance", title:"Finance", file:"modules/finance/FinancialCore.jsx · 1,243 lines", roles:["MANAGER","EXECUTIVE","FIELD_EXECUTIVE","CHANNEL_PARTNER"], group:"business",
+  actions:'<button class="btn btn-sec btn-sm">Export</button>', search:"Lead, property, reference…",
+  note:["Note the gate:","The same screen shows company revenue to a Manager and personal earnings to everyone else. Admin is excluded from this route entirely — see the flag on the screen when you switch to Admin."]},
+
+ {id:"map", path:"/map", title:"Field Ops", file:"modules/field/FieldOps.jsx · 917 lines", roles:["ADMIN","MANAGER","FIELD_EXECUTIVE"], group:"sales",
+  actions:'<button class="btn btn-sec btn-sm">Today</button>', search:"Property or area…",
+  note:["The change:","Map and route list side by side. Managers additionally see live team positions; a field executive sees only their own stops, which keeps the screen about the next drive rather than surveillance."]},
+
+ {id:"reports", path:"/reports", title:"Reports", file:"modules/reports/IntelligenceReports.jsx", roles:["ADMIN","MANAGER"], group:"business",
+  actions:'<button class="btn btn-sec btn-sm">Export CSV</button><button class="btn btn-pri btn-sm">Schedule</button>', search:"Search reports…",
+  note:["The change:","Five headline numbers, then the two charts that explain them, then the two tables that name who and why. <i>Where leads are lost</i> is the panel that changes behaviour — it is currently not in the product at all."]},
+
+ {id:"leaderboard", path:"/leaderboard", title:"Leaderboard", file:"modules/reports/RoleLeaderboard.jsx", roles:SALES, group:"business",
+  actions:'', search:"Search people…",
+  note:["The change:","Your own row is highlighted wherever you sit, and target attainment sits beside raw counts so the ranking is readable rather than just competitive. Team pace on the right keeps it collective."]},
+
+ {id:"calendar", path:"/calendar", title:"Calendar", file:"modules/calendar/MasterSchedule.jsx · 1,067 lines", roles:["ADMIN","MANAGER","EXECUTIVE","FIELD_EXECUTIVE"], group:"work",
+  actions:'<button class="btn btn-pri btn-sm">+ New event</button>', search:"Search events…",
+  note:["The change:","Site visits, follow-ups and tasks are one calendar with three colours, not three places to look. Today's agenda sits underneath the month so you never have to click a cell to see what's happening now."]},
+
+ {id:"tasks", path:"/tasks", title:"Tasks", file:"modules/tasks/TaskManager.jsx · 1,964 lines", roles:["ADMIN","MANAGER","EXECUTIVE","FIELD_EXECUTIVE","PRODUCTION_EXECUTIVE","COMMUNITY_MANAGER"], group:"work",
+  actions:'<button class="btn btn-pri btn-sm">+ New task</button>', search:"Search tasks…",
+  note:["The change:","A four-column board with an explicit <b>Blocked</b> lane. Blocked work is the thing that silently rots in a task list, so it gets a column and a red border rather than sitting invisibly in Open."]},
+
+ {id:"attendance", path:"/attendance", title:"Attendance", file:"modules/attendance/AttendanceHub.jsx · 1,490 lines", roles:["ADMIN","MANAGER","EXECUTIVE","FIELD_EXECUTIVE","PRODUCTION_EXECUTIVE","COMMUNITY_MANAGER","CHANNEL_PARTNER"], group:"work",
+  actions:'<button class="btn btn-sec btn-sm">Request leave</button>', search:"Search dates…",
+  note:["The change:","Check-in state is the first thing on the page, at a size you can read from a metre away. Managers get the team approval queue in the same screen instead of a separate destination."]},
+
+ {id:"targets", path:"/targets", title:"Targets", file:"modules/reports/Performance.jsx · ProductionExecutiveDashboard", roles:["ADMIN","MANAGER","EXECUTIVE","FIELD_EXECUTIVE","PRODUCTION_EXECUTIVE","COMMUNITY_MANAGER"], group:"business",
+  actions:'<button class="btn btn-sec btn-sm" data-only="ADMIN MANAGER">Set targets</button>', search:"Search…",
+  note:["Two components, one route:","Sales roles get <code>Performance</code>; production roles get <code>ProductionExecutiveDashboard mode=\"performance\"</code>, which measures output rather than closures. Switch between Executive and Production to see both."]},
+
+ {id:"chat", path:"/chat", title:"Team Chat", file:"modules/chat/TeamChat.jsx · 3,283 lines", roles:["ADMIN","MANAGER","EXECUTIVE","FIELD_EXECUTIVE","PRODUCTION_EXECUTIVE","COMMUNITY_MANAGER"], group:"team",
+  actions:'<button class="btn btn-sec btn-sm">New group</button>', search:"Search messages…",
+  note:["The change:","Conversation list, thread, composer — nothing else. This is the one screen where the app chrome should get out of the way completely, which is why <code>WorkbenchShell</code> already special-cases it with <code>isChatPage</code>."]},
+
+ {id:"profile", path:"/profile", title:"My Profile", file:"modules/profile/UserProfile.jsx · 927 lines", roles:["ADMIN","MANAGER","EXECUTIVE","FIELD_EXECUTIVE","PRODUCTION_EXECUTIVE","COMMUNITY_MANAGER","CHANNEL_PARTNER"], group:"settings",
+  actions:'<button class="btn btn-pri btn-sm">Save</button>', search:"Search settings…",
+  note:["The change:","Editable fields on the left, identity and notification switches on the right. Server-owned fields (employee ID, reporting line) are visibly disabled rather than silently rejecting an edit."]},
+
+ {id:"settings", path:"/settings", title:"Settings", file:"modules/admin/SystemSettings.jsx", roles:["ADMIN","MANAGER"], group:"settings",
+  actions:'<button class="btn btn-pri btn-sm">Save changes</button>', search:"Search settings…",
+  note:["The change:","A settings sub-nav instead of one endless scroll. Lead routing gets its own section because those four switches decide how every Meta lead reaches a human."]},
+
+ {id:"admin-users", path:"/admin/users", title:"Team", file:"modules/admin/TeamManager.jsx · 776 lines", roles:["ADMIN","MANAGER"], group:"admin",
+  actions:'<button class="btn btn-pri btn-sm">+ Add user</button>', search:"Name, email, role…",
+  note:["The change:","Role, reporting line and last-active in one row, so the hierarchy in <code>ROLE_PARENT_RULES</code> is visible rather than implied. Accounts that cannot actually sign in are flagged instead of shown as healthy."]},
+
+ {id:"admin-user-detail", path:"/admin/users/:userId", title:"User detail", file:"modules/admin/UserDetailsEditor.jsx · 1,846 lines", roles:["ADMIN","MANAGER"], group:"admin",
+  actions:'<button class="btn btn-pri btn-sm">Save</button>', search:"Search…",
+  note:["The change:","Account fields, permission switches, and the three destructive actions kept apart from each other. <i>Transfer all leads</i> sits next to <i>Disable account</i> because you almost always need the first before the second."]},
+
+ {id:"admin-console", path:"/admin/console", title:"Console", file:"modules/admin/AdminCommandConsole.jsx · 3,797 lines", roles:["ADMIN","MANAGER"], group:"admin",
+  actions:'<button class="btn btn-sec btn-sm">Audit log</button>', search:"Search anything…",
+  note:["The change:","3,797 lines currently do everything. Split it: this screen is the approval queue plus system health, and user management moves out to Team. Approvals are the only thing here with a deadline."]},
+
+ {id:"admin-meta-ads", path:"/admin/meta-ads", title:"Meta Ads", file:"modules/admin/AdminMetaAdsPanel.jsx", roles:["ADMIN","MANAGER"], group:"admin",
+  actions:'<button class="btn btn-sec btn-sm">Re-sync</button><button class="btn btn-pri btn-sm">Connect page</button>', search:"Form, page, lead ID…",
+  note:["The change:","Failed syncs get their own table with a retry button. An expired page token currently fails silently — those leads are paid for and never reach anybody, which makes this the highest-value panel on the screen."]},
+
+ {id:"admin-notifications", path:"/admin/notifications", title:"Notifications", file:"modules/admin/AdminNotifications.jsx · 1,536 lines", roles:["ADMIN","MANAGER"], group:"admin",
+  actions:'<button class="btn btn-pri btn-sm">+ Broadcast</button>', search:"Search notifications…",
+  note:["The change:","Every row carries the action it wants from you. A notification you can't act on from the list is a notification that gets ignored."]}
+];
+
+var NAV = [
+  {g:"Work", items:[
+    {s:"dashboard", label:"Home", icon:"home"},
+    {s:"tasks", label:"Tasks", icon:"check", count:"6"},
+    {s:"calendar", label:"Calendar", icon:"cal"},
+    {s:"attendance", label:"Attendance", icon:"clock"}
+  ]},
+  {g:"Sales", items:[
+    {s:"leads", label:"Pipeline", icon:"users", count:"27", hot:true},
+    {s:"my-leads", label:"My Leads", icon:"brief", count:"9", hot:true},
+    {s:"inventory", label:"Inventory", icon:"bldg"},
+    {s:"projects", label:"Projects", icon:"layers"},
+    {s:"map", label:"Field Ops", icon:"map"}
+  ]},
+  {g:"Business", items:[
+    {s:"finance", label:"Finance", icon:"pie"},
+    {s:"reports", label:"Reports", icon:"chart"},
+    {s:"leaderboard", label:"Leaderboard", icon:"trophy"},
+    {s:"targets", label:"Targets", icon:"target"}
+  ]},
+  {g:"Team", items:[
+    {s:"chat", label:"Chat", icon:"chat", count:"3"}
+  ]},
+  {g:"Admin", items:[
+    {s:"admin-users", label:"Team", icon:"user"},
+    {s:"admin-console", label:"Console", icon:"shield", count:"7", hot:true},
+    {s:"admin-meta-ads", label:"Meta Ads", icon:"meta"},
+    {s:"admin-notifications", label:"Notifications", icon:"bell", count:"9", hot:true},
+    {s:"settings", label:"Settings", icon:"cog"}
+  ]}
+];
+
+var INDEX_GROUPS = [
+  {g:"Entry", ids:["login","login-admin"]},
+  {g:"Work", ids:["dashboard","tasks","calendar","attendance"]},
+  {g:"Sales", ids:["leads","my-leads","lead-detail","inventory","inventory-detail","projects","project-detail","map"]},
+  {g:"Business", ids:["finance","reports","leaderboard","targets"]},
+  {g:"Team", ids:["chat","profile"]},
+  {g:"Admin", ids:["settings","admin-users","admin-user-detail","admin-console","admin-meta-ads","admin-notifications"]}
+];
+
+var byId = {};
+SCREENS.forEach(function(s){ byId[s.id] = s; });
+
+var root = document.documentElement;
+var store = document.createElement("div");
+store.innerHTML = document.getElementById("tpl-store").innerHTML;
+
+var state = { role: "MANAGER", screen: "dashboard" };
+
+function can(s){ return s.roles.indexOf(state.role) !== -1; }
+function svg(k){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">' + (ICON[k]||"") + '</svg>'; }
+
+function applyRole(node){
+  var i, el, list;
+  list = node.querySelectorAll("[data-only]");
+  for(i=0;i<list.length;i++){ el=list[i]; el.hidden = el.getAttribute("data-only").split(/\s+/).indexOf(state.role) === -1; }
+  list = node.querySelectorAll("[data-not]");
+  for(i=0;i<list.length;i++){ el=list[i]; el.hidden = el.getAttribute("data-not").split(/\s+/).indexOf(state.role) !== -1; }
+}
+
+function renderNav(){
+  var u = USERS[state.role], html = "";
+  html += '<div class="side-brand"><div class="glyph">OR</div><div><b>Office on Rent</b><small>'+u.b+'</small></div></div>';
+  var any = false;
+  NAV.forEach(function(grp){
+    var items = grp.items.filter(function(it){ var s=byId[it.s]; return s && can(s); });
+    if(!items.length) return;
+    any = true;
+    html += '<div class="side-group">'+grp.g+'</div>';
+    items.forEach(function(it){
+      var active = it.s === state.screen ? " active" : "";
+      html += '<div class="navitem'+active+'" data-go="'+it.s+'">'+svg(it.icon)+it.label+
+        (it.count ? '<span class="count'+(it.hot?" hot":"")+'">'+it.count+'</span>' : '')+'</div>';
+    });
+  });
+  if(!any){
+    html += '<div style="padding:var(--s5) var(--s4);font-size:12.5px;color:var(--dg600);line-height:1.5">'+
+      '<b style="display:block;margin-bottom:6px">No accessible routes</b>'+
+      'Every gate in <code>App.jsx</code> excludes this role.</div>';
+  }
+  html += '<div class="side-foot"><div class="userchip"><div class="avatar">'+u.i+'</div><div><b>'+u.n+'</b><small>'+u.r+'</small></div></div></div>';
+  document.getElementById("sideNav").innerHTML = html;
+}
+
+function renderIndex(){
+  var html = "";
+  INDEX_GROUPS.forEach(function(grp){
+    html += '<h5>'+grp.g+'</h5>';
+    grp.ids.forEach(function(id){
+      var s = byId[id]; if(!s) return;
+      var cls = "idx" + (id===state.screen?" on":"") + (can(s)?"":" locked");
+      html += '<button class="'+cls+'" data-go="'+id+'"><span>'+s.title+'</span><span class="rt">'+s.path+'</span></button>';
+    });
+  });
+  document.getElementById("routeIndex").innerHTML = html;
+}
+
+function renderScreen(){
+  var s = byId[state.screen], u = USERS[state.role];
+  document.getElementById("scrTitle").textContent = s.title;
+  document.getElementById("scrPath").textContent = s.path;
+  document.getElementById("scrFile").textContent = s.file;
+  document.getElementById("frameCaption").textContent = u.r + " · " + s.path;
+
+  var host = document.getElementById("canvasHost");
+  var top = document.getElementById("topBar");
+  var side = document.getElementById("sideNav");
+  var note = document.getElementById("scrNote");
+
+  // chrome on/off (login screens have no shell)
+  var showChrome = s.chrome !== false;
+  side.hidden = !showChrome;
+  top.hidden = !showChrome;
+  host.style.padding = showChrome ? "" : "0";
+  host.style.gap = showChrome ? "" : "0";
+
+  if(showChrome && !can(s)){
+    top.innerHTML = '<div class="crumbs"><b>'+s.title+'</b></div>';
+    host.innerHTML = '<div class="noaccess"><div class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>'+
+      '<h3>Not available for '+u.r+'</h3>'+
+      '<p>The gate on <code>'+s.path+'</code> does not include <code>'+state.role+'</code>, so this role is redirected to <code>/</code>. The route is hidden from the sidebar too — a locked item in the list on the left means exactly this.</p></div>';
+    note.innerHTML = '<b>Role gating:</b><span>Mirrors the <code>canAccess()</code> call on this route in <code>App.jsx</code>. Roles with access: <code>'+s.roles.join("</code>, <code>")+'</code>.</span>';
+    renderNav(); renderIndex();
+    return;
+  }
+
+  if(showChrome){
+    top.innerHTML = '<div class="crumbs"><b>'+s.title+'</b></div>'+
+      '<div class="omnibox"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'+(s.search||"Search…")+'<kbd>&#8984;K</kbd></div>'+
+      (s.actions||"");
+  }
+
+  var tpl = store.querySelector('[data-screen="'+s.id+'"]');
+  host.innerHTML = tpl ? tpl.innerHTML : '<div class="emptybox"><h4>Screen not drafted</h4></div>';
+  note.innerHTML = '<b>'+s.note[0]+'</b><span>'+s.note[1]+'</span>';
+
+  applyRole(host);
+  applyRole(top);
+  renderNav(); renderIndex();
+}
+
+function go(id){
+  if(!byId[id]) return;
+  state.screen = id;
+  renderScreen();
+  var y = document.querySelector(".stage").getBoundingClientRect().top + window.pageYOffset - 84;
+  if(window.pageYOffset > y) window.scrollTo({top:y, behavior:"smooth"});
+}
+
+document.addEventListener("click", function(e){
+  var g = e.target.closest("[data-go]");
+  if(g){ go(g.getAttribute("data-go")); return; }
+  var r = e.target.closest("#roleseg button");
+  if(r){
+    state.role = r.getAttribute("data-role");
+    var bs = document.querySelectorAll("#roleseg button");
+    for(var i=0;i<bs.length;i++) bs[i].classList.toggle("on", bs[i]===r);
+    root.setAttribute("data-role", state.role);
+    renderScreen();
+    return;
+  }
+  var seg = e.target.closest(".seg button");
+  if(seg && seg.parentElement.id !== "roleseg"){
+    var sib = seg.parentElement.querySelectorAll("button");
+    for(var j=0;j<sib.length;j++) sib[j].classList.toggle("on", sib[j]===seg);
+    return;
+  }
+  var tb = e.target.closest(".tabs button");
+  if(tb){
+    var tsib = tb.parentElement.querySelectorAll("button");
+    for(var k=0;k<tsib.length;k++) tsib[k].classList.toggle("on", tsib[k]===tb);
+    return;
+  }
+  var ch = e.target.closest(".chip");
+  if(ch){ ch.classList.toggle("on"); return; }
+  var sw = e.target.closest(".sw");
+  if(sw){ sw.classList.toggle("on"); return; }
+});
+
+var lbl = document.getElementById("themeLabel");
+function setTheme(t){ root.setAttribute("data-theme", t); lbl.textContent = t==="dark" ? "Light" : "Dark"; }
+try{ setTheme(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
+catch(err){ setTheme("light"); }
+document.getElementById("themeToggle").addEventListener("click", function(){
+  setTheme(root.getAttribute("data-theme")==="dark" ? "light" : "dark");
+});
+
+renderScreen();
+})();
+</script>
+</body>
+</html>

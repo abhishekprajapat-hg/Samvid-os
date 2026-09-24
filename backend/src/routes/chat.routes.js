@@ -3,13 +3,14 @@ const express = require("express");
 const router = express.Router();
 const chatController = require("../controllers/chat.controller");
 const broadcastController = require("../controllers/broadcast.controller");
-const uploadController = require("../controllers/upload.controller");
 const authMiddleware = require("../middleware/auth.middleware");
 const { requireChatRoles } = require("../middleware/chatPermission.middleware");
 const { chatMessageLimiter } = require("../middleware/rateLimit.middleware");
-const { chatUpload, handleUploadError } = require("../middleware/upload.middleware");
+const { requirePageAccess, requirePageActionForMethod } = require("../middleware/pageAccess.middleware");
 
 router.use(authMiddleware.protect);
+router.use(requirePageAccess("chat"));
+router.use(requirePageActionForMethod("chat"));
 
 router.get("/rooms", chatController.getRooms);
 router.post("/rooms/direct", chatController.createDirectRoom);
@@ -26,9 +27,6 @@ router.patch("/rooms/:roomId/clear", chatController.clearRoomMessages);
 router.patch("/messages/:messageId/delete", chatController.deleteMessage);
 router.patch("/messages/:messageId/delivered", chatController.markDelivered);
 router.patch("/messages/:messageId/seen", chatController.markSeen);
-router.post("/calls", chatController.createCall);
-router.patch("/calls/:callId", chatController.updateCall);
-router.post("/uploads", chatUpload.single("file"), handleUploadError, uploadController.handleChatUpload);
 router.get("/escalations", chatController.getEscalations);
 router.get("/escalation-logs", chatController.getEscalationLogs);
 router.get("/escalations/:roomId/logs", chatController.getEscalationLogs);
@@ -44,7 +42,6 @@ router.get("/broadcasts", broadcastController.getBroadcastRooms);
 router.get("/contacts", chatController.getContacts);
 router.get("/conversations", chatController.getConversations);
 router.get("/conversations/:conversationId/messages", chatController.getConversationMessages);
-router.get("/conversations/:conversationId/calls", chatController.getConversationCalls);
 router.post("/messages", chatMessageLimiter, chatController.sendMessage);
 
 module.exports = router;

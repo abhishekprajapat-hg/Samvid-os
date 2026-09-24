@@ -705,6 +705,20 @@ export const InventoryDetailsScreen = () => {
         ) : null}
         <Text style={styles.meta}>Price: Rs {Number(asset.price || 0).toLocaleString("en-IN")}</Text>
         <Text style={styles.meta}>Description: {asset.description || "-"}</Text>
+        {asset.officeNumber ? <Text style={styles.meta}>Office Number: {asset.officeNumber}</Text> : null}
+        {asset.dealType ? <Text style={styles.meta}>Deal Type: {asset.dealType}</Text> : null}
+        {asset.propertyDate ? <Text style={styles.meta}>Property Date: {formatDateTime(asset.propertyDate)}</Text> : null}
+        <Text style={styles.meta}>GST Applicable: {asset.gstApplicable ? "Yes" : "No"}</Text>
+
+        {(asset.ownerName || asset.ownerNumber || asset.keyManagerName || asset.keyManagerNumber) ? (
+          <>
+            <Text style={styles.sectionInline}>Owner &amp; Key Manager</Text>
+            {asset.ownerName ? <Text style={styles.meta}>Owner Name: {asset.ownerName}</Text> : null}
+            {asset.ownerNumber ? <Text style={styles.meta}>Owner Number: {asset.ownerNumber}</Text> : null}
+            {asset.keyManagerName ? <Text style={styles.meta}>Key Manager Name: {asset.keyManagerName}</Text> : null}
+            {asset.keyManagerNumber ? <Text style={styles.meta}>Key Manager Number: {asset.keyManagerNumber}</Text> : null}
+          </>
+        ) : null}
 
         {!!asset.amenities?.length ? (
           <>

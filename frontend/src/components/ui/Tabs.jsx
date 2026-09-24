@@ -1,7 +1,7 @@
 import { cn } from "./utils";
 
 export const Tabs = ({ className, ...props }) => (
-  <div className={cn("flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-900", className)} {...props} />
+  <div className={cn("flex flex-wrap items-center gap-4 border-b border-slate-200 dark:border-slate-800", className)} {...props} />
 );
 
 export const TabButton = ({ active = false, className, children, ...props }) => (
@@ -9,10 +9,11 @@ export const TabButton = ({ active = false, className, children, ...props }) => 
     type="button"
     aria-pressed={active}
     className={cn(
-      "inline-flex h-8 items-center justify-center rounded-lg px-3 text-xs font-bold outline-none transition focus-visible:ring-2 focus-visible:ring-blue-500/50",
+      "-mb-px inline-flex items-center justify-center border-b-2 py-2.5 text-[12.5px] font-semibold outline-none transition",
+      "focus-visible:ring-2 focus-visible:ring-blue-500/50",
       active
-        ? "bg-white text-blue-700 shadow-sm dark:bg-slate-800 dark:text-blue-200"
-        : "text-slate-600 hover:bg-white/70 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100",
+        ? "border-blue-600 text-slate-900 dark:border-blue-400 dark:text-slate-50"
+        : "border-transparent text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100",
       className,
     )}
     {...props}

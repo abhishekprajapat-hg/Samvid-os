@@ -66,7 +66,7 @@ export const updateUserDesignation = async (userId, payload = {}) => {
 };
 
 export const updateUserByAdmin = async (userId, payload = {}) => {
-  const res = await api.patch(`/users/${userId}`, payload);
+  const res = await api.patch(`/users/admin/${userId}`, payload);
   return res.data?.user || null;
 };
 

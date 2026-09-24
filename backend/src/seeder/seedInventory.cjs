@@ -231,7 +231,7 @@ async function resolveSeederActors() {
 
 async function seedInventoryByType() {
   try {
-    assertSeedAllowed({ scriptName: "seed:inventory", destructive: true });
+    assertSeedAllowed({ scriptName: "seed:inventory", destructive: false });
     const perType = parsePerTypeCount(
       process.argv[2] || process.env.INVENTORY_SEED_PER_TYPE,
       DEFAULT_PER_TYPE,
@@ -239,14 +239,6 @@ async function seedInventoryByType() {
 
     await mongoose.connect(process.env.MONGO_URI);
     const { companyId, actorId, teamId } = await resolveSeederActors();
-
-    await Inventory.deleteMany({
-      companyId,
-      $or: [
-        { propertyId: { $regex: /^SEED-/i } },
-        { projectName: { $regex: /^Seed /i } },
-      ],
-    });
 
     const rows = [];
     TYPE_COMBINATIONS.forEach((combo, comboIndex) => {
@@ -263,10 +255,19 @@ async function seedInventoryByType() {
       }
     });
 
-    const inserted = await Inventory.insertMany(rows, { ordered: true });
+    const result = await Inventory.bulkWrite(
+      rows.map((row) => ({
+        updateOne: {
+          filter: { companyId, propertyId: row.propertyId },
+          update: { $set: row },
+          upsert: true,
+        },
+      })),
+      { ordered: true },
+    );
 
     console.log(
-      `Seeded ${inserted.length} properties (${perType} each for COMMERCIAL-Sale, COMMERCIAL-Rent, RESIDENTIAL-Sale, RESIDENTIAL-Rent)`,
+      `Seeded ${result.upsertedCount + result.modifiedCount} properties (${perType} each for COMMERCIAL-Sale, COMMERCIAL-Rent, RESIDENTIAL-Sale, RESIDENTIAL-Rent)`,
     );
   } catch (error) {
     console.error("Inventory seeding failed:", error.message);

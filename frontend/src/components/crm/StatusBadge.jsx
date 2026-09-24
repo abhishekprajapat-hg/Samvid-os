@@ -5,7 +5,7 @@ const StatusBadge = ({ status, label, className }) => {
   const meta = getStatusMeta(status);
 
   return (
-    <Badge variant={meta.tone} className={cn("whitespace-nowrap", className)}>
+    <Badge variant={meta.tone} dot className={cn("whitespace-nowrap", className)}>
       {label || meta.label}
     </Badge>
   );

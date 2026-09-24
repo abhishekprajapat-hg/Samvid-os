@@ -518,9 +518,16 @@ export const ChatNotificationProvider = ({ children, enabled = true }) => {
     };
 
     const onTaskEvent = (payload = {}, eventType = "task:updated") => {
+      if (String(payload.actorId || "") === getCurrentUserId()) return;
       const event = normalizeTaskNotificationEvent(payload, eventType);
       if (!event?.id) return;
 
+      const storageKey = `taskNotificationSeen:v1:${getCurrentUserId()}`;
+      let persistedIds = [];
+      try { persistedIds = JSON.parse(localStorage.getItem(storageKey) || "[]"); } catch { /* optional storage */ }
+      if (!Array.isArray(persistedIds)) persistedIds = [];
+      if (persistedIds.includes(event.id)) return;
+      try { localStorage.setItem(storageKey, JSON.stringify([...persistedIds, event.id].slice(-500))); } catch { /* optional storage */ }
       if (seenMessageIdsRef.current.has(event.id)) {
         return;
       }

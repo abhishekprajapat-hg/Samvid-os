@@ -14,6 +14,7 @@ import {
 import { Badge, Button, EmptyState, Skeleton } from "../../../components/ui";
 import { DataTableShell, MetricCard } from "../../../components/crm";
 import { toApiInventoryStatus } from "./propertyWorkspaceUtils";
+import InventoryCard from "./InventoryCard";
 
 const INITIAL_VISIBLE_ASSETS = 60;
 const VISIBLE_ASSET_INCREMENT = 60;
@@ -95,6 +96,7 @@ export const PropertyCard = React.memo(({
   canManage,
   canDeleteDirect,
   canRequestDelete,
+  pendingDeleteAssetIds,
   canOpenEditModal,
   canRequestStatusChange,
   deleting,
@@ -118,6 +120,7 @@ export const PropertyCard = React.memo(({
   const imageCount = Array.isArray(asset?.images) ? asset.images.length : 0;
   const statusValue = toApiInventoryStatus(asset?.status);
   const isRent = String(asset?.type || "").trim().toUpperCase() === "RENT";
+  const isDeleteRequested = pendingDeleteAssetIds?.has(String(asset?._id || ""));
 
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-lg">
@@ -189,6 +192,12 @@ export const PropertyCard = React.memo(({
           </div>
         ) : null}
 
+        {isDeleteRequested ? (
+          <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
+            Delete requested - awaiting approval
+          </div>
+        ) : null}
+
         {statusValue === "Sold" && asset?.saleDetails ? (
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
             <div className="font-semibold text-slate-800">
@@ -221,8 +230,8 @@ export const PropertyCard = React.memo(({
                 size="sm"
                 variant="danger"
                 onClick={() => onDelete(asset?._id)}
-                disabled={deleting}
-                aria-label={canDeleteDirect ? "Delete property" : "Request property delete"}
+                disabled={deleting || isDeleteRequested}
+                aria-label={isDeleteRequested ? "Property delete already requested" : canDeleteDirect ? "Delete property" : "Request property delete"}
                 className="w-9 px-0"
               >
                 {deleting ? <MoreHorizontal size={15} /> : <Trash2 size={15} />}
@@ -264,6 +273,7 @@ export const PropertyTable = React.memo(({
   canManage,
   canDeleteDirect,
   canRequestDelete,
+  pendingDeleteAssetIds,
   canOpenEditModal,
   canRequestStatusChange,
   deletingId,
@@ -294,7 +304,9 @@ export const PropertyTable = React.memo(({
         </tr>
       </thead>
       <tbody className="divide-y divide-slate-100 bg-white">
-        {assets.map((asset) => (
+        {assets.map((asset) => {
+          const isDeleteRequested = pendingDeleteAssetIds?.has(String(asset?._id || ""));
+          return (
           <tr key={asset._id} className="hover:bg-slate-50/80">
             <td className="px-4 py-3">
               <button
@@ -306,6 +318,9 @@ export const PropertyTable = React.memo(({
                 <div className="mt-1 text-xs text-slate-500">
                   {[asset?.propertyId, getLocationLabel(asset)].filter(Boolean).join(" | ")}
                 </div>
+                {isDeleteRequested ? (
+                  <div className="mt-1 text-xs font-bold text-rose-600">Delete requested - awaiting approval</div>
+                ) : null}
               </button>
             </td>
             <td className="px-4 py-3">
@@ -354,8 +369,8 @@ export const PropertyTable = React.memo(({
                     size="sm"
                     variant="danger"
                     onClick={() => onDelete(asset?._id)}
-                    disabled={deletingId === asset._id}
-                    aria-label={canDeleteDirect ? "Delete property" : "Request property delete"}
+                    disabled={deletingId === asset._id || isDeleteRequested}
+                    aria-label={isDeleteRequested ? "Property delete already requested" : canDeleteDirect ? "Delete property" : "Request property delete"}
                     className="w-9 px-0"
                   >
                     <Trash2 size={15} />
@@ -364,7 +379,8 @@ export const PropertyTable = React.memo(({
               </div>
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   </DataTableShell>
@@ -454,17 +470,35 @@ export const PropertyWorkspace = ({
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-3 pb-8 sm:gap-5 md:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-5 pb-8 md:grid-cols-2 xl:grid-cols-3">
         {visibleAssets.map((asset) => (
-          <PropertyCard
+          <InventoryCard
             key={asset._id}
             asset={asset}
+            priceLabel={actionProps.formatPrice(asset)}
+            onView={actionProps.onView}
+            onEdit={actionProps.onEdit}
+            onShare={actionProps.onShare}
+            onDelete={actionProps.onDelete}
+            canOpenEditModal={actionProps.canOpenEditModal}
+            canDelete={actionProps.canDeleteDirect || actionProps.canRequestDelete}
             deleting={actionProps.deletingId === asset._id}
-            updatingStatus={actionProps.updatingStatusId === asset._id}
-            requestingStatus={actionProps.requestingStatusId === asset._id}
-            {...actionProps}
+            deleteRequested={actionProps.pendingDeleteAssetIds?.has(String(asset?._id || ""))}
           />
         ))}
+        {actionProps.canOpenCreateModal ? (
+          <button
+            type="button"
+            onClick={actionProps.onOpenAddModal}
+            className="grid min-h-[180px] place-items-center rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-slate-400 outline-none transition hover:border-slate-400 hover:text-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500/40 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-500"
+          >
+            <span>
+              <span className="block text-[22px] leading-none">+</span>
+              <span className="mt-2 block text-[12.5px] font-semibold">Add property</span>
+              <span className="mt-0.5 block text-[11px]">or drop a spreadsheet</span>
+            </span>
+          </button>
+        ) : null}
       </div>
       {hiddenCount > 0 ? (
         <div className="-mt-2 flex justify-center pb-8">

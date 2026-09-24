@@ -1,5 +1,5 @@
 const INVENTORY_STATUSES = ["Available", "Blocked", "Sold"];
-const INVENTORY_TYPES = ["Sale", "Rent"];
+const INVENTORY_TYPES = ["Sale", "Rent", "Both"];
 const INVENTORY_SALE_PAYMENT_MODES = [
   "UPI",
   "CASH",
@@ -7,18 +7,24 @@ const INVENTORY_SALE_PAYMENT_MODES = [
   "NET_BANKING_NEFTRTGSIMPS",
 ];
 const INVENTORY_SALE_PAYMENT_TYPES = ["FULL", "PARTIAL"];
+const INVENTORY_DEAL_TYPES = ["PURCHASE", "RENT", "LEASE"];
+const INVENTORY_OWNER_TYPES = ["1ST", "2ND", "3RD", "POWER_OF_ATTORNEY"];
 
 const INVENTORY_REQUEST_TYPES = ["create", "update", "delete"];
 const INVENTORY_REQUEST_STATUSES = ["pending", "approved", "rejected"];
 
+// propertyId and unitNumber are server-generated (see generatePropertyId in
+// inventoryWorkflow.service.js) and must never be settable from client payloads.
 const INVENTORY_ALLOWED_FIELDS = [
   "projectName",
   "towerName",
-  "unitNumber",
-  "propertyId",
   "inventoryType",
   "price",
+  "rent",
   "deposit",
+  "depositMonths",
+  "agreementYears",
+  "lockInYears",
   "type",
   "category",
   "furnishingStatus",
@@ -36,22 +42,35 @@ const INVENTORY_ALLOWED_FIELDS = [
   "totalArea",
   "carpetArea",
   "builtUpArea",
+  "superBuiltUpArea",
+  "length",
+  "width",
+  "height",
   "areaUnit",
   "maintenanceCharges",
   "commercialDetails",
   "residentialDetails",
+  "documentsAvailable",
   "siteLocation",
   "images",
   "documents",
   "floorPlans",
   "videoTours",
+  "officeNumber",
+  "ownerName",
+  "ownerNumber",
+  "ownerWhatsappNumber",
+  "ownerType",
+  "keyManagerName",
+  "keyManagerNumber",
+  "dealType",
+  "propertyDate",
+  "gstApplicable",
 ];
 
 const INVENTORY_REQUIRED_CREATE_FIELDS = [
   "projectName",
   "towerName",
-  "unitNumber",
-  "price",
   "location",
 ];
 
@@ -72,6 +91,8 @@ module.exports = {
   INVENTORY_TYPES,
   INVENTORY_SALE_PAYMENT_MODES,
   INVENTORY_SALE_PAYMENT_TYPES,
+  INVENTORY_DEAL_TYPES,
+  INVENTORY_OWNER_TYPES,
   INVENTORY_REQUEST_TYPES,
   INVENTORY_REQUEST_STATUSES,
   INVENTORY_ALLOWED_FIELDS,

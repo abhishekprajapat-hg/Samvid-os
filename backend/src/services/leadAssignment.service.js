@@ -31,6 +31,7 @@ const AUTO_ASSIGNMENT_REASON = "New lead automatically assigned to Inside Execut
 const DEFAULT_MAX_ACTIVE_LEADS = 120;
 const ACTIVE_LOAD_WEIGHT = 100;
 const DAILY_LOAD_WEIGHT = 10;
+const ROLE_TYPE_VALUES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "BOTH"]);
 
 const configuredMaxActiveLeads = Number.parseInt(
   process.env.AUTO_ASSIGN_MAX_ACTIVE_LEADS || "",
@@ -44,6 +45,12 @@ const MAX_ACTIVE_LEADS_PER_EXECUTIVE =
 
 const toId = (value) => String(value || "");
 const toTimestamp = (value) => (value ? new Date(value).getTime() : 0);
+const normalizeRoleType = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  return ROLE_TYPE_VALUES.includes(normalized) ? normalized : "COMMERCIAL";
+};
+const getLeadRoleType = (lead) => normalizeRoleType(lead?.requirements?.inventoryType);
+const getUserRoleType = (user) => normalizeRoleType(user?.roleType);
 
 const buildCountMap = (rows) =>
   new Map(rows.map((row) => [toId(row._id), Number(row.count || 0)]));
@@ -298,7 +305,14 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
   const actorId = performedBy || requester?._id || null;
   const resolvedCompanyId = requester?.companyId || lead?.companyId || null;
 
-  if (requester && LEAD_OWNER_ROLES.includes(requester.role) && requester.isActive) {
+  const leadRoleType = getLeadRoleType(lead);
+
+  if (
+    requester
+    && LEAD_OWNER_ROLES.includes(requester.role)
+    && requester.isActive
+    && [leadRoleType, "BOTH"].includes(getUserRoleType(requester))
+  ) {
     await persistAssignment({
       lead,
       executive: requester,
@@ -317,6 +331,7 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
 
   const executiveQuery = {
     role: { $in: LEAD_OWNER_ROLES },
+    roleType: { $in: [leadRoleType, "BOTH"] },
     isActive: true,
   };
   if (resolvedCompanyId) {
@@ -324,7 +339,7 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
   }
 
   const activeExecutives = await User.find(executiveQuery)
-    .select("_id name role parentId companyId isActive createdAt lastAssignedAt")
+    .select("_id name role roleType parentId companyId isActive createdAt lastAssignedAt")
     .sort({ createdAt: 1 })
     .lean();
 
@@ -388,8 +403,9 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
       role: { $in: MANAGEMENT_ROLES },
       isActive: true,
       ...(resolvedCompanyId ? { companyId: resolvedCompanyId } : {}),
+      roleType: { $in: [leadRoleType, "BOTH"] },
     })
-      .select("_id name role createdAt lastAssignedAt")
+      .select("_id name role roleType createdAt lastAssignedAt")
       .sort({ createdAt: 1 })
       .lean()
     : [];
@@ -448,7 +464,7 @@ const redistributePipelineLeads = async ({
   }
 
   const executives = await User.find(query)
-    .select("_id role parentId createdAt lastAssignedAt")
+    .select("_id role roleType parentId createdAt lastAssignedAt")
     .sort({ createdAt: 1 })
     .lean();
 
@@ -480,7 +496,7 @@ const redistributePipelineLeads = async ({
 
   const pipelineLeads = await Lead.find(pipelineLeadQuery)
     .select(
-      "_id assignedTo assignedManager assignedExecutive assignedFieldExecutive createdAt",
+      "_id requirements assignedTo assignedManager assignedExecutive assignedFieldExecutive createdAt",
     )
     .sort({ createdAt: 1 })
     .lean();
@@ -599,7 +615,11 @@ const redistributePipelineLeads = async ({
   const touchedExecutiveIds = new Set();
 
   pipelineLeads.forEach((lead) => {
-    const selectedExecutive = orderedExecutives[0];
+    const leadRoleType = getLeadRoleType(lead);
+    const selectedExecutive =
+      orderedExecutives.find((executive) => [leadRoleType, "BOTH"].includes(getUserRoleType(executive)))
+      || null;
+    if (!selectedExecutive) return;
     const selectedExecutiveId = toId(selectedExecutive._id);
     const currentAssignee = toId(lead.assignedTo);
     const managerId = resolveManagerId(selectedExecutive);

@@ -50,36 +50,33 @@ type TeamLead = {
 
 const ROLE_OPTIONS = [
   { label: "Manager", value: "MANAGER" },
-  { label: "Inside Executive", value: "INSIDE_EXECUTIVE" },
   { label: "Executive", value: "EXECUTIVE" },
   { label: "Field Executive", value: "FIELD_EXECUTIVE" },
   { label: "Production Executive", value: "PRODUCTION_EXECUTIVE" },
+  { label: "Community Manager", value: "COMMUNITY_MANAGER" },
   { label: "Channel Partner", value: "CHANNEL_PARTNER" },
+  { label: "Coworking admin", value: "COWORKING_ADMIN" },
 ];
 const EDIT_ROLE_OPTIONS = [
   { label: "Manager", value: "MANAGER" },
-  { label: "Inside Executive", value: "INSIDE_EXECUTIVE" },
   { label: "Executive", value: "EXECUTIVE" },
   { label: "Field Executive", value: "FIELD_EXECUTIVE" },
   { label: "Production Executive", value: "PRODUCTION_EXECUTIVE" },
+  { label: "Community Manager", value: "COMMUNITY_MANAGER" },
   { label: "Channel Partner", value: "CHANNEL_PARTNER" },
+  { label: "Coworking admin", value: "COWORKING_ADMIN" },
 ];
 
-const EXECUTIVE_ROLES = new Set([
-  "INSIDE_EXECUTIVE",
-  "EXECUTIVE",
-  "FIELD_EXECUTIVE",
-  "PRODUCTION_EXECUTIVE",
-]);
+const EXECUTIVE_ROLES = new Set(["EXECUTIVE", "FIELD_EXECUTIVE"]);
 const MANAGEMENT_ROLES = new Set(["MANAGER"]);
 const REPORTING_PARENT_ROLES: Record<string, string[]> = {
-  ADMIN: ["SUPER_ADMIN"],
   MANAGER: ["ADMIN"],
-  INSIDE_EXECUTIVE: ["MANAGER"],
   EXECUTIVE: ["MANAGER"],
   FIELD_EXECUTIVE: ["MANAGER"],
   PRODUCTION_EXECUTIVE: ["MANAGER"],
+  COMMUNITY_MANAGER: ["MANAGER"],
   CHANNEL_PARTNER: ["MANAGER"],
+  COWORKING_ADMIN: ["ADMIN"],
 };
 const getRefId = (value: { _id?: string } | string | null | undefined) => {
   if (!value) return "";
@@ -91,7 +88,7 @@ export const TeamManagerScreen = () => {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const { role, user } = useAuth();
-  const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
+  const isAdmin = role === "ADMIN";
   const canManageUsers = isAdmin || MANAGEMENT_ROLES.has(String(role || ""));
 
   const [loading, setLoading] = useState(true);

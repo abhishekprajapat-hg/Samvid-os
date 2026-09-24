@@ -27,7 +27,14 @@ export const deleteTask = async (taskId) => {
   return res.data || null;
 };
 
-export const getTaskStats = async () => {
-  const res = await api.get("/tasks/stats");
+export const getTaskStats = async (params = {}) => {
+  const res = await api.get("/tasks/stats", { params });
   return res.data || null;
 };
+
+export const getTaskStatsByUser = async () => {
+  const res = await api.get("/tasks/stats/by-user");
+  return res.data || {};
+};
+
+export const getTaskAssignees = async () => (await api.get("/tasks/assignees")).data;

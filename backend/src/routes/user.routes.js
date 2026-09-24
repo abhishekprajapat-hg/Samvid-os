@@ -82,6 +82,13 @@ router.patch(
   userController.updateMyLocation
 );
 
+router.patch(
+  "/admin/:userId",
+  writeLimiter,
+  authMiddleware.protect,
+  userController.updateUserByAdmin
+);
+
 router.post(
   "/:userId/delete-request",
   writeLimiter,
@@ -100,13 +107,6 @@ router.post(
   writeLimiter,
   authMiddleware.protect,
   userController.rebalanceExecutives
-);
-
-router.patch(
-  "/:userId",
-  writeLimiter,
-  authMiddleware.protect,
-  userController.updateUserByAdmin
 );
 
 router.delete(

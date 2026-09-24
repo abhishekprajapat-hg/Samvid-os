@@ -1,5 +1,17 @@
 import React from "react";
-import { Filter, LayoutGrid, Plus, Search, Table2 } from "lucide-react";
+import {
+  Armchair,
+  Building2,
+  CarFront,
+  ChevronDown,
+  Coffee,
+  Grid2X2,
+  IndianRupee,
+  Layers3,
+  Plus,
+  Sparkles,
+  UsersRound,
+} from "lucide-react";
 
 export const AssetVaultToolbar = ({ modeType, onModeChange, canOpenCreateModal, onOpenAddModal }) => (
   <div className="flex flex-col items-start gap-4 z-10 xl:flex-row xl:items-end xl:justify-end">
@@ -39,18 +51,19 @@ export const AssetVaultToolbar = ({ modeType, onModeChange, canOpenCreateModal, 
   </div>
 );
 
+const InventoryFilterControl = ({ icon: Icon, label, children, className = "" }) => (
+  <label className={`inventory-reference-filter relative inline-flex h-10 min-w-[112px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[13px] font-medium text-slate-700 shadow-sm transition hover:border-blue-200 ${className}`}>
+    {React.createElement(Icon, { size: 17, className: "shrink-0 text-slate-700", strokeWidth: 1.9 })}
+    <span className="pointer-events-none min-w-0 flex-1 truncate">{label}</span>
+    {children}
+    <ChevronDown size={15} className="pointer-events-none shrink-0 text-slate-500" />
+  </label>
+);
+
 export const AssetVaultFilters = ({
-  searchTerm,
-  onSearchChange,
-  viewMode,
-  onViewModeChange,
-  advancedFiltersOpen,
-  onToggleAdvancedFilters,
-  statusFilter,
-  onStatusFilterChange,
-  statusOptions,
   inventoryTypeFilter,
   onInventoryTypeFilterChange,
+  canChooseInventoryRoleType = true,
   furnishingFilter,
   onFurnishingFilterChange,
   bhkFilter,
@@ -59,8 +72,6 @@ export const AssetVaultFilters = ({
   onCabinsFilterChange,
   seatsFilter,
   onSeatsFilterChange,
-  areaRangeFilter,
-  onAreaRangeFilterChange,
   budgetRangeFilter,
   onBudgetRangeFilterChange,
   floorFilter,
@@ -72,186 +83,44 @@ export const AssetVaultFilters = ({
   amenitiesFilter,
   onAmenitiesFilterChange,
 }) => (
-  <div className="z-20 space-y-2 rounded-2xl border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur md:space-y-3 md:p-3">
-    <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_auto_220px]">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search project, tower, unit, city, area, property ID"
-          className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-        />
-      </div>
-
-      <div className="hidden rounded-xl border border-slate-200 bg-slate-50 p-1 md:flex">
-        <button
-          type="button"
-          onClick={() => onViewModeChange("cards")}
-          className={`inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-xs font-bold uppercase tracking-widest transition ${
-            viewMode === "cards"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-          aria-pressed={viewMode === "cards"}
-        >
-          <LayoutGrid size={14} />
-          Cards
-        </button>
-        <button
-          type="button"
-          onClick={() => onViewModeChange("table")}
-          className={`inline-flex h-9 flex-1 items-center justify-center gap-2 rounded-lg px-3 text-xs font-bold uppercase tracking-widest transition ${
-            viewMode === "table"
-              ? "bg-white text-slate-900 shadow-sm"
-              : "text-slate-500 hover:text-slate-800"
-          }`}
-          aria-pressed={viewMode === "table"}
-        >
-          <Table2 size={14} />
-          Table
-        </button>
-      </div>
-
-      <select
-        aria-label="Filter inventory by status"
-        value={statusFilter}
-        onChange={(event) => onStatusFilterChange(event.target.value)}
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      >
-        <option value="all">All statuses</option>
-        {statusOptions.map((status) => (
-          <option key={status} value={status}>
-            {status}
-          </option>
-        ))}
-      </select>
-    </div>
-
-    <button
-      type="button"
-      onClick={onToggleAdvancedFilters}
-      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-bold uppercase tracking-widest text-slate-600 md:hidden"
-    >
-      <Filter size={14} />
-      {advancedFiltersOpen ? "Hide Filters" : "More Filters"}
-    </button>
-
-    <div className={`${advancedFiltersOpen ? "grid" : "hidden"} grid-cols-1 gap-3 md:grid md:grid-cols-2 xl:grid-cols-4`}>
-      <select
-        aria-label="Filter inventory by type"
-        value={inventoryTypeFilter}
-        onChange={(event) => onInventoryTypeFilterChange(event.target.value)}
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      >
-        <option value="all">Inventory Type (All)</option>
-        <option value="COMMERCIAL">Commercial</option>
-        <option value="RESIDENTIAL">Residential</option>
-      </select>
-
-      <select
-        aria-label="Filter inventory by furnishing"
-        value={furnishingFilter}
-        onChange={(event) => onFurnishingFilterChange(event.target.value)}
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      >
-        <option value="">Furnishing (All)</option>
-        <option value="UNFURNISHED">Unfurnished</option>
-        <option value="SEMI_FURNISHED">Semi Furnished</option>
-        <option value="FULLY_FURNISHED">Fully Furnished</option>
-        <option value="BARE_SHELL">Bare Shell</option>
-        <option value="WARM_SHELL">Warm Shell</option>
-        <option value="MANAGED_OFFICE">Managed Office</option>
-        <option value="COWORKING">Coworking</option>
-      </select>
-
-      <select
-        aria-label="Filter inventory by BHK"
-        value={bhkFilter}
-        onChange={(event) => onBhkFilterChange(event.target.value)}
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      >
-        <option value="">BHK (All)</option>
-        <option value="1BHK">1 BHK</option>
-        <option value="2BHK">2 BHK</option>
-        <option value="3BHK">3 BHK</option>
-        <option value="4BHK">4 BHK</option>
-        <option value="5BHK">5 BHK</option>
-      </select>
-
-      <input
-        type="text"
-        value={budgetRangeFilter}
-        onChange={(event) => onBudgetRangeFilterChange(event.target.value)}
-        placeholder="Budget Range (min-max)"
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      />
-
-      <input
-        type="text"
-        value={areaRangeFilter}
-        onChange={(event) => onAreaRangeFilterChange(event.target.value)}
-        placeholder="Area Range (min-max)"
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      />
-
-      <input
-        type="number"
-        min="0"
-        value={cabinsFilter}
-        onChange={(event) => onCabinsFilterChange(event.target.value)}
-        placeholder="Cabins (min)"
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      />
-
-      <input
-        type="number"
-        min="0"
-        value={seatsFilter}
-        onChange={(event) => onSeatsFilterChange(event.target.value)}
-        placeholder="Seats (min)"
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      />
-
-      <input
-        type="number"
-        min="0"
-        value={floorFilter}
-        onChange={(event) => onFloorFilterChange(event.target.value)}
-        placeholder="Floor (min)"
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      />
-
-      <select
-        aria-label="Filter inventory by parking"
-        value={parkingFilter}
-        onChange={(event) => onParkingFilterChange(event.target.value)}
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      >
-        <option value="">Parking (All)</option>
-        <option value="true">Parking Available</option>
-        <option value="false">No Parking</option>
-      </select>
-
-      <select
-        aria-label="Filter inventory by pantry"
-        value={pantryFilter}
-        onChange={(event) => onPantryFilterChange(event.target.value)}
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      >
-        <option value="">Pantry (All)</option>
-        <option value="true">Pantry Yes</option>
-        <option value="false">Pantry No</option>
-      </select>
-
-      <input
-        type="text"
-        value={amenitiesFilter}
-        onChange={(event) => onAmenitiesFilterChange(event.target.value)}
-        placeholder="Amenities (comma separated)"
-        className="h-11 px-3 rounded-xl border border-slate-200 bg-white text-sm text-slate-700 focus:outline-none focus:border-emerald-500"
-      />
+  <div className="inventory-filter-panel z-20 space-y-2 bg-transparent p-0">
+    <div className="inventory-reference-filter-row flex flex-wrap items-center gap-2">
+      <InventoryFilterControl icon={Building2} label={inventoryTypeFilter === "RESIDENTIAL" ? "Residential" : "Commercial"}>
+        {canChooseInventoryRoleType ? (
+          <select aria-label="Inventory type" value={inventoryTypeFilter} onChange={(event) => onInventoryTypeFilterChange(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0">
+            <option value="all">All inventory types</option>
+            <option value="COMMERCIAL">Commercial</option>
+            <option value="RESIDENTIAL">Residential</option>
+          </select>
+        ) : null}
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={Armchair} label={furnishingFilter ? furnishingFilter.replace(/_/g, " ") : "Furnishing"}>
+        <select aria-label="Furnishing" value={furnishingFilter} onChange={(event) => onFurnishingFilterChange(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0"><option value="">All furnishing</option><option value="UNFURNISHED">Unfurnished</option><option value="SEMI_FURNISHED">Semi Furnished</option><option value="FULLY_FURNISHED">Fully Furnished</option><option value="BARE_SHELL">Bare Shell</option><option value="WARM_SHELL">Warm Shell</option><option value="MANAGED_OFFICE">Managed Office</option><option value="COWORKING">Coworking</option></select>
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={Grid2X2} label={bhkFilter || "BHK"}>
+        <select aria-label="BHK" value={bhkFilter} onChange={(event) => onBhkFilterChange(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0"><option value="">All BHK</option><option value="1BHK">1 BHK</option><option value="2BHK">2 BHK</option><option value="3BHK">3 BHK</option><option value="4BHK">4 BHK</option><option value="5BHK">5 BHK</option></select>
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={CarFront} label={parkingFilter === "true" ? "Parking" : parkingFilter === "false" ? "No parking" : "Parking"}>
+        <select aria-label="Parking" value={parkingFilter} onChange={(event) => onParkingFilterChange(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0"><option value="">All parking</option><option value="true">Parking Available</option><option value="false">No Parking</option></select>
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={Coffee} label={pantryFilter === "true" ? "Pantry" : pantryFilter === "false" ? "No pantry" : "Pantry"}>
+        <select aria-label="Pantry" value={pantryFilter} onChange={(event) => onPantryFilterChange(event.target.value)} className="absolute inset-0 cursor-pointer opacity-0"><option value="">All pantry</option><option value="true">Pantry Yes</option><option value="false">Pantry No</option></select>
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={UsersRound} label={cabinsFilter ? `${cabinsFilter} cabins` : "Cabins"}>
+        <input aria-label="Minimum cabins" type="number" min="0" value={cabinsFilter} onChange={(event) => onCabinsFilterChange(event.target.value)} className="absolute inset-0 w-full cursor-pointer opacity-0" />
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={UsersRound} label={seatsFilter ? `${seatsFilter} seats` : "Seats"}>
+        <input aria-label="Minimum seats" type="number" min="0" value={seatsFilter} onChange={(event) => onSeatsFilterChange(event.target.value)} className="absolute inset-0 w-full cursor-pointer opacity-0" />
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={Layers3} label={floorFilter ? `Floor ${floorFilter}` : "Floor"}>
+        <input aria-label="Minimum floor" type="number" min="0" value={floorFilter} onChange={(event) => onFloorFilterChange(event.target.value)} className="absolute inset-0 w-full cursor-pointer opacity-0" />
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={IndianRupee} label={budgetRangeFilter || "Budget"}>
+        <input aria-label="Budget range" type="text" value={budgetRangeFilter} onChange={(event) => onBudgetRangeFilterChange(event.target.value)} className="absolute inset-0 w-full cursor-pointer opacity-0" />
+      </InventoryFilterControl>
+      <InventoryFilterControl icon={Sparkles} label={amenitiesFilter || "Amenities"}>
+        <input aria-label="Amenities" type="text" value={amenitiesFilter} onChange={(event) => onAmenitiesFilterChange(event.target.value)} className="absolute inset-0 w-full cursor-pointer opacity-0" />
+      </InventoryFilterControl>
     </div>
   </div>
 );
@@ -268,7 +137,7 @@ export const PendingInventoryRequestsPanel = ({
   onReject,
   onViewInventory,
 }) => {
-  if (!canManage) return null;
+  if (!canManage || pendingRequests.length === 0) return null;
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">

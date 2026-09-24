@@ -63,6 +63,11 @@ const resolveCompanyContext = async (user) => {
 
 exports.protect = async (req, res, next) => {
   try {
+    // Some routers mount protect at router level *and* list it per route
+    // (lead.routes.js). Resolving the same token twice would mean a second JWT
+    // verify plus a second User lookup on a hot path, so short-circuit.
+    if (req.user) return next();
+
     let token = "";
 
     if (
@@ -77,6 +82,17 @@ exports.protect = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.scope) {
+      /*
+       * Tokens minted for one narrow purpose carry a scope: a client-portal
+       * session, or the push-reply token that rides inside a notification
+       * payload. Neither stands in for a staff session, so reject any scoped
+       * token outright rather than trying to resolve one as a User id. Staff
+       * access tokens (utils/generateToken) carry no scope, which keeps this
+       * closed by default as further scoped tokens are added.
+       */
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
     const user = await User.findById(decoded.id).select("-password");
 
     if (!user || !user.isActive) {

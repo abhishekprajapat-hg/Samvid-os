@@ -125,6 +125,22 @@ const normalizeCallLog = (row: any): ChatCallLog => {
   };
 };
 
+const inferMimeTypeFromName = (name: string) => {
+  const normalized = String(name || "").toLowerCase();
+  if (normalized.endsWith(".jpg") || normalized.endsWith(".jpeg")) return "image/jpeg";
+  if (normalized.endsWith(".png")) return "image/png";
+  if (normalized.endsWith(".webp")) return "image/webp";
+  if (normalized.endsWith(".heic")) return "image/heic";
+  if (normalized.endsWith(".pdf")) return "application/pdf";
+  if (normalized.endsWith(".mp3")) return "audio/mpeg";
+  if (normalized.endsWith(".m4a")) return "audio/m4a";
+  if (normalized.endsWith(".wav")) return "audio/wav";
+  if (normalized.endsWith(".aac")) return "audio/aac";
+  if (normalized.endsWith(".ogg")) return "audio/ogg";
+  if (normalized.endsWith(".mp4")) return "video/mp4";
+  return "application/octet-stream";
+};
+
 const isWebRuntime = () => typeof window !== "undefined" && typeof document !== "undefined";
 
 const toFormFileValue = async ({
@@ -300,21 +316,24 @@ export const uploadChatFile = async ({
   mimeType?: string;
   file?: any;
 }) => {
+  const resolvedMimeType = String(mimeType || inferMimeTypeFromName(name) || "application/octet-stream");
   const formData = new FormData();
   const fileValue = await toFormFileValue({
     uri,
     name,
-    mimeType: mimeType || "application/octet-stream",
+    mimeType: resolvedMimeType,
     file,
   });
   formData.append("file", fileValue as any);
 
-  try {
-    const res = await api.post("/chat/uploads", formData);
-    return toLegacyAttachment(res.data?.attachment || null);
-  } catch (error: any) {
-    throw error;
-  }
+  const res = await api.post("/uploads", formData, { params: { category: "chat" } });
+  return {
+    fileName: String(res.data?.fileName || name || "attachment"),
+    fileUrl: String(res.data?.url || ""),
+    mimeType: String(res.data?.mimeType || resolvedMimeType),
+    size: Number(res.data?.size || 0) || 0,
+    storagePath: "",
+  };
 };
 
 export const getCallLogs = async ({
@@ -368,7 +387,16 @@ export const createCallLog = async ({
   metadata?: Record<string, unknown>;
 }) => {
   if (!conversationId) {
-    throw new Error("Conversation is required before starting a call");
+    return {
+      call: createLocalCallLog({
+        conversationId,
+        recipientId,
+        callType,
+        e2ee,
+        metadata,
+      }),
+      conversationId: String(conversationId || ""),
+    };
   }
 
   try {
@@ -384,64 +412,20 @@ export const createCallLog = async ({
       conversationId: String(res.data?.conversationId || ""),
     };
   } catch (error) {
+    if (isMissingRouteError(error)) {
+      return {
+        call: createLocalCallLog({
+          conversationId,
+          recipientId,
+          callType,
+          e2ee,
+          metadata,
+        }),
+        conversationId: String(conversationId || ""),
+      };
+    }
     throw error;
   }
-};
-
-export const createMobileCallSession = async ({
-  conversationId,
-  recipientId,
-  callType,
-  e2ee,
-  socket,
-  createCallLog: createCallLogImpl = createCallLog,
-}: {
-  conversationId: string;
-  recipientId?: string;
-  callType: "VOICE" | "VIDEO";
-  e2ee?: {
-    enabled?: boolean;
-    protocol?: string;
-    senderKeyFingerprint?: string;
-    receiverKeyFingerprint?: string;
-  };
-  socket?: {
-    emit: (event: string, payload?: any, ack?: (payload: any) => void) => void;
-  } | null;
-  createCallLog?: typeof createCallLog;
-}) => {
-  const created = await createCallLogImpl({
-    conversationId,
-    recipientId,
-    callType,
-    e2ee,
-  });
-  const call = created.call || null;
-  const stableCallId = String((call as any)?._id || (call as any)?.callId || "").trim();
-  const stableConversationId = String(created.conversationId || conversationId || "").trim();
-  if (!stableCallId || !stableConversationId) {
-    throw new Error("Failed to create call");
-  }
-
-  socket?.emit("chat:call:initiate", {
-    callId: stableCallId,
-    conversationId: stableConversationId,
-    mode: callType === "VIDEO" ? "video" : "audio",
-  });
-  socket?.emit("messenger:call:initiate", {
-    callId: stableCallId,
-    conversationId: stableConversationId,
-    recipientId,
-    callType,
-    e2ee,
-  });
-
-  return {
-    ...created,
-    call,
-    callId: stableCallId,
-    conversationId: stableConversationId,
-  };
 };
 
 export const updateCallLog = async ({
@@ -473,6 +457,9 @@ export const updateCallLog = async ({
     });
     return (res.data?.call || null) as ChatCallLog | null;
   } catch (error) {
+    if (isMissingRouteError(error)) {
+      return null;
+    }
     throw error;
   }
 };

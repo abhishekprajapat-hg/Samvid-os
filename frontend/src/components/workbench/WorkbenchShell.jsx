@@ -1,10 +1,12 @@
 import { memo, useCallback, useMemo, useState } from "react";
 import { useChatNotifications } from "../../context/useChatNotifications";
+import { usePermissions } from "../../context/usePermissions";
 import { cn } from "../ui";
-import ActivityBar from "./ActivityBar";
 import AppTopCommandBar from "./AppTopCommandBar";
+import FloatingMessenger from "./FloatingMessenger";
+import { useIsMobileViewport } from "../../hooks/useIsMobileViewport";
+import { getAllVisibleMenuGroups } from "./workbenchNavigation";
 import PrimarySidebar from "./PrimarySidebar";
-import TopNavigation from "./TopNavigation";
 
 const WorkbenchShell = ({
   children,
@@ -18,13 +20,20 @@ const WorkbenchShell = ({
   isChatPage = false,
   shouldLockDocumentScroll = true,
 }) => {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isMobileViewport = useIsMobileViewport();
   const { adminRequestUnread, unreadTotal } = useChatNotifications();
-  const userForNav = useMemo(() => user || {}, [user]);
+  const { permissions, enforcePageAccess, loading: permissionsLoading } = usePermissions();
+  const userForNav = useMemo(
+    () => ({
+      ...(user || {}),
+      permissions: permissionsLoading ? null : permissions,
+      enforcePageAccess: permissionsLoading ? false : enforcePageAccess,
+    }),
+    [user, permissions, enforcePageAccess, permissionsLoading],
+  );
   const handleOpenMobileMenu = useCallback(() => setMobileMenuOpen(true), []);
   const handleCloseMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
-  const handleToggleSidebar = useCallback(() => setSidebarCollapsed((prev) => !prev), []);
 
   return (
     <div
@@ -33,43 +42,27 @@ const WorkbenchShell = ({
         shouldLockDocumentScroll ? "h-dvh overflow-hidden" : "min-h-screen",
       )}
     >
-      <ActivityBar
-        userRole={userRole}
-        user={userForNav}
-        theme={theme}
-        onToggleTheme={onToggleTheme}
-        onLogout={onLogout}
-        unreadAlerts={adminRequestUnread}
-        unreadChats={unreadTotal}
-        onMobileMenuOpen={handleOpenMobileMenu}
-      />
       <PrimarySidebar
         userRole={userRole}
         user={userForNav}
-        theme={theme}
-        onToggleTheme={onToggleTheme}
-        onLogout={onLogout}
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={handleToggleSidebar}
+        roleLabel={roleLabel}
         mobileOpen={mobileMenuOpen}
         onMobileClose={handleCloseMobileMenu}
-        unreadChats={unreadTotal}
       />
 
       <main className="workspace-main app-page-bg relative min-w-0 flex flex-1 flex-col overflow-hidden">
-        <TopNavigation
-          userRole={userRole}
-          user={userForNav}
-          unreadAlerts={adminRequestUnread}
-          unreadChats={unreadTotal}
-          onMenuOpen={handleOpenMobileMenu}
-        />
-        {!isChatPage ? (
           <AppTopCommandBar
-            pageHeader={pageHeader}
-            roleLabel={roleLabel}
+            key={pageHeader?.title || (isChatPage ? "chat" : "workspace")}
+            user={userForNav}
+            userRole={userRole}
+            onLogout={onLogout}
+            unreadAlerts={adminRequestUnread}
+            unreadChats={unreadTotal}
+            pageHeader={isChatPage ? { title: "Team Chat" } : pageHeader}
+            theme={theme}
+            onToggleTheme={onToggleTheme}
+            onMenuOpen={handleOpenMobileMenu}
           />
-        ) : null}
         <div
           className={cn(
             "workspace-main-content min-h-0 flex-1 overflow-hidden",
@@ -79,6 +72,12 @@ const WorkbenchShell = ({
           {children}
         </div>
       </main>
+      {/*
+        Desktop only. On a phone the messenger panel covers most of the screen
+        and leaves the page under it unusable, so the header's chat icon goes
+        to the full /chat page instead (see AppTopCommandBar).
+      */}
+      {!isMobileViewport && !isChatPage && getAllVisibleMenuGroups(userRole, userForNav).some(group => group.items.some(item => item.path === "/chat")) && <FloatingMessenger theme={theme} unreadTotal={unreadTotal} />}
     </div>
   );
 };

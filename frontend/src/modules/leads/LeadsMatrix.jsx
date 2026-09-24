@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   getLeadPool,
   getLeadById,
@@ -21,19 +21,27 @@ import {
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
+import { usePermissions } from "../../context/usePermissions";
 import {
   AddLeadModal,
   BulkLeadUploadModal,
   LeadsMatrixAlerts,
-  LeadsMatrixFilters,
-  LeadsMatrixTable,
-  LeadsMatrixToolbar,
 } from "./components/LeadsMatrixSections";
-import { LeadDetailsRebuilt } from "./components/LeadDetailsRebuilt";
+import PipelineSelectionBar from "./components/PipelineSelectionBar";
+import PipelineCards from "./components/PipelineCards";
+import PipelineTable from "./components/PipelineTable";
+import PipelineTeam from "./components/PipelineTeam";
+import PipelineToolbar from "./components/PipelineToolbar";
+import LeadFiltersFlyout from "./components/LeadFiltersFlyout";
+import { QUICK_FILTER_KEYS } from "./components/leadFilterConstants";
 import {
-  assertSupportedBulkLeadUploadFileName,
-  BULK_LEAD_CSV_ONLY_MESSAGE,
-} from "./bulkLeadFilePolicy";
+  PIPELINE_VIEWS,
+  countNeedsAction,
+  matchesView,
+} from "./components/pipelineViews";
+import { ChevronDown } from "lucide-react";
+import { Button, cn } from "../../components/ui";
+import { LeadDetailsRebuilt } from "./components/LeadDetailsRebuilt";
 import {
   getPropertySubtypeConfig,
   getPropertySubtypeOptions,
@@ -42,6 +50,9 @@ import {
 const LEAD_STATUSES = [
   "NEW",
   "CONTACTED",
+  "FOLLOW_UP_1",
+  "FOLLOW_UP_2",
+  "FOLLOW_UP_3",
   "INTERESTED",
   "SITE_VISIT_SCHEDULED",
   "SITE_VISIT",
@@ -55,7 +66,7 @@ const LEAD_STATUSES = [
   "CLOSED",
   "LOST",
 ];
-const LEAD_STATUS_SET = new Set(["ALL", ...LEAD_STATUSES]);
+const LEAD_STATUS_SET = new Set(["ALL", "TRANSFER", ...LEAD_STATUSES]);
 
 const LEAD_SORT_OPTIONS = {
   RECENT: "RECENT",
@@ -79,16 +90,55 @@ const LEAD_LIST_FIELDS = [
   "city",
   "preferredLocations",
   "projectInterested",
+  "clientProfession",
   "requirements",
   "source",
   "status",
   "assignedTo",
+  "assignedFieldExecutive",
   "createdBy",
   "nextFollowUp",
   "lastContactedAt",
+  "assignmentHistory",
+  "hotClient",
+  "brokerContactId",
   "createdAt",
   "updatedAt",
 ].join(",");
+
+const formatLeadFilterDate = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getLeadFilterDate = (offset = 0, base = new Date()) => {
+  const date = new Date(base);
+  date.setDate(date.getDate() + offset);
+  return formatLeadFilterDate(date);
+};
+
+const getLeadFilterDateRange = (preset, type) => {
+  if (!preset) return ["", ""];
+  if (type === "followUp") {
+    return {
+      TODAY: [getLeadFilterDate(0), getLeadFilterDate(0)],
+      OVERDUE: ["", getLeadFilterDate(-1)],
+      TOMORROW: [getLeadFilterDate(1), getLeadFilterDate(1)],
+      THIS_WEEK: [getLeadFilterDate(0), getLeadFilterDate(6)],
+      NEXT_WEEK: [getLeadFilterDate(7), getLeadFilterDate(13)],
+    }[preset] || ["", ""];
+  }
+  const today = new Date();
+  return {
+    TODAY: [getLeadFilterDate(0), getLeadFilterDate(0)],
+    YESTERDAY: [getLeadFilterDate(-1), getLeadFilterDate(-1)],
+    THIS_WEEK: [getLeadFilterDate(-6), getLeadFilterDate(0)],
+    THIS_MONTH: [formatLeadFilterDate(new Date(today.getFullYear(), today.getMonth(), 1)), getLeadFilterDate(0)],
+    LAST_30_DAYS: [getLeadFilterDate(-30), getLeadFilterDate(0)],
+  }[preset] || ["", ""];
+};
 
 const EXECUTIVE_ROLES = ["INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE"];
 const LEAD_OWNER_ROLES = ["INSIDE_EXECUTIVE", "EXECUTIVE"];
@@ -116,12 +166,14 @@ const MAX_CLOSURE_DOCUMENTS = 20;
 
 const defaultFormData = {
   inventoryId: "",
+  relatedInventoryIds: [],
   name: "",
   phone: "",
   email: "",
   city: "",
   preferredLocations: "",
   projectInterested: "",
+  clientProfession: "",
   siteLat: "",
   siteLng: "",
   requirementsInventoryType: "",
@@ -383,14 +435,20 @@ const getInventoryLeadLabel = (inventoryLike = {}) => {
 const getInventoryLeadCity = (inventoryLike = {}) =>
   String(inventoryLike?.city || inventoryLike?.location || "").trim();
 
-const getStoredUserId = () => {
+const getStoredUserRoleType = () => {
   try {
     const parsedUser = JSON.parse(localStorage.getItem("user") || "{}");
-    return String(parsedUser?._id || parsedUser?.id || "").trim();
+    const normalized = String(parsedUser?.roleType || "").trim().toUpperCase();
+    return ["RESIDENTIAL", "BOTH"].includes(normalized) ? normalized : "COMMERCIAL";
   } catch {
-    return "";
+    return "COMMERCIAL";
   }
 };
+
+const getDefaultFormDataForRoleType = () => ({
+  ...defaultFormData,
+  requirementsInventoryType: getStoredUserRoleType() === "RESIDENTIAL" ? "RESIDENTIAL" : "COMMERCIAL",
+});
 
 const getInventoryLeadSearchText = (inventoryLike = {}) => {
   const commercialLayout = inventoryLike?.commercialDetails?.officeLayout || {};
@@ -437,17 +495,20 @@ const validateLeadRequirementDraft = ({
 } = {}) => {
   const parsedBudgetMin = toAmountNumber(budgetMin);
   const parsedBudgetMax = toAmountNumber(budgetMax);
+  const isPlotRequirement = String(propertySubtype || "").trim().toUpperCase() === "PLOT";
 
   const numericChecks = [
-    ["Budget Min", parsedBudgetMin],
-    ["Budget Max", parsedBudgetMax],
+    [isPlotRequirement ? "Budget Range minimum" : "Budget Min", parsedBudgetMin],
+    [isPlotRequirement ? "Budget Range maximum" : "Budget Max", parsedBudgetMax],
   ];
 
   for (const [label, value] of numericChecks) {
     if (value !== null && value < 0) return `${label} cannot be negative`;
   }
   if (parsedBudgetMin !== null && parsedBudgetMax !== null && parsedBudgetMin > parsedBudgetMax) {
-    return "Budget Min cannot be greater than Budget Max";
+    return isPlotRequirement
+      ? "Budget Range minimum cannot be greater than maximum"
+      : "Budget Min cannot be greater than Budget Max";
   }
 
   const subtypeConfig = getPropertySubtypeConfig(inventoryType, propertySubtype);
@@ -527,6 +588,82 @@ const toObjectIdString = (value) => {
   return String(value);
 };
 
+const mapLeadToFormData = (lead = {}) => {
+  const requirements = mapLeadRequirementsToDraft(lead?.requirements || {});
+  const primaryInventoryId = toObjectIdString(lead?.inventoryId);
+  const relatedInventoryIds = [
+    ...new Set(
+      [
+        primaryInventoryId,
+        ...(Array.isArray(lead?.relatedInventoryIds) ? lead.relatedInventoryIds : []),
+      ]
+        .map(toObjectIdString)
+        .filter(Boolean),
+    ),
+  ];
+  const siteLat = toCoordinateNumber(lead?.siteLocation?.lat);
+  const siteLng = toCoordinateNumber(lead?.siteLocation?.lng);
+
+  return {
+    ...defaultFormData,
+    inventoryId: primaryInventoryId,
+    relatedInventoryIds,
+    name: String(lead?.name || ""),
+    phone: String(lead?.phone || ""),
+    email: String(lead?.email || ""),
+    city: String(lead?.city || ""),
+    preferredLocations: Array.isArray(lead?.preferredLocations)
+      ? lead.preferredLocations.join(", ")
+      : "",
+    projectInterested: String(lead?.projectInterested || ""),
+    clientProfession: String(lead?.clientProfession || ""),
+    siteLat: siteLat === null ? "" : String(siteLat),
+    siteLng: siteLng === null ? "" : String(siteLng),
+    requirementsInventoryType: requirements.inventoryType,
+    requirementsPropertySubtype: requirements.propertySubtype,
+    requirementsSubtypeData: requirements.subtypeData || {},
+    requirementsTransactionType: requirements.transactionType,
+    requirementsFurnishingStatus: requirements.furnishingStatus,
+    requirementsBudgetMin: requirements.budgetMin,
+    requirementsBudgetMax: requirements.budgetMax,
+    requirementsAreaMin: requirements.areaMin,
+    requirementsAreaMax: requirements.areaMax,
+    requirementsAreaUnit: requirements.areaUnit || "SQ_FT",
+    requirementsCommercialSeats: requirements.commercial?.seats || "",
+    requirementsCommercialCabins: requirements.commercial?.cabins || "",
+    requirementsCommercialConferenceRooms: requirements.commercial?.conferenceRooms || "",
+    requirementsCommercialConferenceSeats: requirements.commercial?.conferenceSeats || "",
+    requirementsCommercialParkingAvailable: Boolean(requirements.commercial?.parkingAvailable),
+    requirementsCommercialPantry: Boolean(requirements.commercial?.pantry),
+    requirementsCommercialReceptionArea: Boolean(requirements.commercial?.receptionArea),
+    requirementsCommercialWaitingArea: Boolean(requirements.commercial?.waitingArea),
+    requirementsCommercialCafeteria: Boolean(requirements.commercial?.cafeteria),
+    requirementsCommercialServerRoom: Boolean(requirements.commercial?.serverRoom),
+    requirementsCommercialStorageRoom: Boolean(requirements.commercial?.storageRoom),
+    requirementsCommercialBreakoutArea: Boolean(requirements.commercial?.breakoutArea),
+    requirementsCommercialLiftAvailable: Boolean(requirements.commercial?.liftAvailable),
+    requirementsCommercialPowerBackup: Boolean(requirements.commercial?.powerBackup),
+    requirementsCommercialCentralAC: Boolean(requirements.commercial?.centralAC),
+    requirementsCommercialFireSafety: Boolean(requirements.commercial?.fireSafety),
+    requirementsCommercialReadyToMove: Boolean(requirements.commercial?.readyToMove),
+    requirementsCommercialUnderConstruction: Boolean(requirements.commercial?.underConstruction),
+    requirementsResidentialBhkType: requirements.residential?.bhkType || "",
+    requirementsResidentialFloor: requirements.residential?.floor || "",
+    requirementsResidentialAmenityLift: Boolean(requirements.residential?.amenities?.lift),
+    requirementsResidentialAmenitySecurity: Boolean(requirements.residential?.amenities?.security),
+    requirementsResidentialAmenityGym: Boolean(requirements.residential?.amenities?.gym),
+    requirementsResidentialAmenitySwimmingPool: Boolean(requirements.residential?.amenities?.swimmingPool),
+    requirementsResidentialAmenityClubhouse: Boolean(requirements.residential?.amenities?.clubhouse),
+    requirementsResidentialAmenityPowerBackup: Boolean(requirements.residential?.amenities?.powerBackup),
+    requirementsResidentialAmenityParking: Boolean(requirements.residential?.amenities?.parking),
+    requirementsResidentialAmenityStudyRoom: Boolean(requirements.residential?.amenities?.studyRoom),
+    requirementsResidentialAmenityServantRoom: Boolean(requirements.residential?.amenities?.servantRoom),
+    requirementsResidentialAmenityModularKitchen: Boolean(requirements.residential?.amenities?.modularKitchen),
+    requirementsResidentialAmenityElectricityBackup: Boolean(requirements.residential?.amenities?.electricityBackup),
+    requirementsResidentialAmenityGasPipeline: Boolean(requirements.residential?.amenities?.gasPipeline),
+  };
+};
+
 const sanitizeClosureDocument = (value = {}) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
@@ -588,39 +725,6 @@ const getLeadRelatedInventories = (lead = {}) => {
   return merged;
 };
 
-const getStatusColor = (status) => {
-  switch (status) {
-    case "NEW":
-      return "bg-blue-50 text-blue-700 border-blue-200";
-    case "CONTACTED":
-      return "bg-amber-50 text-amber-700 border-amber-200";
-    case "INTERESTED":
-      return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    case "SITE_VISIT_SCHEDULED":
-      return "bg-cyan-50 text-cyan-700 border-cyan-200";
-    case "SITE_VISIT":
-      return "bg-violet-50 text-violet-700 border-violet-200";
-    case "SITE_VISIT_OVERDUE":
-      return "bg-red-50 text-red-700 border-red-200";
-    case "MISSING_IN_ACTION":
-    case "NOT_PICKING_CALLS":
-      return "bg-yellow-50 text-yellow-800 border-yellow-200";
-    case "INVALID":
-      return "bg-zinc-100 text-zinc-700 border-zinc-300";
-    case "OWNER":
-      return "bg-sky-50 text-sky-700 border-sky-200";
-    case "BROKER":
-      return "bg-purple-50 text-purple-700 border-purple-200";
-    case "REQUESTED":
-      return "bg-orange-50 text-orange-700 border-orange-200";
-    case "CLOSED":
-      return "bg-slate-900 text-white border-slate-900";
-    case "LOST":
-      return "bg-rose-50 text-rose-700 border-rose-200";
-    default:
-      return "bg-slate-50 text-slate-600 border-slate-200";
-  }
-};
 
 const getStatusLabel = (status) =>
   String(status || "")
@@ -681,6 +785,93 @@ const toAmountNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const buildLeadFormPayload = (formData = {}) => {
+  const payload = {
+    name: String(formData.name || "").trim(),
+    phone: String(formData.phone || "").trim(),
+    email: String(formData.email || "").trim(),
+    city: String(formData.city || "").trim(),
+    preferredLocations: toPreferredLocationsList(formData.preferredLocations),
+    projectInterested: String(formData.projectInterested || "").trim(),
+    clientProfession: String(formData.clientProfession || "").trim(),
+  };
+
+  const parsedSiteLat = toCoordinateNumber(formData.siteLat);
+  const parsedSiteLng = toCoordinateNumber(formData.siteLng);
+  const hasAnySiteCoordinate = parsedSiteLat !== null || parsedSiteLng !== null;
+  if (hasAnySiteCoordinate) {
+    payload.siteLocation = {
+      lat: parsedSiteLat,
+      lng: parsedSiteLng,
+      radiusMeters: SITE_VISIT_RADIUS_METERS,
+    };
+  }
+
+  if (hasLeadRequirements(formData)) {
+    const propertySubtype = String(formData.requirementsPropertySubtype || "").trim().toUpperCase();
+    payload.requirements = {
+      inventoryType: String(formData.requirementsInventoryType || "").trim().toUpperCase(),
+      propertySubtype,
+      subtypeData: sanitizeRequirementSubtypeData(formData.requirementsSubtypeData),
+      transactionType: toRequirementTransactionType(formData.requirementsTransactionType),
+      furnishingStatus: String(formData.requirementsFurnishingStatus || "").trim().toUpperCase(),
+      budgetMin: toAmountNumber(formData.requirementsBudgetMin),
+      budgetMax: toAmountNumber(formData.requirementsBudgetMax),
+      areaMin: null,
+      areaMax: null,
+      areaUnit: null,
+    };
+
+    if (!propertySubtype) {
+      payload.requirements.commercial = {
+        seats: toAmountNumber(formData.requirementsCommercialSeats),
+        cabins: toAmountNumber(formData.requirementsCommercialCabins),
+        conferenceRooms: toAmountNumber(formData.requirementsCommercialConferenceRooms),
+        conferenceSeats: toAmountNumber(formData.requirementsCommercialConferenceSeats),
+        parkingAvailable: Boolean(formData.requirementsCommercialParkingAvailable),
+        pantry: Boolean(formData.requirementsCommercialPantry),
+        receptionArea: Boolean(formData.requirementsCommercialReceptionArea),
+        waitingArea: Boolean(formData.requirementsCommercialWaitingArea),
+        cafeteria: Boolean(formData.requirementsCommercialCafeteria),
+        serverRoom: Boolean(formData.requirementsCommercialServerRoom),
+        storageRoom: Boolean(formData.requirementsCommercialStorageRoom),
+        breakoutArea: Boolean(formData.requirementsCommercialBreakoutArea),
+        liftAvailable: Boolean(formData.requirementsCommercialLiftAvailable),
+        powerBackup: Boolean(formData.requirementsCommercialPowerBackup),
+        centralAC: Boolean(formData.requirementsCommercialCentralAC),
+        fireSafety: Boolean(formData.requirementsCommercialFireSafety),
+        readyToMove: Boolean(formData.requirementsCommercialReadyToMove),
+        underConstruction: Boolean(formData.requirementsCommercialUnderConstruction),
+      };
+      payload.requirements.residential = {
+        bhkType: String(formData.requirementsResidentialBhkType || "").trim().toUpperCase(),
+        floor: toAmountNumber(formData.requirementsResidentialFloor),
+        amenities: {
+          lift: Boolean(formData.requirementsResidentialAmenityLift),
+          security: Boolean(formData.requirementsResidentialAmenitySecurity),
+          gym: Boolean(formData.requirementsResidentialAmenityGym),
+          swimmingPool: Boolean(formData.requirementsResidentialAmenitySwimmingPool),
+          clubhouse: Boolean(formData.requirementsResidentialAmenityClubhouse),
+          powerBackup: Boolean(formData.requirementsResidentialAmenityPowerBackup),
+          parking: Boolean(formData.requirementsResidentialAmenityParking),
+          studyRoom: Boolean(formData.requirementsResidentialAmenityStudyRoom),
+          servantRoom: Boolean(formData.requirementsResidentialAmenityServantRoom),
+          modularKitchen: Boolean(formData.requirementsResidentialAmenityModularKitchen),
+          electricityBackup: Boolean(formData.requirementsResidentialAmenityElectricityBackup),
+          gasPipeline: Boolean(formData.requirementsResidentialAmenityGasPipeline),
+        },
+      };
+    }
+  }
+
+  return {
+    payload,
+    parsedSiteLat,
+    parsedSiteLng,
+    hasAnySiteCoordinate,
+  };
+};
+
 const toInventoryApiStatus = (value) => {
   const normalized = String(value || "").trim();
   if (!normalized) return "Available";
@@ -728,6 +919,13 @@ const normalizeCsvHeader = (value) =>
     .toLowerCase()
     .replace(/[\s_/-]+/g, "");
 
+const BULK_LEAD_SHEET_TYPES = {
+  COMMERCIAL: "COMMERCIAL",
+  RESIDENTIAL: "RESIDENTIAL",
+};
+
+const DEFAULT_BULK_LEAD_SHEET_TYPE = BULK_LEAD_SHEET_TYPES.COMMERCIAL;
+
 const normalizeBulkCellText = (value) => {
   if (value === null || value === undefined) return "";
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
@@ -753,6 +951,19 @@ const normalizeBulkAmount = (value) => {
   if (/\blac\b|\blakh\b|\bl\b/.test(lower)) return Math.round(numeric * 100000);
   if (/\bk\b/.test(lower)) return Math.round(numeric * 1000);
   return Math.round(numeric);
+};
+
+const normalizeBulkNumber = (value) => {
+  const raw = normalizeBulkCellText(value);
+  if (!raw) return null;
+  const numeric = Number.parseFloat(raw.replace(/,/g, "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+};
+
+const normalizeBulkBoolean = (value) => {
+  const raw = normalizeBulkCellText(value).toLowerCase();
+  if (!raw) return false;
+  return ["yes", "y", "true", "1", "available", "required", "required hai", "hai"].includes(raw);
 };
 
 const normalizeBulkDate = (value) => {
@@ -812,6 +1023,35 @@ const resolveLeadCsvHeaderKey = (rawHeader) => {
   if (["followup", "followup2", "followupdate", "followupdate2"].includes(normalized)) return "followUp";
   if (["callupdate", "callstatus"].includes(normalized)) return "callUpdate";
   if (["propertytype", "type"].includes(normalized)) return "propertyType";
+  if (["bhk", "bhktype", "bedroom", "bedrooms", "configuration"].includes(normalized)) return "bhkType";
+  if (["floor", "floornumber"].includes(normalized)) return "floor";
+  if (["amenities", "amenity"].includes(normalized)) return "amenities";
+  if (["lift", "elevator"].includes(normalized)) return "lift";
+  if (["security"].includes(normalized)) return "security";
+  if (["gym"].includes(normalized)) return "gym";
+  if (["swimmingpool", "pool"].includes(normalized)) return "swimmingPool";
+  if (["clubhouse", "club"].includes(normalized)) return "clubhouse";
+  if (["powerbackup", "electricitybackup", "backup"].includes(normalized)) return "powerBackup";
+  if (["parking", "carparking"].includes(normalized)) return "parking";
+  if (["studyroom", "study"].includes(normalized)) return "studyRoom";
+  if (["servantroom", "servant"].includes(normalized)) return "servantRoom";
+  if (["modularkitchen", "kitchen"].includes(normalized)) return "modularKitchen";
+  if (["gaspipeline", "gas"].includes(normalized)) return "gasPipeline";
+  if (["seats", "seat", "workstations", "workstation"].includes(normalized)) return "seats";
+  if (["cabins", "cabin", "privatecabins"].includes(normalized)) return "cabins";
+  if (["conferencerooms", "meetingrooms", "meetingroom"].includes(normalized)) return "conferenceRooms";
+  if (["conferenceseats", "meetingseats"].includes(normalized)) return "conferenceSeats";
+  if (["pantry"].includes(normalized)) return "pantry";
+  if (["reception", "receptionarea"].includes(normalized)) return "receptionArea";
+  if (["waiting", "waitingarea"].includes(normalized)) return "waitingArea";
+  if (["cafeteria", "cafe"].includes(normalized)) return "cafeteria";
+  if (["serverroom", "server"].includes(normalized)) return "serverRoom";
+  if (["storageroom", "storage"].includes(normalized)) return "storageRoom";
+  if (["breakoutarea", "breakout"].includes(normalized)) return "breakoutArea";
+  if (["centralac", "ac"].includes(normalized)) return "centralAC";
+  if (["firesafety", "fire"].includes(normalized)) return "fireSafety";
+  if (["readytomove", "ready"].includes(normalized)) return "readyToMove";
+  if (["underconstruction", "construction"].includes(normalized)) return "underConstruction";
   if (["budget"].includes(normalized)) return "budget";
   if (["visit", "visitupdate"].includes(normalized)) return "visit";
   if (["handle", "handledby", "owner"].includes(normalized)) return "handle";
@@ -883,7 +1123,7 @@ const buildBulkLeadProjectSummary = (row) => {
   return parts.join(" | ").slice(0, 500);
 };
 
-const buildBulkLeadRequirements = (row) => {
+const buildBulkLeadRequirements = (row, sheetType = DEFAULT_BULK_LEAD_SHEET_TYPE) => {
   const budget = normalizeBulkAmount(row.budget);
   const requirementText = [
     row.projectInterested,
@@ -898,26 +1138,94 @@ const buildBulkLeadRequirements = (row) => {
     requirements.budgetMax = budget;
   }
 
+  const selectedSheetType = Object.values(BULK_LEAD_SHEET_TYPES).includes(sheetType)
+    ? sheetType
+    : DEFAULT_BULK_LEAD_SHEET_TYPE;
+
   if (["COMMERCIAL", "RESIDENTIAL"].includes(propertyType)) {
     requirements.inventoryType = propertyType;
+  } else {
+    requirements.inventoryType = selectedSheetType;
   }
   if (transactionType) {
     requirements.transactionType = transactionType;
+  } else {
+    requirements.transactionType = selectedSheetType === BULK_LEAD_SHEET_TYPES.COMMERCIAL ? "RENT" : "";
   }
 
   const seatsMatch = requirementText.match(/(\d+)\s*(?:seat|seater|seats)\b/i);
   const cabinMatch = requirementText.match(/(\d+)\s*(?:cabin|cabins)\b/i);
   const conferenceSeatsMatch = requirementText.match(/(\d+)\s*(?:conference\s*seat|conference\s*seater|conference\s*seats)\b/i);
   const areaMatch = requirementText.match(/(\d+(?:\.\d+)?)\s*(?:sq\s*ft|sqft|sqfit|sft)\b/i);
-  if (seatsMatch || cabinMatch || conferenceSeatsMatch) {
+  if (selectedSheetType === BULK_LEAD_SHEET_TYPES.COMMERCIAL || seatsMatch || cabinMatch || conferenceSeatsMatch) {
     requirements.inventoryType = "COMMERCIAL";
     requirements.transactionType = transactionType || "RENT";
     requirements.commercial = {};
-    if (seatsMatch) requirements.commercial.seats = Number.parseInt(seatsMatch[1], 10);
-    if (cabinMatch) requirements.commercial.cabins = Number.parseInt(cabinMatch[1], 10);
+    const seats = normalizeBulkNumber(row.seats);
+    const cabins = normalizeBulkNumber(row.cabins);
+    const conferenceRooms = normalizeBulkNumber(row.conferenceRooms);
+    const conferenceSeats = normalizeBulkNumber(row.conferenceSeats);
+    if (seats !== null) requirements.commercial.seats = Math.round(seats);
+    if (cabins !== null) requirements.commercial.cabins = Math.round(cabins);
+    if (conferenceRooms !== null) requirements.commercial.conferenceRooms = Math.round(conferenceRooms);
+    if (conferenceSeats !== null) requirements.commercial.conferenceSeats = Math.round(conferenceSeats);
+    if (seatsMatch && requirements.commercial.seats === undefined) {
+      requirements.commercial.seats = Number.parseInt(seatsMatch[1], 10);
+    }
+    if (cabinMatch && requirements.commercial.cabins === undefined) {
+      requirements.commercial.cabins = Number.parseInt(cabinMatch[1], 10);
+    }
     if (conferenceSeatsMatch) {
       requirements.commercial.conferenceSeats = Number.parseInt(conferenceSeatsMatch[1], 10);
     }
+    [
+      "parking",
+      "pantry",
+      "receptionArea",
+      "waitingArea",
+      "cafeteria",
+      "serverRoom",
+      "storageRoom",
+      "breakoutArea",
+      "lift",
+      "powerBackup",
+      "centralAC",
+      "fireSafety",
+      "readyToMove",
+      "underConstruction",
+    ].forEach((key) => {
+      if (!row[key]) return;
+      const targetKey = key === "parking" ? "parkingAvailable" : key === "lift" ? "liftAvailable" : key;
+      requirements.commercial[targetKey] = normalizeBulkBoolean(row[key]);
+    });
+  }
+
+  if (selectedSheetType === BULK_LEAD_SHEET_TYPES.RESIDENTIAL) {
+    requirements.inventoryType = "RESIDENTIAL";
+    const floor = normalizeBulkNumber(row.floor);
+    const amenitiesText = normalizeBulkCellText(row.amenities).toLowerCase();
+    const hasAmenity = (key, aliases = []) =>
+      normalizeBulkBoolean(row[key])
+      || aliases.some((alias) => amenitiesText.includes(alias));
+
+    requirements.residential = {
+      bhkType: normalizeBulkCellText(row.bhkType).toUpperCase(),
+      floor: floor === null ? null : Math.round(floor),
+      amenities: {
+        lift: hasAmenity("lift", ["lift", "elevator"]),
+        security: hasAmenity("security", ["security"]),
+        gym: hasAmenity("gym", ["gym"]),
+        swimmingPool: hasAmenity("swimmingPool", ["pool", "swimming"]),
+        clubhouse: hasAmenity("clubhouse", ["club"]),
+        powerBackup: hasAmenity("powerBackup", ["power backup", "electricity backup", "backup"]),
+        parking: hasAmenity("parking", ["parking"]),
+        studyRoom: hasAmenity("studyRoom", ["study"]),
+        servantRoom: hasAmenity("servantRoom", ["servant"]),
+        modularKitchen: hasAmenity("modularKitchen", ["modular kitchen"]),
+        electricityBackup: hasAmenity("powerBackup", ["electricity backup"]),
+        gasPipeline: hasAmenity("gasPipeline", ["gas"]),
+      },
+    };
   }
   if (areaMatch) {
     const area = Number.parseFloat(areaMatch[1]);
@@ -931,7 +1239,7 @@ const buildBulkLeadRequirements = (row) => {
   return Object.keys(requirements).length ? requirements : undefined;
 };
 
-const normalizeBulkLeadRow = ({ rawRow, mappedHeaders, sheetName = "" }) => {
+const normalizeBulkLeadRow = ({ rawRow, mappedHeaders, sheetName = "", sheetType = DEFAULT_BULK_LEAD_SHEET_TYPE }) => {
   const row = {};
   const allCellValues = [];
 
@@ -951,7 +1259,7 @@ const normalizeBulkLeadRow = ({ rawRow, mappedHeaders, sheetName = "" }) => {
   const safeName = name && !normalizeBulkPhone(name) ? name : `Lead ${phone}`;
   const sourceText = normalizeBulkCellText(row.source).toUpperCase();
   const projectInterested = buildBulkLeadProjectSummary(row);
-  const requirements = buildBulkLeadRequirements(row);
+  const requirements = buildBulkLeadRequirements(row, sheetType);
   const nextFollowUp = normalizeBulkDate(row.followUp);
   const lastContactedAt = normalizeBulkDate(row.date);
 
@@ -969,7 +1277,7 @@ const normalizeBulkLeadRow = ({ rawRow, mappedHeaders, sheetName = "" }) => {
   };
 };
 
-const parseBulkLeadRowsFromMatrix = ({ matrix, sheetName = "" }) => {
+const parseBulkLeadRowsFromMatrix = ({ matrix, sheetName = "", sheetType = DEFAULT_BULK_LEAD_SHEET_TYPE }) => {
   const headerIndex = matrix.findIndex((rawRow) => {
     const mappedHeaders = rawRow.map((cell) => resolveLeadCsvHeaderKey(cell));
     const mappedCount = mappedHeaders.filter(Boolean).length;
@@ -987,6 +1295,7 @@ const parseBulkLeadRowsFromMatrix = ({ matrix, sheetName = "" }) => {
       rawRow: matrix[rowIndex],
       mappedHeaders,
       sheetName,
+      sheetType,
     });
     if (!row) continue;
     if (!hasName && !row.name) continue;
@@ -1027,7 +1336,7 @@ const parseCsvLine = (line) => {
   return values;
 };
 
-const parseBulkLeadCsvRows = (csvText) => {
+const parseBulkLeadCsvRows = (csvText, sheetType = DEFAULT_BULK_LEAD_SHEET_TYPE) => {
   const normalizedText = String(csvText || "")
     .replace(/^\uFEFF/, "")
     .trim();
@@ -1053,10 +1362,45 @@ const parseBulkLeadCsvRows = (csvText) => {
   const rows = parseBulkLeadRowsFromMatrix({
     matrix: lines.map(parseCsvLine),
     sheetName: "CSV",
+    sheetType,
   });
 
   if (!rows.length) {
     throw new Error("No valid lead rows found in CSV");
+  }
+
+  return rows;
+};
+
+const parseBulkLeadWorkbookRows = async (file, sheetType = DEFAULT_BULK_LEAD_SHEET_TYPE) => {
+  const XLSX = await import("xlsx");
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, {
+    type: "array",
+    cellDates: true,
+    raw: false,
+  });
+  const rows = [];
+
+  workbook.SheetNames.forEach((sheetName) => {
+    const normalizedSheetName = normalizeCsvHeader(sheetName);
+    if (
+      normalizedSheetName.includes("performance")
+      || normalizedSheetName.includes("perfomance")
+      || ["broker", "owners", "dealclose"].includes(normalizedSheetName)
+    ) return;
+    const worksheet = workbook.Sheets[sheetName];
+    const matrix = XLSX.utils.sheet_to_json(worksheet, {
+      header: 1,
+      defval: "",
+      blankrows: false,
+      raw: false,
+    });
+    rows.push(...parseBulkLeadRowsFromMatrix({ matrix, sheetName, sheetType }));
+  });
+
+  if (!rows.length) {
+    throw new Error("No valid lead rows found in workbook");
   }
 
   return rows;
@@ -1092,21 +1436,134 @@ const LeadsMatrix = () => {
   );
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isEditLeadModalOpen, setIsEditLeadModalOpen] = useState(false);
   const [savingLead, setSavingLead] = useState(false);
-  const [formData, setFormData] = useState(defaultFormData);
+  const [formData, setFormData] = useState(getDefaultFormDataForRoleType);
   const [inventoryOptions, setInventoryOptions] = useState([]);
   const [isBulkUploadModalOpen, setIsBulkUploadModalOpen] = useState(false);
   const [bulkUploadText, setBulkUploadText] = useState("");
   const [bulkUploadParsedRows, setBulkUploadParsedRows] = useState(null);
   const [bulkUploadFileName, setBulkUploadFileName] = useState("");
+  const [bulkUploadSheetType, setBulkUploadSheetType] = useState(DEFAULT_BULK_LEAD_SHEET_TYPE);
   const [bulkUploading, setBulkUploading] = useState(false);
 
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [propertySubtypeFilter, setPropertySubtypeFilter] = useState("");
-  const [sortBy, setSortBy] = useState(LEAD_SORT_OPTIONS.RECENT);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [advancedFilters, setAdvancedFilters] = useState(() => Object.fromEntries(
+    ["source", "assignedTo", "inventoryType", "subtype", "transactionType", "city", "project", "budgetMin", "budgetMax", "budgetRange", "createdFrom", "createdTo", "createdDate", "followUpDateFrom", "followUpDateTo", "followUpDate"]
+      .map((key) => [key, searchParams.get(key) || ""]),
+  ));
+  const [quickFilter, setQuickFilter] = useState(() => searchParams.get("quickFilter") || "");
+  const [filtersFlyoutOpen, setFiltersFlyoutOpen] = useState(false);
+  const leadRequestVersion = useRef(0);
+  const [query, setQuery] = useState(() => searchParams.get("q") || "");
+  const [statusFilter, setStatusFilter] = useState(() => {
+    const fromUrl = String(searchParams.get("status") || "").toUpperCase();
+    return LEAD_STATUS_SET.has(fromUrl) ? fromUrl : "ALL";
+  });
+  const [propertySubtypeFilter, setPropertySubtypeFilter] = useState(
+    () => String(searchParams.get("subtype") || "").toUpperCase(),
+  );
+  const [sortBy, setSortBy] = useState(() => {
+    const fromUrl = String(searchParams.get("sort") || "").toUpperCase();
+    return LEAD_SORT_OPTIONS[fromUrl] || LEAD_SORT_OPTIONS.FOLLOW_UP;
+  });
+  const [view, setView] = useState(() => {
+    const fromUrl = String(searchParams.get("view") || "").toUpperCase();
+    return PIPELINE_VIEWS[fromUrl] || PIPELINE_VIEWS.ALL;
+  });
+  const [selectedLeadKeys, setSelectedLeadKeys] = useState([]);
   const [nowMs, setNowMs] = useState(0);
   const debouncedQuery = useDebouncedValue(query, 180);
+  const { canPageAction, enforcePageAccess } = usePermissions();
+
+  const filterState = useMemo(() => ({
+    status: statusFilter,
+    source: advancedFilters.source || "",
+    assignedTo: advancedFilters.assignedTo || "",
+    propertyType: advancedFilters.subtype || "",
+    budgetRange: advancedFilters.budgetRange || "",
+    followUpDate: advancedFilters.followUpDate || "",
+    createdDate: advancedFilters.createdDate || "",
+    quickFilter,
+  }), [advancedFilters, quickFilter, statusFilter]);
+
+  const applyToolbarFilters = useCallback((next) => {
+    const nextAdvanced = { ...advancedFilters };
+    const map = { source: "source", assignedTo: "assignedTo", propertyType: "subtype" };
+    Object.entries(map).forEach(([from, to]) => { nextAdvanced[to] = next[from] || ""; });
+    const budgetMap = { UNDER_50L: ["", "5000000"], "50L_1CR": ["5000000", "10000000"], "1CR_3CR": ["10000000", "30000000"], "3CR_5CR": ["30000000", "50000000"], ABOVE_5CR: ["50000000", ""] };
+    const range = budgetMap[next.budgetRange] || ["", ""];
+    nextAdvanced.budgetRange = next.budgetRange || "";
+    nextAdvanced.budgetMin = range[0]; nextAdvanced.budgetMax = range[1];
+    nextAdvanced.followUpDate = next.followUpDate || "";
+    nextAdvanced.createdDate = next.createdDate || "";
+    const followUpRange = getLeadFilterDateRange(next.followUpDate, "followUp");
+    const createdRange = getLeadFilterDateRange(next.createdDate, "created");
+    nextAdvanced.followUpDateFrom = followUpRange[0];
+    nextAdvanced.followUpDateTo = followUpRange[1];
+    nextAdvanced.createdFrom = createdRange[0];
+    nextAdvanced.createdTo = createdRange[1];
+    if (next.status !== undefined) setStatusFilter(next.status || "ALL");
+    if (next.propertyType !== undefined) setPropertySubtypeFilter(next.propertyType || "");
+    if (next.quickFilter !== undefined) setQuickFilter(next.quickFilter || "");
+    if (next.quickFilter === QUICK_FILTER_KEYS.UNASSIGNED_LEADS) nextAdvanced.assignedTo = "UNASSIGNED";
+    if (next.quickFilter === QUICK_FILTER_KEYS.NEW_THIS_WEEK) {
+      nextAdvanced.createdFrom = getLeadFilterDate(-7);
+      nextAdvanced.createdTo = "";
+    }
+    if (next.quickFilter === QUICK_FILTER_KEYS.NEEDS_FOLLOW_UP_TODAY) {
+      const today = getLeadFilterDate(0);
+      nextAdvanced.followUpDateFrom = today; nextAdvanced.followUpDateTo = today;
+    }
+    if (next.quickFilter === QUICK_FILTER_KEYS.OVERDUE_FOLLOW_UPS) {
+      nextAdvanced.followUpDateFrom = "";
+      nextAdvanced.followUpDateTo = getLeadFilterDate(-1);
+    }
+    if (!next.quickFilter && quickFilter === QUICK_FILTER_KEYS.UNASSIGNED_LEADS) nextAdvanced.assignedTo = "";
+    if (!next.quickFilter && quickFilter === QUICK_FILTER_KEYS.NEW_THIS_WEEK) { nextAdvanced.createdFrom = ""; nextAdvanced.createdTo = ""; }
+    if (!next.quickFilter && [QUICK_FILTER_KEYS.NEEDS_FOLLOW_UP_TODAY, QUICK_FILTER_KEYS.OVERDUE_FOLLOW_UPS].includes(quickFilter)) { nextAdvanced.followUpDateFrom = ""; nextAdvanced.followUpDateTo = ""; }
+    setAdvancedFilters({ ...nextAdvanced });
+    if (next.quickFilter || next.status && next.status !== "ALL" || Object.values(nextAdvanced).some(Boolean)) setView(PIPELINE_VIEWS.ALL);
+  }, [advancedFilters, quickFilter]);
+
+  const resetAllLeadFilters = useCallback(() => {
+    setStatusFilter("ALL"); setPropertySubtypeFilter(""); setQuickFilter("");
+    setAdvancedFilters({});
+  }, []);
+
+  const applyFlyoutFilters = useCallback((next) => {
+    const budgetMap = { UNDER_50L: ["", "5000000"], "50L_1CR": ["5000000", "10000000"], "1CR_3CR": ["10000000", "30000000"], "3CR_5CR": ["30000000", "50000000"], ABOVE_5CR: ["50000000", ""] };
+    const range = budgetMap[next.budgetRange] || ["", ""];
+    const updated = {
+      ...advancedFilters,
+      source: next.source || "", assignedTo: next.assignedTo || "", subtype: next.propertyType || "",
+      budgetMin: range[0], budgetMax: range[1],
+      budgetRange: next.budgetRange || "", followUpDate: next.followUpDate || "", createdDate: next.createdDate || "",
+    };
+    const followRange = getLeadFilterDateRange(next.followUpDate, "followUp");
+    const createdRange = getLeadFilterDateRange(next.createdDate, "created");
+    updated.followUpDateFrom = followRange[0]; updated.followUpDateTo = followRange[1];
+    updated.createdFrom = createdRange[0]; updated.createdTo = createdRange[1];
+    if (next.quickFilter === QUICK_FILTER_KEYS.UNASSIGNED_LEADS) updated.assignedTo = "UNASSIGNED";
+    if (next.quickFilter === QUICK_FILTER_KEYS.NEW_THIS_WEEK) {
+      updated.createdFrom = getLeadFilterDate(-7);
+      updated.createdTo = "";
+    }
+    if (next.quickFilter === QUICK_FILTER_KEYS.NEEDS_FOLLOW_UP_TODAY) {
+      const today = getLeadFilterDate(0);
+      updated.followUpDateFrom = today;
+      updated.followUpDateTo = today;
+    }
+    if (next.quickFilter === QUICK_FILTER_KEYS.OVERDUE_FOLLOW_UPS) {
+      updated.followUpDateFrom = "";
+      updated.followUpDateTo = getLeadFilterDate(-1);
+    }
+    setStatusFilter(next.status || "ALL");
+    setPropertySubtypeFilter(next.propertyType || "");
+    setQuickFilter(next.quickFilter || "");
+    setAdvancedFilters(updated);
+    setView(PIPELINE_VIEWS.ALL);
+  }, [advancedFilters]);
 
   const [selectedLead, setSelectedLead] = useState(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -1120,7 +1577,7 @@ const LeadsMatrix = () => {
   const [isDiaryMicSupported, setIsDiaryMicSupported] = useState(false);
   const [isDiaryListening, setIsDiaryListening] = useState(false);
   const [savingUpdates, setSavingUpdates] = useState(false);
-  const [updatingInlineStatusId, setUpdatingInlineStatusId] = useState("");
+  const [updatingStatusId, setUpdatingStatusId] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [linkingProperty, setLinkingProperty] = useState(false);
   const [propertyActionInventoryId, setPropertyActionInventoryId] = useState("");
@@ -1131,6 +1588,7 @@ const LeadsMatrix = () => {
   const [emailDraft, setEmailDraft] = useState("");
   const [cityDraft, setCityDraft] = useState("");
   const [projectInterestedDraft, setProjectInterestedDraft] = useState("");
+  const [clientProfessionDraft, setClientProfessionDraft] = useState("");
   const [statusDraft, setStatusDraft] = useState("NEW");
   const [followUpDraft, setFollowUpDraft] = useState("");
   const [executiveDraft, setExecutiveDraft] = useState("");
@@ -1163,8 +1621,10 @@ const LeadsMatrix = () => {
     : "/leads";
 
   const userRole = localStorage.getItem("role") || "";
+  const currentPageKey = currentLeadRouteBase === "/my-leads" ? "my_leads" : "leads";
+  const userRoleType = getStoredUserRoleType();
+  const canChooseLeadRoleType = userRole === "ADMIN" || userRoleType === "BOTH";
   const isExecutiveUser = EXECUTIVE_ROLES.includes(userRole);
-  const currentUserId = getStoredUserId();
   const canAddLead =
     userRole === "ADMIN"
     || MANAGEMENT_ROLES.includes(userRole)
@@ -1172,13 +1632,57 @@ const LeadsMatrix = () => {
     || userRole === "CHANNEL_PARTNER";
   const canBulkUploadLeads =
     userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole) || isExecutiveUser;
-  const canAssignLead = MANUAL_LEAD_TRANSFER_ACTOR_ROLES.includes(userRole);
-  const canManageLeadProperties = userRole !== "CHANNEL_PARTNER";
+  const canAssignLeadByRole = MANUAL_LEAD_TRANSFER_ACTOR_ROLES.includes(userRole);
+  const canEditLead = canPageAction(currentPageKey, "edit");
+  const canExportLeads = canPageAction(currentPageKey, "export");
+  const canFollowUpLead = canPageAction(currentPageKey, "follow_up");
+  const canAddLeadByPage = canPageAction(currentPageKey, "create");
+  const canBulkUploadByPage = canPageAction(currentPageKey, "create");
+  const canAssignLead = canAssignLeadByRole && canPageAction(currentPageKey, "assign");
+  // An explicit page grant is the Admin's per-employee override. It can widen
+  // the old role-based button visibility, while the API remains authoritative.
+  const canAddLeadAllowed = canAddLeadByPage && (canAddLead || enforcePageAccess);
+  const canBulkUploadAllowed = canBulkUploadByPage && (canBulkUploadLeads || enforcePageAccess);
+  const canManageLeadProperties = userRole !== "CHANNEL_PARTNER" && canEditLead;
   const canConfigureSiteLocation =
     userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
   const canReviewDealPayment = userRole === "ADMIN";
+  const availableLeadInventoryTypes = useMemo(
+    () =>
+      canChooseLeadRoleType
+        ? [
+          { label: "Commercial", value: "COMMERCIAL" },
+          { label: "Residential", value: "RESIDENTIAL" },
+        ]
+        : [{ label: userRoleType === "RESIDENTIAL" ? "Residential" : "Commercial", value: userRoleType }],
+    [canChooseLeadRoleType, userRoleType],
+  );
+  const defaultBulkUploadSheetType = availableLeadInventoryTypes[0]?.value || DEFAULT_BULK_LEAD_SHEET_TYPE;
+
+  useEffect(() => {
+    const allowedSheetTypes = new Set(availableLeadInventoryTypes.map((option) => option.value));
+    if (!allowedSheetTypes.has(bulkUploadSheetType)) {
+      setBulkUploadSheetType(defaultBulkUploadSheetType);
+      setBulkUploadParsedRows(null);
+      setBulkUploadText("");
+      setBulkUploadFileName("");
+    }
+  }, [availableLeadInventoryTypes, bulkUploadSheetType, defaultBulkUploadSheetType]);
+
+  useEffect(() => {
+    if (!error) return undefined;
+    const timer = window.setTimeout(() => setError(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [error]);
+
+  useEffect(() => {
+    if (!success) return undefined;
+    const timer = window.setTimeout(() => setSuccess(""), 4500);
+    return () => window.clearTimeout(timer);
+  }, [success]);
 
   const fetchLeads = useCallback(async (asRefresh = false, options = {}) => {
+    const requestVersion = ++leadRequestVersion.current;
     const page = Number(options.page || 1);
     const append = Boolean(options.append);
     try {
@@ -1195,8 +1699,11 @@ const LeadsMatrix = () => {
         page,
         limit: LEAD_LIST_PAGE_LIMIT,
         fields: LEAD_LIST_FIELDS,
-        ...(isExecutiveUser && currentUserId ? { assignedTo: currentUserId } : {}),
+        ...Object.fromEntries(Object.entries(advancedFilters).filter(([, value]) => value !== "")),
+        ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
+        ...(propertySubtypeFilter ? { subtype: propertySubtypeFilter } : {}),
       });
+      if (requestVersion !== leadRequestVersion.current) return;
       const list = Array.isArray(response?.leads) ? response.leads : [];
       setLeadPagination(response?.pagination || null);
       setLeads((prev) => {
@@ -1209,6 +1716,7 @@ const LeadsMatrix = () => {
         return [...rowsById.values()];
       });
     } catch (fetchError) {
+      if (requestVersion !== leadRequestVersion.current) return;
       const message = toErrorMessage(fetchError, "Failed to load leads");
       console.error(`Load leads failed: ${message}`);
       setError(message);
@@ -1217,11 +1725,13 @@ const LeadsMatrix = () => {
         setLeadPagination(null);
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingMoreLeads(false);
+      if (requestVersion === leadRequestVersion.current) {
+        setLoading(false);
+        setRefreshing(false);
+        setLoadingMoreLeads(false);
+      }
     }
-  }, [currentUserId, isExecutiveUser]);
+  }, [advancedFilters, statusFilter, propertySubtypeFilter]);
 
   const fetchExecutives = useCallback(async () => {
     if (!canAssignLead) return;
@@ -1230,13 +1740,14 @@ const LeadsMatrix = () => {
       const response = await getUsers({
         crmAssignable: true,
         limit: 200,
-        fields: "_id,name,role,isActive,lastAssignedAt",
+        fields: "_id,name,role,roleType,isActive,lastAssignedAt",
       });
       const users = response?.users || [];
       const list = users.filter(
         (user) =>
           user.isActive !== false
-          && MANUAL_LEAD_TRANSFER_TARGET_ROLES.includes(user.role),
+          && MANUAL_LEAD_TRANSFER_TARGET_ROLES.includes(user.role)
+          && (canChooseLeadRoleType || [userRoleType, "BOTH"].includes(String(user.roleType || "COMMERCIAL").toUpperCase())),
       );
       setExecutives(list);
     } catch (fetchError) {
@@ -1244,7 +1755,7 @@ const LeadsMatrix = () => {
       console.error(`Load transfer users failed: ${message}`);
       setExecutives([]);
     }
-  }, [canAssignLead]);
+  }, [canAssignLead, canChooseLeadRoleType, userRoleType]);
 
   const fetchInventoryOptions = useCallback(async () => {
     if (!canManageLeadProperties) return;
@@ -1285,9 +1796,14 @@ const LeadsMatrix = () => {
 
   useEffect(() => {
     fetchLeads();
+    setSelectedLeadKeys([]);
+    return () => { leadRequestVersion.current += 1; };
+  }, [fetchLeads]);
+
+  useEffect(() => {
     fetchExecutives();
     fetchInventoryOptions();
-  }, [fetchLeads, fetchExecutives, fetchInventoryOptions]);
+  }, [fetchExecutives, fetchInventoryOptions]);
 
   useEffect(() => {
     setNowMs(Date.now());
@@ -1431,20 +1947,17 @@ const LeadsMatrix = () => {
     };
   }, []);
 
-  const statusBreakdown = useMemo(
-    () =>
-      LEAD_STATUSES.reduce(
-        (acc, status) => ({ ...acc, [status]: leads.filter((lead) => lead.status === status).length }),
-        {},
-      ),
-    [leads],
-  );
 
   const filteredLeads = useMemo(() => {
     const normalized = debouncedQuery.trim().toLowerCase();
 
     const filtered = leads.filter((lead) => {
-      const statusMatch = statusFilter === "ALL" || lead.status === statusFilter;
+      // TODO(backend): the lead list endpoint has no "needs action" or
+      // "unassigned" parameter, so these two views filter the already-fetched
+      // page in the browser. A needsFollowUpBefore + assignedTo=null pair on
+      // GET /leads would make them exact across every page.
+      const viewMatch = matchesView(lead, view, nowMs);
+      const statusMatch = statusFilter === "ALL" || (statusFilter === "TRANSFER" ? lead.assignmentHistory?.some(entry => entry.action === "MANUAL_TRANSFER") : lead.status === statusFilter);
       const leadPropertySubtype = String(lead?.requirements?.propertySubtype || "").trim().toUpperCase();
       const propertySubtypeMatch = !propertySubtypeFilter || leadPropertySubtype === propertySubtypeFilter;
       const relatedInventorySearchValue = getLeadRelatedInventories(lead)
@@ -1469,7 +1982,7 @@ const LeadsMatrix = () => {
           .map((value) => String(value || "").toLowerCase())
           .some((value) => value.includes(normalized));
 
-      return statusMatch && propertySubtypeMatch && searchMatch;
+      return viewMatch && statusMatch && propertySubtypeMatch && searchMatch;
     });
 
     const sorted = [...filtered];
@@ -1496,31 +2009,56 @@ const LeadsMatrix = () => {
       return bMs - aMs;
     });
     return sorted;
-  }, [debouncedQuery, leads, propertySubtypeFilter, sortBy, statusFilter]);
+  }, [debouncedQuery, leads, nowMs, propertySubtypeFilter, sortBy, statusFilter, view]);
 
-  const metrics = useMemo(() => {
-    const closed = statusBreakdown.CLOSED || 0;
-    const contacted = statusBreakdown.CONTACTED || 0;
-    const interested = statusBreakdown.INTERESTED || 0;
-    const fresh = statusBreakdown.NEW || 0;
-    const dueFollowUps = leads.filter((lead) => {
-      const followUpMs = getDateMs(lead.nextFollowUp);
-      return followUpMs > 0 && followUpMs <= nowMs && !["REQUESTED", "CLOSED", "LOST"].includes(String(lead.status || ""));
-    }).length;
+  const needsActionCount = useMemo(() => countNeedsAction(leads, nowMs), [leads, nowMs]);
 
-    const total = leads.length;
-    const conversionRate = total > 0 ? Math.round((closed / total) * 100) : 0;
+  // Filter state lives in the URL so a filtered pipeline can be shared and
+  // survives a reload.
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (view !== PIPELINE_VIEWS.NEEDS_ACTION) next.set("view", view);
+    if (statusFilter !== "ALL") next.set("status", statusFilter);
+    if (propertySubtypeFilter) next.set("subtype", propertySubtypeFilter);
+    if (sortBy !== LEAD_SORT_OPTIONS.FOLLOW_UP) next.set("sort", sortBy);
+    if (debouncedQuery.trim()) next.set("q", debouncedQuery.trim());
+    Object.entries(advancedFilters).forEach(([key, value]) => { if (value) next.set(key, value); });
+    setSearchParams(next, { replace: true });
+  }, [advancedFilters, debouncedQuery, propertySubtypeFilter, setSearchParams, sortBy, statusFilter, view]);
 
-    return {
-      total,
-      new: fresh,
-      contacted,
-      interested,
-      closed,
-      dueFollowUps,
-      conversionRate,
-    };
-  }, [leads, nowMs, statusBreakdown]);
+  const handleExportSelectedLeads = useCallback(() => {
+    if (!canExportLeads) return;
+    const chosen = new Set(selectedLeadKeys.map(String));
+    const rows = filteredLeads.filter((lead) => chosen.has(String(lead?._id)));
+    if (!rows.length) return;
+
+    const escape = (value) => JSON.stringify(String(value ?? ""));
+    const header = ["Name", "Phone", "Email", "Status", "City", "Assigned to", "Next follow-up"];
+    const csv = [
+      header.map(escape).join(","),
+      ...rows.map((lead) =>
+        [
+          lead?.name,
+          lead?.phone,
+          lead?.email,
+          getStatusLabel(lead?.status),
+          lead?.city,
+          lead?.assignedTo?.name,
+          lead?.nextFollowUp ? formatDate(lead.nextFollowUp) : "",
+        ]
+          .map(escape)
+          .join(","),
+      ),
+    ].join("\n");
+
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "leads-" + new Date().toISOString().slice(0, 10) + ".csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [canExportLeads, filteredLeads, selectedLeadKeys]);
+
 
   const openLeadDetails = useCallback(async (lead) => {
     const resolvedLeadId = String(lead?._id || "").trim();
@@ -1567,6 +2105,7 @@ const LeadsMatrix = () => {
     setEmailDraft(String(detailLead?.email || ""));
     setCityDraft(String(detailLead?.city || ""));
     setProjectInterestedDraft(String(detailLead?.projectInterested || ""));
+    setClientProfessionDraft(String(detailLead?.clientProfession || ""));
     setStatusDraft(detailLead.status || "NEW");
     setFollowUpDraft(toDateTimeInput(detailLead.nextFollowUp));
     setSiteLatDraft(leadSiteLat === null ? "" : String(leadSiteLat));
@@ -1647,6 +2186,7 @@ const LeadsMatrix = () => {
     setEmailDraft("");
     setCityDraft("");
     setProjectInterestedDraft("");
+    setClientProfessionDraft("");
     setSiteLatDraft("");
     setSiteLngDraft("");
     setRelatedInventoryDraft("");
@@ -1673,6 +2213,82 @@ const LeadsMatrix = () => {
     if (!resolvedLeadId) return;
     navigate(`${currentLeadRouteBase}/${resolvedLeadId}`);
   }, [currentLeadRouteBase, navigate]);
+
+  const handleOpenTeamEmployee = useCallback((employee) => {
+    const employeeId = String(employee?.id || employee?._id || "").trim();
+    if (!employeeId) return;
+    setAdvancedFilters((previous) => ({ ...previous, assignedTo: employeeId }));
+    setQuickFilter("");
+    setView(PIPELINE_VIEWS.ALL);
+  }, []);
+
+  const handleInlineLeadStatusChange = useCallback(async (lead, nextStatus) => {
+    if (!canEditLead) return;
+    const leadId = String(lead?._id || "").trim();
+    const status = String(nextStatus || "").trim().toUpperCase();
+    const previousStatus = String(lead?.status || "NEW").trim().toUpperCase();
+    if (!leadId || !LEAD_STATUSES.includes(status) || status === previousStatus) return;
+
+    setUpdatingStatusId(leadId);
+    setError("");
+    setLeads((previous) => previous.map((item) => (
+      String(item?._id || "") === leadId ? { ...item, status } : item
+    )));
+
+    try {
+      const updatedLead = await updateLeadStatus(leadId, { status });
+      if (updatedLead) {
+        setLeads((previous) => previous.map((item) => (
+          String(item?._id || "") === leadId ? { ...item, ...updatedLead } : item
+        )));
+      }
+      setSuccess("Lead status updated");
+    } catch (updateError) {
+      setLeads((previous) => previous.map((item) => (
+        String(item?._id || "") === leadId ? { ...item, status: previousStatus } : item
+      )));
+      const message = toErrorMessage(updateError, "Failed to update lead status");
+      console.error(`Inline lead status update failed: ${message}`);
+      setError(message);
+    } finally {
+      setUpdatingStatusId("");
+    }
+  }, [canEditLead]);
+
+  // Everything both pipeline presentations need. Defined once: the card list
+  // and the table are the same list, and a callback that exists on only one of
+  // them is a bug that only shows up at one screen width.
+  const leadTotalCount =
+    leadPagination?.totalItems ?? leadPagination?.total ?? leadPagination?.totalCount ?? 0;
+
+  const pipelineListProps = {
+    leads: filteredLeads,
+    loading,
+    nowMs,
+    showAssigned: canAssignLead,
+    selectedKeys: selectedLeadKeys,
+    onSelectionChange: setSelectedLeadKeys,
+    onOpenLead: handleOpenLeadDetailsPage,
+    onCall: (lead) => {
+      const href = getDialerHref(lead?.phone);
+      if (href) window.location.href = href;
+    },
+    onEmail: (lead) => {
+      const email = String(lead?.email || "").trim();
+      if (email) window.location.href = `mailto:${email}`;
+    },
+    onCalendar: handleOpenLeadDetailsPage,
+    onWhatsApp: (lead) => {
+      const href = getWhatsAppHref(lead?.phone);
+      if (href) window.open(href, "_blank", "noopener");
+    },
+    // TODO(phase 7): swap for QuickLogPopover once it exists; until then Log
+    // opens the record where the diary already lives.
+    onLog: handleOpenLeadDetailsPage,
+    statusOptions: canEditLead ? LEAD_STATUSES : [],
+    onStatusChange: canEditLead ? handleInlineLeadStatusChange : undefined,
+    updatingStatusId,
+  };
 
   useEffect(() => {
     if (!isRouteDetailsView) {
@@ -1719,6 +2335,7 @@ const LeadsMatrix = () => {
     setEmailDraft(String(updatedLead?.email || ""));
     setCityDraft(String(updatedLead?.city || ""));
     setProjectInterestedDraft(String(updatedLead?.projectInterested || ""));
+    setClientProfessionDraft(String(updatedLead?.clientProfession || ""));
     setStatusDraft(String(updatedLead.status || "NEW"));
     setFollowUpDraft(toDateTimeInput(updatedLead?.nextFollowUp));
 
@@ -1752,79 +2369,49 @@ const LeadsMatrix = () => {
     setRequirementsDraft(mapLeadRequirementsToDraft(updatedLead?.requirements));
   };
 
-  const applyInlineUpdatedLeadState = (updatedLead) => {
-    if (!updatedLead?._id) return;
 
-    setLeads((prev) =>
-      prev.map((lead) => (lead._id === updatedLead._id ? updatedLead : lead)),
-    );
 
-    if (String(selectedLead?._id || "") === String(updatedLead._id)) {
-      setSelectedLead(updatedLead);
-      setStatusDraft(String(updatedLead.status || "NEW"));
-    }
-  };
-
-  const handleInlineStatusChange = async (lead, nextStatus) => {
-    const leadId = String(lead?._id || "").trim();
-    const normalizedStatus = String(nextStatus || "").trim().toUpperCase();
-    if (!leadId || !normalizedStatus || normalizedStatus === String(lead?.status || "").toUpperCase()) {
-      return;
-    }
-
-    if (normalizedStatus === "CLOSED") {
-      setError("Open lead details to enter Brokerage Received before closing the deal");
-      handleOpenLeadDetailsPage(lead);
-      return;
-    }
-
-    try {
-      setUpdatingInlineStatusId(leadId);
-      setError("");
-      setLeads((prev) =>
-        prev.map((row) =>
-          String(row?._id || "") === leadId
-            ? { ...row, status: normalizedStatus, updatedAt: new Date().toISOString() }
-            : row),
-      );
-      if (String(selectedLead?._id || "") === leadId) {
-        setSelectedLead((prev) =>
-          prev ? { ...prev, status: normalizedStatus, updatedAt: new Date().toISOString() } : prev,
-        );
-      }
-
-      const updatedLead = await updateLeadStatus(leadId, { status: normalizedStatus });
-
-      if (!updatedLead) {
-        await fetchLeads(true);
-      } else {
-        applyInlineUpdatedLeadState(updatedLead);
-      }
-
-      setSuccess(`Lead status updated to ${getStatusLabel(normalizedStatus)}`);
-    } catch (statusError) {
-      const message = toErrorMessage(statusError, "Failed to update lead status");
-      console.error(`Inline lead status update failed: ${message}`);
-      setLeads((prev) =>
-        prev.map((row) =>
-          String(row?._id || "") === leadId ? { ...row, status: lead.status } : row),
-      );
-      if (String(selectedLead?._id || "") === leadId) {
-        setSelectedLead((prev) => (prev ? { ...prev, status: lead.status } : prev));
-      }
-      setError(message);
-    } finally {
-      setUpdatingInlineStatusId("");
-    }
-  };
-
-  const handleInventorySelection = (inventoryId) => {
+  const handleInventorySelection = (inventoryId, checked = true) => {
     setFormData((prev) => {
-      const selectedInventory = inventoryOptions.find((item) => item._id === inventoryId);
+      const normalizedInventoryId = String(inventoryId || "").trim();
+      const currentRelatedInventoryIds = [
+        ...new Set(
+          [
+            ...(Array.isArray(prev.relatedInventoryIds) ? prev.relatedInventoryIds : []),
+            prev.inventoryId,
+          ]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      ];
+      const nextRelatedInventoryIds = checked
+        ? [...new Set([...currentRelatedInventoryIds, normalizedInventoryId].filter(Boolean))]
+        : currentRelatedInventoryIds.filter((value) => value !== normalizedInventoryId);
+      const nextPrimaryInventoryId = checked
+        ? (prev.inventoryId || normalizedInventoryId)
+        : (prev.inventoryId === normalizedInventoryId ? (nextRelatedInventoryIds[0] || "") : prev.inventoryId);
+
+      if (!checked) {
+        return {
+          ...prev,
+          inventoryId: nextPrimaryInventoryId,
+          relatedInventoryIds: nextRelatedInventoryIds,
+        };
+      }
+
+      const selectedInventory = inventoryOptions.find((item) => item._id === normalizedInventoryId);
       if (!selectedInventory) {
         return {
           ...prev,
-          inventoryId,
+          inventoryId: nextPrimaryInventoryId,
+          relatedInventoryIds: nextRelatedInventoryIds,
+        };
+      }
+
+      if (prev.inventoryId && prev.inventoryId !== normalizedInventoryId) {
+        return {
+          ...prev,
+          relatedInventoryIds: nextRelatedInventoryIds,
         };
       }
 
@@ -1853,7 +2440,8 @@ const LeadsMatrix = () => {
 
       return {
         ...prev,
-        inventoryId,
+        inventoryId: normalizedInventoryId,
+        relatedInventoryIds: nextRelatedInventoryIds,
         projectInterested: inventoryProjectLabel || prev.projectInterested,
         city: getInventoryLeadCity(selectedInventory) || prev.city,
         siteLat: inventorySiteLat === null ? "" : String(inventorySiteLat),
@@ -1931,7 +2519,7 @@ const LeadsMatrix = () => {
   };
 
   const handleSaveLead = async () => {
-    if (!canAddLead) return;
+    if (!canAddLeadAllowed) return;
 
     if (!formData.name.trim() || !formData.phone.trim()) {
       setError("Name and phone are required");
@@ -1974,10 +2562,25 @@ const LeadsMatrix = () => {
         city: formData.city.trim(),
         preferredLocations: toPreferredLocationsList(formData.preferredLocations),
         projectInterested: formData.projectInterested.trim(),
+        clientProfession: formData.clientProfession.trim(),
       };
+
+      const relatedInventoryIds = [
+        ...new Set(
+          [
+            formData.inventoryId,
+            ...(Array.isArray(formData.relatedInventoryIds) ? formData.relatedInventoryIds : []),
+          ]
+            .map((value) => String(value || "").trim())
+            .filter(Boolean),
+        ),
+      ];
 
       if (formData.inventoryId) {
         payload.inventoryId = formData.inventoryId;
+      }
+      if (relatedInventoryIds.length) {
+        payload.relatedInventoryIds = relatedInventoryIds;
       }
 
       if (hasAnySiteCoordinate) {
@@ -2054,7 +2657,7 @@ const LeadsMatrix = () => {
       }
 
       setIsAddModalOpen(false);
-      setFormData(defaultFormData);
+      setFormData(getDefaultFormDataForRoleType());
       setSuccess("Lead created successfully");
     } catch (saveError) {
       const message = toErrorMessage(saveError, "Failed to save lead");
@@ -2065,28 +2668,104 @@ const LeadsMatrix = () => {
     }
   };
 
+  const handleOpenEditLeadForm = () => {
+    if (!selectedLead || !canEditLead) return;
+    setFormData(mapLeadToFormData(selectedLead));
+    setIsEditLeadModalOpen(true);
+  };
+
+  const handleSaveEditedLead = async () => {
+    if (!selectedLead || !canEditLead) return;
+
+    if (!formData.name.trim() || !formData.phone.trim()) {
+      setError("Name and phone are required");
+      return;
+    }
+
+    if (!/^\d{8,15}$/.test(String(formData.phone || "").trim())) {
+      setError("Phone should be 8 to 15 digits");
+      return;
+    }
+
+    const { payload, parsedSiteLat, parsedSiteLng, hasAnySiteCoordinate } =
+      buildLeadFormPayload(formData);
+
+    if (
+      canConfigureSiteLocation
+      && hasAnySiteCoordinate
+      && (parsedSiteLat === null || parsedSiteLng === null)
+    ) {
+      setError("Enter valid site latitude and longitude");
+      return;
+    }
+
+    const requirementValidationError = validateLeadRequirementDraft({
+      inventoryType: formData.requirementsInventoryType,
+      propertySubtype: formData.requirementsPropertySubtype,
+      budgetMin: formData.requirementsBudgetMin,
+      budgetMax: formData.requirementsBudgetMax,
+      subtypeData: formData.requirementsSubtypeData,
+    });
+    if (requirementValidationError) {
+      setError(requirementValidationError);
+      return;
+    }
+
+    payload.status = statusDraft || selectedLead?.status || "NEW";
+    if (!canConfigureSiteLocation) {
+      delete payload.siteLocation;
+    }
+    if (String(followUpDraft || "").trim()) {
+      payload.nextFollowUp = String(followUpDraft || "").trim();
+    }
+
+    try {
+      setSavingUpdates(true);
+      setError("");
+      const updatedLead = await updateLeadStatus(selectedLead._id, payload);
+
+      if (updatedLead) {
+        applyUpdatedLeadState(updatedLead);
+      } else {
+        await fetchLeads(true);
+      }
+
+      setIsEditLeadModalOpen(false);
+      setFormData(getDefaultFormDataForRoleType());
+      setSuccess("Lead updated");
+    } catch (updateError) {
+      const message = toErrorMessage(updateError, "Failed to update lead");
+      console.error(`Edit lead form save failed: ${message}`);
+      setError(message);
+    } finally {
+      setSavingUpdates(false);
+    }
+  };
+
   const handleBulkUploadFileSelect = async (file) => {
     if (!file) return;
 
     try {
-      assertSupportedBulkLeadUploadFileName(file.name);
-      const csvText = await file.text();
-      setBulkUploadParsedRows(null);
-      setBulkUploadText(String(csvText || ""));
+      const extension = String(file.name || "").split(".").pop()?.toLowerCase();
+      if (["xlsx", "xls"].includes(extension)) {
+        const rows = await parseBulkLeadWorkbookRows(file, bulkUploadSheetType);
+        setBulkUploadParsedRows(rows);
+        setBulkUploadText(`Parsed ${rows.length} lead rows from ${file.name}`);
+      } else {
+        const csvText = await file.text();
+        setBulkUploadParsedRows(null);
+        setBulkUploadText(String(csvText || ""));
+      }
       setBulkUploadFileName(String(file.name || ""));
       setError("");
-    } catch (readError) {
+    } catch {
       setBulkUploadParsedRows(null);
-      setBulkUploadText("");
-      setBulkUploadFileName("");
-      setError(readError?.message === BULK_LEAD_CSV_ONLY_MESSAGE
-        ? BULK_LEAD_CSV_ONLY_MESSAGE
-        : "Unable to read selected bulk lead file");
+      setError("Unable to read selected bulk lead file");
     }
   };
 
   const handleBulkUploadLeads = async () => {
-    if (!canBulkUploadLeads) return;
+    if (!canBulkUploadAllowed) return;
 
     try {
       setBulkUploading(true);
@@ -2094,7 +2773,7 @@ const LeadsMatrix = () => {
 
       const rows = Array.isArray(bulkUploadParsedRows)
         ? bulkUploadParsedRows
-        : parseBulkLeadCsvRows(bulkUploadText);
+        : parseBulkLeadCsvRows(bulkUploadText, bulkUploadSheetType);
       const result = await bulkUploadLeads(rows);
       await fetchLeads(true);
 
@@ -2121,6 +2800,7 @@ const LeadsMatrix = () => {
         setBulkUploadText("");
         setBulkUploadParsedRows(null);
         setBulkUploadFileName("");
+        setBulkUploadSheetType(defaultBulkUploadSheetType);
       }
     } catch (uploadError) {
       const message = toErrorMessage(uploadError, "Failed to bulk upload leads");
@@ -2150,6 +2830,7 @@ const LeadsMatrix = () => {
       const normalizedEmailDraft = String(emailDraft || "").trim();
       const normalizedCityDraft = String(cityDraft || "").trim();
       const normalizedProjectInterestedDraft = String(projectInterestedDraft || "").trim();
+      const normalizedClientProfessionDraft = String(clientProfessionDraft || "").trim();
       const normalizedFollowUpDraft = String(followUpDraft || "").trim();
       const hasFollowUpDraft = normalizedFollowUpDraft.length > 0;
       const parsedFollowUpDate = hasFollowUpDraft ? new Date(normalizedFollowUpDraft) : null;
@@ -2318,6 +2999,7 @@ const LeadsMatrix = () => {
         email: normalizedEmailDraft,
         city: normalizedCityDraft,
         projectInterested: normalizedProjectInterestedDraft,
+        clientProfession: normalizedClientProfessionDraft,
         status: statusDraft,
         requirements: buildLeadRequirementsPayloadFromDraft(requirementsDraft),
       };
@@ -2412,6 +3094,7 @@ const LeadsMatrix = () => {
       return;
     }
 
+    if (!window.confirm("Are you sure you want to transfer this lead?")) return;
     try {
       setAssigning(true);
       setError("");
@@ -2586,7 +3269,7 @@ const LeadsMatrix = () => {
   };
 
   const handleAddDiary = async () => {
-    if (!selectedLead) return;
+    if (!selectedLead || !canFollowUpLead) return;
 
     const note = diaryDraft.trim();
     if (!note) {
@@ -2668,15 +3351,10 @@ const LeadsMatrix = () => {
   return (
     <div
       className={`ui-page-shell relative h-full w-full overflow-x-hidden overflow-y-auto custom-scrollbar ${
-        isDark ? "bg-slate-950" : ""
-      }`}
+        isRouteDetailsView ? "route-details-page" : ""
+      } ${isDark ? "bg-slate-950" : ""}`}
     >
-      <div className={`pointer-events-none absolute inset-0 ${
-        isDark
-          ? "bg-[radial-gradient(circle_at_9%_10%,rgba(56,189,248,0.18),transparent_35%),radial-gradient(circle_at_93%_16%,rgba(16,185,129,0.16),transparent_30%),radial-gradient(circle_at_50%_105%,rgba(30,41,59,0.65),transparent_50%)]"
-          : "bg-[radial-gradient(circle_at_10%_9%,rgba(14,165,233,0.16),transparent_35%),radial-gradient(circle_at_90%_14%,rgba(16,185,129,0.14),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.45),rgba(241,245,249,0.82))]"
-      }`} />
-      <div className={`relative z-10 flex flex-col ${isRouteDetailsView ? "" : "flex-1"}`}>
+      <div className={`relative z-10 flex flex-col gap-4 ${isRouteDetailsView ? "px-5" : "flex-1 p-5"}`}>
         {isRouteDetailsView ? (
           <>
             <LeadsMatrixAlerts isDark={isDark} error={error} success={success} />
@@ -2703,56 +3381,77 @@ const LeadsMatrix = () => {
           </>
         ) : (
           <>
-            <LeadsMatrixToolbar
-              isDark={isDark}
+            <PipelineToolbar
+              view={view}
+              onViewChange={setView}
+              needsActionCount={needsActionCount}
+              canSeeUnassigned={canAssignLead}
+              query={query}
+              onQueryChange={setQuery}
               refreshing={refreshing}
-              canAddLead={canAddLead}
-              canBulkUploadLeads={canBulkUploadLeads}
               onRefresh={() => fetchLeads(true)}
-              onOpenAddModal={() => setIsAddModalOpen(true)}
+              sortBy={sortBy}
+              onSortByChange={setSortBy}
+              onOpenFiltersFlyout={() => setFiltersFlyoutOpen(true)}
+              onOpenAddModal={() => { if (!canAddLeadAllowed) return; setFormData(getDefaultFormDataForRoleType()); setIsAddModalOpen(true); }}
               onOpenBulkUploadModal={() => setIsBulkUploadModalOpen(true)}
-              totalLeads={leadPagination?.totalCount ?? metrics.total}
-              filteredLeads={filteredLeads.length}
-              dueFollowUps={metrics.dueFollowUps}
+              canAddLead={canAddLeadAllowed}
+              canBulkUploadLeads={canBulkUploadAllowed}
+              filterState={filterState}
+              onFilterChange={applyToolbarFilters}
+              onResetFilters={resetAllLeadFilters}
+              employees={executives}
+              propertySubtypes={ALL_PROPERTY_SUBTYPE_OPTIONS}
             />
 
             <LeadsMatrixAlerts isDark={isDark} error={error} success={success} />
-
-            <div className="z-30 -mx-2.5 px-2.5 pb-1 pt-0.5 md:sticky md:top-0 md:pb-2 md:pt-1 md:backdrop-blur-xl sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10">
-              <LeadsMatrixFilters
-                isDark={isDark}
-                query={query}
-                onQueryChange={setQuery}
-                statusFilter={statusFilter}
-                onStatusFilterChange={setStatusFilter}
-                leadStatuses={LEAD_STATUSES}
-                propertySubtypeFilter={propertySubtypeFilter}
-                onPropertySubtypeFilterChange={setPropertySubtypeFilter}
-                propertySubtypeOptions={ALL_PROPERTY_SUBTYPE_OPTIONS}
-                sortBy={sortBy}
-                onSortByChange={setSortBy}
-                getStatusLabel={getStatusLabel}
-              />
-            </div>
-
-            <LeadsMatrixTable
-              isDark={isDark}
-              loading={loading}
-              filteredLeads={filteredLeads}
-              statusBreakdown={statusBreakdown}
-              onOpenLeadDetails={handleOpenLeadDetailsPage}
-              canAssignLead={canAssignLead}
-              onInlineStatusChange={handleInlineStatusChange}
-              updatingInlineStatusId={updatingInlineStatusId}
-              leadStatuses={LEAD_STATUSES}
-              getStatusColor={getStatusColor}
-              getStatusLabel={getStatusLabel}
-              formatDate={formatDate}
-              nowMs={nowMs}
+            {(Object.values(advancedFilters).some(Boolean) || statusFilter !== "ALL" || propertySubtypeFilter) && <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>{loading ? "Finding matching leads…" : `${leadPagination?.totalCount ?? leads.length} matching leads · ${filteredLeads.length} shown in this view`}</span><button type="button" className="font-medium text-blue-600 dark:text-blue-400" onClick={() => { setAdvancedFilters({}); setStatusFilter("ALL"); setPropertySubtypeFilter(""); }}>Clear all filters</button></div>}
+            <LeadFiltersFlyout
+              isOpen={filtersFlyoutOpen}
+              onClose={() => setFiltersFlyoutOpen(false)}
+              status={statusFilter}
+              source={advancedFilters.source}
+              assignedTo={advancedFilters.assignedTo}
+              propertyType={advancedFilters.subtype}
+              budgetRange={advancedFilters.budgetRange || ""}
+              followUpDate={advancedFilters.followUpDate || ""}
+              createdDate={advancedFilters.createdDate || ""}
+              quickFilter={quickFilter}
+              employees={executives}
+              statuses={LEAD_STATUSES}
+              propertySubtypes={ALL_PROPERTY_SUBTYPE_OPTIONS}
+              onApply={applyFlyoutFilters}
+              onReset={resetAllLeadFilters}
             />
 
-            {leadPagination?.hasNextPage ? (
-              <div className="flex justify-center px-4 py-5">
+            {view === PIPELINE_VIEWS.TEAM ? (
+              <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+                <PipelineTeam
+                  leads={filteredLeads}
+                  employees={executives}
+                  loading={loading}
+                  onOpenEmployee={handleOpenTeamEmployee}
+                />
+              </div>
+            ) : null}
+
+            {view !== PIPELINE_VIEWS.TEAM ? <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
+              {/*
+                Same data, same callbacks, two presentations: a table needs
+                columns a phone does not have, and cards waste a wide screen.
+                The props are built once so the two can never drift.
+              */}
+              <PipelineCards {...pipelineListProps} className="lg:hidden" />
+              <PipelineTable {...pipelineListProps} className="hidden lg:block" />
+              <PipelineSelectionBar
+                count={selectedLeadKeys.length}
+                onClear={() => setSelectedLeadKeys([])}
+                onExport={canExportLeads ? handleExportSelectedLeads : undefined}
+              />
+            </div> : null}
+
+            {view !== PIPELINE_VIEWS.TEAM && leadPagination?.hasNextPage ? (
+              <div className="px-1 py-4">
                 <button
                   type="button"
                   onClick={() =>
@@ -2762,14 +3461,25 @@ const LeadsMatrix = () => {
                     })
                   }
                   disabled={loadingMoreLeads}
-                  className={`rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-widest transition ${
+                  className={cn(
+                    "flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-3",
+                    "text-[13px] font-semibold outline-none transition",
+                    "focus-visible:ring-2 focus-visible:ring-blue-500/40",
+                    "disabled:cursor-not-allowed disabled:opacity-60",
                     isDark
-                      ? "border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                      ? "border border-slate-700 bg-slate-900 text-blue-300 hover:bg-slate-800"
+                      : "border border-slate-200 bg-white text-blue-700 hover:bg-slate-50",
+                  )}
                 >
-                  {loadingMoreLeads ? "Loading..." : "Load more leads"}
+                  {loadingMoreLeads ? "Loading…" : "Load more leads"}
+                  <ChevronDown aria-hidden="true" size={15} />
                 </button>
+                <p className="mt-2 text-center text-[11.5px] text-slate-500 dark:text-slate-400">
+                  {/* Only claims a total when the API actually sent one. */}
+                  {leadTotalCount
+                    ? `Showing ${filteredLeads.length} of ${leadTotalCount} leads`
+                    : `Showing ${filteredLeads.length} leads`}
+                </p>
               </div>
             ) : null}
           </>
@@ -2777,12 +3487,13 @@ const LeadsMatrix = () => {
       </div>
 
       <AnimatePresence>
-        {isAddModalOpen && canAddLead && (
+        {isAddModalOpen && canAddLeadAllowed && (
           <AddLeadModal
             isDark={isDark}
             formData={formData}
             setFormData={setFormData}
             inventoryOptions={inventoryOptions}
+            availableInventoryTypes={availableLeadInventoryTypes}
             getInventoryLeadLabel={getInventoryLeadLabel}
             onInventorySelection={handleInventorySelection}
             onClose={() => setIsAddModalOpen(false)}
@@ -2793,10 +3504,43 @@ const LeadsMatrix = () => {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isBulkUploadModalOpen && canBulkUploadLeads && (
+        {isEditLeadModalOpen && selectedLead && (
+          <AddLeadModal
+            isDark={isDark}
+            title="Edit Lead"
+            saveLabel="Update Lead"
+            savingLabel="Updating..."
+            formData={formData}
+            setFormData={setFormData}
+            inventoryOptions={inventoryOptions}
+            availableInventoryTypes={availableLeadInventoryTypes}
+            getInventoryLeadLabel={getInventoryLeadLabel}
+            onInventorySelection={handleInventorySelection}
+            onClose={() => {
+              setIsEditLeadModalOpen(false);
+              setFormData(getDefaultFormDataForRoleType());
+            }}
+            onSave={handleSaveEditedLead}
+            savingLead={savingUpdates}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isBulkUploadModalOpen && canBulkUploadAllowed && (
           <BulkLeadUploadModal
             isDark={isDark}
             csvText={bulkUploadText}
+            sheetType={bulkUploadSheetType}
+            availableInventoryTypes={availableLeadInventoryTypes}
+            onSheetTypeChange={(value) => {
+              setBulkUploadSheetType(value);
+              setBulkUploadParsedRows(null);
+              if (bulkUploadFileName) {
+                setBulkUploadText("");
+                setBulkUploadFileName("");
+              }
+            }}
             onCsvTextChange={(value) => {
               setBulkUploadParsedRows(null);
               setBulkUploadText(value);
@@ -2841,6 +3585,7 @@ const LeadsMatrix = () => {
             setRelatedInventoryDraft={setRelatedInventoryDraft}
             linkingProperty={linkingProperty}
             onLinkPropertyToLead={handleLinkPropertyToLead}
+            onOpenEditLeadForm={handleOpenEditLeadForm}
             leadStatuses={LEAD_STATUSES}
             nameDraft={nameDraft}
             setNameDraft={setNameDraft}
@@ -2852,6 +3597,8 @@ const LeadsMatrix = () => {
             setCityDraft={setCityDraft}
             projectInterestedDraft={projectInterestedDraft}
             setProjectInterestedDraft={setProjectInterestedDraft}
+            clientProfessionDraft={clientProfessionDraft}
+            setClientProfessionDraft={setClientProfessionDraft}
             statusDraft={statusDraft}
             setStatusDraft={setStatusDraft}
             requirementsDraft={requirementsDraft}
@@ -2882,6 +3629,7 @@ const LeadsMatrix = () => {
             closureDocumentsDraft={closureDocumentsDraft}
             setClosureDocumentsDraft={setClosureDocumentsDraft}
             canReviewDealPayment={canReviewDealPayment}
+            canEditLead={canEditLead}
             siteLatDraft={siteLatDraft}
             setSiteLatDraft={setSiteLatDraft}
             siteLngDraft={siteLngDraft}
@@ -2897,6 +3645,10 @@ const LeadsMatrix = () => {
             executiveDraft={executiveDraft}
             setExecutiveDraft={setExecutiveDraft}
             executives={executives}
+            onToggleHotClient={async () => {
+              try { const updated = await updateLeadStatus(selectedLead._id, { status: selectedLead.status, hotClient: !selectedLead.hotClient }); applyUpdatedLeadState(updated); }
+              catch (error) { setError(toErrorMessage(error, "Failed to update qualification")); }
+            }}
             transferReasonDraft={transferReasonDraft}
             setTransferReasonDraft={setTransferReasonDraft}
             assigneeSearchDraft={assigneeSearchDraft}

@@ -150,7 +150,7 @@ const ExecutiveDashboard = () => {
 };
 
 const ExecutiveOverview = ({ stats, leads, onOpen }) => (
-  <div className="h-full overflow-y-auto custom-scrollbar px-4 py-6 sm:px-6 lg:px-8">
+  <div className="dashboard-doc-screen h-full overflow-y-auto custom-scrollbar px-4 py-6 sm:px-6 lg:px-8">
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
       <StatCard
         title="Total Leads Assigned"

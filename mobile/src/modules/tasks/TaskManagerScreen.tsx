@@ -49,6 +49,7 @@ export const TaskManagerScreen = () => {
   const insets = useSafeAreaInsets();
   const { user, role } = useAuth();
   const isAdmin = role === "ADMIN" || (role as string) === "SUPER_ADMIN";
+  const isProductionTaskRole = ["PRODUCTION_EXECUTIVE", "COMMUNITY_MANAGER"].includes(String(role || ""));
 
   // Data States
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -132,7 +133,7 @@ export const TaskManagerScreen = () => {
       if (statusFilter) filters.status = statusFilter;
       if (priorityFilter) filters.priority = priorityFilter;
       if (assigneeFilter) filters.assignedTo = assigneeFilter;
-      if (leadFilter) filters.leadId = leadFilter;
+      if (!isProductionTaskRole && leadFilter) filters.leadId = leadFilter;
       if (searchQuery.trim()) filters.search = searchQuery.trim();
       if (tagFilter) filters.tag = tagFilter;
 
@@ -140,7 +141,7 @@ export const TaskManagerScreen = () => {
         getTasks(filters),
         getTaskStats(),
         getUsers(),
-        getAllLeads(),
+        isProductionTaskRole ? Promise.resolve([]) : getAllLeads(),
       ]);
 
       if (tasksResult.status === "fulfilled") {
@@ -166,7 +167,7 @@ export const TaskManagerScreen = () => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [statusFilter, priorityFilter, assigneeFilter, leadFilter, searchQuery, tagFilter]);
+  }, [statusFilter, priorityFilter, assigneeFilter, leadFilter, searchQuery, tagFilter, isProductionTaskRole]);
 
   useEffect(() => {
     void loadData();
@@ -341,7 +342,7 @@ export const TaskManagerScreen = () => {
       priority: formData.priority,
       dueDate: formData.dueDate || null,
       assignedTo: (formData.assignedTo || null) as any,
-      leadId: (formData.leadId || null) as any,
+      leadId: (isProductionTaskRole ? null : formData.leadId || null) as any,
       subtasks: formData.subtasks,
       tags: formData.tags,
     };
@@ -788,7 +789,7 @@ export const TaskManagerScreen = () => {
                               ) : null}
 
                               {/* Lead Link */}
-                              {task.leadId ? (
+                              {!isProductionTaskRole && task.leadId ? (
                                 <View style={[styles.badge, { backgroundColor: "#f0fdf4", borderColor: "#bbf7d0" }]}>
                                   <Text style={[styles.badgeText, { color: "#15803d" }]}>
                                     Lead: {task.leadId && typeof task.leadId === "object" ? task.leadId.name : "Linked"}
@@ -955,37 +956,41 @@ export const TaskManagerScreen = () => {
                 </View>
               )}
 
-              {/* Lead Association */}
-              <Text style={styles.formLabel}>Associated Lead</Text>
-              <Pressable style={styles.selectRowField} onPress={() => setLeadDropdownOpen(!leadDropdownOpen)}>
-                <Text style={styles.selectRowText}>{currentLeadName}</Text>
-                <Ionicons name="people-outline" size={16} color="#64748b" />
-              </Pressable>
-              {leadDropdownOpen && (
-                <View style={styles.dropdownCard}>
-                  <Pressable
-                    style={styles.dropdownItem}
-                    onPress={() => {
-                      setFormData((prev) => ({ ...prev, leadId: "" }));
-                      setLeadDropdownOpen(false);
-                    }}
-                  >
-                    <Text style={styles.dropdownItemText}>None</Text>
+              {!isProductionTaskRole ? (
+                <>
+                  {/* Lead Association */}
+                  <Text style={styles.formLabel}>Associated Lead</Text>
+                  <Pressable style={styles.selectRowField} onPress={() => setLeadDropdownOpen(!leadDropdownOpen)}>
+                    <Text style={styles.selectRowText}>{currentLeadName}</Text>
+                    <Ionicons name="people-outline" size={16} color="#64748b" />
                   </Pressable>
-                  {leads.map((l) => (
-                    <Pressable
-                      key={l._id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setFormData((prev) => ({ ...prev, leadId: l._id }));
-                        setLeadDropdownOpen(false);
-                      }}
-                    >
-                      <Text style={styles.dropdownItemText}>{l.name} {l.phone ? `(${l.phone})` : ""}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
+                  {leadDropdownOpen && (
+                    <View style={styles.dropdownCard}>
+                      <Pressable
+                        style={styles.dropdownItem}
+                        onPress={() => {
+                          setFormData((prev) => ({ ...prev, leadId: "" }));
+                          setLeadDropdownOpen(false);
+                        }}
+                      >
+                        <Text style={styles.dropdownItemText}>None</Text>
+                      </Pressable>
+                      {leads.map((l) => (
+                        <Pressable
+                          key={l._id}
+                          style={styles.dropdownItem}
+                          onPress={() => {
+                            setFormData((prev) => ({ ...prev, leadId: l._id }));
+                            setLeadDropdownOpen(false);
+                          }}
+                        >
+                          <Text style={styles.dropdownItemText}>{l.name} {l.phone ? `(${l.phone})` : ""}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </>
+              ) : null}
 
               {/* Tags Section */}
               <Text style={styles.formLabel}>Tags</Text>

@@ -5,14 +5,17 @@ const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
 const LeadStatusRequest = require("../models/LeadStatusRequest");
 const logger = require("../config/logger");
+const { resolveAccessProfile } = require("../services/access.service");
+const CrmContact = require("../models/CrmContact");
+const { findBrokerByPhone, recordBlockedLead, normalizePhone } = require("../services/crmContact.service");
 const { isDeepStrictEqual } = require("util");
 const {
   autoAssignLead,
 } = require("../services/leadAssignment.service");
 const {
   USER_ROLES,
-  PLATFORM_ADMIN_ROLES,
   EXECUTIVE_ROLES,
+  LEAD_OWNER_ROLES,
   MANUAL_LEAD_TRANSFER_TARGET_ROLES,
   MANAGEMENT_ROLES,
   isManagementRole,
@@ -50,6 +53,7 @@ const LEAD_INVENTORY_SELECT_FIELDS = [
   "totalArea",
   "carpetArea",
   "builtUpArea",
+  "superBuiltUpArea",
   "areaUnit",
   "price",
   "deposit",
@@ -120,6 +124,7 @@ const LEAD_SELECTABLE_FIELDS = [
   "city",
   "preferredLocations",
   "projectInterested",
+  "clientProfession",
   "inventoryId",
   "relatedInventoryIds",
   "siteLocation",
@@ -138,6 +143,8 @@ const LEAD_SELECTABLE_FIELDS = [
   "assignedExecutive",
   "assignedFieldExecutive",
   "assignmentHistory",
+  "hotClient",
+  "brokerContactId",
   "qualifiedBy",
   "qualifiedAt",
   "createdBy",
@@ -168,11 +175,15 @@ const FIELD_EXECUTIVE_ROLE = USER_ROLES.FIELD_EXECUTIVE;
 const SITE_VISIT_STATUS = "SITE_VISIT";
 const SITE_VISIT_REQUIRED_STATUS = "SITE_VISIT_REQUIRED";
 const QUALIFIED_LEAD_STATUS = "QUALIFIED_LEAD";
+const ROLE_TYPE_VALUES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "BOTH"]);
 const REQUESTED_STATUS = "REQUESTED";
 const CLOSED_STATUS = "CLOSED";
 const LEAD_STATUS_VALUES = Object.freeze([
   "NEW",
   "CONTACTED",
+  "FOLLOW_UP_1",
+  "FOLLOW_UP_2",
+  "FOLLOW_UP_3",
   "INTERESTED",
   "SITE_VISIT_SCHEDULED",
   "SITE_VISIT",
@@ -218,13 +229,11 @@ const MAX_BROKERAGE_TEXT_LENGTH = 180;
 const BROKERAGE_AMOUNT_TOLERANCE = 0.01;
 const MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH = 500;
 const MAX_BULK_LEAD_UPLOAD_ROWS = 5000;
-const BULK_LEAD_AUTO_ASSIGN_SYNC_LIMIT =
-  Number.parseInt(process.env.BULK_LEAD_AUTO_ASSIGN_SYNC_LIMIT, 10) || 200;
 const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTIAL"]);
 const LEAD_REQUIREMENT_TRANSACTION_TYPES = Object.freeze(["SALE", "LEASE", "RENT"]);
 const LEAD_REQUIREMENT_AREA_UNITS = Object.freeze(["SQ_FT", "SQ_M"]);
 const CRM_ASSIGNABLE_ROLES = Object.freeze([
-  ...PLATFORM_ADMIN_ROLES,
+  USER_ROLES.ADMIN,
   ...MANAGEMENT_ROLES,
   USER_ROLES.INSIDE_EXECUTIVE,
   USER_ROLES.EXECUTIVE,
@@ -281,20 +290,6 @@ const normalizePreferredLocations = (value) => {
     .slice(0, 20);
 };
 
-const sanitizeFormulaLikeText = (value) => {
-  const trimmed = String(value || "").trim();
-  if (!trimmed) return "";
-  return /^[=+\-@]/.test(trimmed) ? `'${trimmed}` : trimmed;
-};
-
-const normalizeLeadPhoneInput = (value) => {
-  const digits = String(value || "").replace(/\D/g, "");
-  if (digits.length === 12 && digits.startsWith("91")) {
-    return digits.slice(2);
-  }
-  return digits;
-};
-
 const toObjectIdString = (value) => {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -338,14 +333,57 @@ const toLeadView = (lead) => {
   };
 };
 
-const buildCompanyInventoryQuery = ({ inventoryId, companyId }) => {
+const buildCompanyInventoryQuery = ({ inventoryId, companyId, user = null }) => {
   const query = {
     _id: inventoryId,
   };
   if (companyId) {
     query.companyId = companyId;
   }
+  if (user?.role && user.role !== USER_ROLES.ADMIN && getUserRoleType(user) !== "BOTH") {
+    query.inventoryType = getUserRoleType(user);
+  }
   return query;
+};
+
+const normalizeRoleType = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  return ROLE_TYPE_VALUES.includes(normalized) ? normalized : "COMMERCIAL";
+};
+
+const getUserRoleType = (user) => normalizeRoleType(user?.roleType);
+
+const buildLeadTypeClause = (roleType) => {
+  if (roleType === "RESIDENTIAL") {
+    return { "requirements.inventoryType": "RESIDENTIAL" };
+  }
+
+  return {
+    $or: [
+      { "requirements.inventoryType": "COMMERCIAL" },
+      { "requirements.inventoryType": "" },
+      { "requirements.inventoryType": { $exists: false } },
+    ],
+  };
+};
+
+const addLeadRoleTypeScope = (query, user) => {
+  if (!query || user?.role === USER_ROLES.ADMIN || getUserRoleType(user) === "BOTH") return query;
+  addLeadAndClause(query, buildLeadTypeClause(getUserRoleType(user)));
+  return query;
+};
+
+const assertLeadTypeMatchesUser = (leadOrRequirements, user) => {
+  if (user?.role === USER_ROLES.ADMIN || getUserRoleType(user) === "BOTH") return null;
+  const userRoleType = getUserRoleType(user);
+  const leadType = normalizeRoleType(
+    leadOrRequirements?.requirements?.inventoryType
+    || leadOrRequirements?.inventoryType,
+  );
+  if (leadType !== userRoleType) {
+    return `This ${leadType.toLowerCase()} lead is not available for ${userRoleType.toLowerCase()} users`;
+  }
+  return null;
 };
 
 const applyLeadSelectionFromInventory = ({ lead, inventory }) => {
@@ -889,6 +927,8 @@ const addLeadAndClause = (query, clause) => {
 };
 
 const applyLeadListFilters = (query, rawQuery = {}) => {
+  require("../utils/leadAdvancedFilters").applyLeadAdvancedFilters(query, rawQuery);
+  if (rawQuery.status === "TRANSFER") addLeadAndClause(query, { "assignmentHistory.action": "MANUAL_TRANSFER" });
   const status = normalizeLeadStatusValue(rawQuery.status);
   if (status && LEAD_STATUS_VALUES.includes(status)) {
     query.status = status;
@@ -902,18 +942,18 @@ const applyLeadListFilters = (query, rawQuery = {}) => {
   const assignedTo = String(rawQuery.assignedTo || "").trim();
   if (assignedTo) {
     if (assignedTo.toUpperCase() === "UNASSIGNED") {
-      query.assignedTo = null;
+      addLeadAndClause(query, { assignedTo: null });
     } else if (isValidObjectId(assignedTo)) {
-      query.assignedTo = assignedTo;
+      addLeadAndClause(query, { assignedTo });
     }
   }
 
   const dateFrom = normalizeDateBoundary(
-    rawQuery.dateFrom || rawQuery.startDate || rawQuery.createdFrom,
+    rawQuery.dateFrom || rawQuery.startDate,
     "start",
   );
   const dateTo = normalizeDateBoundary(
-    rawQuery.dateTo || rawQuery.endDate || rawQuery.createdTo,
+    rawQuery.dateTo || rawQuery.endDate,
     "end",
   );
   if (dateFrom || dateTo) {
@@ -1266,17 +1306,8 @@ const parseBrokeragePayload = (rawPayload = {}) => {
     return { error: "brokerageDistributionBreakdown must be an array" };
   }
 
-  if (
-    hasBreakdown
-    && source.brokerageDistributionBreakdown.length > MAX_BROKERAGE_BREAKDOWN_ROWS
-  ) {
-    return {
-      error: `Maximum ${MAX_BROKERAGE_BREAKDOWN_ROWS} brokerage distribution rows are allowed`,
-    };
-  }
-
   const breakdown = hasBreakdown
-    ? source.brokerageDistributionBreakdown.map((row) => {
+    ? source.brokerageDistributionBreakdown.slice(0, MAX_BROKERAGE_BREAKDOWN_ROWS).map((row) => {
         const amount = toFiniteNumber(row?.amount);
         const paidDateRaw = String(row?.paidDate || "").trim();
         const paidDate = paidDateRaw ? new Date(paidDateRaw) : null;
@@ -1357,7 +1388,7 @@ const emitAdminManagerRequestEvent = ({
   const resolvedCompanyId = String(companyId || "").trim();
   if (!io || !resolvedCompanyId || !eventName || !payload) return;
 
-  [...PLATFORM_ADMIN_ROLES, USER_ROLES.MANAGER].forEach((role) => {
+  [USER_ROLES.ADMIN, USER_ROLES.MANAGER].forEach((role) => {
     const roleRoom = `company:${resolvedCompanyId}:role:${role}`;
     io.to(roleRoom).emit(eventName, payload);
     io.to(roleRoom).emit("admin:request:new", payload);
@@ -1517,25 +1548,22 @@ const resolveLiveLocationForVerification = (user) => {
   };
 };
 
-const getLeadViewById = async (leadId, companyId = null) => {
+const getLeadViewById = async (leadId, companyId = null, user = null) => {
   const query = { _id: leadId };
   if (companyId && isValidObjectId(companyId)) {
     query.companyId = companyId;
   }
+  addLeadRoleTypeScope(query, user);
   const row = await Lead.findOne(query).populate(LEAD_POPULATE_FIELDS).lean();
   return toLeadView(row);
 };
 
 const getExecutiveIdsForLeader = async (user) => getDescendantExecutiveIds({
   rootUserId: user?._id,
-  companyId: user?.role === USER_ROLES.SUPER_ADMIN ? null : user?.companyId || null,
+  companyId: user?.companyId || null,
 });
 
 const resolveLeadCompanyScope = (user) => {
-  if (user?.role === USER_ROLES.SUPER_ADMIN) {
-    return {};
-  }
-
   const companyId = toObjectIdString(user?.companyId);
   if (!isValidObjectId(companyId)) {
     return null;
@@ -1550,23 +1578,59 @@ const buildLeadQueryForUser = async (user) => {
     return null;
   }
 
-  if (isPlatformAdminRole(user.role)) {
+  if (user.role === USER_ROLES.ADMIN) {
     return companyScope;
   }
 
   if (isManagementRole(user.role)) {
-    return companyScope;
+    return addLeadRoleTypeScope(companyScope, user);
+  }
+
+  if (user.role === USER_ROLES.FIELD_EXECUTIVE) {
+    return addLeadRoleTypeScope({
+      ...companyScope,
+      $or: [
+        { assignedTo: user._id },
+        { assignedFieldExecutive: user._id },
+      ],
+    }, user);
   }
 
   if (EXECUTIVE_ROLES.includes(user.role)) {
-    return {
+    return addLeadRoleTypeScope({
       ...companyScope,
       assignedTo: user._id,
-    };
+    }, user);
   }
 
   if (user.role === USER_ROLES.CHANNEL_PARTNER) {
-    return { ...companyScope, createdBy: user._id };
+    return addLeadRoleTypeScope({ ...companyScope, createdBy: user._id }, user);
+  }
+
+  // A role outside the built-in lead hierarchy (Production Executive, Community
+  // Manager, Coworking admin, or any custom role built on them) reaches leads
+  // only when an Admin has explicitly granted its role the Leads page. Without
+  // that grant this still returns null, and the callers still answer 403 — so
+  // nothing changes for accounts that were never given the page.
+  const access = await resolveAccessProfile(user);
+  const hasLeadsPage =
+    access.enforcePageAccess
+    && (access.permissions.includes("page.leads.view")
+      || access.permissions.includes("page.my_leads.view"));
+
+  if (hasLeadsPage) {
+    // Only an Admin can set a role's data scope, so an explicit "ALL" is an
+    // instruction to honour. Every other scope collapses to the same
+    // least-privilege answer here: these roles sit outside the lead hierarchy,
+    // so they have no team beneath them to widen to.
+    if (access.dataScope === "ALL") {
+      return addLeadRoleTypeScope({ ...companyScope }, user);
+    }
+
+    return addLeadRoleTypeScope({
+      ...companyScope,
+      $or: [{ assignedTo: user._id }, { createdBy: user._id }],
+    }, user);
   }
 
   return null;
@@ -1727,7 +1791,7 @@ const buildCompanyPerformanceOverview = ({
   const leaderboardRows = new Map();
   users.forEach((user) => {
     const role = String(user?.role || "").toUpperCase();
-    if (isPlatformAdminRole(role)) return;
+    if (role === USER_ROLES.ADMIN) return;
     const id = String(user?._id || "");
     if (!id) return;
     leaderboardRows.set(id, {
@@ -1768,6 +1832,7 @@ const buildCompanyPerformanceOverview = ({
   return {
     summary: {
       totalLeads,
+      transferredLeads: leads.filter(lead => lead.assignmentHistory?.some(entry => entry.action === "MANUAL_TRANSFER")).length,
       closed,
       closeVelocity,
     },
@@ -1867,6 +1932,50 @@ const getLeadRoleCounts = async (query) => {
   }, {});
 };
 
+const buildCreatorLeadAssignment = async (user) => {
+  if (!user?._id) {
+    return {};
+  }
+
+  const assignment = {
+    assignedTo: user._id,
+    assignmentHistory: [
+      {
+        action: "INITIAL_ASSIGNMENT",
+        fromUser: null,
+        toUser: user._id,
+        reason: "Lead assigned to creator on creation",
+        statusAtTransfer: "NEW",
+        createdAt: new Date(),
+        createdBy: user._id,
+      },
+    ],
+  };
+
+  if (isManagementRole(user.role)) {
+    assignment.assignedManager = user._id;
+    return assignment;
+  }
+
+  if (LEAD_OWNER_ROLES.includes(user.role)) {
+    assignment.assignedExecutive = user._id;
+  } else if (user.role === USER_ROLES.FIELD_EXECUTIVE) {
+    assignment.assignedFieldExecutive = user._id;
+  }
+
+  if (assignment.assignedExecutive || assignment.assignedFieldExecutive) {
+    const topManager = await getAncestorByRoles({
+      user,
+      targetRoles: [USER_ROLES.MANAGER],
+      companyId: user.companyId || null,
+      select: "_id role parentId companyId isActive",
+    });
+    assignment.assignedManager = topManager?._id || user.parentId || null;
+  }
+
+  return assignment;
+};
+
 exports.createLead = async (req, res) => {
   try {
     const {
@@ -1876,33 +1985,35 @@ exports.createLead = async (req, res) => {
       city,
       preferredLocations,
       projectInterested,
+      clientProfession,
       inventoryId: rawInventoryId,
+      relatedInventoryIds: rawRelatedInventoryIds,
       siteLocation: rawSiteLocation,
       requirements: rawRequirements,
-      source: rawSource,
     } = req.body;
-
-    const normalizedName = sanitizeFormulaLikeText(name);
-    const normalizedPhone = normalizeLeadPhoneInput(phone);
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-    const normalizedSource = normalizeEnumValue(rawSource) === "META" ? "META" : "MANUAL";
-
-    if (!normalizedName) {
-      return res.status(400).json({ message: "Name is required" });
-    }
-
-    if (!normalizedPhone || !/^\d{8,15}$/.test(normalizedPhone)) {
-      return res.status(400).json({ message: "Phone must be 8 to 15 digits" });
-    }
 
     const companyId = toObjectIdString(req.user?.companyId);
     if (!isValidObjectId(companyId)) {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const existing = await Lead.findOne({ phone: normalizedPhone, companyId }).select("_id").lean();
+    const existing = await Lead.findOne({ phone, companyId }).select("_id").lean();
     if (existing) {
       return res.status(400).json({ message: "Lead already exists" });
+    }
+
+    // A number in the Broker Database is a broker, not an enquiry. Refuse it
+    // here so it never reaches the pipeline, and record the attempt against the
+    // broker so the refusal can be accounted for later.
+    const broker = await findBrokerByPhone(companyId, phone);
+    if (broker) {
+      await recordBlockedLead(broker._id, { name, phone, origin: "MANUAL", attemptedBy: req.user?._id || null });
+      return res.status(409).json({
+        message: `${broker.name} is in your Broker Database, so this number cannot be added as a lead. Remove them from the Broker Database first if this is genuinely a client enquiry.`,
+        brokerBlocked: true,
+        brokerId: broker._id,
+        brokerName: broker.name,
+      });
     }
 
     const parsedSiteLocation = parseSiteLocationPayload(rawSiteLocation);
@@ -1911,25 +2022,46 @@ exports.createLead = async (req, res) => {
     }
 
     const inventoryId = String(rawInventoryId || "").trim();
+    const requestedInventoryIds = [
+      ...new Set(
+        [
+          inventoryId,
+          ...(Array.isArray(rawRelatedInventoryIds) ? rawRelatedInventoryIds : []),
+        ]
+          .map((value) => String(value || "").trim())
+          .filter(Boolean),
+      ),
+    ];
+    const invalidInventoryId = requestedInventoryIds.find((value) => !/^[a-fA-F0-9]{24}$/.test(value));
+    if (invalidInventoryId) {
+      return res.status(400).json({ message: "Invalid inventory id" });
+    }
+
     let inventory = null;
+    let relatedInventories = [];
 
-    if (inventoryId) {
-      if (!/^[a-fA-F0-9]{24}$/.test(inventoryId)) {
-        return res.status(400).json({ message: "Invalid inventory id" });
+    if (requestedInventoryIds.length) {
+      const inventoryQuery = { _id: { $in: requestedInventoryIds } };
+      if (req.user?.companyId) inventoryQuery.companyId = req.user.companyId;
+      if (req.user?.role !== USER_ROLES.ADMIN && getUserRoleType(req.user) !== "BOTH") {
+        inventoryQuery.inventoryType = getUserRoleType(req.user);
       }
 
-      const inventoryQuery = { _id: inventoryId };
-      if (req.user?.companyId) {
-        inventoryQuery.companyId = req.user.companyId;
-      }
-
-      inventory = await Inventory.findOne(inventoryQuery)
+      relatedInventories = await Inventory.find(inventoryQuery)
         .select(LEAD_INVENTORY_SELECT_FIELDS)
         .lean();
 
-      if (!inventory) {
+      if (relatedInventories.length !== requestedInventoryIds.length) {
         return res.status(404).json({ message: "Inventory not found" });
       }
+
+      const inventoryById = new Map(
+        relatedInventories.map((row) => [String(row?._id || ""), row]),
+      );
+      inventory = inventoryById.get(requestedInventoryIds[0]) || null;
+      relatedInventories = requestedInventoryIds
+        .map((id) => inventoryById.get(id))
+        .filter(Boolean);
     }
 
     const resolvedProjectInterested =
@@ -1941,24 +2073,31 @@ exports.createLead = async (req, res) => {
       || resolveInventoryLeadCity(inventory);
 
     const createPayload = {
-      name: normalizedName,
-      phone: normalizedPhone,
-      email: normalizedEmail,
-      city: sanitizeFormulaLikeText(resolvedCity),
+      name,
+      phone,
+      email,
+      city: resolvedCity,
       preferredLocations: normalizePreferredLocations(preferredLocations),
-      projectInterested: sanitizeFormulaLikeText(resolvedProjectInterested),
+      projectInterested: resolvedProjectInterested,
+      clientProfession: String(clientProfession || "").trim(),
       requirements: normalizeLeadRequirements({
         rawRequirements,
         inventory,
       }),
       companyId,
-      source: normalizedSource,
+      source: "MANUAL",
       createdBy: req.user._id,
+      ...(await buildCreatorLeadAssignment(req.user)),
     };
+
+    const roleTypeError = assertLeadTypeMatchesUser(createPayload, req.user);
+    if (roleTypeError) {
+      return res.status(403).json({ message: roleTypeError });
+    }
 
     if (inventory) {
       createPayload.inventoryId = inventory._id;
-      createPayload.relatedInventoryIds = [inventory._id];
+      createPayload.relatedInventoryIds = relatedInventories.map((row) => row._id);
     }
 
     if (parsedSiteLocation.provided) {
@@ -1977,28 +2116,16 @@ exports.createLead = async (req, res) => {
     }
 
     const lead = await Lead.create(createPayload);
-    const shouldAutoAssignLead = req.user.role !== USER_ROLES.CHANNEL_PARTNER;
+    await LeadActivity.create({
+      lead: lead._id,
+      action: "Lead created and assigned to creator",
+      performedBy: req.user._id,
+    });
 
-    if (shouldAutoAssignLead) {
-      await autoAssignLead({
-        lead,
-        requester: req.user,
-        performedBy: req.user._id,
-      });
-    } else {
-      await LeadActivity.create({
-        lead: lead._id,
-        action: "Lead created by channel partner and pending admin assignment",
-        performedBy: req.user._id,
-      });
-    }
-
-    const populatedLead = await getLeadViewById(lead._id, companyId);
+    const populatedLead = await getLeadViewById(lead._id, companyId, req.user);
 
     return res.status(201).json({
-      message: shouldAutoAssignLead
-        ? "Lead created and assignment processed"
-        : "Lead created successfully",
+      message: "Lead created and assigned to creator",
       lead: populatedLead,
     });
   } catch (error) {
@@ -2030,6 +2157,7 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
     buildCompanyInventoryQuery({
       inventoryId: selectedInventoryId,
       companyId: user?.companyId || null,
+      user,
     }),
   );
 
@@ -2101,7 +2229,9 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
     };
   }
 
-  const saleDetails = {
+  inventory.status = "Sold";
+  inventory.updatedBy = user?._id || null;
+  inventory.saleDetails = {
     leadId: lead._id,
     paymentMode,
     paymentType,
@@ -2112,54 +2242,10 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
     soldAt: inventory?.saleDetails?.soldAt || new Date(),
   };
 
-  const updatedInventory = await Inventory.findOneAndUpdate(
-    {
-      ...buildCompanyInventoryQuery({
-        inventoryId: selectedInventoryId,
-        companyId: user?.companyId || null,
-      }),
-      $or: [
-        { status: "Available" },
-        { status: "Blocked", reservationLeadId: lead._id },
-        { status: "Sold", "saleDetails.leadId": lead._id },
-      ],
-    },
-    {
-      $set: {
-        status: "Sold",
-        reservationLeadId: null,
-        reservationReason: "",
-        updatedBy: user?._id || null,
-        saleDetails,
-      },
-    },
-    {
-      returnDocument: "after",
-      runValidators: true,
-    },
-  ).lean();
-
-  if (!updatedInventory) {
-    const latest = await Inventory.findOne(
-      buildCompanyInventoryQuery({
-        inventoryId: selectedInventoryId,
-        companyId: user?.companyId || null,
-      }),
-    ).lean();
-    const latestStatus = String(latest?.status || "").trim().toLowerCase();
-    const latestReservationLeadId = toObjectIdString(latest?.reservationLeadId);
-    const latestSoldLeadId = toObjectIdString(latest?.saleDetails?.leadId);
-    if (latestStatus === "blocked" && latestReservationLeadId !== leadId) {
-      return { error: "Selected property is reserved for another lead" };
-    }
-    if (latestStatus === "sold" && latestSoldLeadId !== leadId) {
-      return { error: "Selected property is already sold to another lead" };
-    }
-    return { error: "Selected property is not available for closure" };
-  }
+  await inventory.save();
 
   return {
-    inventory: updatedInventory,
+    inventory,
   };
 };
 
@@ -2179,6 +2265,7 @@ const syncSelectedInventoryAsReservedForCloseRequest = async ({
     buildCompanyInventoryQuery({
       inventoryId: selectedInventoryId,
       companyId: user?.companyId || null,
+      user,
     }),
   );
 
@@ -2202,52 +2289,14 @@ const syncSelectedInventoryAsReservedForCloseRequest = async ({
     };
   }
 
-  const updatedInventory = await Inventory.findOneAndUpdate(
-    {
-      ...buildCompanyInventoryQuery({
-        inventoryId: selectedInventoryId,
-        companyId: user?.companyId || null,
-      }),
-      $or: [
-        { status: "Available" },
-        { status: "Blocked", reservationLeadId: lead._id },
-      ],
-    },
-    {
-      $set: {
-        status: "Blocked",
-        reservationLeadId: lead._id,
-        reservationReason:
-          `Deal close request pending for ${String(lead?.name || "lead").trim() || "lead"}`,
-        updatedBy: user?._id || null,
-      },
-    },
-    {
-      returnDocument: "after",
-      runValidators: true,
-    },
-  ).lean();
-
-  if (!updatedInventory) {
-    const latest = await Inventory.findOne(
-      buildCompanyInventoryQuery({
-        inventoryId: selectedInventoryId,
-        companyId: user?.companyId || null,
-      }),
-    ).lean();
-    const latestStatus = String(latest?.status || "").trim().toLowerCase();
-    const latestReservationLeadId = toObjectIdString(latest?.reservationLeadId);
-    if (latestStatus === "sold") {
-      return { error: "Selected property is already sold" };
-    }
-    if (latestStatus === "blocked" && latestReservationLeadId !== leadId) {
-      return { error: "Selected property is already reserved for another lead" };
-    }
-    return { error: "Selected property is not available for reservation" };
-  }
+  inventory.status = "Blocked";
+  inventory.reservationLeadId = lead._id;
+  inventory.reservationReason = `Deal close request pending for ${String(lead?.name || "lead").trim() || "lead"}`;
+  inventory.updatedBy = user?._id || null;
+  await inventory.save();
 
   return {
-    inventory: updatedInventory,
+    inventory,
   };
 };
 
@@ -2265,6 +2314,7 @@ const releaseSelectedInventoryReservationForLead = async ({
     buildCompanyInventoryQuery({
       inventoryId: selectedInventoryId,
       companyId: user?.companyId || null,
+      user,
     }),
   );
 
@@ -2278,31 +2328,14 @@ const releaseSelectedInventoryReservationForLead = async ({
     return { inventory: null };
   }
 
-  const updatedInventory = await Inventory.findOneAndUpdate(
-    {
-      ...buildCompanyInventoryQuery({
-        inventoryId: selectedInventoryId,
-        companyId: user?.companyId || null,
-      }),
-      status: "Blocked",
-      reservationLeadId: lead._id,
-    },
-    {
-      $set: {
-        status: "Available",
-        reservationLeadId: null,
-        reservationReason: "",
-        updatedBy: user?._id || null,
-      },
-    },
-    {
-      returnDocument: "after",
-      runValidators: true,
-    },
-  ).lean();
+  inventory.status = "Available";
+  inventory.reservationLeadId = null;
+  inventory.reservationReason = "";
+  inventory.updatedBy = user?._id || null;
+  await inventory.save();
 
   return {
-    inventory: updatedInventory || null,
+    inventory,
   };
 };
 
@@ -2344,7 +2377,10 @@ const toLeadStatusRequestDealPayment = (saleMeta = {}) => {
 
 exports.bulkUploadLeads = async (req, res) => {
   try {
-    if (![...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES, ...EXECUTIVE_ROLES].includes(req.user?.role)) {
+    const access = await resolveAccessProfile(req.user);
+    const hasExplicitCreateGrant = access.enforcePageAccess
+      && access.permissions.includes("page.leads.create");
+    if (!hasExplicitCreateGrant && ![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES, ...EXECUTIVE_ROLES].includes(req.user?.role)) {
       return res.status(403).json({ message: "Only ADMIN, MANAGER, or EXECUTIVE can bulk upload leads" });
     }
 
@@ -2367,7 +2403,7 @@ exports.bulkUploadLeads = async (req, res) => {
     const payloadPhones = [
       ...new Set(
         rows
-          .map((row) => normalizeLeadPhoneInput(row?.phone))
+          .map((row) => String(row?.phone || "").trim())
           .filter(Boolean),
       ),
     ];
@@ -2417,6 +2453,9 @@ exports.bulkUploadLeads = async (req, res) => {
         ? Inventory.find({
           _id: { $in: payloadInventoryIds },
           companyId,
+          ...((req.user?.role === USER_ROLES.ADMIN || getUserRoleType(req.user) === "BOTH")
+            ? {}
+            : { inventoryType: getUserRoleType(req.user) }),
         })
           .select(LEAD_INVENTORY_SELECT_FIELDS)
           .lean()
@@ -2435,6 +2474,21 @@ exports.bulkUploadLeads = async (req, res) => {
       inventoryRows.map((row) => [String(row._id), row]),
     );
 
+    // One lookup for the whole sheet: broker numbers are refused row by row
+    // below rather than with a query each.
+    const brokersByPhone = new Map(
+      (payloadPhones.length
+        ? await CrmContact.find({
+          companyId,
+          kind: "BROKER",
+          phone: { $in: payloadPhones.map((value) => normalizePhone(value)).filter(Boolean) },
+        })
+          .select("_id name phone")
+          .lean()
+        : []
+      ).map((row) => [row.phone, row]),
+    );
+
     const createdIds = [];
     const updatedPhones = [];
     const failures = [];
@@ -2450,13 +2504,13 @@ exports.bulkUploadLeads = async (req, res) => {
           throw new Error("Row must be an object");
         }
 
-        const name = sanitizeFormulaLikeText(row.name);
-        const phone = normalizeLeadPhoneInput(row.phone);
+        const name = String(row.name || "").trim();
+        const phone = String(row.phone || "").trim();
         const email = String(row.email || "").trim().toLowerCase();
-        const city = sanitizeFormulaLikeText(row.city);
-        const projectInterested = sanitizeFormulaLikeText(
+        const city = String(row.city || "").trim();
+        const projectInterested = String(
           row.projectInterested || row.project || row.project_name || "",
-        );
+        ).trim();
         const source = String(row.source || "").trim().toUpperCase() === "META"
           ? "META"
           : "MANUAL";
@@ -2483,6 +2537,11 @@ exports.bulkUploadLeads = async (req, res) => {
         if (uploadedPhoneSet.has(phone)) {
           throw new Error("Duplicate phone in uploaded sheet");
         }
+        const rowBroker = brokersByPhone.get(normalizePhone(phone));
+        if (rowBroker) {
+          await recordBlockedLead(rowBroker._id, { name, phone, origin: "BULK", attemptedBy: req.user?._id || null });
+          throw new Error(`${rowBroker.name} is in the Broker Database, so this row was not added as a lead`);
+        }
         if (companyPhoneSet.has(phone) && !accessiblePhoneSet.has(phone)) {
           throw new Error("Lead already exists outside your accessible team");
         }
@@ -2496,7 +2555,7 @@ exports.bulkUploadLeads = async (req, res) => {
 
           inventory = inventoryById.get(inventoryId) || null;
           if (!inventory) {
-            throw new Error("Inventory not found in your company");
+            throw new Error("Inventory not found in your accessible inventory");
           }
         }
 
@@ -2549,6 +2608,11 @@ exports.bulkUploadLeads = async (req, res) => {
           status,
           createdBy: req.user._id,
         };
+
+        const roleTypeError = assertLeadTypeMatchesUser(writePayload, req.user);
+        if (roleTypeError) {
+          throw new Error(roleTypeError);
+        }
 
         if (nextFollowUp) {
           writePayload.nextFollowUp = nextFollowUp;
@@ -2691,37 +2755,30 @@ exports.bulkUploadLeads = async (req, res) => {
       }
     }
 
-    if (createdLeads.length && createdLeads.length <= BULK_LEAD_AUTO_ASSIGN_SYNC_LIMIT) {
+    if (createdLeads.length) {
       const requester = {
         _id: req.user._id,
         role: req.user.role,
         companyId: req.user.companyId,
       };
-
-      await Promise.all(
-        createdLeads.map((lead) =>
-          autoAssignLead({
-            lead,
-            requester,
-            performedBy: requester._id,
-          })),
-      );
-    } else if (createdLeads.length) {
-      logger.warn({
-        requestId: req.requestId || null,
-        createdCount: createdLeads.length,
-        syncLimit: BULK_LEAD_AUTO_ASSIGN_SYNC_LIMIT,
-        message: "Bulk lead auto assignment deferred for large batch",
+      setImmediate(async () => {
+        for (const lead of createdLeads) {
+          try {
+            await autoAssignLead({
+              lead,
+              requester,
+              performedBy: requester._id,
+            });
+          } catch (assignmentError) {
+            logger.error({
+              requestId: req.requestId || null,
+              leadId: lead?._id || null,
+              error: assignmentError.message,
+              message: "Bulk lead auto assignment failed",
+            });
+          }
+        }
       });
-      await LeadActivity.insertMany(
-        createdLeads.map((lead) => ({
-          lead: lead._id,
-          action:
-            "Auto assignment pending: bulk upload batch exceeds synchronous assignment limit",
-          performedBy: req.user._id,
-        })),
-        { ordered: false },
-      );
     }
 
     return res.status(201).json({
@@ -2800,7 +2857,7 @@ exports.getAllLeads = async (req, res) => {
       error: error.message,
       message: "getAllLeads failed",
     });
-    return res.status(500).json({ message: "Server error" });
+    return res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Server error" });
   }
 };
 
@@ -2816,7 +2873,7 @@ exports.getLeadById = async (req, res) => {
       return res.status(404).json({ message: "Lead not found" });
     }
 
-    const lead = await getLeadViewById(leadId, req.user.companyId);
+    const lead = await getLeadViewById(leadId, req.user.companyId, req.user);
     if (!lead) {
       return res.status(404).json({ message: "Lead not found" });
     }
@@ -2916,7 +2973,10 @@ exports.assignLead = async (req, res) => {
       return res.status(400).json({ message: "assignedTo must be a valid user id" });
     }
 
-    if (!CRM_ASSIGNABLE_ROLES.includes(req.user?.role)) {
+    const access = await resolveAccessProfile(req.user);
+    const hasExplicitAssignGrant = access.enforcePageAccess
+      && access.permissions.includes("page.leads.assign");
+    if (!hasExplicitAssignGrant && !CRM_ASSIGNABLE_ROLES.includes(req.user?.role)) {
       return res.status(403).json({ message: "You are not authorized to transfer leads" });
     }
 
@@ -2945,6 +3005,13 @@ exports.assignLead = async (req, res) => {
     if (!MANUAL_LEAD_TRANSFER_TARGET_ROLES.includes(targetUser.role)) {
       return res.status(400).json({
         message: "Lead can only be assigned to an Executive or Field Executive",
+      });
+    }
+
+    const targetRoleTypeError = assertLeadTypeMatchesUser(lead, targetUser);
+    if (targetRoleTypeError) {
+      return res.status(400).json({
+        message: "Lead can only be assigned to a user with the same role type",
       });
     }
 
@@ -2996,7 +3063,7 @@ exports.assignLead = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
 
     return res.json({
       message: "Lead assigned successfully",
@@ -3042,6 +3109,7 @@ exports.addRelatedPropertyToLead = async (req, res) => {
       buildCompanyInventoryQuery({
         inventoryId: rawInventoryId,
         companyId: req.user.companyId,
+        user: req.user,
       }),
     )
       .select(LEAD_INVENTORY_SELECT_FIELDS)
@@ -3067,7 +3135,7 @@ exports.addRelatedPropertyToLead = async (req, res) => {
     const inventoryIdStr = String(inventory._id);
 
     if (existingIds.includes(inventoryIdStr)) {
-      const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+      const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
       return res.json({
         message: "Property already linked to this lead",
         lead: populatedLead,
@@ -3087,7 +3155,7 @@ exports.addRelatedPropertyToLead = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
 
     return res.json({
       message: "Property linked to lead",
@@ -3128,6 +3196,7 @@ exports.selectRelatedPropertyForLead = async (req, res) => {
       buildCompanyInventoryQuery({
         inventoryId,
         companyId: req.user.companyId,
+        user: req.user,
       }),
     )
       .select(LEAD_INVENTORY_SELECT_FIELDS)
@@ -3156,7 +3225,7 @@ exports.selectRelatedPropertyForLead = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
     return res.json({
       message: "Property selected",
       lead: populatedLead,
@@ -3206,7 +3275,7 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
     const targetInventoryId = String(inventoryId);
 
     if (!existingIds.includes(targetInventoryId)) {
-      const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+      const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
       return res.json({
         message: "Property is already not linked",
         lead: populatedLead,
@@ -3233,6 +3302,7 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
           buildCompanyInventoryQuery({
             inventoryId: fallbackInventoryId,
             companyId: req.user.companyId,
+            user: req.user,
           }),
         )
           .select(LEAD_INVENTORY_SELECT_FIELDS)
@@ -3257,7 +3327,7 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
     return res.json({
       message: "Property removed",
       lead: populatedLead,
@@ -3274,7 +3344,7 @@ exports.removeRelatedPropertyFromLead = async (req, res) => {
 
 exports.getLeadPaymentRequests = async (req, res) => {
   try {
-    if (![...PLATFORM_ADMIN_ROLES, USER_ROLES.MANAGER].includes(req.user.role)) {
+    if (![USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(req.user.role)) {
       return res.status(403).json({
         message: "Only admin or manager users can view payment requests",
       });
@@ -3352,6 +3422,7 @@ exports.updateLeadBasics = async (req, res) => {
     const nextCity = String(req.body?.city || "").trim();
     const nextPreferredLocations = normalizePreferredLocations(req.body?.preferredLocations);
     const nextProjectInterested = String(req.body?.projectInterested || "").trim();
+    const nextClientProfession = String(req.body?.clientProfession || "").trim();
     const nextSource = String(req.body?.source || "").trim();
 
     if (nextName && nextName.length < 2) {
@@ -3394,6 +3465,10 @@ exports.updateLeadBasics = async (req, res) => {
       lead.projectInterested = nextProjectInterested;
       updates.push("projectInterested");
     }
+    if (req.body?.clientProfession !== undefined && nextClientProfession !== String(lead.clientProfession || "")) {
+      lead.clientProfession = nextClientProfession;
+      updates.push("clientProfession");
+    }
     if (req.body?.source !== undefined && nextSource !== String(lead.source || "")) {
       lead.source = nextSource;
       updates.push("source");
@@ -3402,7 +3477,7 @@ exports.updateLeadBasics = async (req, res) => {
     if (!updates.length) {
       return res.json({
         message: "No profile changes",
-        lead: await getLeadViewById(lead._id, req.user.companyId),
+        lead: await getLeadViewById(lead._id, req.user.companyId, req.user),
       });
     }
 
@@ -3413,7 +3488,7 @@ exports.updateLeadBasics = async (req, res) => {
       performedBy: req.user._id,
     });
 
-    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
     return res.json({
       message: "Lead profile updated",
       lead: populatedLead,
@@ -3438,6 +3513,7 @@ exports.updateLeadStatus = async (req, res) => {
       city,
       preferredLocations,
       projectInterested,
+      clientProfession,
       status: rawStatus,
       nextFollowUp,
       siteLocation: rawSiteLocation,
@@ -3446,6 +3522,7 @@ exports.updateLeadStatus = async (req, res) => {
       requirements: rawRequirements,
     } = req.body;
     const requestedStatus = normalizeLeadStatusValue(rawStatus);
+    if (req.body.hotClient !== undefined && typeof req.body.hotClient !== "boolean") return res.status(400).json({ message: "hotClient must be boolean" });
 
     if (!requestedStatus) {
       return res.status(400).json({ message: "Status is required" });
@@ -3457,6 +3534,7 @@ exports.updateLeadStatus = async (req, res) => {
     const hasCityField = Object.prototype.hasOwnProperty.call(req.body || {}, "city");
     const hasPreferredLocationsField = Object.prototype.hasOwnProperty.call(req.body || {}, "preferredLocations");
     const hasProjectInterestedField = Object.prototype.hasOwnProperty.call(req.body || {}, "projectInterested");
+    const hasClientProfessionField = Object.prototype.hasOwnProperty.call(req.body || {}, "clientProfession");
     const hasRequirementsField = Object.prototype.hasOwnProperty.call(req.body || {}, "requirements");
     const normalizedName = hasNameField ? String(name || "").trim() : "";
     const normalizedPhone = hasPhoneField ? String(phone || "").trim() : "";
@@ -3467,6 +3545,9 @@ exports.updateLeadStatus = async (req, res) => {
       : [];
     const normalizedProjectInterested = hasProjectInterestedField
       ? String(projectInterested || "").trim()
+      : "";
+    const normalizedClientProfession = hasClientProfessionField
+      ? String(clientProfession || "").trim()
       : "";
 
     if (!LEAD_STATUS_VALUES.includes(requestedStatus)) {
@@ -3579,6 +3660,14 @@ exports.updateLeadStatus = async (req, res) => {
       }
     }
 
+    if (hasClientProfessionField) {
+      const existingClientProfession = String(lead?.clientProfession || "").trim();
+      if (normalizedClientProfession !== existingClientProfession) {
+        lead.clientProfession = normalizedClientProfession;
+        updatedProfileFields.push("clientProfession");
+      }
+    }
+
     if (hasRequirementsField) {
       const selectedInventoryId = toObjectIdString(lead?.inventoryId);
       let selectedInventory = null;
@@ -3588,6 +3677,7 @@ exports.updateLeadStatus = async (req, res) => {
           buildCompanyInventoryQuery({
             inventoryId: selectedInventoryId,
             companyId: req.user.companyId,
+            user: req.user,
           }),
         )
           .select(LEAD_INVENTORY_SELECT_FIELDS)
@@ -3598,6 +3688,10 @@ exports.updateLeadStatus = async (req, res) => {
         rawRequirements,
         inventory: selectedInventory,
       }) || {};
+      const roleTypeError = assertLeadTypeMatchesUser(normalizedRequirements, req.user);
+      if (roleTypeError) {
+        return res.status(403).json({ message: roleTypeError });
+      }
       const existingRequirements = lead?.requirements?.toObject
         ? lead.requirements.toObject()
         : (lead?.requirements || {});
@@ -3627,7 +3721,7 @@ exports.updateLeadStatus = async (req, res) => {
     }
 
     const dealPaymentPayload = parsedDealPayment.value || {};
-    const isAdminUser = [...PLATFORM_ADMIN_ROLES, USER_ROLES.MANAGER].includes(req.user.role);
+    const isAdminUser = [USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(req.user.role);
     const isExecutiveUser = EXECUTIVE_ROLES.includes(req.user.role);
     const isNonAdminCloseIntent =
       !isAdminUser && requestedStatus === CLOSED_STATUS;
@@ -3678,7 +3772,7 @@ exports.updateLeadStatus = async (req, res) => {
 
     if (
       parsedSiteLocation.provided
-      && ![...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES].includes(req.user.role)
+      && ![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES].includes(req.user.role)
     ) {
       return res.status(403).json({
         message: "Only admin or leadership roles can configure site coordinates",
@@ -4043,6 +4137,7 @@ exports.updateLeadStatus = async (req, res) => {
       releasedInventory = releaseResult?.inventory || null;
     }
 
+    if (req.body.hotClient !== undefined) lead.hotClient = req.body.hotClient;
     await lead.save();
 
     const didTransitionToClosed =
@@ -4157,7 +4252,7 @@ exports.updateLeadStatus = async (req, res) => {
         })),
     );
 
-    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
 
     return res.json({
       message: "Lead status updated",
@@ -4343,7 +4438,7 @@ exports.getLeadStatusRequests = async (req, res) => {
       query.status = requestedStatus;
     }
 
-    const isAdmin = isPlatformAdminRole(req.user.role);
+    const isAdmin = req.user.role === USER_ROLES.ADMIN;
     if (!isAdmin && !isManagementRole(req.user.role)) {
       query.requestedBy = req.user._id;
     }
@@ -4569,7 +4664,7 @@ exports.approveLeadStatusRequest = async (req, res) => {
       });
     }
 
-    const populatedLead = await getLeadViewById(lead._id, req.user.companyId);
+    const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
     const populatedRequest = await LeadStatusRequest.findById(request._id)
       .populate("requestedBy", "name role")
       .populate("reviewedBy", "name role")

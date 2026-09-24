@@ -1,5 +1,6 @@
 import BrandLogo from "../common/BrandLogo";
 import { Skeleton } from "../ui";
+import Loader from "./Loader";
 
 const RouteLoadingSkeleton = ({ compact = false }) => (
   <div
@@ -16,6 +17,9 @@ const RouteLoadingSkeleton = ({ compact = false }) => (
       <div className="min-w-0 flex-1">
         <Skeleton className="h-3 w-28 rounded-full" />
         <Skeleton className="mt-2 h-7 w-52 max-w-[70vw] rounded-lg" />
+      </div>
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <Loader />
       </div>
     </div>
 

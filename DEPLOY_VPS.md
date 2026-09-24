@@ -110,6 +110,10 @@ sudo systemctl reload nginx
 
 ## 6. Important Notes
 
+- `backend/uploads/` holds user-uploaded files (inventory photos, floor plans, documents, chat
+  media). It is gitignored and lives only on disk, so `git pull` / `pm2 reload` never touch it —
+  but that also means it is **not** part of the repo and must be included in your own VPS backup
+  routine (rsync/tar it alongside your MongoDB backups).
 - Do not bind The Office on Rent backend to the same port used by ecommerce backend.
 - Keep separate Nginx server blocks per app/subdomain.
 - Keep `.env` out of Git and rotate secrets if ever exposed.

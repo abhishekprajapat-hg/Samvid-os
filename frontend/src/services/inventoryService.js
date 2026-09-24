@@ -130,6 +130,11 @@ export const getPendingInventoryRequests = async () => {
   return res.data?.requests || [];
 };
 
+export const getMyInventoryRequests = async () => {
+  const res = await api.get("/inventory-request/my");
+  return res.data?.requests || [];
+};
+
 export const approveInventoryRequest = async (requestId) => {
   const res = await api.patch(`/inventory-request/${requestId}/approve`);
   return res.data || null;

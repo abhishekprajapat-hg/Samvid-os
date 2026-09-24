@@ -286,6 +286,10 @@ const MasterSchedule = () => {
     month: "long",
     year: "numeric",
   });
+  const todayKey = toDateKey(new Date());
+  const todayFollowUps = byDate.get(todayKey)?.length || 0;
+  const todayTasks = tasksByDate.get(todayKey)?.length || 0;
+  const completedTasks = tasks.filter((task) => task.status === "COMPLETED").length;
 
   useEffect(() => {
     if (!selectedDayItems.length) {
@@ -523,11 +527,11 @@ const MasterSchedule = () => {
   };
 
   return (
-	    <div className={`ui-page-shell custom-scrollbar overflow-x-hidden ${isDark ? "bg-slate-950/35" : "bg-white/30"}`}>
-      <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className={`calendar-doc-screen ui-page-shell custom-scrollbar overflow-x-hidden ${isDark ? "bg-slate-950/35" : "bg-white/30"}`}>
+      <div className="calendar-toolbar flex flex-wrap items-center justify-end gap-2">
           <button
             onClick={loadScheduleData}
-            className={`h-10 px-4 rounded-xl border text-sm font-semibold flex items-center gap-2 ${
+            className={`calendar-btn h-10 px-4 rounded-xl border text-sm font-semibold flex items-center gap-2 ${
               isDark ? "border-slate-700 bg-slate-900/70 text-slate-200" : "border-slate-300 bg-white text-slate-700"
             }`}
           >
@@ -536,7 +540,7 @@ const MasterSchedule = () => {
           </button>
           <button
             onClick={goToday}
-            className={`h-10 px-4 rounded-xl border text-sm font-semibold ${
+            className={`calendar-btn calendar-btn-primary h-10 px-4 rounded-xl border text-sm font-semibold ${
               isDark ? "border-cyan-400/40 bg-cyan-500/10 text-cyan-200" : "border-sky-300 bg-sky-50 text-sky-700"
             }`}
           >
@@ -547,21 +551,48 @@ const MasterSchedule = () => {
       <ToastNotice message={error} type="error" />
       <ToastNotice message={success} type="success" />
 
-      <div className="grid grid-cols-1 gap-3 md:gap-5 md:min-h-[640px] xl:grid-cols-[1.2fr_0.8fr]">
-        <section className={`rounded-2xl border overflow-hidden ${isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
-          <div className={`h-14 px-4 flex items-center justify-between border-b ${isDark ? "border-slate-700 bg-slate-900/90" : "border-slate-200 bg-slate-50"}`}>
+      <section className="calendar-statgrid">
+        <div className="calendar-stat">
+          <div>
+            <p>Total follow-ups</p>
+            <strong>{followUps.length}</strong>
+            <span>{leads.length} leads loaded</span>
+          </div>
+          <CalendarIcon size={17} />
+        </div>
+        <div className="calendar-stat">
+          <div>
+            <p>Today</p>
+            <strong>{todayFollowUps + todayTasks}</strong>
+            <span>{todayFollowUps} follow-ups, {todayTasks} tasks</span>
+          </div>
+          <Clock3 size={17} />
+        </div>
+        <div className="calendar-stat">
+          <div>
+            <p>Task deadlines</p>
+            <strong>{tasks.length}</strong>
+            <span>{completedTasks} completed</span>
+          </div>
+          <NotebookPen size={17} />
+        </div>
+      </section>
+
+      <div className="calendar-layout grid grid-cols-1 gap-3 md:gap-5 md:min-h-[640px] xl:grid-cols-[1.2fr_0.8fr]">
+        <section className={`calendar-card calendar-month-card rounded-2xl border overflow-hidden ${isDark ? "border-slate-700 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
+          <div className={`calendar-card-head h-14 px-4 flex items-center justify-between border-b ${isDark ? "border-slate-700 bg-slate-900/90" : "border-slate-200 bg-slate-50"}`}>
             <div className={`text-sm font-bold tracking-wide ${isDark ? "text-slate-100" : "text-slate-800"}`}>{monthTitle}</div>
             <div className="flex items-center gap-1">
-              <button onClick={() => moveMonth(-1)} className={`p-2 rounded-lg ${isDark ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-200 text-slate-600"}`}>
+              <button onClick={() => moveMonth(-1)} className={`calendar-icon-btn p-2 rounded-lg ${isDark ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-200 text-slate-600"}`}>
                 <ChevronLeft size={16} />
               </button>
-              <button onClick={() => moveMonth(1)} className={`p-2 rounded-lg ${isDark ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-200 text-slate-600"}`}>
+              <button onClick={() => moveMonth(1)} className={`calendar-icon-btn p-2 rounded-lg ${isDark ? "hover:bg-slate-800 text-slate-300" : "hover:bg-slate-200 text-slate-600"}`}>
                 <ChevronRight size={16} />
               </button>
             </div>
           </div>
 
-          <div className={`grid grid-cols-7 border-b ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+          <div className={`calendar-weekdays grid grid-cols-7 border-b ${isDark ? "border-slate-700" : "border-slate-200"}`}>
             {DAY_NAMES.map((day) => (
               <div key={day} className={`py-2 text-center text-[11px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 {day}
@@ -569,7 +600,7 @@ const MasterSchedule = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-7 auto-rows-fr">
+          <div className="calendar-grid grid grid-cols-7 auto-rows-fr">
             {calendarCells.map((date) => {
               const key = toDateKey(date);
               const leadCount = (byDate.get(key) || []).length;
@@ -582,9 +613,9 @@ const MasterSchedule = () => {
                 <button
                   key={key}
                   onClick={() => setSelectedDate(date)}
-                  className={`min-h-[56px] border p-1.5 text-left transition-colors sm:min-h-[92px] sm:p-2 ${
+                  className={`calendar-day min-h-[56px] border p-1.5 text-left transition-colors sm:min-h-[92px] sm:p-2 ${
                     isDark ? "border-slate-800 hover:bg-slate-800/60" : "border-slate-100 hover:bg-slate-50"
-                  } ${selected ? (isDark ? "bg-cyan-500/10" : "bg-sky-50") : ""}`}
+                  } ${selected ? (isDark ? "is-selected bg-cyan-500/10" : "is-selected bg-sky-50") : ""} ${inMonth ? "" : "is-muted"}`}
                 >
                   <div className="flex items-start justify-between w-full h-full">
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
@@ -621,8 +652,8 @@ const MasterSchedule = () => {
           </div>
         </section>
 
-	          <section className="grid grid-rows-[auto_auto] gap-3 md:gap-4 xl:min-h-0 xl:grid-rows-[auto_1fr]">
-          <div className={`rounded-2xl border p-3 sm:p-4 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
+        <section className="calendar-side grid grid-rows-[auto_auto] gap-3 md:gap-4 xl:min-h-0 xl:grid-rows-[auto_1fr]">
+          <div className={`calendar-card calendar-form-card rounded-2xl border p-3 sm:p-4 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
             <h3 className={`text-sm font-bold mb-3 ${isDark ? "text-slate-100" : "text-slate-800"}`}>Schedule Follow-up</h3>
             <div className="space-y-2">
               <select
@@ -656,8 +687,8 @@ const MasterSchedule = () => {
             </div>
           </div>
 
-	          <div className={`rounded-2xl border flex flex-col xl:min-h-0 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
-            <div className={`p-4 border-b ${isDark ? "border-slate-700" : "border-slate-200"}`}>
+          <div className={`calendar-card calendar-agenda-card rounded-2xl border flex flex-col xl:min-h-0 ${isDark ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
+            <div className={`calendar-card-head p-4 border-b ${isDark ? "border-slate-700" : "border-slate-200"}`}>
               <div className={`text-sm font-bold ${isDark ? "text-slate-100" : "text-slate-800"}`}>
                 {new Date(selectedDate).toLocaleDateString([], { weekday: "long", day: "2-digit", month: "long" })}
               </div>
@@ -666,7 +697,7 @@ const MasterSchedule = () => {
               </div>
             </div>
 
-	              <div className="flex-1 overflow-visible p-4 space-y-4 xl:overflow-y-auto custom-scrollbar">
+            <div className="calendar-agenda-scroll flex-1 overflow-visible p-4 space-y-4 xl:overflow-y-auto custom-scrollbar">
                 {loading ? (
                   <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>Loading...</div>
                 ) : (

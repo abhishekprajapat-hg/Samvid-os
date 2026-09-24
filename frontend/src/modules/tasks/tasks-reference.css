@@ -1,0 +1,91 @@
+.tasks-reference-page .tasks-scroll > * { flex-shrink: 0; }
+.tasks-reference-page .tasks-scope-tabs { flex-wrap: wrap; flex-shrink: 0; }
+.tasks-reference-page .tasks-scope-tabs > div { flex-wrap: wrap; flex: 1 1 100%; min-width: 0; }
+.tasks-reference-page .tasks-scope-tabs button,
+.tasks-reference-page .tasks-scope-tabs > span { white-space: nowrap; flex-shrink: 0; }
+.tasks-reference-page .tasks-scope-tabs button { flex: 1 1 auto; }
+.tasks-reference-page .tasks-member-card { box-shadow: none; }
+.tasks-reference-page .tasks-member-card .font-black { font-weight: 750; }
+.tasks-reference-page .tasks-task-card { background-color: #fff; }
+html.theme-dark .tasks-reference-page .tasks-task-card { background-color: #0f172a; }
+
+@media (max-width: 1279px) {
+  .tasks-reference-page .tasks-scroll { display: block; padding: 14px; }
+  .tasks-reference-page .tasks-scroll > * + * { margin-top: 14px; }
+  .tasks-reference-page .tasks-roster { overflow: visible; }
+  .tasks-reference-page .tasks-roster-heading { flex-direction: row; align-items: center; }
+  .tasks-reference-page .tasks-roster-heading h1 { font-size: 23px; line-height: 1.25; }
+  .tasks-reference-page .tasks-roster-heading > div:first-child { min-width: 0; flex: 1; }
+  .tasks-reference-page .tasks-roster-heading > div:last-child > :not(:last-child) { display: none; }
+  .tasks-reference-page .tasks-roster-heading > div:last-child > button:last-child { background: #2224d9; color: white; }
+  .tasks-reference-page .tasks-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-bottom: 3px; }
+  .tasks-reference-page .tasks-metrics > div { padding: 12px 9px; border-radius: 12px; box-shadow: 0 2px 5px #16204c05; }
+  .tasks-reference-page .tasks-metrics > div > div { gap: 7px; align-items: flex-start; }
+  .tasks-reference-page .tasks-metrics .h-10 { width: 28px; height: 28px; }
+  .tasks-reference-page .tasks-metrics p:first-child { white-space: normal; overflow: visible; text-overflow: clip; font-size: 11px; min-height: 30px; }
+  .tasks-reference-page .tasks-roster-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0; border: 0; box-shadow: none; background: transparent; }
+  .tasks-reference-page .tasks-roster-filters > div:first-child { grid-column: 1 / -1; max-width: none; }
+  .tasks-reference-page .tasks-roster-filters input { border-radius: 18px; height: 44px; }
+  .tasks-reference-page .tasks-roster-filters select { width: 100%; min-width: 0; border-radius: 20px; font-size: 11px; padding: 0 9px; }
+  .tasks-reference-page .tasks-roster-filters > div:last-child { grid-column: 1 / -1; margin-left: 0; }
+  .tasks-reference-page .tasks-roster-filters > div:last-child > span { display: none; }
+  .tasks-reference-page .tasks-member-card { padding: 15px; border-radius: 15px; }
+  .tasks-reference-page .tasks-member-card p.text-sm { font-size: 16px; }
+  .tasks-reference-page .tasks-member-card .h-11 { height: 44px; width: 44px; }
+  .tasks-reference-page .tasks-member-card .h-1\.5 { height: 6px; }
+  .tasks-reference-page .tasks-member-card .text-\[10px\] { font-size: 11px; }
+  .tasks-reference-page .tasks-member-card .grid-cols-3 > div:last-child > p:first-child { color: #dc2626; }
+  .tasks-reference-page .tasks-member-summary { position: relative; margin-top: 34px; padding: 15px; }
+  .tasks-reference-page .tasks-member-summary > div:first-child > button { position: absolute; top: -37px; left: 0; border: 0; background: none; color: #2525d9; padding-left: 0; box-shadow: none; }
+  .tasks-reference-page .tasks-member-summary h2 { font-size: 18px; }
+  .tasks-reference-page .tasks-member-summary .h-14 { height: 48px; width: 48px; }
+  .tasks-reference-page .tasks-member-summary .grid-cols-4 { margin-top: 4px; }
+  .tasks-reference-page .tasks-member-summary .grid-cols-4 > div { padding-left: 3px; padding-right: 3px; }
+  .tasks-reference-page .tasks-member-summary .grid-cols-4 p { white-space: normal; overflow: visible; text-overflow: clip; font-size: 10px; overflow-wrap: normal; }
+  .tasks-reference-page .tasks-member-summary .grid-cols-4 p:first-child { font-size: 19px; }
+  .tasks-reference-page .tasks-scope-tabs { gap: 0; border: 1px solid #e0e4ee; border-radius: 12px; background: #fff; }
+  .tasks-reference-page .tasks-scope-tabs > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; border: 0; box-shadow: none; }
+  .tasks-reference-page .tasks-scope-tabs button { padding: 11px 12px; font-size: 12px; }
+  .tasks-reference-page .tasks-scope-tabs > span { width: 100%; white-space: normal; border: 0; border-bottom: 2px solid #2525e8; border-radius: 8px; font-size: 12px; background: #eeeeff; color: #2222d7; }
+  .tasks-reference-page .tasks-scope-tabs > span > svg { display: none; }
+  .tasks-reference-page .tasks-toolbar { padding: 0; border: 0; box-shadow: none; background: transparent; gap: 10px; }
+  .tasks-reference-page .tasks-toolbar > div:first-child { flex: none; }
+  .tasks-reference-page .tasks-toolbar input { height: 44px; border-radius: 13px; }
+  .tasks-reference-page .tasks-toolbar > div:last-child { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tasks-reference-page .tasks-toolbar select { min-width: 0; max-width: none; width: 100%; font-size: 12px; }
+  .tasks-reference-page .tasks-list { border: 0; padding: 0; background: transparent; box-shadow: none; overflow: visible; }
+  .tasks-reference-page .tasks-list > h3 { display: none; }
+  .tasks-reference-page .tasks-list > div:first-of-type { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tasks-reference-page .tasks-list > div:first-of-type button { white-space: nowrap; flex-shrink: 0; }
+  .tasks-reference-page .tasks-scope-tabs,
+  .tasks-reference-page .tasks-metrics,
+  .tasks-reference-page .tasks-list > div:first-of-type { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .tasks-reference-page .tasks-scope-tabs::-webkit-scrollbar,
+  .tasks-reference-page .tasks-metrics::-webkit-scrollbar,
+  .tasks-reference-page .tasks-list > div:first-of-type::-webkit-scrollbar { display: none; }
+  .tasks-reference-page .tasks-task-card { padding: 14px; border-radius: 16px; }
+  .tasks-reference-page .tasks-task-card > div > button:first-child { width: 27px; height: 27px; }
+  .tasks-reference-page .tasks-task-card p.font-bold { font-size: 16px; }
+  .tasks-reference-page .tasks-task-card p.text-xs { font-size: 12px; margin-top: 3px; white-space: normal; }
+  .tasks-reference-page .tasks-task-card .text-\[11px\] { font-size: 11px; }
+  .tasks-reference-page .tasks-detail-panel { display: none; }
+  .tasks-reference-page .tasks-detail-open { display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 45; max-height: 52dvh; overflow-y: auto; border-radius: 22px 22px 0 0; padding: 22px 16px calc(16px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 40px #13223d26; background: #fff; }
+  .tasks-reference-page .tasks-detail-open::before { content: ''; position: absolute; top: 8px; left: calc(50% - 18px); width: 36px; height: 4px; border-radius: 5px; background: #b7bbc5; }
+  .tasks-reference-page .tasks-detail-close { position: absolute; right: 8px; top: 16px; }
+  .tasks-reference-page .tasks-detail-panel > div:first-of-type { padding-right: 30px; }
+  .tasks-reference-page .tasks-detail-panel > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  html.theme-dark .tasks-reference-page .tasks-detail-open,
+  html.theme-dark .tasks-reference-page .tasks-scope-tabs { background: #0f172a; border-color: #334155; }
+}
+
+@media (max-width: 639px) {
+  .tasks-reference-page .tasks-edit-form { overflow-x: hidden; padding-right: 2px; }
+  .tasks-reference-page .tasks-edit-fields > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .tasks-reference-page .tasks-edit-fields > div > div:first-child { flex: 0 0 100%; width: 100%; }
+  .tasks-reference-page .tasks-edit-fields > div > div:nth-child(2) { flex: 1 1 100%; width: 100%; }
+  .tasks-reference-page .tasks-edit-fields > div:nth-child(2) > div:nth-child(2) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tasks-reference-page .tasks-edit-fields button { height: auto; min-height: 36px; white-space: normal; line-height: 1.35; padding-top: 7px; padding-bottom: 7px; }
+  .tasks-reference-page .tasks-edit-fields input,
+  .tasks-reference-page .tasks-edit-fields select { min-height: 38px; min-width: 0; max-width: 100%; }
+  .tasks-reference-page .tasks-scope-tabs button { white-space: normal; min-width: 0; overflow-wrap: anywhere; }
+}

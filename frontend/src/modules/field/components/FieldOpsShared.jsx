@@ -2,8 +2,8 @@ import { CalendarClock } from "lucide-react";
 import { MetricCard, StatusBadge as CrmStatusBadge } from "../../../components/crm";
 import { EmptyState as SharedEmptyState } from "../../../components/ui";
 
-export const StatCard = ({ title, value, helper, icon }) => (
-  <MetricCard title={title} value={value} helper={helper} icon={icon} />
+export const StatCard = ({ title, value, helper, icon, className = "" }) => (
+  <MetricCard title={title} value={value} helper={helper} icon={icon} className={className} />
 );
 
 export const MiniStat = ({ label, value }) => (

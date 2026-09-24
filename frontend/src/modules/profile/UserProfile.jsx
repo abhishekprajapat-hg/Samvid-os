@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import PushNotificationCard from "../../components/common/PushNotificationCard";
 import { useNavigate } from "react-router-dom";
 import {
   UserCircle2,
@@ -14,11 +15,13 @@ import {
   CalendarDays,
   RefreshCw,
   ArrowRight,
+  Camera,
 } from "lucide-react";
 import {
   getMyProfile,
   updateMyProfile,
 } from "../../services/userService";
+import { uploadFile } from "../../services/uploadService";
 import {
   createLeaveRequest,
   getMyAttendance,
@@ -35,7 +38,9 @@ const ROLE_LABELS = {
   EXECUTIVE: "Executive",
   FIELD_EXECUTIVE: "Field Executive",
   PRODUCTION_EXECUTIVE: "Production Executive",
+  COMMUNITY_MANAGER: "Community Manager",
   CHANNEL_PARTNER: "Channel Partner",
+  COWORKING_ADMIN: "Coworking admin",
 };
 const MANAGEMENT_ROLES = ["MANAGER"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -214,6 +219,7 @@ const UserProfile = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [profile, setProfile] = useState(null);
   const [summary, setSummary] = useState({});
   const [nameDraft, setNameDraft] = useState("");
@@ -475,6 +481,45 @@ const UserProfile = () => {
     }
   };
 
+  const handlePhotoChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      setError("Please choose an image file");
+      return;
+    }
+
+    try {
+      setUploadingPhoto(true);
+      setError("");
+      const uploaded = await uploadFile(file, "profile-images");
+      const response = await updateMyProfile({ profileImageUrl: uploaded.url });
+      setProfile(response.profile || profile);
+      setSummary(response.summary || summary);
+
+      const storedUserRaw = localStorage.getItem("user");
+      if (storedUserRaw) {
+        try {
+          const storedUser = JSON.parse(storedUserRaw);
+          storedUser.profileImageUrl = response.profile?.profileImageUrl || uploaded.url;
+          localStorage.setItem("user", JSON.stringify(storedUser));
+        } catch {
+          // ignore invalid local cache
+        }
+      }
+
+      setSuccess("Profile photo updated");
+    } catch (uploadError) {
+      const message = toErrorMessage(uploadError, "Failed to upload photo");
+      console.error(`Upload profile photo failed: ${message}`);
+      setError(message);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
   return (
     <div className="ui-page-shell custom-scrollbar space-y-6">
       <ToastNotice message={error} type="error" />
@@ -492,8 +537,33 @@ const UserProfile = () => {
         <>
           <div className="ui-soft-panel rounded-2xl border bg-white p-5 sm:p-6">
             <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-              <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center">
-                <UserCircle2 size={30} />
+              <div className="relative shrink-0 w-fit">
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center overflow-hidden ring-1 ring-slate-200 shadow-sm">
+                  {profile.profileImageUrl ? (
+                    <img
+                      src={profile.profileImageUrl}
+                      alt={profile.name || "Profile"}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <UserCircle2 size={40} />
+                  )}
+                </div>
+                <label
+                  title="Change profile photo"
+                  className={`absolute -bottom-1.5 -right-1.5 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-white shadow-md transition-colors hover:bg-slate-700 ${
+                    uploadingPhoto ? "cursor-not-allowed opacity-70" : "cursor-pointer"
+                  }`}
+                >
+                  {uploadingPhoto ? <Loader size={13} className="animate-spin" /> : <Camera size={13} />}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handlePhotoChange}
+                    disabled={uploadingPhoto}
+                    className="hidden"
+                  />
+                </label>
               </div>
 
               <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -602,6 +672,8 @@ const UserProfile = () => {
               </div>
             </div>
           </div>
+
+          <PushNotificationCard />
 
           <section className="ui-soft-panel rounded-2xl border bg-white p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

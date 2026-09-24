@@ -1,24 +1,26 @@
 const mongoose = require("mongoose");
 const Inventory = require("../models/Inventory");
+const InventoryIdCounter = require("../models/InventoryIdCounter");
 const InventoryRequest = require("../models/InventoryRequest");
 const InventoryActivity = require("../models/InventoryActivity");
 const Lead = require("../models/Lead");
 const LeadDiary = require("../models/leadDiary.model");
 const LeadActivity = require("../models/leadActivity.model");
 const User = require("../models/User");
+const { resolveAccessProfile } = require("./access.service");
 const {
   USER_ROLES,
-  PLATFORM_ADMIN_ROLES,
   EXECUTIVE_ROLES,
   MANAGEMENT_ROLES,
   isManagementRole,
-  isPlatformAdminRole,
 } = require("../constants/role.constants");
 const {
   INVENTORY_STATUSES,
   INVENTORY_TYPES,
   INVENTORY_SALE_PAYMENT_MODES,
   INVENTORY_SALE_PAYMENT_TYPES,
+  INVENTORY_DEAL_TYPES,
+  INVENTORY_OWNER_TYPES,
   INVENTORY_ALLOWED_FIELDS,
   INVENTORY_REQUIRED_CREATE_FIELDS,
   INVENTORY_ACTIVITY_ACTIONS,
@@ -39,37 +41,35 @@ const DEFAULT_SITE_VISIT_RADIUS_METERS =
 const INVENTORY_REQUEST_LIST_LIMIT =
   Number.parseInt(process.env.INVENTORY_REQUEST_LIST_LIMIT, 10) || 200;
 const INVENTORY_CREATE_REQUEST_ROLES = Object.freeze([
-  ...PLATFORM_ADMIN_ROLES,
+  USER_ROLES.ADMIN,
   ...MANAGEMENT_ROLES,
   USER_ROLES.EXECUTIVE,
-  USER_ROLES.INSIDE_EXECUTIVE,
   USER_ROLES.FIELD_EXECUTIVE,
   USER_ROLES.CHANNEL_PARTNER,
 ]);
 const INVENTORY_UPDATE_REQUEST_ROLES = Object.freeze([
-  ...PLATFORM_ADMIN_ROLES,
+  USER_ROLES.ADMIN,
   ...MANAGEMENT_ROLES,
   USER_ROLES.EXECUTIVE,
-  USER_ROLES.INSIDE_EXECUTIVE,
   USER_ROLES.FIELD_EXECUTIVE,
 ]);
 const INVENTORY_DIRECT_MANAGE_ROLES = Object.freeze([
-  ...PLATFORM_ADMIN_ROLES,
+  USER_ROLES.ADMIN,
   USER_ROLES.MANAGER,
 ]);
 const INVENTORY_DIRECT_CREATE_ROLES = INVENTORY_CREATE_REQUEST_ROLES;
 const INVENTORY_DELETE_REQUEST_ROLES = Object.freeze([
   USER_ROLES.MANAGER,
-  USER_ROLES.INSIDE_EXECUTIVE,
   USER_ROLES.EXECUTIVE,
   USER_ROLES.FIELD_EXECUTIVE,
   USER_ROLES.CHANNEL_PARTNER,
 ]);
 const INVENTORY_REVIEW_ROLES = Object.freeze([
-  ...PLATFORM_ADMIN_ROLES,
+  USER_ROLES.ADMIN,
   ...MANAGEMENT_ROLES,
 ]);
 const INVENTORY_TYPE_OPTIONS = Object.freeze(["COMMERCIAL", "RESIDENTIAL"]);
+const ROLE_TYPE_OPTIONS = [...INVENTORY_TYPE_OPTIONS, "BOTH"];
 const FURNISHING_STATUS_OPTIONS = Object.freeze([
   "",
   "UNFURNISHED",
@@ -127,6 +127,13 @@ const RESIDENTIAL_WATER_SUPPLY_TYPES = Object.freeze([
   "BOTH",
   "OTHER",
 ]);
+const DEAL_TYPE_OPTIONS = Object.freeze(["", ...INVENTORY_DEAL_TYPES]);
+const OWNER_TYPE_OPTIONS = Object.freeze(["", ...INVENTORY_OWNER_TYPES]);
+const PROPERTY_ID_PREFIX = Object.freeze({
+  COMMERCIAL: "COM",
+  RESIDENTIAL: "RES",
+});
+const PHONE_NUMBER_PATTERN = /^[0-9+\-\s()]{7,20}$/;
 
 const normalizeResidentialPropertyType = (value) => {
   const normalized = toUpperSnake(value);
@@ -157,6 +164,33 @@ const sanitizeString = (value) => {
 
 const sanitizeCappedString = (value, maxLength = 200) =>
   sanitizeString(value).slice(0, Math.max(1, maxLength));
+
+// All free-text inventory fields are stored uppercase so data stays consistent
+// regardless of what casing the client (web/mobile) submits.
+const sanitizeUppercaseString = (value) => sanitizeString(value).toUpperCase();
+
+const sanitizeUppercaseCappedString = (value, maxLength = 200) =>
+  sanitizeCappedString(value, maxLength).toUpperCase();
+
+const sanitizePhoneNumber = (value, label) => {
+  const cleanValue = sanitizeCappedString(value, 20);
+  if (!cleanValue) return "";
+  if (!PHONE_NUMBER_PATTERN.test(cleanValue)) {
+    throw createHttpError(400, `${label} must be a valid phone number`);
+  }
+  return cleanValue;
+};
+
+const generatePropertyId = async ({ companyId, inventoryType }) => {
+  const category = PROPERTY_ID_PREFIX[inventoryType] ? inventoryType : "COMMERCIAL";
+  const counter = await InventoryIdCounter.findOneAndUpdate(
+    { companyId, category },
+    { $inc: { seq: 1 } },
+    { new: true, upsert: true },
+  );
+  const prefix = PROPERTY_ID_PREFIX[category];
+  return `${prefix}-${String(counter.seq).padStart(4, "0")}`;
+};
 
 const sanitizeSubtypeData = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -296,7 +330,7 @@ const sanitizeFileList = (value) => {
 
 const sanitizePrice = (value) => {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return null;
   }
   return parsed;
@@ -584,6 +618,18 @@ const sanitizeCommercialDetailsPayload = (value) => {
   };
 };
 
+const sanitizeDocumentsAvailablePayload = (value) => {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    registry: toBoolean(source.registry, false),
+    searchReport: toBoolean(source.searchReport, false),
+    electricityNoc: toBoolean(source.electricityNoc, false),
+    maintenanceNoc: toBoolean(source.maintenanceNoc, false),
+    taxReceipt: toBoolean(source.taxReceipt, false),
+    loanNoc: toBoolean(source.loanNoc, false),
+  };
+};
+
 const sanitizeResidentialDetailsPayload = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw createHttpError(400, "residentialDetails must be an object");
@@ -715,11 +761,6 @@ const normalizeLegacyInventoryPayload = (payload = {}) => {
     normalized.inventoryType = toUpperSnake(normalized.inventoryType);
   }
 
-  if (!Object.prototype.hasOwnProperty.call(normalized, "propertyId")) {
-    const fallbackPropertyId = normalized.unitNumber || normalized.code || normalized.id || "";
-    normalized.propertyId = sanitizeString(fallbackPropertyId);
-  }
-
   if (Object.prototype.hasOwnProperty.call(normalized, "furnishingStatus")) {
     normalized.furnishingStatus = toUpperSnake(normalized.furnishingStatus);
   }
@@ -756,13 +797,28 @@ const getCompanyIdForUser = (user) => {
   return companyId;
 };
 
-const ensureChannelPartnerInventoryAccess = (user) => {
-  if (user?.role === USER_ROLES.CHANNEL_PARTNER && !user?.canViewInventory) {
-    throw createHttpError(403, "Inventory access is not enabled for this channel partner");
+const normalizeUserRoleType = (user) => {
+  const normalized = toUpperSnake(user?.roleType);
+  return ROLE_TYPE_OPTIONS.includes(normalized) ? normalized : "COMMERCIAL";
+};
+
+const ensureInventoryTypeAllowedForUser = ({ user, inventoryType }) => {
+  if (user?.role === USER_ROLES.ADMIN) return;
+  const userRoleType = normalizeUserRoleType(user);
+  const normalizedInventoryType = sanitizeEnum(
+    inventoryType,
+    INVENTORY_TYPE_OPTIONS,
+    "inventoryType",
+  );
+  if (userRoleType !== "BOTH" && normalizedInventoryType !== userRoleType) {
+    throw createHttpError(
+      403,
+      `This account can manage only ${userRoleType.toLowerCase()} inventory`,
+    );
   }
 };
 
-const ensureManagerExistsInCompany = async ({ managerId, companyId }) => {
+const ensureManagerExistsInCompany = async ({ managerId, companyId, roleType = "" }) => {
   if (!managerId) return null;
   if (!isValidObjectId(managerId)) {
     throw createHttpError(400, "Invalid team id");
@@ -770,15 +826,22 @@ const ensureManagerExistsInCompany = async ({ managerId, companyId }) => {
 
   const manager = await User.findOne({
     _id: managerId,
-    role: { $in: MANAGEMENT_ROLES },
-    isActive: true,
     companyId,
   })
-    .select("_id name role companyId")
+    .select("_id name role roleType isActive companyId")
     .lean();
 
   if (!manager) {
-    throw createHttpError(403, "Team owner is inactive or does not belong to your company");
+    throw createHttpError(403, "Team owner was not found in your company. Ask an admin to assign an active manager to your account.");
+  }
+  if (!manager.isActive) {
+    throw createHttpError(403, `Team owner ${manager.name} is inactive. Ask an admin to reactivate the manager or assign you to an active manager.`);
+  }
+  if (!MANAGEMENT_ROLES.includes(manager.role)) {
+    throw createHttpError(403, "Your team owner is not a manager. Ask an admin to correct your reporting manager.");
+  }
+  if (ROLE_TYPE_OPTIONS.includes(toUpperSnake(roleType)) && normalizeUserRoleType(manager) !== "BOTH" && normalizeUserRoleType(manager) !== toUpperSnake(roleType)) {
+    throw createHttpError(403, `Team owner ${manager.name} manages ${normalizeUserRoleType(manager).toLowerCase()} properties. Ask an admin to assign a ${toUpperSnake(roleType).toLowerCase()} manager or correct the account property type.`);
   }
 
   return manager;
@@ -793,10 +856,17 @@ const getTeamIdForUser = (user) => {
   return null;
 };
 
-const ensureCanReviewInventoryRequests = (user) => {
+const hasExplicitInventoryAction = async (user, action) => {
+  const access = await resolveAccessProfile(user);
+  return access.enforcePageAccess
+    && access.permissions.includes(`page.inventory.${action}`);
+};
+
+const ensureCanReviewInventoryRequests = async (user) => {
   const userRole = String(user?.role || "").trim().toUpperCase();
 
-  if (!INVENTORY_REVIEW_ROLES.includes(userRole)) {
+  if (!INVENTORY_REVIEW_ROLES.includes(userRole)
+    && !(await hasExplicitInventoryAction(user, "approve"))) {
     throw createHttpError(403, "Only ADMIN or MANAGER can review requests");
   }
 };
@@ -811,41 +881,39 @@ const buildPendingRequestReviewQuery = ({ user, requestId }) => {
     query._id = requestId;
   }
 
+  if (isManagementRole(user?.role)) {
+    query.teamId = user._id;
+  }
+
   return query;
 };
 
-const ensureSaleDetailsLeadExists = async (saleDetails, companyId = null) => {
+const ensureSaleDetailsLeadExists = async (saleDetails) => {
   if (!saleDetails?.leadId) return null;
 
-  const query = { _id: saleDetails.leadId };
-  if (companyId) query.companyId = companyId;
-
-  const lead = await Lead.findOne(query)
+  const lead = await Lead.findById(saleDetails.leadId)
     .select("_id name phone status")
     .lean();
 
   if (!lead) {
-    throw createHttpError(404, "Selected lead not found for sold property details");
+    throw createHttpError(400, "Selected lead not found for sold property details");
   }
 
   return lead;
 };
 
-const ensureReservationLeadExists = async (leadId, companyId = null) => {
+const ensureReservationLeadExists = async (leadId) => {
   const normalizedLeadId = toObjectIdString(leadId);
   if (!normalizedLeadId) return null;
   if (!isValidObjectId(normalizedLeadId)) {
     throw createHttpError(400, "Invalid lead id");
   }
 
-  const query = { _id: normalizedLeadId };
-  if (companyId) query.companyId = companyId;
-
-  const lead = await Lead.findOne(query)
+  const lead = await Lead.findById(normalizedLeadId)
     .select("_id name phone status")
     .lean();
   if (!lead) {
-    throw createHttpError(404, "Selected lead not found");
+    throw createHttpError(400, "Selected lead not found");
   }
 
   return lead;
@@ -919,6 +987,7 @@ const resolveDirectCreateTeamId = async ({ user, payload, companyId }) => {
     await ensureManagerExistsInCompany({
       managerId: requestedTeamId,
       companyId,
+      roleType: payload?.inventoryType,
     });
     return requestedTeamId;
   }
@@ -928,12 +997,14 @@ const resolveDirectCreateTeamId = async ({ user, payload, companyId }) => {
     await ensureManagerExistsInCompany({
       managerId: userTeamId,
       companyId,
+      roleType: payload?.inventoryType,
     });
     return userTeamId;
   }
 
   const manager = await User.findOne({
     role: USER_ROLES.MANAGER,
+    roleType: { $in: [payload?.inventoryType, "BOTH"] },
     isActive: true,
     companyId,
   })
@@ -1005,17 +1076,12 @@ const sanitizeInventoryPayload = ({
 
     if (value === undefined || value === null) return;
 
-    if (field === "projectName" || field === "towerName" || field === "unitNumber" || field === "location") {
-      const cleanValue = sanitizeString(value);
+    if (field === "projectName" || field === "towerName" || field === "location") {
+      const cleanValue = sanitizeUppercaseString(value);
       if (!cleanValue) {
         throw createHttpError(400, `${field} must be a non-empty string`);
       }
       safePayload[field] = cleanValue;
-      return;
-    }
-
-    if (field === "propertyId") {
-      safePayload[field] = sanitizeCappedString(value, 80);
       return;
     }
 
@@ -1102,12 +1168,73 @@ const sanitizeInventoryPayload = ({
     }
 
     if (field === "city" || field === "area" || field === "buildingName") {
-      safePayload[field] = sanitizeCappedString(value, 120);
+      safePayload[field] = sanitizeUppercaseCappedString(value, 120);
       return;
     }
 
     if (field === "pincode") {
       safePayload[field] = sanitizeCappedString(value, 20);
+      return;
+    }
+
+    if (field === "officeNumber") {
+      safePayload[field] = sanitizeUppercaseCappedString(value, 40);
+      return;
+    }
+
+    if (field === "ownerName" || field === "keyManagerName") {
+      safePayload[field] = sanitizeUppercaseCappedString(value, 120);
+      return;
+    }
+
+    if (field === "ownerNumber") {
+      safePayload[field] = sanitizePhoneNumber(value, "ownerNumber");
+      return;
+    }
+
+    if (field === "ownerWhatsappNumber") {
+      safePayload[field] = sanitizePhoneNumber(value, "ownerWhatsappNumber");
+      return;
+    }
+
+    if (field === "keyManagerNumber") {
+      safePayload[field] = sanitizePhoneNumber(value, "keyManagerNumber");
+      return;
+    }
+
+    if (field === "dealType") {
+      const cleanDealType = toUpperSnake(value);
+      if (!DEAL_TYPE_OPTIONS.includes(cleanDealType)) {
+        throw createHttpError(400, "dealType is invalid");
+      }
+      safePayload[field] = cleanDealType;
+      return;
+    }
+
+    if (field === "ownerType") {
+      const cleanOwnerType = toUpperSnake(value);
+      if (!OWNER_TYPE_OPTIONS.includes(cleanOwnerType)) {
+        throw createHttpError(400, "ownerType is invalid");
+      }
+      safePayload[field] = cleanOwnerType;
+      return;
+    }
+
+    if (field === "propertyDate") {
+      if (value === "" || value === null) {
+        safePayload[field] = null;
+        return;
+      }
+      const parsedDate = new Date(value);
+      if (Number.isNaN(parsedDate.getTime())) {
+        throw createHttpError(400, "propertyDate must be a valid date");
+      }
+      safePayload[field] = parsedDate;
+      return;
+    }
+
+    if (field === "gstApplicable") {
+      safePayload[field] = toBoolean(value, false);
       return;
     }
 
@@ -1121,8 +1248,15 @@ const sanitizeInventoryPayload = ({
       || field === "totalArea"
       || field === "carpetArea"
       || field === "builtUpArea"
+      || field === "superBuiltUpArea"
+      || field === "length"
+      || field === "width"
+      || field === "height"
       || field === "maintenanceCharges"
       || field === "deposit"
+      || field === "depositMonths"
+      || field === "agreementYears"
+      || field === "lockInYears"
     ) {
       safePayload[field] = sanitizeNonNegativeNumber(value, field);
       return;
@@ -1140,6 +1274,11 @@ const sanitizeInventoryPayload = ({
 
     if (field === "residentialDetails") {
       safePayload[field] = sanitizeResidentialDetailsPayload(value);
+      return;
+    }
+
+    if (field === "documentsAvailable") {
+      safePayload[field] = sanitizeDocumentsAvailablePayload(value);
       return;
     }
 
@@ -1168,9 +1307,9 @@ const sanitizeInventoryPayload = ({
       ? (hasTypePatch ? safePayload.type : normalizeLegacyType(payload.type))
       : (hasTypePatch ? safePayload.type : normalizeLegacyType(currentType));
 
-  if (hasDepositPatch && effectiveTransactionType !== "Rent") {
+  if (hasDepositPatch && !["Rent", "Both"].includes(effectiveTransactionType)) {
     safePayload.deposit = null;
-  } else if (!hasDepositPatch && hasTypePatch && safePayload.type !== "Rent") {
+  } else if (!hasDepositPatch && hasTypePatch && !["Rent", "Both"].includes(safePayload.type)) {
     safePayload.deposit = null;
   }
 
@@ -1180,6 +1319,13 @@ const sanitizeInventoryPayload = ({
         throw createHttpError(400, `${field} is required`);
       }
     });
+
+    if (effectiveTransactionType !== "Rent" && safePayload.price == null) {
+      throw createHttpError(400, "price is required");
+    }
+    if (["Rent", "Both"].includes(effectiveTransactionType) && safePayload.rent == null) {
+      throw createHttpError(400, "rent is required");
+    }
 
     if (!safePayload.status) {
       safePayload.status = "Available";
@@ -1274,26 +1420,34 @@ const sanitizeInventoryPayload = ({
   return safePayload;
 };
 
-const getInventoryScopeQueryForUser = (user) => {
-  if (user?.role === USER_ROLES.SUPER_ADMIN) {
-    return {};
+const getInventoryScopeQueryForUser = async (user) => {
+  if (user.role === USER_ROLES.ADMIN) {
+    return { companyId: getCompanyIdForUser(user) };
   }
 
   if (
     [
-      ...PLATFORM_ADMIN_ROLES,
       ...MANAGEMENT_ROLES,
-      USER_ROLES.INSIDE_EXECUTIVE,
       USER_ROLES.EXECUTIVE,
       USER_ROLES.FIELD_EXECUTIVE,
+      USER_ROLES.CHANNEL_PARTNER,
     ].includes(user.role)
   ) {
-    return { companyId: getCompanyIdForUser(user) };
+    return {
+      companyId: getCompanyIdForUser(user),
+      ...(normalizeUserRoleType(user) === "BOTH" ? {} : { inventoryType: normalizeUserRoleType(user) }),
+    };
   }
 
-  if (user.role === USER_ROLES.CHANNEL_PARTNER) {
-    ensureChannelPartnerInventoryAccess(user);
-    return { companyId: getCompanyIdForUser(user) };
+  // A role outside the built-in inventory list reaches inventory only when an
+  // Admin has explicitly granted its role the Inventory page. Without that
+  // grant this still throws, so nothing changes for accounts never given it.
+  const access = await resolveAccessProfile(user);
+  if (access.enforcePageAccess && access.permissions.includes("page.inventory.view")) {
+    return {
+      companyId: getCompanyIdForUser(user),
+      ...(normalizeUserRoleType(user) === "BOTH" ? {} : { inventoryType: normalizeUserRoleType(user) }),
+    };
   }
 
   throw createHttpError(403, "Access denied");
@@ -1346,7 +1500,7 @@ const getInventoryList = async ({
   pagination = null,
   selectFields = "",
 }) => {
-  const scope = getInventoryScopeQueryForUser(user);
+  const scope = await getInventoryScopeQueryForUser(user);
   const query = { ...scope };
 
   if (filters.status && INVENTORY_STATUSES.includes(filters.status)) {
@@ -1581,7 +1735,7 @@ const getInventoryById = async ({ user, inventoryId }) => {
     throw createHttpError(400, "Invalid inventory id");
   }
 
-  const scope = getInventoryScopeQueryForUser(user);
+  const scope = await getInventoryScopeQueryForUser(user);
   const row = await applyInventoryPopulates(
     Inventory.findOne({
       _id: inventoryId,
@@ -1597,10 +1751,10 @@ const getInventoryById = async ({ user, inventoryId }) => {
 };
 
 const createInventoryDirect = async ({ user, payload }) => {
-  if (!INVENTORY_DIRECT_CREATE_ROLES.includes(user.role)) {
+  if (!INVENTORY_DIRECT_CREATE_ROLES.includes(user.role)
+    && !(await hasExplicitInventoryAction(user, "create"))) {
     throw createHttpError(403, "This role cannot create inventory");
   }
-  ensureChannelPartnerInventoryAccess(user);
 
   const companyId = getCompanyIdForUser(user);
   const normalizedPayload = normalizeLegacyInventoryPayload(payload);
@@ -1608,14 +1762,24 @@ const createInventoryDirect = async ({ user, payload }) => {
     payload: normalizedPayload,
     mode: "create",
   });
-  await ensureSaleDetailsLeadExists(proposed.saleDetails, companyId);
-  await ensureReservationLeadExists(proposed.reservationLeadId, companyId);
+  ensureInventoryTypeAllowedForUser({ user, inventoryType: proposed.inventoryType });
+  await ensureSaleDetailsLeadExists(proposed.saleDetails);
+  await ensureReservationLeadExists(proposed.reservationLeadId);
 
   const teamId = await resolveDirectCreateTeamId({
     user,
     payload: normalizedPayload,
     companyId,
   });
+
+  // propertyId is always server-generated and doubles as the unitNumber; the
+  // client cannot set or edit either (see INVENTORY_ALLOWED_FIELDS).
+  const propertyId = await generatePropertyId({
+    companyId,
+    inventoryType: proposed.inventoryType,
+  });
+  proposed.propertyId = propertyId;
+  proposed.unitNumber = propertyId;
 
   const created = await Inventory.create({
     ...proposed,
@@ -1640,7 +1804,8 @@ const createInventoryDirect = async ({ user, payload }) => {
 };
 
 const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
-  if (!INVENTORY_DIRECT_MANAGE_ROLES.includes(user.role)) {
+  if (!INVENTORY_DIRECT_MANAGE_ROLES.includes(user.role)
+    && !(await hasExplicitInventoryAction(user, "edit"))) {
     throw createHttpError(403, "Only ADMIN or MANAGER can update inventory directly");
   }
 
@@ -1649,9 +1814,10 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
   }
 
   const companyId = getCompanyIdForUser(user);
+  const scope = await getInventoryScopeQueryForUser(user);
   const inventory = await Inventory.findOne({
     _id: inventoryId,
-    companyId,
+    ...scope,
   });
 
   if (!inventory) {
@@ -1668,29 +1834,12 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
     currentReservationLeadId: inventory.reservationLeadId,
     currentSaleDetails: inventory.saleDetails || null,
   });
-  await ensureSaleDetailsLeadExists(patch.saleDetails, companyId);
-  await ensureReservationLeadExists(patch.reservationLeadId, companyId);
-
-  const incomingSaleLeadId = toObjectIdString(patch.saleDetails?.leadId);
-  const currentReservedLeadId = toObjectIdString(inventory.reservationLeadId);
-  if (
-    incomingSaleLeadId
-    && inventory.status === "Blocked"
-    && currentReservedLeadId
-    && incomingSaleLeadId !== currentReservedLeadId
-  ) {
-    throw createHttpError(409, "Inventory is reserved for a different lead");
-  }
-
-  const currentSoldLeadId = toObjectIdString(inventory.saleDetails?.leadId);
-  if (
-    incomingSaleLeadId
-    && inventory.status === "Sold"
-    && currentSoldLeadId
-    && incomingSaleLeadId !== currentSoldLeadId
-  ) {
-    throw createHttpError(409, "Inventory is already sold to a different lead");
-  }
+  ensureInventoryTypeAllowedForUser({
+    user,
+    inventoryType: patch.inventoryType || inventory.inventoryType,
+  });
+  await ensureSaleDetailsLeadExists(patch.saleDetails);
+  await ensureReservationLeadExists(patch.reservationLeadId);
 
   const diff = pickInventoryDiff(inventory, patch);
 
@@ -1723,7 +1872,7 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
     if (!reservationLeadId) {
       throw createHttpError(400, "Lead selection is required when status is Blocked");
     }
-    await ensureReservationLeadExists(reservationLeadId, companyId);
+    await ensureReservationLeadExists(reservationLeadId);
     await appendLeadDiaryForInventory({
       leadId: reservationLeadId,
       note: diaryNote,
@@ -1737,7 +1886,8 @@ const updateInventoryDirect = async ({ user, inventoryId, payload }) => {
 };
 
 const deleteInventoryDirect = async ({ user, inventoryId }) => {
-  if (!isPlatformAdminRole(user.role)) {
+  if (user.role !== USER_ROLES.ADMIN
+    && !(await hasExplicitInventoryAction(user, "delete"))) {
     throw createHttpError(403, "Only ADMIN can delete inventory directly");
   }
 
@@ -1755,18 +1905,6 @@ const deleteInventoryDirect = async ({ user, inventoryId }) => {
     throw createHttpError(404, "Inventory not found");
   }
 
-  const linkedLead = await Lead.findOne({
-    companyId,
-    $or: [
-      { inventoryId: inventory._id },
-      { relatedInventoryIds: inventory._id },
-    ],
-  }).select("_id").lean();
-
-  if (linkedLead) {
-    throw createHttpError(409, "Inventory is linked to an active lead and cannot be deleted");
-  }
-
   const snapshot = inventory.toObject();
   await Inventory.deleteOne({ _id: inventory._id, companyId });
 
@@ -1782,7 +1920,8 @@ const deleteInventoryDirect = async ({ user, inventoryId }) => {
 };
 
 const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
-  if (!INVENTORY_DIRECT_MANAGE_ROLES.includes(user.role)) {
+  if (!INVENTORY_DIRECT_MANAGE_ROLES.includes(user.role)
+    && !(await hasExplicitInventoryAction(user, "create"))) {
     throw createHttpError(403, "Only ADMIN or MANAGER can bulk upload inventory");
   }
 
@@ -1807,18 +1946,27 @@ const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
         payload: normalizedRow,
         mode: "create",
       });
-      await ensureSaleDetailsLeadExists(proposed.saleDetails, companyId);
-      await ensureReservationLeadExists(proposed.reservationLeadId, companyId);
+      ensureInventoryTypeAllowedForUser({ user, inventoryType: proposed.inventoryType });
+      await ensureSaleDetailsLeadExists(proposed.saleDetails);
+      await ensureReservationLeadExists(proposed.reservationLeadId);
 
       const teamId = row?.teamId || null;
-      const teamIdKey = teamId ? String(teamId) : "";
+      const teamIdKey = teamId ? `${teamId}:${proposed.inventoryType}` : "";
       if (teamId && !validatedTeamIds.has(teamIdKey)) {
         await ensureManagerExistsInCompany({
           managerId: teamId,
           companyId,
+          roleType: proposed.inventoryType,
         });
         validatedTeamIds.add(teamIdKey);
       }
+
+      const propertyId = await generatePropertyId({
+        companyId,
+        inventoryType: proposed.inventoryType,
+      });
+      proposed.propertyId = propertyId;
+      proposed.unitNumber = propertyId;
 
       const created = await Inventory.create({
         ...proposed,
@@ -1857,10 +2005,10 @@ const bulkCreateInventoryDirect = async ({ user, payload = [] }) => {
 };
 
 const createInventoryCreateRequest = async ({ user, payload, io }) => {
-  if (!INVENTORY_CREATE_REQUEST_ROLES.includes(user.role)) {
+  if (!INVENTORY_CREATE_REQUEST_ROLES.includes(user.role)
+    && !(await hasExplicitInventoryAction(user, "create"))) {
     throw createHttpError(403, "This role cannot submit create requests");
   }
-  ensureChannelPartnerInventoryAccess(user);
 
   const companyId = getCompanyIdForUser(user);
   const normalizedPayload = normalizeLegacyInventoryPayload(payload);
@@ -1868,14 +2016,16 @@ const createInventoryCreateRequest = async ({ user, payload, io }) => {
     payload: normalizedPayload,
     mode: "create",
   });
-  await ensureSaleDetailsLeadExists(proposed.saleDetails, companyId);
-  await ensureReservationLeadExists(proposed.reservationLeadId, companyId);
+  ensureInventoryTypeAllowedForUser({ user, inventoryType: proposed.inventoryType });
+  await ensureSaleDetailsLeadExists(proposed.saleDetails);
+  await ensureReservationLeadExists(proposed.reservationLeadId);
 
   const teamId = getTeamIdForUser(user);
   if (teamId) {
     await ensureManagerExistsInCompany({
       managerId: teamId,
       companyId,
+      roleType: proposed.inventoryType,
     });
   }
 
@@ -1901,7 +2051,8 @@ const createInventoryCreateRequest = async ({ user, payload, io }) => {
 const createInventoryUpdateRequest = async ({
   user, inventoryId, payload, requestNote, relatedLeadId, io,
 }) => {
-  if (!INVENTORY_UPDATE_REQUEST_ROLES.includes(user.role)) {
+  if (!INVENTORY_UPDATE_REQUEST_ROLES.includes(user.role)
+    && !(await hasExplicitInventoryAction(user, "edit"))) {
     throw createHttpError(
       403,
       "Channel partner cannot submit update/status-change requests",
@@ -1913,12 +2064,13 @@ const createInventoryUpdateRequest = async ({
   }
 
   const companyId = getCompanyIdForUser(user);
+  const scope = await getInventoryScopeQueryForUser(user);
   const inventory = await Inventory.findOne({
     _id: inventoryId,
-    companyId,
+    ...scope,
   })
     .select(
-      "_id projectName towerName unitNumber propertyId inventoryType price rent deposit type category furnishingStatus status reservationReason reservationLeadId saleDetails location city area pincode buildingName floorNumber totalFloors totalArea carpetArea builtUpArea areaUnit maintenanceCharges commercialDetails residentialDetails siteLocation images documents floorPlans videoTours",
+      "_id projectName towerName unitNumber propertyId inventoryType price rent deposit depositMonths agreementYears lockInYears type category furnishingStatus status reservationReason reservationLeadId saleDetails location city area pincode buildingName floorNumber totalFloors totalArea carpetArea builtUpArea superBuiltUpArea length width height areaUnit maintenanceCharges commercialDetails residentialDetails documentsAvailable siteLocation images documents floorPlans videoTours officeNumber ownerName ownerNumber ownerWhatsappNumber ownerType keyManagerName keyManagerNumber dealType propertyDate gstApplicable",
     )
     .lean();
 
@@ -1936,7 +2088,11 @@ const createInventoryUpdateRequest = async ({
     currentReservationLeadId: inventory.reservationLeadId,
     currentSaleDetails: inventory.saleDetails || null,
   });
-  await ensureSaleDetailsLeadExists(proposed.saleDetails, companyId);
+  ensureInventoryTypeAllowedForUser({
+    user,
+    inventoryType: proposed.inventoryType || inventory.inventoryType,
+  });
+  await ensureSaleDetailsLeadExists(proposed.saleDetails);
 
   const nextStatus = Object.prototype.hasOwnProperty.call(proposed, "status")
     ? String(proposed.status || "").trim()
@@ -1960,7 +2116,7 @@ const createInventoryUpdateRequest = async ({
   }
 
   const selectedLead = selectedLeadId
-    ? await ensureReservationLeadExists(selectedLeadId, companyId)
+    ? await ensureReservationLeadExists(selectedLeadId)
     : null;
 
   if (isBlockedRequest) {
@@ -1987,6 +2143,7 @@ const createInventoryUpdateRequest = async ({
     await ensureManagerExistsInCompany({
       managerId: teamId,
       companyId,
+      roleType: proposed.inventoryType || inventory.inventoryType,
     });
   }
 
@@ -2036,7 +2193,8 @@ const createInventoryUpdateRequest = async ({
 const createInventoryDeleteRequest = async ({
   user, inventoryId, requestNote, io,
 }) => {
-  if (!INVENTORY_DELETE_REQUEST_ROLES.includes(user.role)) {
+  if (!INVENTORY_DELETE_REQUEST_ROLES.includes(user.role)
+    && !(await hasExplicitInventoryAction(user, "delete"))) {
     throw createHttpError(403, "Admins can delete directly; other roles must submit a delete request");
   }
 
@@ -2045,9 +2203,10 @@ const createInventoryDeleteRequest = async ({
   }
 
   const companyId = getCompanyIdForUser(user);
+  const scope = await getInventoryScopeQueryForUser(user);
   const inventory = await Inventory.findOne({
     _id: inventoryId,
-    companyId,
+    ...scope,
   }).lean();
 
   if (!inventory) {
@@ -2112,7 +2271,7 @@ const createInventoryDeleteRequest = async ({
 };
 
 const getPendingRequests = async ({ user }) => {
-  ensureCanReviewInventoryRequests(user);
+  await ensureCanReviewInventoryRequests(user);
   const query = buildPendingRequestReviewQuery({ user });
 
   return applyRequestPopulates(
@@ -2123,7 +2282,8 @@ const getPendingRequests = async ({ user }) => {
 };
 
 const preApproveRequestByManager = async ({ user, requestId }) => {
-  if (!isManagementRole(user.role)) {
+  if (!isManagementRole(user.role)
+    && !(await hasExplicitInventoryAction(user, "approve"))) {
     throw createHttpError(403, "Only leadership roles can pre-approve requests");
   }
 
@@ -2151,7 +2311,7 @@ const preApproveRequestByManager = async ({ user, requestId }) => {
 };
 
 const approveRequest = async ({ user, requestId, io }) => {
-  ensureCanReviewInventoryRequests(user);
+  await ensureCanReviewInventoryRequests(user);
 
   if (!isValidObjectId(requestId)) {
     throw createHttpError(400, "Invalid request id");
@@ -2176,8 +2336,16 @@ const approveRequest = async ({ user, requestId, io }) => {
       payload: request.proposedData || request.proposedChanges || {},
       mode: "create",
     });
-    await ensureSaleDetailsLeadExists(proposed.saleDetails, companyId);
-    await ensureReservationLeadExists(proposed.reservationLeadId, companyId);
+    ensureInventoryTypeAllowedForUser({ user, inventoryType: proposed.inventoryType });
+    await ensureSaleDetailsLeadExists(proposed.saleDetails);
+    await ensureReservationLeadExists(proposed.reservationLeadId);
+
+    const propertyId = await generatePropertyId({
+      companyId,
+      inventoryType: proposed.inventoryType,
+    });
+    proposed.propertyId = propertyId;
+    proposed.unitNumber = propertyId;
 
     inventory = await Inventory.create({
       ...proposed,
@@ -2207,7 +2375,7 @@ const approveRequest = async ({ user, requestId, io }) => {
 
     inventory = await Inventory.findOne({
       _id: request.inventoryId,
-      companyId,
+      ...(await getInventoryScopeQueryForUser(user)),
     });
 
     if (!inventory) {
@@ -2223,7 +2391,11 @@ const approveRequest = async ({ user, requestId, io }) => {
       currentReservationLeadId: inventory.reservationLeadId,
       currentSaleDetails: inventory.saleDetails || null,
     });
-    await ensureSaleDetailsLeadExists(proposed.saleDetails, companyId);
+    ensureInventoryTypeAllowedForUser({
+      user,
+      inventoryType: proposed.inventoryType || inventory.inventoryType,
+    });
+    await ensureSaleDetailsLeadExists(proposed.saleDetails);
     const nextStatus = Object.prototype.hasOwnProperty.call(proposed, "status")
       ? String(proposed.status || "").trim()
       : String(inventory.status || "").trim();
@@ -2242,7 +2414,7 @@ const approveRequest = async ({ user, requestId, io }) => {
       if (!approvedLeadId) {
         throw createHttpError(400, "Lead selection is required when approving blocked status");
       }
-      await ensureReservationLeadExists(approvedLeadId, companyId);
+      await ensureReservationLeadExists(approvedLeadId);
       proposed.reservationLeadId = approvedLeadId;
       if (approvedLeadNote) {
         proposed.reservationReason = approvedLeadNote;
@@ -2251,29 +2423,8 @@ const approveRequest = async ({ user, requestId, io }) => {
       approvedLeadId = toObjectIdString(request.relatedLead);
       approvedLeadNote = sanitizeString(request.requestNote || "");
       if (approvedLeadId) {
-        await ensureReservationLeadExists(approvedLeadId, companyId);
+        await ensureReservationLeadExists(approvedLeadId);
       }
-    }
-
-    const saleLeadId = toObjectIdString(proposed.saleDetails?.leadId);
-    const reservedLeadId = toObjectIdString(inventory.reservationLeadId);
-    if (
-      saleLeadId
-      && inventory.status === "Blocked"
-      && reservedLeadId
-      && saleLeadId !== reservedLeadId
-    ) {
-      throw createHttpError(409, "Inventory is reserved for a different lead");
-    }
-
-    const soldLeadId = toObjectIdString(inventory.saleDetails?.leadId);
-    if (
-      saleLeadId
-      && inventory.status === "Sold"
-      && soldLeadId
-      && saleLeadId !== soldLeadId
-    ) {
-      throw createHttpError(409, "Inventory is already sold to a different lead");
     }
 
     const diff = pickInventoryDiff(inventory, proposed);
@@ -2300,23 +2451,11 @@ const approveRequest = async ({ user, requestId, io }) => {
 
     inventory = await Inventory.findOne({
       _id: request.inventoryId,
-      companyId,
+      ...(await getInventoryScopeQueryForUser(user)),
     });
 
     if (!inventory) {
       throw createHttpError(404, "Inventory not found for delete request");
-    }
-
-    const linkedLead = await Lead.findOne({
-      companyId,
-      $or: [
-        { inventoryId: inventory._id },
-        { relatedInventoryIds: inventory._id },
-      ],
-    }).select("_id").lean();
-
-    if (linkedLead) {
-      throw createHttpError(409, "Inventory is linked to an active lead and cannot be deleted");
     }
 
     const snapshot = inventory.toObject();
@@ -2367,7 +2506,7 @@ const approveRequest = async ({ user, requestId, io }) => {
 };
 
 const rejectRequest = async ({ user, requestId, rejectionReason, io }) => {
-  ensureCanReviewInventoryRequests(user);
+  await ensureCanReviewInventoryRequests(user);
 
   if (!isValidObjectId(requestId)) {
     throw createHttpError(400, "Invalid request id");
@@ -2424,7 +2563,8 @@ const getMyRequests = async ({ user }) => {
 };
 
 const getInventoryActivities = async ({ user, inventoryId, limit = 100 }) => {
-  if (![...PLATFORM_ADMIN_ROLES, ...MANAGEMENT_ROLES].includes(user.role)) {
+  if (![USER_ROLES.ADMIN, ...MANAGEMENT_ROLES].includes(user.role)
+    && !(await hasExplicitInventoryAction(user, "view"))) {
     throw createHttpError(403, "Only admin/leadership roles can view activity logs");
   }
 

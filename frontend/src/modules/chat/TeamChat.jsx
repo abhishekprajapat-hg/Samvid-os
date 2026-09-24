@@ -37,12 +37,13 @@ import {
   markMessageDelivered,
   markMessageSeen,
   sendDirectMessage,
-  uploadChatFile,
 } from "../../services/chatService";
 import ToastNotice from "../../components/ui/ToastNotice";
+import { uploadFile } from "../../services/uploadService";
 import { acquireChatSocket, releaseChatSocket } from "../../services/chatSocket";
 import { useChatNotifications } from "../../context/useChatNotifications";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { useIsMobileViewport } from "../../hooks/useIsMobileViewport";
 import {
   TeamChatSidebar,
 } from "./components/TeamChatPanels";
@@ -248,14 +249,14 @@ const getCurrentUser = () => {
 };
 
 const uploadMediaFile = async (file) => {
-  const payload = await uploadChatFile(file);
+  const payload = await uploadFile(file, "chat");
 
   const uploaded = sanitizeMediaAttachment({
-    url: payload?.fileUrl,
+    url: payload.url,
     kind: detectMediaKind({ mimeType: file.type }),
-    mimeType: payload?.mimeType || file.type,
-    name: payload?.fileName || file.name,
-    size: payload?.size || file.size,
+    mimeType: file.type,
+    name: file.name,
+    size: file.size,
   });
 
   if (!uploaded) {
@@ -503,7 +504,7 @@ const updateTypingUsers = (prev, { roomId, userId, isTyping }) => {
   return next;
 };
 
-const TeamChat = ({ theme = "light" }) => {
+const TeamChat = ({ theme = "light", embedded = false, visible = true }) => {
   const isDark = theme === "dark";
   const location = useLocation();
   const navigate = useNavigate();
@@ -518,6 +519,8 @@ const TeamChat = ({ theme = "light" }) => {
   const socketRef = useRef(null);
   const selectedConversationRef = useRef("");
   const chatOpenReadSyncRef = useRef(false);
+  const panelVisibleRef = useRef(visible);
+  useEffect(() => { panelVisibleRef.current = visible; }, [visible]);
   const typingStateRef = useRef({ roomId: "", isTyping: false });
   const bottomRef = useRef(null);
   const mediaInputRef = useRef(null);
@@ -577,38 +580,13 @@ const TeamChat = ({ theme = "light" }) => {
   const [activeMessageActionId, setActiveMessageActionId] = useState("");
   const [messageActionLoadingId, setMessageActionLoadingId] = useState("");
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
-  const [isMobileViewport, setIsMobileViewport] = useState(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return false;
-    }
-    return window.matchMedia("(max-width: 767px)").matches;
-  });
+  const isMobileViewport = useIsMobileViewport();
 
   useEffect(() => {
     const host = document.querySelector("main.app-page-bg");
     if (host) {
       host.scrollTop = 0;
     }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return undefined;
-    }
-
-    const mediaQuery = window.matchMedia("(max-width: 767px)");
-    const handleViewportChange = (event) => {
-      setIsMobileViewport(event.matches);
-    };
-
-    setIsMobileViewport(mediaQuery.matches);
-    if (typeof mediaQuery.addEventListener === "function") {
-      mediaQuery.addEventListener("change", handleViewportChange);
-      return () => mediaQuery.removeEventListener("change", handleViewportChange);
-    }
-
-    mediaQuery.addListener(handleViewportChange);
-    return () => mediaQuery.removeListener(handleViewportChange);
   }, []);
 
   useEffect(() => {
@@ -681,6 +659,7 @@ const TeamChat = ({ theme = "light" }) => {
 
   const emitConversationRead = useCallback(
     async (conversationId, options = {}) => {
+      if (!panelVisibleRef.current) return;
       const id = toId(conversationId);
       if (!id) return;
 
@@ -1161,7 +1140,7 @@ const TeamChat = ({ theme = "light" }) => {
   }, [clearActiveCallLocally, emitCallAck]);
 
   useEffect(() => {
-    setActiveConversationId(selectedConversationId || "");
+    setActiveConversationId(visible ? selectedConversationId || "" : "");
 
     if (selectedConversationId) {
       emitConversationRead(selectedConversationId).catch(() => null);
@@ -1170,7 +1149,7 @@ const TeamChat = ({ theme = "light" }) => {
     return () => {
       setActiveConversationId("");
     };
-  }, [emitConversationRead, selectedConversationId, setActiveConversationId]);
+  }, [emitConversationRead, selectedConversationId, setActiveConversationId, visible]);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -1188,10 +1167,10 @@ const TeamChat = ({ theme = "light" }) => {
   }, [emitConversationRead]);
 
   useEffect(() => {
-    if (chatOpenReadSyncRef.current) return;
+    if (embedded || chatOpenReadSyncRef.current) return;
     chatOpenReadSyncRef.current = true;
     markAllRead().catch(() => null);
-  }, [markAllRead]);
+  }, [markAllRead, embedded]);
 
   const activeConversation = useMemo(
     () => conversations.find((conversation) => String(conversation._id) === String(selectedConversationId)) || null,
@@ -2347,35 +2326,6 @@ const TeamChat = ({ theme = "light" }) => {
 
   const messageSearchQuery = messageSearch.trim().toLowerCase();
 
-  const conversationInsights = useMemo(() => {
-    const summary = {
-      totalMessages: messages.length,
-      outgoingMessages: 0,
-      mediaMessages: 0,
-      mediaAttachments: 0,
-      sharedProperties: 0,
-    };
-
-    messages.forEach((message) => {
-      const mine = String(message?.sender?._id || message?.sender || "") === currentUser.id;
-      if (mine) {
-        summary.outgoingMessages += 1;
-      }
-
-      const media = sanitizeMediaAttachments(message?.mediaAttachments);
-      if (media.length > 0) {
-        summary.mediaMessages += 1;
-        summary.mediaAttachments += media.length;
-      }
-
-      if (isPropertyMessage(message)) {
-        summary.sharedProperties += 1;
-      }
-    });
-
-    return summary;
-  }, [currentUser.id, messages]);
-
   const visibleTimeline = useMemo(() => {
     if (!messageSearchQuery) return timeline;
 
@@ -2594,6 +2544,15 @@ const TeamChat = ({ theme = "light" }) => {
   };
 
   const mobileSidebarVisible = !activeContact || mobileListMode === "calls";
+  const activeParticipants = Array.isArray(activeConversation?.participants)
+    ? activeConversation.participants
+    : activeContact
+      ? [activeContact]
+      : [];
+  const otherParticipantCount = Math.max(0, activeParticipants.length - 1);
+  const onlineLabel = socketConnected
+    ? `${Math.max(1, Math.min(activeParticipants.length || 1, 5))} online`
+    : "reconnecting";
 
   if (loading) {
     return (
@@ -2607,9 +2566,9 @@ const TeamChat = ({ theme = "light" }) => {
 
   return (
     <div
-      className="ui-page-shell chat-page h-full min-h-0 w-full overflow-hidden p-0 sm:p-3"
+      className="ui-page-shell chat-page h-full min-h-0 w-full overflow-hidden p-0"
     >
-      <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-2 sm:gap-3">
+      <div className="chat-doc-screen mx-auto flex h-full min-h-0 w-full max-w-none flex-col">
         {mobileSidebarVisible ? (
           <div className="flex items-center px-2 pt-2 sm:hidden">
             <button
@@ -2627,79 +2586,10 @@ const TeamChat = ({ theme = "light" }) => {
           </div>
         ) : null}
 
-        <section
-          className="ui-hero-card hidden px-3 py-2.5 sm:block sm:px-4"
-          style={{
-            backgroundImage: isDark
-              ? "radial-gradient(circle at 95% 0%, rgba(6,182,212,0.16), transparent 30%)"
-              : "radial-gradient(circle at 95% 0%, rgba(6,182,212,0.12), transparent 30%)",
-          }}
-        >
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <p className={`text-sm font-semibold ${isDark ? "text-slate-100" : "text-slate-900"}`}>
-                Team Chat Command Center
-              </p>
-              <p className={`text-[11px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                Active: {activeContact?.name || "No conversation selected"}
-              </p>
-            </div>
-
-            <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:justify-end">
-              <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
-              }`}>
-                Conversations: {conversations.length}
-              </span>
-              <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-100 text-emerald-700"
-              }`}>
-                Contacts: {contacts.length}
-              </span>
-              <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                unreadTotal > 0
-                  ? isDark
-                    ? "bg-rose-500/15 text-rose-200"
-                    : "bg-rose-100 text-rose-700"
-                  : isDark
-                    ? "bg-slate-800 text-slate-300"
-                    : "bg-slate-100 text-slate-600"
-              }`}>
-                Unread: {unreadTotal}
-              </span>
-              <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                socketConnected
-                  ? isDark
-                    ? "bg-cyan-500/15 text-cyan-200"
-                    : "bg-cyan-100 text-cyan-700"
-                  : isDark
-                    ? "bg-amber-500/15 text-amber-200"
-                    : "bg-amber-100 text-amber-700"
-              }`}>
-                {socketConnected ? "Realtime: Online" : "Realtime: Reconnecting"}
-              </span>
-              <button
-                type="button"
-                onClick={() => markAllRead().catch(() => null)}
-                disabled={unreadTotal === 0}
-                className={`h-7 shrink-0 whitespace-nowrap rounded-md border px-2 text-[10px] font-semibold uppercase tracking-[0.1em] transition-colors ${
-                  isDark
-                    ? "border-slate-700 text-slate-300 hover:border-cyan-400/45 hover:text-cyan-200"
-                    : "border-slate-300 text-slate-600 hover:border-cyan-400 hover:text-cyan-700"
-                } disabled:cursor-not-allowed disabled:opacity-60`}
-              >
-                Mark All Read
-              </button>
-            </div>
-          </div>
-        </section>
-
       <Motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`ui-soft-panel chat-workspace grid min-h-0 flex-1 w-full grid-cols-1 overflow-hidden rounded-none border-0 shadow-none sm:rounded-2xl sm:border sm:shadow-sm md:grid-cols-[360px_minmax(0,1fr)] ${
-          isDark ? "bg-slate-900/70" : "bg-white/95"
-        }`}
+        className="chatwrap chat-workspace grid min-h-0 flex-1 w-full grid-cols-1 overflow-hidden md:grid-cols-[330px_minmax(0,1fr)]"
       >
         <TeamChatSidebar
           mobileSidebarVisible={mobileSidebarVisible}
@@ -2730,16 +2620,12 @@ const TeamChat = ({ theme = "light" }) => {
           chatFilter={chatFilter}
           setChatFilter={setChatFilter}
         />
-        <section className={`${mobileSidebarVisible ? "hidden md:flex" : "flex"} chat-room-panel h-full min-h-0 min-w-0 w-full flex-col overflow-hidden ${isDark ? "bg-slate-900/65" : "bg-slate-50/90"}`}>
-          <div className={`chat-thread-header sticky top-0 z-20 flex items-center gap-2 border-b px-3 py-2.5 sm:px-4 ${
-            isDark ? "border-slate-700 bg-slate-900/90" : "border-emerald-700/25 bg-emerald-600 md:border-slate-200 md:bg-white"
-          }`}>
+        <section className={`${mobileSidebarVisible ? "hidden md:flex" : "flex"} chatpane chat-room-panel h-full min-h-0 min-w-0 w-full flex-col overflow-hidden`}>
+          <div className="chat-thread-header sticky top-0 z-20 flex items-center gap-2">
             <button
               type="button"
               onClick={handleMobileBack}
-              className={`inline-flex h-8 w-8 items-center justify-center rounded-lg md:hidden ${
-                isDark ? "text-slate-300 hover:bg-slate-800" : "text-white hover:bg-emerald-500"
-              }`}
+              className="iconbtn inline-flex md:hidden"
               aria-label="Back to chats"
             >
               <ArrowLeft size={16} />
@@ -2747,36 +2633,44 @@ const TeamChat = ({ theme = "light" }) => {
 
             {activeContact ? (
               <div className="flex min-w-0 flex-1 items-center gap-2">
-                <div className={`chat-avatar flex h-9 w-9 items-center justify-center rounded-full text-[10px] font-semibold ${
-                  isDark ? "bg-slate-800 text-slate-200" : "bg-emerald-500 text-white md:bg-slate-200 md:text-slate-700"
-                }`}>
+                <div className="avatar chat-avatar">
                   {getInitials(activeContact.name)}
                 </div>
                 <div className="min-w-0">
-                  <p className={`truncate text-sm font-semibold ${isDark ? "text-slate-100" : "text-white md:text-slate-900"}`}>
+                  <p className="truncate text-[13.5px] font-semibold">
                     {activeContact.name}
                   </p>
-                  <p className={`truncate text-[11px] ${
-                    isActiveContactTyping
-                      ? isDark
-                        ? "text-emerald-300"
-                        : "text-emerald-100 md:text-emerald-600"
-                      : isDark
-                        ? "text-slate-400"
-                        : "text-emerald-50/90 md:text-slate-500"
-                  }`}>
-                    {isActiveContactTyping ? "typing..." : (activeContact.roleLabel || activeContact.role)}
+                  <p className="hint truncate">
+                    {isActiveContactTyping
+                      ? "typing..."
+                      : `${otherParticipantCount > 0 ? `${activeParticipants.length} members | ` : ""}${onlineLabel}`}
                   </p>
                 </div>
               </div>
             ) : (
-              <p className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+              <p className="hint text-sm">
                 Select a chat to start messaging
               </p>
             )}
 
             <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
-              <span className={`hidden text-xs sm:inline ${isDark ? "text-slate-400" : "text-emerald-50 md:text-slate-500"}`}>
+              <div className="avstack hidden md:flex">
+                {activeParticipants.slice(0, 4).map((participant) => (
+                  <div className="avatar" key={participant._id || participant.id || participant.name}>
+                    {getInitials(participant.name)}
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => markAllRead().catch(() => null)}
+                disabled={unreadTotal === 0}
+                className="chat-mark-read hidden sm:inline-flex"
+                title="Mark all read"
+              >
+                {unreadTotal > 0 ? `${unreadTotal} unread` : "Read"}
+              </button>
+              <span className="hint hidden text-xs sm:inline">
                 {messageSearchQuery
                   ? `${visibleTimeline.length}/${messages.length} messages`
                   : `${messages.length} messages`}
@@ -2787,11 +2681,7 @@ const TeamChat = ({ theme = "light" }) => {
                     type="button"
                     onClick={() => setConversationMenuOpen((prev) => !prev)}
                     disabled={Boolean(activeCall)}
-                    className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${
-                      isDark
-                        ? "border-slate-700 text-slate-200 hover:border-cyan-400/50 hover:text-cyan-200"
-                        : "border-white/45 text-white hover:bg-white/10 md:border-slate-300 md:text-slate-600 md:hover:border-emerald-400 md:hover:text-emerald-700"
-                    } disabled:cursor-not-allowed disabled:opacity-60`}
+                    className="iconbtn inline-flex disabled:cursor-not-allowed disabled:opacity-60"
                     title="Chat actions"
                   >
                     <MoreVertical size={14} />
@@ -2820,33 +2710,8 @@ const TeamChat = ({ theme = "light" }) => {
           </div>
 
           {activeContact && (
-            <div className={`chat-insights hidden border-b px-3 py-2.5 sm:px-4 md:block ${
-              isDark ? "border-slate-700 bg-slate-900/80" : "border-slate-200 bg-slate-50/75"
-            }`}>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  isDark ? "bg-cyan-500/15 text-cyan-200" : "bg-cyan-100 text-cyan-700"
-                }`}>
-                  Total: {conversationInsights.totalMessages}
-                </span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  isDark ? "bg-slate-800 text-slate-300" : "bg-white text-slate-600"
-                }`}>
-                  Mine: {conversationInsights.outgoingMessages}
-                </span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  isDark ? "bg-violet-500/15 text-violet-200" : "bg-violet-100 text-violet-700"
-                }`}>
-                  Media: {conversationInsights.mediaAttachments}
-                </span>
-                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  isDark ? "bg-emerald-500/15 text-emerald-200" : "bg-emerald-100 text-emerald-700"
-                }`}>
-                  Shared properties: {conversationInsights.sharedProperties}
-                </span>
-              </div>
-
-              <div className="relative mt-2">
+            <div className="chat-insights hidden border-b md:block">
+              <div className="relative">
                 <Search
                   size={14}
                   className={`pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 ${
@@ -2857,12 +2722,8 @@ const TeamChat = ({ theme = "light" }) => {
                   type="text"
                   value={messageSearch}
                   onChange={(event) => setMessageSearch(event.target.value)}
-                  placeholder={`Search in ${activeContact.name}'s conversation`}
-                  className={`h-9 w-full rounded-lg border pl-8 pr-8 text-xs outline-none transition-colors ${
-                    isDark
-                      ? "border-slate-700 bg-slate-950 text-slate-200 placeholder:text-slate-500 focus:border-cyan-400/40"
-                      : "border-slate-300 bg-white text-slate-700 placeholder:text-slate-400 focus:border-cyan-400"
-                  }`}
+                  placeholder="Search messages..."
+                  className="input h-9 w-full pl-8 pr-8 text-xs outline-none transition-colors"
                 />
                 {messageSearchQuery && (
                   <button
@@ -2882,14 +2743,8 @@ const TeamChat = ({ theme = "light" }) => {
 
           <ToastNotice message={error} type="error" />
 
-          <div className={`chat-message-surface relative flex min-h-0 w-full flex-1 flex-col overflow-hidden ${isDark ? "bg-slate-950/45" : "bg-slate-50"}`}>
-            <div className={`chat-message-pattern pointer-events-none absolute inset-0 opacity-45 ${
-              isDark
-                ? "bg-[radial-gradient(circle_at_20%_20%,rgba(34,211,238,0.14),transparent_40%),radial-gradient(circle_at_80%_0%,rgba(14,165,233,0.12),transparent_35%),linear-gradient(45deg,rgba(15,23,42,0.75)_25%,transparent_25%,transparent_50%,rgba(15,23,42,0.75)_50%,rgba(15,23,42,0.75)_75%,transparent_75%,transparent)] bg-[length:220px_220px]"
-                : "bg-[radial-gradient(circle_at_25%_20%,rgba(16,185,129,0.14),transparent_42%),radial-gradient(circle_at_85%_0%,rgba(74,222,128,0.1),transparent_35%),linear-gradient(45deg,rgba(255,255,255,0.58)_25%,transparent_25%,transparent_50%,rgba(255,255,255,0.58)_50%,rgba(255,255,255,0.58)_75%,transparent_75%,transparent)] bg-[length:220px_220px]"
-            }`}
-            />
-            <div className="chat-message-scroll relative min-h-0 w-full flex-1 space-y-3 overflow-y-auto px-3 py-4 sm:px-5 custom-scrollbar">
+          <div className="chat-message-surface msgs relative flex min-h-0 w-full flex-1 flex-col overflow-hidden">
+            <div className="chat-message-scroll relative min-h-0 w-full flex-1 space-y-3 overflow-y-auto custom-scrollbar">
             {messagesLoading ? (
               <div className={`text-sm ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                 Loading messages...
@@ -2933,7 +2788,7 @@ const TeamChat = ({ theme = "light" }) => {
                       </div>
                     )}
                     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                      <div className={`chat-bubble ${mine ? "chat-bubble-mine" : "chat-bubble-other"} max-w-[94%] rounded-2xl border px-3 py-2.5 shadow-sm sm:max-w-[78%] lg:max-w-[72%] ${
+                      <div className={`msg chat-bubble ${mine ? "me chat-bubble-mine" : "chat-bubble-other"} max-w-[94%] sm:max-w-[78%] lg:max-w-[72%] ${
                         mine
                           ? isDark
                             ? "border-emerald-400/35 bg-emerald-500/20 text-slate-100"
@@ -3223,7 +3078,7 @@ const TeamChat = ({ theme = "light" }) => {
                 multiple
                 onChange={handleMediaSelected}
                 className="hidden"
-                accept="image/*,video/*,audio/*,.pdf"
+                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar"
               />
               <button
                 type="button"

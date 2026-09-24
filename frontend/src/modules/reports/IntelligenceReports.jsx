@@ -1,41 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { RefreshCw } from "lucide-react";
-import { getAllLeads } from "../../services/leadService";
-import { getInventoryAssets } from "../../services/inventoryService";
-import { toErrorMessage } from "../../utils/errorMessage";
-import { escapeCsvValue } from "../../utils/csvSafety";
 import ToastNotice from "../../components/ui/ToastNotice";
-import {
-  ExecutivePerformanceSection,
-  FollowUpRiskSection,
-  InventoryInsightsSection,
-  LeadAgingSection,
-  LeadFunnelSection,
-  ProjectDemandSection,
-  ReportsHeader,
-  ReportSummaryCards,
-  SourceEffectivenessSection,
-} from "./components/IntelligenceReportSections";
+import { getAllLeads } from "../../services/leadService";
+import { toErrorMessage } from "../../utils/errorMessage";
 
 const RANGE_OPTIONS = [
-  { key: "TODAY", label: "Today" },
-  { key: "30D", label: "Last 30 Days" },
-  { key: "THIS_MONTH", label: "This Month" },
+  { key: "THIS_MONTH", label: "This month" },
+  { key: "QUARTER", label: "Quarter" },
+  { key: "YEAR", label: "Year" },
   { key: "CUSTOM", label: "Custom" },
-  { key: "ALL", label: "All Time" },
 ];
 
-const LEAD_STAGES = [
-  { key: "NEW", label: "New" },
-  { key: "CONTACTED", label: "Contacted" },
-  { key: "INTERESTED", label: "Interested" },
-  { key: "SITE_VISIT", label: "Site Visit" },
-  { key: "CLOSED", label: "Closed" },
-  { key: "LOST", label: "Lost" },
-];
-
-const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "REQUESTED"]);
-const QUALIFIED_STATUSES = new Set(["INTERESTED", "SITE_VISIT", "REQUESTED", "CLOSED"]);
+const SITE_VISIT_STATUSES = new Set(["SITE_VISIT", "SITE_VISIT_SCHEDULED", "SITE_VISIT_OVERDUE"]);
+const LOST_REASON_LABELS = {
+  NOT_PICKING_CALLS: "Not picking calls",
+  MISSING_IN_ACTION: "Missing in action",
+  SITE_VISIT_OVERDUE: "Visit no-show",
+  INVALID: "Invalid number",
+  LOST: "Lost",
+};
 
 const parseLocalDateInput = (value) => {
   const raw = String(value || "").trim();
@@ -70,61 +53,56 @@ const toDate = (value) => {
 const toDateInputValue = (value) => {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
 };
 
-const getDayStart = (value) => {
-  const date = toDate(value);
-  if (!date) return null;
-  date.setHours(0, 0, 0, 0);
-  return date;
+const startOfDay = (date) => {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
 };
 
-const getDayEnd = (value) => {
-  const date = toDate(value);
-  if (!date) return null;
-  date.setHours(23, 59, 59, 999);
-  return date;
+const endOfDay = (date) => {
+  const copy = new Date(date);
+  copy.setHours(23, 59, 59, 999);
+  return copy;
 };
 
-const resolveRangeBounds = ({ rangeKey, customRange }) => {
+const resolveRangeBounds = ({ rangeKey, customRange, offset = 0 }) => {
   const now = new Date();
 
-  if (rangeKey === "TODAY") {
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-    return { start, end };
-  }
-
-  if (rangeKey === "30D") {
-    const start = new Date(now);
-    start.setDate(start.getDate() - 29);
-    start.setHours(0, 0, 0, 0);
-
-    const end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-    return { start, end };
-  }
-
   if (rangeKey === "THIS_MONTH") {
-    const end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-
     return {
-      start: new Date(now.getFullYear(), now.getMonth(), 1),
-      end,
+      start: new Date(now.getFullYear(), now.getMonth() + offset, 1),
+      end: endOfDay(new Date(now.getFullYear(), now.getMonth() + offset + 1, 0)),
+    };
+  }
+
+  if (rangeKey === "QUARTER") {
+    const quarterStartMonth = Math.floor(now.getMonth() / 3) * 3 + offset * 3;
+    return {
+      start: new Date(now.getFullYear(), quarterStartMonth, 1),
+      end: endOfDay(new Date(now.getFullYear(), quarterStartMonth + 3, 0)),
+    };
+  }
+
+  if (rangeKey === "YEAR") {
+    return {
+      start: new Date(now.getFullYear() + offset, 0, 1),
+      end: endOfDay(new Date(now.getFullYear() + offset, 11, 31)),
     };
   }
 
   if (rangeKey === "CUSTOM") {
+    const start = parseLocalDateInput(customRange.startDate);
+    const end = parseLocalDateInput(customRange.endDate);
     return {
-      start: getDayStart(customRange.startDate),
-      end: getDayEnd(customRange.endDate),
+      start: start ? startOfDay(start) : null,
+      end: end ? endOfDay(end) : null,
     };
   }
 
@@ -133,51 +111,121 @@ const resolveRangeBounds = ({ rangeKey, customRange }) => {
 
 const getLeadRangeDate = (lead) => {
   const status = String(lead?.status || "").toUpperCase();
-  if (status === "CLOSED" || status === "LOST") {
+  if (status === "CLOSED" || status === "LOST" || status === "INVALID") {
     return toDate(lead?.updatedAt || lead?.createdAt);
   }
   return toDate(lead?.createdAt);
 };
 
-const formatPercent = (value) => `${Math.round(Number(value) || 0)}%`;
-
-const formatDateTime = (value) => {
-  const parsed = toDate(value);
-  if (!parsed) return "-";
-  return parsed.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+const isInRange = (date, bounds) => {
+  if (!date) return false;
+  if (bounds.start && date < bounds.start) return false;
+  if (bounds.end && date > bounds.end) return false;
+  return true;
 };
 
-const formatCurrency = (value) =>
-  new Intl.NumberFormat("en-IN", {
+const formatPercent = (value, digits = 0) =>
+  `${(Number(value) || 0).toFixed(digits).replace(/\.0+$/, "")}%`;
+
+const formatCurrencyCompact = (value) => {
+  const amount = Number(value) || 0;
+  if (Math.abs(amount) >= 100000) {
+    const lakhs = amount / 100000;
+    return `₹${lakhs.toFixed(lakhs >= 10 ? 1 : 2).replace(/\.0+$/, "")} L`;
+  }
+  return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
-  }).format(Number(value) || 0);
+  }).format(amount);
+};
+
+const formatSignedDelta = (current, previous, { suffix = "%", inverse = false } = {}) => {
+  if (!Number.isFinite(previous) || previous <= 0) return { text: "No previous data", tone: "" };
+  const change = current - previous;
+  const tone = inverse ? (change <= 0 ? "up" : "down") : (change >= 0 ? "up" : "down");
+  const symbol = change >= 0 ? "▲" : "▼";
+  const absolute = Math.abs(change);
+  const value = suffix === "pt"
+    ? `${absolute.toFixed(1).replace(/\.0$/, "")}pt`
+    : `${Math.round(absolute)}${suffix}`;
+  return { text: `${symbol} ${value}`, tone };
+};
+
+const getLeadRevenue = (lead = {}) => {
+  const direct = Number(lead.brokerageReceived);
+  if (Number.isFinite(direct) && direct > 0) return direct;
+
+  const inventories = [
+    ...(lead.inventoryId ? [lead.inventoryId] : []),
+    ...(Array.isArray(lead.relatedInventoryIds) ? lead.relatedInventoryIds : []),
+  ];
+  return inventories.reduce((sum, inventory) => {
+    const saleDetails = inventory && typeof inventory === "object" ? inventory.saleDetails : null;
+    const total = Number(saleDetails?.totalAmount || inventory?.price || 0);
+    const remaining = Number(saleDetails?.remainingAmount || 0);
+    return sum + Math.max(0, total - remaining);
+  }, 0);
+};
+
+const getInitials = (name = "") =>
+  String(name || "Unassigned")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "UN";
+
+const toCsvValue = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
 
 const downloadCsv = (filename, rows) => {
-  const csv = rows.map((row) => row.map((value) => escapeCsvValue(value)).join(",")).join("\n");
+  const csv = rows.map((row) => row.map((value) => toCsvValue(value)).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-
   URL.revokeObjectURL(url);
 };
 
+const buildSummary = (leadRows) => {
+  const received = leadRows.length;
+  const closedRows = leadRows.filter((lead) => String(lead.status || "").toUpperCase() === "CLOSED");
+  const visits = leadRows.filter((lead) => SITE_VISIT_STATUSES.has(String(lead.status || "").toUpperCase())).length;
+  const closeAges = closedRows
+    .map((lead) => {
+      const created = toDate(lead.createdAt);
+      const updated = toDate(lead.updatedAt || lead.createdAt);
+      if (!created || !updated) return null;
+      return Math.max(0, (updated - created) / (1000 * 60 * 60 * 24));
+    })
+    .filter((days) => Number.isFinite(days));
+  const revenue = closedRows.reduce((sum, lead) => sum + getLeadRevenue(lead), 0);
+  const metaRows = leadRows.filter((lead) => String(lead.source || "").toUpperCase() === "META");
+  const metaSpend = metaRows.reduce((sum, lead) => sum + Number(lead.adSpend || lead.campaignSpend || 0), 0);
+
+  return {
+    received,
+    closed: closedRows.length,
+    visits,
+    conversion: received > 0 ? (closedRows.length / received) * 100 : 0,
+    avgDaysToClose: closeAges.length
+      ? closeAges.reduce((sum, days) => sum + days, 0) / closeAges.length
+      : 0,
+    costPerLead: metaSpend > 0 && metaRows.length > 0 ? metaSpend / metaRows.length : null,
+    revenue,
+  };
+};
+
 const IntelligenceReports = () => {
-  const [rangeKey, setRangeKey] = useState("30D");
+  const [rangeKey, setRangeKey] = useState("THIS_MONTH");
   const [customRange, setCustomRange] = useState(() => {
     const now = new Date();
     const start = new Date(now);
-    start.setDate(start.getDate() - 9);
+    start.setDate(start.getDate() - 29);
     return {
       startDate: toDateInputValue(start),
       endDate: toDateInputValue(now),
@@ -187,7 +235,6 @@ const IntelligenceReports = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [leads, setLeads] = useState([]);
-  const [inventory, setInventory] = useState([]);
 
   const loadReports = useCallback(async (silent = false) => {
     try {
@@ -198,13 +245,11 @@ const IntelligenceReports = () => {
       }
 
       setError("");
-      const [leadRows, inventoryRows] = await Promise.all([getAllLeads(), getInventoryAssets()]);
+      const leadRows = await getAllLeads();
       setLeads(Array.isArray(leadRows) ? leadRows : []);
-      setInventory(Array.isArray(inventoryRows) ? inventoryRows : []);
     } catch (fetchError) {
       setError(toErrorMessage(fetchError, "Failed to load reports"));
       setLeads([]);
-      setInventory([]);
     } finally {
       setRefreshing(false);
       setLoading(false);
@@ -215,322 +260,164 @@ const IntelligenceReports = () => {
     loadReports(false);
   }, [loadReports]);
 
-  const scopedData = useMemo(() => {
-    const { start, end } = resolveRangeBounds({ rangeKey, customRange });
-    if (!start && !end) {
-      return { leads, inventory };
-    }
+  const currentBounds = useMemo(
+    () => resolveRangeBounds({ rangeKey, customRange }),
+    [customRange, rangeKey],
+  );
+  const previousBounds = useMemo(
+    () => resolveRangeBounds({ rangeKey, customRange, offset: -1 }),
+    [customRange, rangeKey],
+  );
 
-    return {
-      leads: leads.filter((lead) => {
-        const rangeDate = getLeadRangeDate(lead);
-        if (!rangeDate) return false;
-        if (start && rangeDate < start) return false;
-        if (end && rangeDate > end) return false;
-        return true;
-      }),
-      inventory: inventory.filter((asset) => {
-        const createdAt = toDate(asset.createdAt);
-        if (!createdAt) return false;
-        if (start && createdAt < start) return false;
-        if (end && createdAt > end) return false;
-        return true;
-      }),
-    };
-  }, [customRange, inventory, leads, rangeKey]);
+  const scopedLeads = useMemo(
+    () => leads.filter((lead) => isInRange(getLeadRangeDate(lead), currentBounds)),
+    [currentBounds, leads],
+  );
+  const previousLeads = useMemo(
+    () => rangeKey === "CUSTOM"
+      ? []
+      : leads.filter((lead) => isInRange(getLeadRangeDate(lead), previousBounds)),
+    [leads, previousBounds, rangeKey],
+  );
 
-  const leadStageRows = useMemo(() => {
-    const countMap = LEAD_STAGES.reduce((acc, stage) => {
-      acc[stage.key] = 0;
-      return acc;
-    }, {});
+  // Transfers stay countable after the lead moves on, so they read off the
+  // assignment history rather than the current stage.
+  const transferredLeadCount = useMemo(
+    () => scopedLeads.filter((lead) => lead.assignmentHistory?.some((entry) => entry.action === "MANUAL_TRANSFER")).length,
+    [scopedLeads],
+  );
 
-    scopedData.leads.forEach((lead) => {
-      const status = String(lead.status || "NEW");
-      if (Object.prototype.hasOwnProperty.call(countMap, status)) {
-        countMap[status] += 1;
-      }
+  const summary = useMemo(() => buildSummary(scopedLeads), [scopedLeads]);
+  const previousSummary = useMemo(() => buildSummary(previousLeads), [previousLeads]);
+
+  const statRows = useMemo(() => {
+    const leadsDelta = formatSignedDelta(summary.received, previousSummary.received);
+    const conversionDelta = formatSignedDelta(summary.conversion, previousSummary.conversion, { suffix: "pt" });
+    const daysDelta = formatSignedDelta(summary.avgDaysToClose, previousSummary.avgDaysToClose, {
+      suffix: " days",
+      inverse: true,
     });
+    const revenueDelta = formatSignedDelta(summary.revenue, previousSummary.revenue);
 
-    const total = scopedData.leads.length;
-    return LEAD_STAGES.map((stage) => {
-      const count = countMap[stage.key] || 0;
+    return [
+      { key: "Leads received", value: summary.received, delta: leadsDelta, detail: "vs previous period" },
+      { key: "Conversion", value: formatPercent(summary.conversion, 1), delta: conversionDelta, detail: "vs previous period" },
+      { key: "Avg. days to close", value: Math.round(summary.avgDaysToClose), delta: daysDelta, detail: daysDelta.tone === "down" ? "slower" : "faster" },
+      {
+        key: "Cost per lead",
+        value: summary.costPerLead === null ? "-" : formatCurrencyCompact(summary.costPerLead),
+        detail: "Meta campaigns only",
+      },
+      { key: "Revenue", value: formatCurrencyCompact(summary.revenue), delta: revenueDelta, detail: "vs previous period" },
+    ];
+  }, [previousSummary, summary]);
+
+  const monthlyBars = useMemo(() => {
+    const now = new Date();
+    const months = Array.from({ length: 6 }, (_, index) =>
+      new Date(now.getFullYear(), now.getMonth() - 5 + index, 1),
+    );
+    const rows = months.map((month) => {
+      const start = new Date(month.getFullYear(), month.getMonth(), 1);
+      const end = endOfDay(new Date(month.getFullYear(), month.getMonth() + 1, 0));
+      const rowsInMonth = leads.filter((lead) => isInRange(getLeadRangeDate(lead), { start, end }));
+      const closed = rowsInMonth.filter((lead) => String(lead.status || "").toUpperCase() === "CLOSED").length;
       return {
-        ...stage,
-        count,
-        share: total > 0 ? (count / total) * 100 : 0,
+        label: month.toLocaleString("en-IN", { month: "short" }),
+        leads: rowsInMonth.length,
+        closed,
       };
     });
-  }, [scopedData.leads]);
-
-  const topMetrics = useMemo(() => {
-    const totalLeads = scopedData.leads.length;
-    const closed = scopedData.leads.filter((lead) => String(lead.status || "") === "CLOSED").length;
-    const qualified = scopedData.leads.filter((lead) => QUALIFIED_STATUSES.has(String(lead.status || ""))).length;
-    const active = scopedData.leads.filter((lead) => ACTIVE_STATUSES.has(String(lead.status || ""))).length;
-
-    const conversion = totalLeads > 0 ? (closed / totalLeads) * 100 : 0;
-
-    const closeAges = scopedData.leads
-      .filter((lead) => String(lead.status || "") === "CLOSED")
-      .map((lead) => {
-        const created = toDate(lead.createdAt);
-        const updated = toDate(lead.updatedAt || lead.createdAt);
-        if (!created || !updated) return null;
-        return Math.max((updated - created) / (1000 * 60 * 60 * 24), 0);
-      })
-      .filter((days) => Number.isFinite(days));
-
-    const avgDaysToClose =
-      closeAges.length > 0 ? closeAges.reduce((sum, days) => sum + days, 0) / closeAges.length : 0;
-
-    const reservedOrSold = scopedData.inventory.filter((asset) =>
-      ["Reserved", "Blocked", "Sold"].includes(String(asset.status || "")),
-    ).length;
-    const inventoryUtilization =
-      scopedData.inventory.length > 0 ? (reservedOrSold / scopedData.inventory.length) * 100 : 0;
-
-    return {
-      totalLeads,
-      qualified,
-      active,
-      closed,
-      conversion,
-      avgDaysToClose,
-      inventoryUtilization,
-    };
-  }, [scopedData.inventory, scopedData.leads]);
-
-  const sourcePerformance = useMemo(() => {
-    const map = new Map();
-
-    scopedData.leads.forEach((lead) => {
-      const source = String(lead.source || "OTHER");
-      if (!map.has(source)) {
-        map.set(source, {
-          source,
-          total: 0,
-          qualified: 0,
-          closed: 0,
-        });
-      }
-
-      const row = map.get(source);
-      row.total += 1;
-
-      const status = String(lead.status || "");
-      if (QUALIFIED_STATUSES.has(status)) row.qualified += 1;
-      if (status === "CLOSED") row.closed += 1;
-    });
-
-    return [...map.values()]
-      .map((row) => ({
-        ...row,
-        conversion: row.total > 0 ? (row.closed / row.total) * 100 : 0,
-      }))
-      .sort((a, b) => b.total - a.total);
-  }, [scopedData.leads]);
-
-  const executivePerformance = useMemo(() => {
-    const map = new Map();
-
-    scopedData.leads.forEach((lead) => {
-      const assignee = lead.assignedTo;
-      const key = String(assignee?._id || "unassigned");
-      const label = assignee?.name || "Unassigned";
-
-      if (!map.has(key)) {
-        map.set(key, {
-          key,
-          label,
-          total: 0,
-          active: 0,
-          closed: 0,
-          lost: 0,
-        });
-      }
-
-      const row = map.get(key);
-      row.total += 1;
-
-      const status = String(lead.status || "");
-      if (status === "CLOSED") row.closed += 1;
-      else if (status === "LOST") row.lost += 1;
-      else row.active += 1;
-    });
-
-    return [...map.values()]
-      .map((row) => ({
-        ...row,
-        closeRate: row.total > 0 ? (row.closed / row.total) * 100 : 0,
-      }))
-      .sort((a, b) => b.closed - a.closed || b.active - a.active)
-      .slice(0, 10);
-  }, [scopedData.leads]);
-
-  const projectDemand = useMemo(() => {
-    const map = new Map();
-
-    scopedData.leads.forEach((lead) => {
-      const project = String(lead.projectInterested || "").trim() || "Unspecified";
-
-      if (!map.has(project)) {
-        map.set(project, {
-          project,
-          leads: 0,
-          qualified: 0,
-          closed: 0,
-        });
-      }
-
-      const row = map.get(project);
-      row.leads += 1;
-
-      const status = String(lead.status || "");
-      if (QUALIFIED_STATUSES.has(status)) row.qualified += 1;
-      if (status === "CLOSED") row.closed += 1;
-    });
-
-    return [...map.values()].sort((a, b) => b.leads - a.leads).slice(0, 10);
-  }, [scopedData.leads]);
-
-  const agingBuckets = useMemo(() => {
-    const buckets = [
-      { label: "0-3 days", min: 0, max: 3, count: 0 },
-      { label: "4-7 days", min: 4, max: 7, count: 0 },
-      { label: "8-14 days", min: 8, max: 14, count: 0 },
-      { label: "15-30 days", min: 15, max: 30, count: 0 },
-      { label: "31+ days", min: 31, max: Number.POSITIVE_INFINITY, count: 0 },
-    ];
-
-    const now = new Date();
-    scopedData.leads
-      .filter((lead) => ACTIVE_STATUSES.has(String(lead.status || "")))
-      .forEach((lead) => {
-        const createdAt = toDate(lead.createdAt);
-        if (!createdAt) return;
-
-        const ageDays = Math.floor((now - createdAt) / (1000 * 60 * 60 * 24));
-        const bucket = buckets.find((item) => ageDays >= item.min && ageDays <= item.max);
-        if (bucket) bucket.count += 1;
-      });
-
-    const maxCount = Math.max(...buckets.map((row) => row.count), 1);
-    return buckets.map((row) => ({
+    const max = Math.max(...rows.map((row) => row.leads), 1);
+    return rows.map((row) => ({
       ...row,
-      share: (row.count / maxCount) * 100,
+      leadHeight: Math.max(8, Math.round((row.leads / max) * 100)),
+      closedHeight: Math.max(6, Math.round((row.closed / max) * 100)),
     }));
-  }, [scopedData.leads]);
+  }, [leads]);
 
-  const inventoryInsights = useMemo(() => {
-    const statusMap = {
-      Available: { count: 0, value: 0 },
-      Reserved: { count: 0, value: 0 },
-      Sold: { count: 0, value: 0 },
-      Other: { count: 0, value: 0 },
-    };
+  const sourceMix = useMemo(() => {
+    const rows = new Map();
+    scopedLeads.forEach((lead) => {
+      const source = String(lead.source || "OTHER").trim().toUpperCase();
+      const label = source === "META" ? "Meta ads" : source === "MANUAL" ? "Manual entry" : source || "Other";
+      rows.set(label, (rows.get(label) || 0) + 1);
+    });
 
-    const locationMap = new Map();
-
-    scopedData.inventory.forEach((asset) => {
-      const status = String(asset.status || "");
-      const price = Number(asset.price) || 0;
-
-      if (Object.prototype.hasOwnProperty.call(statusMap, status)) {
-        statusMap[status].count += 1;
-        statusMap[status].value += price;
-      } else {
-        statusMap.Other.count += 1;
-        statusMap.Other.value += price;
-      }
-
-      const location = String(asset.location || "").trim() || "Unspecified";
-      if (!locationMap.has(location)) {
-        locationMap.set(location, { location, units: 0, value: 0 });
-      }
-
-      const row = locationMap.get(location);
-      row.units += 1;
-      row.value += price;
+    const total = [...rows.values()].reduce((sum, value) => sum + value, 0);
+    const colors = ["var(--b500)", "var(--vi500)", "var(--ok500)", "var(--wa500)", "var(--muted)"];
+    let cursor = 0;
+    const list = [...rows.entries()].map(([label, count], index) => {
+      const share = total > 0 ? Math.round((count / total) * 100) : 0;
+      const start = cursor;
+      cursor += share;
+      return { label, count, color: colors[index % colors.length], start, end: cursor };
     });
 
     return {
-      statusRows: Object.entries(statusMap).map(([label, value]) => ({ label, ...value })),
-      locationRows: [...locationMap.values()].sort((a, b) => b.units - a.units).slice(0, 8),
+      rows: list,
+      gradient: list.length
+        ? `conic-gradient(${list.map((row) => `${row.color} ${row.start}% ${row.end}%`).join(", ")})`
+        : "conic-gradient(var(--line) 0 100%)",
     };
-  }, [scopedData.inventory]);
+  }, [scopedLeads]);
 
-  const followUpRisk = useMemo(() => {
-    const now = new Date();
-    const next48 = new Date(now.getTime() + 48 * 60 * 60 * 1000);
+  const executiveRows = useMemo(() => {
+    const rows = new Map();
+    scopedLeads.forEach((lead) => {
+      const assignee = lead.assignedTo || lead.assignedExecutive || lead.createdBy;
+      const key = String(assignee?._id || assignee?.email || "unassigned");
+      const name = assignee?.name || "Unassigned";
+      const current = rows.get(key) || { key, name, leads: 0, visits: 0, closed: 0 };
+      const status = String(lead.status || "").toUpperCase();
+      current.leads += 1;
+      if (SITE_VISIT_STATUSES.has(status)) current.visits += 1;
+      if (status === "CLOSED") current.closed += 1;
+      rows.set(key, current);
+    });
 
-    const rows = scopedData.leads
-      .filter((lead) => ACTIVE_STATUSES.has(String(lead.status || "")))
-      .map((lead) => {
-        const nextFollowUp = toDate(lead.nextFollowUp);
-        return {
-          ...lead,
-          nextFollowUp,
-        };
-      })
-      .filter((lead) => lead.nextFollowUp)
-      .sort((a, b) => a.nextFollowUp - b.nextFollowUp);
+    return [...rows.values()]
+      .map((row) => ({
+        ...row,
+        conversion: row.leads > 0 ? (row.closed / row.leads) * 100 : 0,
+      }))
+      .sort((left, right) => right.closed - left.closed || right.visits - left.visits || right.leads - left.leads)
+      .slice(0, 5);
+  }, [scopedLeads]);
 
-    return {
-      overdue: rows.filter((lead) => lead.nextFollowUp < now),
-      next48h: rows.filter((lead) => lead.nextFollowUp >= now && lead.nextFollowUp <= next48),
-      list: rows.slice(0, 10),
-    };
-  }, [scopedData.leads]);
+  const lostRows = useMemo(() => {
+    const rows = new Map();
+    scopedLeads.forEach((lead) => {
+      const status = String(lead.status || "").toUpperCase();
+      const label = LOST_REASON_LABELS[status];
+      if (!label) return;
+      rows.set(label, (rows.get(label) || 0) + 1);
+    });
+
+    const list = [...rows.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 5);
+    const max = Math.max(...list.map((row) => row.count), 1);
+    return list.map((row) => ({ ...row, width: Math.max(8, Math.round((row.count / max) * 100)) }));
+  }, [scopedLeads]);
 
   const handleExportCsv = () => {
-    const rows = [["Section", "Metric", "Value"]];
-
-    rows.push(["Summary", "Total Leads", topMetrics.totalLeads]);
-    rows.push(["Summary", "Qualified Leads", topMetrics.qualified]);
-    rows.push(["Summary", "Active Leads", topMetrics.active]);
-    rows.push(["Summary", "Closed Leads", topMetrics.closed]);
-    rows.push(["Summary", "Lead Conversion", formatPercent(topMetrics.conversion)]);
-    rows.push(["Summary", "Avg Days to Close", topMetrics.avgDaysToClose.toFixed(1)]);
-    rows.push(["Summary", "Inventory Utilization", formatPercent(topMetrics.inventoryUtilization)]);
-
-    LEAD_STAGES.forEach((stage) => {
-      const row = leadStageRows.find((item) => item.key === stage.key);
-      rows.push(["Lead Funnel", stage.label, row ? row.count : 0]);
-    });
-
-    sourcePerformance.forEach((row) => {
-      rows.push([
-        "Source Performance",
-        row.source,
-        `${row.total} leads, ${row.closed} closed, ${formatPercent(row.conversion)}`,
-      ]);
-    });
-
-    executivePerformance.forEach((row) => {
-      rows.push([
-        "Executive Performance",
-        row.label,
-        `${row.total} total, ${row.closed} closed, ${formatPercent(row.closeRate)}`,
-      ]);
-    });
-
-    projectDemand.forEach((row) => {
-      rows.push([
-        "Project Demand",
-        row.project,
-        `${row.leads} leads, ${row.closed} closed`,
-      ]);
-    });
-
-    inventoryInsights.statusRows.forEach((row) => {
-      rows.push([
-        "Inventory Status",
-        row.label,
-        `${row.count} units, ${formatCurrency(row.value)}`,
-      ]);
-    });
-
+    const rows = [
+      ["Section", "Metric", "Value"],
+      ["Summary", "Leads received", summary.received],
+      ["Summary", "Transferred leads", transferredLeadCount],
+      ["Summary", "Conversion", formatPercent(summary.conversion, 1)],
+      ["Summary", "Avg. days to close", Math.round(summary.avgDaysToClose)],
+      ["Summary", "Cost per lead", summary.costPerLead === null ? "" : Math.round(summary.costPerLead)],
+      ["Summary", "Revenue", summary.revenue],
+      ...executiveRows.map((row) => [
+        "Executive performance",
+        row.name,
+        `${row.leads} leads, ${row.visits} visits, ${row.closed} closed, ${formatPercent(row.conversion, 1)}`,
+      ]),
+      ...lostRows.map((row) => ["Where leads are lost", row.label, row.count]),
+    ];
     downloadCsv(`reports_${rangeKey.toLowerCase()}.csv`, rows);
   };
 
@@ -544,59 +431,172 @@ const IntelligenceReports = () => {
   }
 
   return (
-    <div className="ui-page-shell custom-scrollbar space-y-6">
-      <ReportsHeader
-        rangeOptions={RANGE_OPTIONS}
-        rangeKey={rangeKey}
-        onRangeChange={setRangeKey}
-        customRange={customRange}
-        onCustomRangeChange={setCustomRange}
-        refreshing={refreshing}
-        onRefresh={() => loadReports(true)}
-        onExport={handleExportCsv}
-      />
-
+    <div className="reports-doc-screen ui-page-shell custom-scrollbar">
       <ToastNotice message={error} type="error" />
 
-      {!error && scopedData.leads.length === 0 && scopedData.inventory.length === 0 ? (
-        <div className="ui-soft-panel rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-6 text-center shadow-sm">
-          <p className="text-sm font-semibold text-slate-800">No report data in this window</p>
-          <p className="mt-1 text-xs text-slate-500">
-            Change the date filter or refresh once new leads and inventory are available.
-          </p>
+      <section className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
+        <strong>{transferredLeadCount} transferred leads</strong> in this period. Transfer history is retained separately from the current lead stage.
+      </section>
+      <div className="reports-toolbar">
+        <div className="reports-seg">
+          {RANGE_OPTIONS.map((range) => (
+            <button
+              key={range.key}
+              type="button"
+              className={rangeKey === range.key ? "on" : ""}
+              onClick={() => setRangeKey(range.key)}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="reports-chip">+ Branch</button>
+        <button type="button" className="reports-chip">+ Executive</button>
+        <button type="button" className="reports-chip">+ Source</button>
+        <button type="button" className="reports-btn reports-btn-sec reports-btn-sm reports-push" onClick={handleExportCsv}>
+          Export CSV
+        </button>
+        <button type="button" className="reports-btn reports-btn-sec reports-btn-sm">
+          Schedule email
+        </button>
+      </div>
+
+      {rangeKey === "CUSTOM" ? (
+        <div className="reports-toolbar reports-custom-range">
+          <label>
+            From
+            <input
+              type="date"
+              value={customRange.startDate}
+              onChange={(event) => setCustomRange((prev) => ({ ...prev, startDate: event.target.value }))}
+            />
+          </label>
+          <label>
+            To
+            <input
+              type="date"
+              value={customRange.endDate}
+              onChange={(event) => setCustomRange((prev) => ({ ...prev, endDate: event.target.value }))}
+            />
+          </label>
+          <button
+            type="button"
+            className="reports-btn reports-btn-sec reports-btn-sm"
+            disabled={refreshing}
+            onClick={() => loadReports(true)}
+          >
+            <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
       ) : null}
 
-      <ReportSummaryCards topMetrics={topMetrics} formatPercent={formatPercent} />
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <LeadFunnelSection leadStageRows={leadStageRows} formatPercent={formatPercent} />
-        <LeadAgingSection agingBuckets={agingBuckets} />
+      <div className="reports-statgrid">
+        {statRows.map((stat) => (
+          <div key={stat.key} className="reports-stat">
+            <div className="reports-k">{stat.key}</div>
+            <div className="reports-v">{stat.value}</div>
+            <div className="reports-d">
+              {stat.delta ? <span className={`reports-delta ${stat.delta.tone}`}>{stat.delta.text}</span> : null}
+              {stat.detail}
+            </div>
+          </div>
+        ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <SourceEffectivenessSection
-          sourcePerformance={sourcePerformance}
-          formatPercent={formatPercent}
-        />
-        <ProjectDemandSection projectDemand={projectDemand} />
+      <div className="reports-split">
+        <div className="reports-card">
+          <div className="reports-card-h"><h4>Leads and closures by month</h4></div>
+          <div className="reports-card-b">
+            <div className="reports-bars reports-bars-tall">
+              {monthlyBars.map((bar) => (
+                <div key={bar.label} title={`${bar.leads} leads, ${bar.closed} closed`}>
+                  <i style={{ height: `${bar.leadHeight}%` }} />
+                  <i className="closed" style={{ height: `${bar.closedHeight}%` }} />
+                  <span>{bar.label}</span>
+                </div>
+              ))}
+            </div>
+            <div className="reports-legend reports-inline-legend">
+              <div><i style={{ background: "var(--b500)" }} />Leads received</div>
+              <div><i style={{ background: "var(--ok500)" }} />Closed</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="reports-card">
+          <div className="reports-card-h"><h4>Source mix</h4></div>
+          <div className="reports-card-b reports-source-mix">
+            <div className="reports-donut" style={{ background: sourceMix.gradient }} />
+            <div className="reports-legend">
+              {sourceMix.rows.length === 0 ? (
+                <div><i style={{ background: "var(--line)" }} />No sources<b>0</b></div>
+              ) : null}
+              {sourceMix.rows.map((row) => (
+                <div key={row.label}><i style={{ background: row.color }} />{row.label}<b>{row.count}</b></div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <ExecutivePerformanceSection
-          executivePerformance={executivePerformance}
-          formatPercent={formatPercent}
-        />
-        <FollowUpRiskSection
-          followUpRisk={followUpRisk}
-          formatDateTime={formatDateTime}
-        />
-      </div>
+      <div className="reports-split-even">
+        <div className="reports-card">
+          <div className="reports-card-h"><h4>Executive performance</h4></div>
+          <div className="reports-table-wrap">
+            <table className="reports-tbl">
+              <thead>
+                <tr>
+                  <th>Executive</th>
+                  <th>Leads</th>
+                  <th>Visits</th>
+                  <th>Closed</th>
+                  <th>Conv.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {executiveRows.length === 0 ? (
+                  <tr><td colSpan={5} className="reports-empty-row">No executive data in this period.</td></tr>
+                ) : null}
+                {executiveRows.map((row) => (
+                  <tr key={row.key}>
+                    <td>
+                      <div className="reports-cellname">
+                        <div className="reports-avatar reports-avatar-sm">{getInitials(row.name)}</div>
+                        <b>{row.name}</b>
+                      </div>
+                    </td>
+                    <td className="reports-num">{row.leads}</td>
+                    <td className="reports-num">{row.visits}</td>
+                    <td className="reports-num">{row.closed}</td>
+                    <td className={`reports-num reports-conv ${row.conversion >= summary.conversion ? "good" : "risk"}`}>
+                      {formatPercent(row.conversion, 1)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-      <InventoryInsightsSection
-        inventoryInsights={inventoryInsights}
-        formatCurrency={formatCurrency}
-      />
+        <div className="reports-card">
+          <div className="reports-card-h"><h4>Where leads are lost</h4></div>
+          <div className="reports-card-b">
+            <div className="reports-rowlist">
+              {lostRows.length === 0 ? (
+                <div className="reports-empty-row">No lost lead reasons in this period.</div>
+              ) : null}
+              {lostRows.map((row) => (
+                <div key={row.label}>
+                  <span className="reports-reason">{row.label}</span>
+                  <span className="reports-bar-mini"><i style={{ width: `${row.width}%` }} /></span>
+                  <span className="reports-num reports-muted">{row.count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

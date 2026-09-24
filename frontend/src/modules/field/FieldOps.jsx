@@ -48,22 +48,23 @@ const CITY_COORDINATES = {
 
 const PROPERTY_MARKER_ICON = divIcon({
   className: "property-map-marker",
-  iconSize: [30, 30],
-  iconAnchor: [15, 15],
+  iconSize: [34, 34],
+  iconAnchor: [17, 17],
   popupAnchor: [0, -12],
   html: `
     <div style="
-      width:30px;
-      height:30px;
-      border-radius:9999px;
-      background:#f59e0b;
-      border:2px solid #b45309;
-      box-shadow:0 2px 6px rgba(15,23,42,0.35);
+      width:34px;
+      height:34px;
+      border-radius:12px;
+      background:linear-gradient(135deg,#f59e0b,#f97316);
+      border:3px solid #ffffff;
+      box-shadow:0 12px 26px rgba(15,23,42,0.22),0 0 0 1px rgba(180,83,9,0.24);
       display:flex;
       align-items:center;
       justify-content:center;
+      transform:rotate(45deg);
     ">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="transform:rotate(-45deg)">
         <path d="M3 10.5L12 3l9 7.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         <path d="M6 9.5V20h12V9.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
         <path d="M10 20v-5h4v5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -725,16 +726,32 @@ const FieldOps = () => {
 
   return (
     <div className="ui-page-shell h-full w-full overflow-y-auto custom-scrollbar">
-      <div className="space-y-5 sm:space-y-6">
-        <section className="ui-hero-card overflow-hidden">
-          <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-cyan-900 px-4 py-5 sm:px-6">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-end">
-              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-2">
+      <div className="space-y-4 sm:space-y-5">
+        <section className="ui-soft-panel overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600 sm:tracking-[0.12em]">
+                <span className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-emerald-700">
+                  <Signal size={12} />
+                  Live tracked: {liveTrackedExecutives}
+                </span>
+                <span className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-cyan-200 bg-cyan-50 px-2.5 text-cyan-700">
+                  Coverage: {coveragePercent}%
+                </span>
+                <span className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-slate-600">
+                  Visit share: {visitShare}%
+                </span>
+                <span className="inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-slate-600">
+                  Last sync: {formatDateTime(lastSyncedAt)}
+                </span>
+              </div>
+
+              <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
                 <button
                   type="button"
                   onClick={() => loadFieldOps(true)}
                   disabled={refreshing}
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/30 bg-white/10 px-3 text-xs font-semibold text-white backdrop-blur hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-cyan-300 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
                   Refresh
@@ -742,32 +759,16 @@ const FieldOps = () => {
                 <button
                   type="button"
                   onClick={() => navigate("/leads")}
-                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-white/30 bg-white px-3 text-xs font-semibold text-slate-900 hover:bg-slate-100"
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-cyan-700"
                 >
                   Open Leads
                   <ArrowUpRight size={14} />
                 </button>
               </div>
             </div>
-
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] sm:tracking-[0.12em]">
-              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-white/30 bg-white/10 px-2.5 py-1 text-cyan-100">
-                <Signal size={12} />
-                Live tracked: {liveTrackedExecutives}
-              </span>
-              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-white/30 bg-white/10 px-2.5 py-1 text-cyan-100">
-                Coverage: {coveragePercent}%
-              </span>
-              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-white/30 bg-white/10 px-2.5 py-1 text-cyan-100">
-                Visit share: {visitShare}%
-              </span>
-              <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-white/30 bg-white/10 px-2.5 py-1 text-cyan-100">
-                Last sync: {formatDateTime(lastSyncedAt)}
-              </span>
-            </div>
           </div>
 
-          <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3 sm:px-6">
+          <div className="bg-slate-50/70 px-4 py-3 sm:px-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="relative w-full lg:max-w-xl">
                 <Search
@@ -779,7 +780,7 @@ const FieldOps = () => {
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="Search executive, lead, project, city, or property..."
-                  className="h-10 w-full rounded-xl border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-cyan-400"
+                  className="h-10 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
                 />
                 {searchQuery ? (
                   <button
@@ -794,13 +795,13 @@ const FieldOps = () => {
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
-                <span className="rounded-full border border-slate-300 bg-white px-2.5 py-1">
+                <span className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-2.5 font-medium shadow-sm">
                   {trimmedQuery
                     ? `${visibleMapExecutives.length + visibleMapProperties.length + visibleDispatchQueue.length} matched records`
                     : "Showing full field scope"}
                 </span>
                 {staleTrackedExecutives > 0 ? (
-                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-amber-700">
+                  <span className="inline-flex h-8 items-center rounded-lg border border-amber-200 bg-amber-50 px-2.5 font-semibold text-amber-700">
                     {staleTrackedExecutives} stale live locations
                   </span>
                 ) : null}
@@ -817,36 +818,42 @@ const FieldOps = () => {
             value={dashboard.fieldExecutives.length}
             helper="Available for assignments"
             icon={Users}
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
           />
           <StatCard
             title="Live Tracked"
             value={liveTrackedExecutives}
             helper={`${coveragePercent}% tracking coverage`}
             icon={Signal}
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
           />
           <StatCard
             title="Site Visits"
             value={dashboard.siteVisitLeads.length}
             helper={`${visitShare}% of active pipeline`}
             icon={MapPin}
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
           />
           <StatCard
             title="Overdue Follow-ups"
             value={dashboard.overdueFollowUps.length}
             helper="Requires immediate intervention"
             icon={Clock3}
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
           />
           <StatCard
             title="Dispatch Queue"
             value={dashboard.unassignedQueue.length}
             helper="Unassigned active leads"
             icon={Route}
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
           />
           <StatCard
             title="Average Load"
             value={averageLoad}
             helper="Active leads per executive"
             icon={Activity}
+            className="rounded-2xl border-slate-200 bg-white shadow-sm"
           />
         </div>
 

@@ -70,23 +70,24 @@ const PROPERTY_REQUIREMENT_CONFIG = {
   },
   RESIDENTIAL: {
     APARTMENT: [
-      select("bhkType"), text("preferredFloor"), number("totalFloors"), number("bathrooms"),
-      number("balconies"), text("facing"), text("propertyAge"), bool("gatedSociety"),
+      select("bhkType"), number("area"), number("superBuiltUpArea"), number("carpetArea"),
+      select("purpose"), select("bathrooms"), text("preferredFloor"), number("balconies"), text("facing"), bool("gatedSociety"),
       bool("lift"), bool("security"), bool("gym"), bool("swimmingPool"), bool("clubhouse"),
       bool("parking"), bool("powerBackup"), bool("gasPipeline"), bool("modularKitchen"),
       bool("servantRoom"), bool("studyRoom"),
     ],
     INDEPENDENT_HOUSE: [
-      select("bhkType"), number("numberOfFloors"), number("plotArea"), number("builtUpArea"),
-      number("bathrooms"), number("balconies"), text("facing"), bool("cornerProperty"),
+      select("bhkType"), number("area"), number("superBuiltUpArea"), number("carpetArea"),
+      select("purpose"), select("bathrooms"), select("numberOfFloors"), number("balconies"), text("facing"), bool("cornerProperty"),
       bool("privateParking"), bool("garden"), bool("terrace"), bool("servantRoom"),
       bool("storageRoom"), bool("powerBackup"), bool("gasPipeline"), bool("separateEntry"),
     ],
     PLOT: [
-      number("plotArea"), number("plotLength"), number("plotWidth"),
-      number("roadWidth"), text("facing"), bool("cornerPlot"), bool("gatedColony"),
-      bool("approvedColony"), bool("boundaryWall"), bool("constructionAllowed"),
-      text("ownershipType"), select("suitableFor"),
+      select("plotLocation"), select("plotOccupancy"), select("plotPurpose"),
+      select("projectStatus"), select("plotType"),
+      number("plotLength"), number("plotWidth"), number("plotArea"),
+      text("facing"), bool("loanRequired"), bool("semiCommercialPlot"), bool("commercialPlot"),
+      bool("gardenFacing"), bool("cornerPlot"), bool("gatedColony"), bool("approvedColony"),
     ],
     PG_HOSTEL: [
       select("occupancyType"), select("sharingType"), number("numberOfBeds"), number("perBedBudget"),
