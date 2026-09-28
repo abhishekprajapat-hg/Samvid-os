@@ -12,6 +12,7 @@ const documentSchema = new mongoose.Schema({
 
 const coworkingContractSchema = new mongoose.Schema(
   {
+    billstackSyncPending: { type: Boolean, default: false },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,

@@ -745,7 +745,7 @@ const TeamManager = ({ theme = "light" }) => {
                       </td>
                       <td>
                         <div className="team-rowacts">
-                          {isAdmin && user.role !== "ADMIN" && <button type="button" className="team-mini-toggle" onClick={(event) => { event.stopPropagation(); setAccessEmployee(user); }} title={`Manage page access for ${user.name}`}>Page access</button>}
+                          {(isAdmin || currentUser?.role === 'MANAGER') && user.role !== "ADMIN" && <button type="button" className="team-mini-toggle" onClick={(event) => { event.stopPropagation(); setAccessEmployee(user); }} title={`Manage page access for ${user.name}`}>Page access</button>}
                           {canUseAdminTools ? (
                             <button
                               type="button"

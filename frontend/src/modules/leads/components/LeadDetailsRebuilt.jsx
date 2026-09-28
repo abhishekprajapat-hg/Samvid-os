@@ -1,4 +1,5 @@
 import BrokerPhoneHint from "./BrokerPhoneHint";
+import BillstackSection from '../../../components/billing/BillstackSection';
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import { createInventoryShareLink } from "../../../services/inventoryService";
@@ -2026,6 +2027,7 @@ const LeadDetailsRebuiltContent = ({
         isDark ? "border-slate-700 bg-slate-900/95" : "border-slate-200 bg-white/95"
       }`}
     >
+      {selectedLead?.status === 'CLOSED' && <BillstackSection key={selectedLead._id} entityType="lead" entityId={selectedLead._id} />}
       <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]">
         <div className={`absolute -left-10 top-0 h-36 w-36 rounded-full blur-3xl ${
           isDark ? "bg-sky-500/20" : "bg-sky-300/45"

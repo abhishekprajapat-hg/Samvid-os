@@ -344,12 +344,15 @@ const transitionBooking = (fromStatuses, toStatus, auditAction, seatEffect) => a
   }
 
   booking.status = toStatus;
+  if (toStatus === 'ACTIVE') booking.billstackSyncPending = require('../config/billstack').isBillstackEnabled(companyId);
   booking.updatedBy = actingUser._id;
   if (toStatus === "CANCELLED") {
     booking.cancelledAt = new Date();
     booking.cancelledReason = String(rest.reason || "").trim().slice(0, 500);
   }
   await booking.save();
+
+  if (toStatus === 'ACTIVE') await require('./billstackSync.service').scheduleStructuredSafely('booking', booking);
 
   await writeAuditLog({
     companyId,

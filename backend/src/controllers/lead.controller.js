@@ -1862,6 +1862,8 @@ const findAccessibleLeadById = async ({ leadId, user }) => {
     .select("_id companyId")
     .lean();
 };
+// Reuse the existing record scope for Billing; a billing grant does not widen it.
+exports.findAccessibleLeadById = findAccessibleLeadById;
 
 const applyLeadQueryOptions = ({
   queryBuilder,
@@ -3480,7 +3482,9 @@ exports.updateLeadBasics = async (req, res) => {
       });
     }
 
+    if (lead.status === 'CLOSED' && require('../config/billstack').isBillstackEnabled(req.user.companyId)) lead.set('billstack.syncStatus', 'PENDING');
     await lead.save();
+    if (lead.status === 'CLOSED') await require('../services/billstackSync.service').scheduleSafely(req.user.companyId, 'lead', lead._id);
     await LeadActivity.create({
       lead: lead._id,
       action: `Lead profile updated (${updates.join(", ")})`,
@@ -4137,7 +4141,9 @@ exports.updateLeadStatus = async (req, res) => {
     }
 
     if (req.body.hotClient !== undefined) lead.hotClient = req.body.hotClient;
+    if (nextLeadStatus === CLOSED_STATUS && require('../config/billstack').isBillstackEnabled(req.user.companyId)) lead.set('billstack.syncStatus', 'PENDING');
     await lead.save();
+    if (nextLeadStatus === CLOSED_STATUS) await require('../services/billstackSync.service').scheduleSafely(req.user.companyId, 'lead', lead._id);
 
     const didTransitionToClosed =
       previousLeadStatus !== CLOSED_STATUS
@@ -4617,6 +4623,7 @@ exports.approveLeadStatusRequest = async (req, res) => {
       }
       soldInventory = soldSyncResult?.inventory || null;
     }
+    if (lead.status === CLOSED_STATUS && require('../config/billstack').isBillstackEnabled(req.user.companyId)) lead.set('billstack.syncStatus', 'PENDING');
     await lead.save();
 
     request.status = "approved";
@@ -4625,6 +4632,8 @@ exports.approveLeadStatusRequest = async (req, res) => {
     request.reviewNote = String(req.body?.reviewNote || "").trim().slice(0, 500);
     request.rejectionReason = "";
     await request.save();
+
+    if (lead.status === CLOSED_STATUS) await require('../services/billstackSync.service').scheduleSafely(req.user.companyId, 'lead', lead._id);
 
     await LeadActivity.create({
       lead: lead._id,

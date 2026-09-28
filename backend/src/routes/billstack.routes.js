@@ -1,0 +1,11 @@
+const router = require('express').Router();
+const { protect } = require('../middleware/auth.middleware');
+const { requireCompanyContext } = require('../middleware/company.middleware');
+const { requirePermission } = require('../middleware/permission.middleware');
+const { writeLimiter } = require('../middleware/rateLimit.middleware');
+const controller = require('../controllers/billstack.controller');
+router.use(protect, requireCompanyContext);
+router.get('/:type/:id', requirePermission('page.billing.view'), controller.status);
+router.post('/:type/:id/sync', writeLimiter, requirePermission('page.billing.sync_customer'), controller.sync);
+router.post('/:type/:id/handoff', writeLimiter, requirePermission('page.billing.create_invoice'), controller.handoff);
+module.exports = router;

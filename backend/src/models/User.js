@@ -29,6 +29,8 @@ const userSchema = new mongoose.Schema(
     // action-aware shape { pageKey, actions }, so existing employee grants
     // keep working while new grants can restrict create/edit/delete/etc.
     pageAccessOverride: { type: [mongoose.Schema.Types.Mixed], default: null },
+    // Sparse page actions overlay the existing defaults/full override.
+    pageActionOverrides: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
     name: {
       type: String,
       required: true,

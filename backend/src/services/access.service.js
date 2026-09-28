@@ -116,9 +116,19 @@ const buildAccessProfile = async (user) => {
     ));
   }
 
+  for (const [pageKey, actions] of Object.entries(user?.pageActionOverrides || {})) {
+    if (!isValidPageKey(pageKey) || !Array.isArray(actions)) continue;
+    pages = pages.filter(page => page.pageKey !== pageKey);
+    if (actions.length) pages.push(...normalizePageEntries([{ pageKey, actions }]));
+  }
+  pages = withAlwaysAccessiblePages(pages);
+
   const permissions = [
     ...new Set([
-      ...legacyPermissions.filter((permission) => !hasPageOverride || !permission.startsWith("page.")),
+      ...legacyPermissions.filter((permission) => {
+        if (permission.startsWith('page.') && Object.prototype.hasOwnProperty.call(user?.pageActionOverrides || {}, permission.split('.')[1])) return false;
+        return !hasPageOverride || !permission.startsWith('page.');
+      }),
       ...toPagePermissions(pages),
       // Coworking sub-routes still use their legacy capability names, so mirror
       // each explicitly granted page action into those API permissions.
@@ -161,6 +171,7 @@ const resolveAccessProfile = async (user) => {
     String(user?.companyId || ""),
     String(user?.role || ""),
     JSON.stringify(user?.pageAccessOverride ?? null),
+    JSON.stringify(user?.pageActionOverrides ?? {}),
   ].join("|");
 
   const cached = accessProfileCache.get(cacheKey);

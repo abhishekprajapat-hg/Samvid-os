@@ -1,5 +1,7 @@
 const router = require("express").Router();
 const BoardState = require("../models/CoworkingBoardState");
+const { bridgeSafely, preserveBindings } = require('../services/coworkingBoardIdentity.service');
+const { isBillstackEnabled } = require('../config/billstack');
 const { writeLimiter } = require("../middleware/rateLimit.middleware");
 
 /*
@@ -49,12 +51,14 @@ router.put("/", writeLimiter, async (req, res) => {
       return res.status(413).json({ message: "The board is too large to save" });
     }
 
+    const existing = await BoardState.findOne({ companyId: req.user.companyId }).select('version state').lean();
     const trimmed = {
-      cabins: state.cabins,
+      // A browser cannot certify a canonical binding. The bridge validates it
+      // after this save and persists the verification under the version CAS.
+      cabins: preserveBindings(state.cabins, existing?.state?.cabins, req.user.companyId),
       activity: Array.isArray(state.activity) ? state.activity.slice(0, MAX_ACTIVITY_ENTRIES) : [],
     };
     const expected = Number(req.body?.version);
-    const existing = await BoardState.findOne({ companyId: req.user.companyId }).select("version").lean();
     const current = existing?.version || 0;
 
     /*
@@ -75,7 +79,7 @@ router.put("/", writeLimiter, async (req, res) => {
     const saved = await BoardState.findOneAndUpdate(
       { companyId: req.user.companyId, ...(existing ? { version: current } : {}) },
       {
-        $set: { state: trimmed, updatedBy: req.user._id, updatedByName: req.user.name || "" },
+        $set: { state: trimmed, billingBridgePending: isBillstackEnabled(req.user.companyId), updatedBy: req.user._id, updatedByName: req.user.name || "" },
         $inc: { version: 1 },
         $setOnInsert: { companyId: req.user.companyId },
       },
@@ -85,7 +89,8 @@ router.put("/", writeLimiter, async (req, res) => {
       return res.status(409).json({ message: "The board changed while saving. Reload and try again." });
     }
 
-    res.json({ version: saved.version, updatedAt: saved.updatedAt, updatedByName: saved.updatedByName });
+    const bridged = await bridgeSafely(saved);
+    res.json({ version: bridged.version, state: bridged.state, updatedAt: bridged.updatedAt, updatedByName: bridged.updatedByName });
   } catch (error) {
     if (error.code === 11000) {
       return res.status(409).json({ message: "The board changed while saving. Reload and try again." });

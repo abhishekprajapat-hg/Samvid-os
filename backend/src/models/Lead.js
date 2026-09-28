@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 
 const leadSchema = new mongoose.Schema(
   {
+    billstack: { type: require('./billstackState'), default: () => ({}) },
     name: { type: String, required: true },
     phone: { type: String, required: true, index: true },
     email: String,

@@ -19,6 +19,6 @@ router.get("/me", async (req, res) => {
     return res.status(500).json({ message: "Unable to load page access" });
   }
 });
-router.get("/users/:userId/pages", checkRole(["ADMIN"]), userPageAccess.handle());
-router.patch("/users/:userId/pages", writeLimiter, checkRole(["ADMIN"]), userPageAccess.handle(true));
+router.get("/users/:userId/pages", checkRole(["ADMIN", "MANAGER"]), userPageAccess.handle());
+router.patch("/users/:userId/pages", writeLimiter, checkRole(["ADMIN", "MANAGER"]), userPageAccess.handle(true));
 module.exports = router;

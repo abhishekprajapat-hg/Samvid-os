@@ -91,6 +91,8 @@ const addMonths = (iso, months) => {
 const addDays = (iso, days) => new Date(new Date(iso).getTime() + days * DAY).toISOString();
 
 const uid = (prefix) => `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+// getRandomValues also works on the existing HTTP LAN development setup.
+const clientIdentity = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('');
 const slug = (name) => String(name).toLowerCase().replace(/[^a-z]+/g, "");
 
 /*
@@ -168,6 +170,7 @@ export const boardReducer = (state, action) => {
   switch (action.type) {
     case "ONBOARD": {
       const { cabinCodes, client, terms } = action;
+      const identityKey = client.identityKey || clientIdentity();
       const selected = cabins.filter((cabin) => cabinCodes.includes(cabin.code));
       const startDate = new Date(terms.startDate).toISOString();
       const endDate = addMonths(startDate, terms.termMonths);
@@ -179,7 +182,7 @@ export const boardReducer = (state, action) => {
           status: "BOOKED",
           vacantSince: null,
           holdExpiresAt: null,
-          client: { ...client, id: client.id || slug(client.name), since: startDate },
+          client: { ...client, identityKey, id: client.id || identityKey, since: startDate },
           contract: {
             id: agreementId,
             startDate,
@@ -219,7 +222,7 @@ export const boardReducer = (state, action) => {
           status: "RESERVED",
           vacantSince: null,
           holdExpiresAt: addDays(now, days),
-          client: { id: slug(name), name, industry: "Prospect", contactPerson: "", phone: "", email: "", gstin: "" },
+          client: { id: uid('prospect'), identityKey: clientIdentity(), name, industry: "Prospect", contactPerson: "", phone: "", email: "", gstin: "" },
           contract: {
             id: uid("HOLD").toUpperCase(),
             startDate: addDays(now, days),
@@ -543,6 +546,20 @@ export const resetBoard = () => {
 
 /** Reducer wrapper that keeps an undo stack and re-derives the day counts. */
 export const boardWithHistory = (state, action) => {
+  if (action.type === 'BILLING_METADATA') {
+    const cabins = state.cabins.map(cabin => {
+      const sent = action.submitted?.cabins?.find(item => item.code === cabin.code);
+      const saved = action.state?.cabins?.find(item => item.code === cabin.code);
+      if (!cabin.client || !sent?.client || !saved?.client || cabin.client.id !== sent.client.id
+        || cabin.client.identityKey !== sent.client.identityKey) return cabin;
+      const client = { ...cabin.client };
+      for (const key of ['identityKey', 'canonicalClientId', 'billingIdentityVerified', 'billingBindingEstablished', 'billingBindingConflict', 'billingIdentityError']) {
+        if (saved.client[key] === undefined) delete client[key]; else client[key] = saved.client[key];
+      }
+      return { ...cabin, client };
+    });
+    return { ...state, cabins };
+  }
   /*
    * Hydration from the server. It replaces the floor outright and clears the
    * undo stack, because undoing back past someone else's saved state would push
@@ -553,20 +570,21 @@ export const boardWithHistory = (state, action) => {
       cabins: Array.isArray(action.state?.cabins) ? action.state.cabins : [],
       activity: Array.isArray(action.state?.activity) ? action.state.activity : [],
     });
-    return { cabins: decorate(swept.cabins), activity: swept.activity, undoStack: [] };
+    return { cabins: decorate(swept.cabins), activity: swept.activity, undoStack: [], revision: state.revision || 0 };
   }
   if (action.type === "UNDO") {
     if (!state.undoStack.length) return state;
     const [previous, ...rest] = state.undoStack;
-    return { cabins: decorate(previous.cabins), activity: previous.activity, undoStack: rest };
+    return { cabins: decorate(previous.cabins), activity: previous.activity, undoStack: rest, revision: (state.revision || 0) + 1 };
   }
-  if (action.type === "RESET") return resetBoard();
+  if (action.type === "RESET") return { ...resetBoard(), revision: (state.revision || 0) + 1 };
 
   const next = boardReducer({ cabins: state.cabins, activity: state.activity }, action);
   if (next.cabins === state.cabins && next.activity === state.activity) return state;
 
   return {
     cabins: decorate(next.cabins),
+    revision: (state.revision || 0) + 1,
     activity: next.activity,
     undoStack: [{ cabins: state.cabins, activity: state.activity }, ...state.undoStack].slice(0, UNDO_DEPTH),
   };
@@ -591,6 +609,8 @@ export const useBoard = () => {
   // Skips the save that would otherwise fire for the server's own payload.
   const hydrating = useRef(true);
   const versionRef = useRef(0);
+  const latestBoard = useRef(board);
+  useEffect(() => { latestBoard.current = board; saveBoard(board); }, [board]);
 
   useEffect(() => {
     let active = true;
@@ -618,13 +638,14 @@ export const useBoard = () => {
   useEffect(() => {
     // The local cache is written every time regardless, so a failed save still
     // leaves the work recoverable on this machine.
-    saveBoard(board);
     if (hydrating.current || sync.loading) return undefined;
 
     const timer = window.setTimeout(() => {
-      pushBoardState(board, versionRef.current)
-        .then(({ version }) => {
+      const submitted = latestBoard.current;
+      pushBoardState(submitted, versionRef.current)
+        .then(({ version, state }) => {
           versionRef.current = version;
+          if (state) dispatch({ type: 'BILLING_METADATA', state, submitted });
           setSync((current) => ({ ...current, version, error: "", savedAt: new Date() }));
         })
         .catch((error) => {
@@ -632,7 +653,7 @@ export const useBoard = () => {
         });
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [board, sync.loading]);
+  }, [board.revision, sync.loading]);
 
   return [board, dispatch, sync];
 };
@@ -680,18 +701,18 @@ export const clientsFrom = (cabins) => {
  * they sit in, former ones from the history each cabin keeps. There is no
  * separate client table to fall out of step with the board.
  *
- * A name that appears in both is one record, not two. A tenant who left C-7
- * and later took A-3 is a returning client, and that is worth seeing on their
- * profile rather than filing them twice under opposite headings.
+ * Match current and former stays by client identity. Equal names alone must
+ * not combine unrelated customers or route Billing to the wrong profile.
  */
 export const directoryFrom = (cabins) => {
   const active = clientsFrom(cabins);
-  const byName = new Map(active.map((client) => [client.name, { ...client, kind: "active", stays: [], totalMonths: 0, lastLeft: null }]));
+  const byIdentity = new Map(active.map((client) => [client.id, { ...client, kind: "active", stays: [], totalMonths: 0, lastLeft: null }]));
 
   cabins.forEach((cabin) => {
     cabin.previousClients.forEach((stay) => {
       const snapshot = stay.client || {};
-      const record = byName.get(stay.name) || {
+      const identity = stay.clientId || snapshot.id || slug(stay.name);
+      const record = byIdentity.get(identity) || {
         ...snapshot,
         id: stay.clientId || snapshot.id || slug(stay.name),
         name: stay.name,
@@ -723,11 +744,11 @@ export const directoryFrom = (cabins) => {
       });
       record.totalMonths += monthsBetween(stay.from, stay.to);
       if (!record.lastLeft || new Date(stay.to) > new Date(record.lastLeft)) record.lastLeft = stay.to;
-      byName.set(stay.name, record);
+      byIdentity.set(identity, record);
     });
   });
 
-  return [...byName.values()]
+  return [...byIdentity.values()]
     .map((client) => ({
       ...client,
       // Active plus a history means they left and came back.

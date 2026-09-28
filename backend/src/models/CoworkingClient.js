@@ -49,6 +49,7 @@ const documentSchema = new mongoose.Schema({
 
 const coworkingClientSchema = new mongoose.Schema(
   {
+    billstack: { type: require('./billstackState'), default: () => ({}) },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,
