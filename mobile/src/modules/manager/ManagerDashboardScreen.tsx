@@ -1,67 +1,48 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import Svg, { Circle, Defs, G, LinearGradient, Path, Rect, Stop, Text as SvgText } from "react-native-svg";
-import { Icon } from "../../components/ui/Icon";
-import { Screen } from "../../components/common/Screen";
+import { Glyph, type GlyphName } from "../../components/ui/Glyph";
 import { useAuth } from "../../context/AuthContext";
 import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
-import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
-import { elevation, radii, spacing, typography } from "../../theme/tokens";
-import { themedStyles, themePalette } from "../../theme/themedStyles";
-import type { InventoryAsset, Lead, User } from "../../types";
+import { brand, brandStyles, layout, round, type as t } from "../../theme/brand";
+import type { InventoryAsset, Lead } from "../../types";
 
 /*
- * The mobile cut of frontend/src/modules/manager/ManagerDashboard.jsx - the
- * page ADMIN and MANAGER land on. Section for section it is the same page:
- * greeting, five KPI tiles, occupancy area chart, inventory donut, today's
- * follow-ups, pipeline snapshot, recent activity, revenue bars, upcoming
- * visits, quick actions, team footer.
+ * Home, drawn to the mobile comp.
  *
- * What changes is only what has to. Web lays the page out in three wide rows;
- * a phone has one column, so the rows stack and the tile grids go two-up. The
- * hex literals the web file writes inline resolve to the nearest token here,
- * per the rule in docs/mobile/01_MOBILE_DESIGN_SYSTEM.md - #f6f8fc is slate-50,
- * #1747e8 is blue-600, and so on down the file.
+ * The comp is not the web dashboard reorganised for a phone - it is a
+ * different page: a greeting, four headline numbers, a revenue strip, four
+ * quick actions, the inventory split, and the two things happening next. The
+ * web page's occupancy area chart, inventory donut, pipeline snapshot, recent
+ * activity, revenue bar chart and team footer are not on it, so they are not
+ * here. Everything they linked to is still reachable - Inventory, Leads,
+ * Finance and Calendar all have their own destinations.
+ *
+ * The numbers come from the same endpoints the old page used, so the data
+ * contract in docs/mobile/00_MOBILE_PARITY_SPEC.md is unchanged.
+ *
+ * Sizes are the comp's, measured at 2x off a 430pt frame: an 18pt gutter, 9pt
+ * between grid cells, 100pt stat tiles, a 70pt revenue strip. Widths flex, so
+ * the same screen holds at 320pt.
  */
 
 const REFRESH_INTERVAL_MS = 30000;
 
-type StageKey = "NEW" | "CONTACTED" | "INTERESTED" | "SITE_VISIT" | "REQUESTED" | "CLOSED";
-
-type Stage = {
-  key: StageKey;
-  label: string;
-  icon: string;
-  color: string;
-  soft: string;
-};
-
-/*
- * A function, not a constant. themePalette answers for the scheme active when
- * it is read, and a module-level array reads it once at import - when the
- * scheme is always still light.
- */
-const buildStages = (): Stage[] => [
-  { key: "NEW", label: "New", icon: "todo", color: themePalette.blue[500], soft: themePalette.blue[50] },
-  { key: "CONTACTED", label: "Contacted", icon: "call", color: themePalette.blue[400], soft: themePalette.blue[50] },
-  { key: "INTERESTED", label: "Interested", icon: "people", color: themePalette.emerald[500], soft: themePalette.emerald[50] },
-  { key: "SITE_VISIT", label: "Visit", icon: "calendarDays", color: themePalette.amber[400], soft: themePalette.amber[50] },
-  { key: "REQUESTED", label: "Requested", icon: "activity", color: themePalette.rose[500], soft: themePalette.rose[50] },
-  { key: "CLOSED", label: "Closed", icon: "checkmark-circle-outline", color: themePalette.emerald[400], soft: themePalette.emerald[50] },
-];
-
-/* The page header strings web builds in resolveHomeHeader(). */
-const HOME_SCOPE: Record<string, string> = {
-  ADMIN: "Admin Command Center",
-  MANAGER: "Management Command Center",
-};
-
 /*
  * Fields the API returns on a lead that the shared Lead type does not carry
- * yet - the web dashboard reads all three straight off the raw payload.
+ * yet - the dashboard reads all three straight off the raw payload.
  */
 type DashboardLead = Lead & {
   siteVisitDate?: string;
@@ -71,9 +52,12 @@ type DashboardLead = Lead & {
 
 type DatedLead = DashboardLead & { when: Date | null };
 
+/* The comp writes the amount tight against the sign: "0", not " 0". */
 const money = (value: number) => {
   const amount = Number(value || 0);
-  return amount >= 100000 ? `₹ ${(amount / 100000).toFixed(1)}L` : `₹ ${amount.toLocaleString("en-IN")}`;
+  return amount >= 100000
+    ? `₹${(amount / 100000).toFixed(1)}L`
+    : `₹${amount.toLocaleString("en-IN")}`;
 };
 
 const dateOf = (value?: string | null) => {
@@ -81,231 +65,119 @@ const dateOf = (value?: string | null) => {
   return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
 };
 
-const initials = (name = "") =>
-  name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join("")
-    .toUpperCase() || "NA";
+const timeOf = (value: Date) =>
+  value
+    .toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })
+    .toUpperCase();
 
-const timeOf = (value: Date) => value.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+/*
+ * "Tue, 22 Sep" - the comp's date line.
+ *
+ * Spelled out rather than handed to Intl: recent ICU renders September's short
+ * month as "Sept", which is four characters where the comp has three and wide
+ * enough to change the line.
+ */
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const dayLabel = (value: Date) =>
+  `${WEEKDAYS[value.getDay()]}, ${String(value.getDate()).padStart(2, "0")} ${MONTHS[value.getMonth()]}`;
+
+const greetingFor = (hour: number) =>
+  hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+/** The comp greets by first name. */
+const firstNameOf = (name?: string) => String(name || "").trim().split(/\s+/)[0] || "there";
 
 const statusLabel = (status?: string) => String(status || "").replace(/_/g, " ");
 
+/*
+ * The comp puts a place under the visit's title, against a pin. A lead carries
+ * no address of its own, so it comes from the unit the visit is against, and
+ * falls back to the city the enquiry was filed under.
+ */
+const placeOf = (lead: DashboardLead) => {
+  const linked = lead.inventoryId;
+  if (linked && typeof linked === "object" && linked.location) return linked.location;
+  return lead.city || "";
+};
+
 /* ---------------------------------------------------------- building blocks -- */
 
-/*
- * Web's local <Card>: a 48px header bar with a divider under it, the title on
- * the left and an optional action on the right. Content sits flush, so each
- * section pads itself the way it wants to.
- */
-const DashCard = ({
+/** A section heading, with the comp's optional link on the right. */
+const SectionHead = ({
   title,
-  icon,
-  action,
-  children,
+  onPress,
+  style,
 }: {
   title: string;
-  /*
-   * Web prefixes five of these titles with a glyph: 🏢 ♨ ▣ ⌁ ▥. Three of
-   * those live in Unicode blocks Android has no guaranteed font for, and a
-   * tofu box is a worse match for the design than the lucide mark that means
-   * the same thing. So the mark is an icon here rather than a character.
-   */
-  icon?: string;
-  action?: React.ReactNode;
-  children: React.ReactNode;
+  onPress?: () => void;
+  style?: object;
 }) => (
-  <View style={styles.card}>
-    <View style={styles.cardHeader}>
-      <View style={styles.cardTitleWrap}>
-        {icon ? <Icon name={icon} size={15} color={themePalette.slate[600]} /> : null}
-        <Text style={styles.cardTitle} numberOfLines={1}>
-          {title}
-        </Text>
-      </View>
-      {action}
-    </View>
-    {children}
+  <View style={[styles.sectionHead, style]}>
+    <Text style={styles.sectionTitle}>{title}</Text>
+    {onPress ? (
+      <Pressable style={styles.sectionLink} onPress={onPress} hitSlop={10} accessibilityRole="button">
+        <Text style={styles.sectionLinkText}>View all</Text>
+        <Glyph name="chevron-forward" size={16} color={brand.ink} />
+      </Pressable>
+    ) : null}
   </View>
 );
 
-const CardLink = ({ label = "View All", onPress }: { label?: string; onPress: () => void }) => (
-  <Pressable onPress={onPress} hitSlop={8} accessibilityRole="button">
-    <Text style={styles.cardLink}>{label} →</Text>
-  </Pressable>
-);
-
-/*
- * Web's single-option <select>. It filters nothing there either, so it reads
- * as the static label it is rather than pretending to be a picker.
+/**
+ * The two list cards at the foot of the page: a tinted badge, a title, a muted
+ * "View all", and a body indented to the title's column.
  */
-const RangePill = ({ label }: { label: string }) => (
-  <View style={styles.rangePill}>
-    <Text style={styles.rangePillText}>{label}</Text>
-    <Icon name="chevron-down" size={12} color={themePalette.slate[500]} />
-  </View>
-);
-
-const EmptyNote = ({ label, tall }: { label: string; tall?: boolean }) => (
-  <Text style={[styles.emptyNote, tall && styles.emptyNoteTall]}>{label}</Text>
-);
-
-/*
- * The occupancy area chart. Web draws a fixed decorative path rather than
- * charting anything, so this draws the same one, stretched the same way.
- */
-const OccupancyChart = () => (
-  <View style={styles.occBox}>
-    <View style={styles.occGrid} pointerEvents="none">
-      {[0, 1, 2, 3].map((row) => (
-        <View key={row} style={styles.occGridRow} />
-      ))}
-    </View>
-    <View style={styles.occChartLayer} pointerEvents="none">
-      <Svg width="100%" height="100%" viewBox="0 0 600 190" preserveAspectRatio="none">
-        <Defs>
-          <LinearGradient id="occupancyFill" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={themePalette.blue[500]} stopOpacity="0.28" />
-            <Stop offset="1" stopColor={themePalette.blue[500]} stopOpacity="0" />
-          </LinearGradient>
-        </Defs>
-        <Path
-          d="M15 145L120 115L225 86L330 57L435 57L540 36L585 24L585 178L15 178Z"
-          fill="url(#occupancyFill)"
-        />
-        <Path
-          d="M15 145L120 115L225 86L330 57L435 57L540 36L585 24"
-          fill="none"
-          stroke={themePalette.blue[600]}
-          strokeWidth={2}
-        />
-      </Svg>
-    </View>
-    <View style={styles.occMonths} pointerEvents="none">
-      {["Apr", "May", "Jun", "Jul", "Aug", "Sep"].map((month) => (
-        <Text key={month} style={styles.occMonth}>
-          {month}
-        </Text>
-      ))}
-    </View>
-  </View>
-);
-
-/*
- * The inventory donut. Same trick web uses: r = 15.9155 makes the
- * circumference 100, so each slice's dash array is just its percentage.
- */
-const InventoryDonut = ({
-  total,
-  segments,
+const ListCard = ({
+  icon,
+  iconColor,
+  badgeColor,
+  title,
+  onViewAll,
+  /* The comp sets the body's own gap per card: 15 under a two-line note, 8
+     under a row. */
+  bodyGap = 15,
+  children,
+  style,
 }: {
-  total: number;
-  segments: Array<{ label: string; value: number; color: string }>;
-}) => {
-  let offset = 0;
-  return (
-    <View style={styles.donutWrap}>
-      <Svg width={128} height={128} viewBox="0 0 42 42">
-        <G rotation={-90} origin="21, 21">
-          <Circle cx="21" cy="21" r="15.9155" fill="none" stroke={themePalette.border} strokeWidth={6} />
-          {segments.map((segment) => {
-            const share = total ? (segment.value / total) * 100 : 0;
-            const slice = (
-              <Circle
-                key={segment.label}
-                cx="21"
-                cy="21"
-                r="15.9155"
-                fill="none"
-                stroke={segment.color}
-                strokeWidth={6}
-                strokeDasharray={[share, 100 - share]}
-                strokeDashoffset={-offset}
-              />
-            );
-            offset += share;
-            return slice;
-          })}
-        </G>
-      </Svg>
-      <View style={styles.donutCenter} pointerEvents="none">
-        <Text style={styles.donutTotal}>{total}</Text>
-        <Text style={styles.donutCaption}>Total Units</Text>
+  icon: GlyphName;
+  iconColor: string;
+  badgeColor: string;
+  title: string;
+  onViewAll: () => void;
+  bodyGap?: number;
+  children: React.ReactNode;
+  style?: object;
+}) => (
+  <View style={[styles.card, style]}>
+    <View style={styles.cardHead}>
+      <View style={[styles.cardBadge, { backgroundColor: badgeColor }]}>
+        <Glyph name={icon} size={15} color={iconColor} />
       </View>
+      <Text style={styles.cardTitle} numberOfLines={1}>
+        {title}
+      </Text>
+      <Pressable style={styles.cardLink} onPress={onViewAll} hitSlop={10} accessibilityRole="button">
+        <Text style={styles.cardLinkText}>View all</Text>
+        <Glyph name="chevron-forward" size={15} color={brand.textMuted} />
+      </Pressable>
     </View>
-  );
-};
-
-/*
- * Revenue bars. Web's nine bars are hardcoded percentages behind a mint
- * gradient; both carry over as they are.
- */
-const REVENUE_BARS = [18, 26, 38, 54, 59, 67, 78, 91, 100];
-const REVENUE_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep"];
-
-const RevenueChart = () => {
-  const width = 330;
-  const height = 176;
-  const padX = 14;
-  const plot = 130;
-  const baseline = 146;
-  const slot = (width - padX * 2) / REVENUE_BARS.length;
-  const barWidth = Math.min(20, slot * 0.6);
-  const barX = (index: number) => padX + index * slot + (slot - barWidth) / 2;
-
-  return (
-    <View style={styles.revenueBox}>
-      <Svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
-        <Defs>
-          <LinearGradient id="revenueFill" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={themePalette.emerald[200]} />
-            <Stop offset="1" stopColor={themePalette.emerald[300]} />
-          </LinearGradient>
-        </Defs>
-        {REVENUE_BARS.map((percent, index) => {
-          const barHeight = (percent / 100) * plot;
-          return (
-            <Rect
-              key={`bar-${REVENUE_MONTHS[index]}`}
-              x={barX(index)}
-              y={baseline - barHeight}
-              width={barWidth}
-              height={barHeight}
-              rx={4}
-              fill="url(#revenueFill)"
-            />
-          );
-        })}
-        {REVENUE_MONTHS.map((month, index) => (
-          <SvgText
-            key={`label-${month}`}
-            x={barX(index) + barWidth / 2}
-            y={baseline + 16}
-            fontSize="9"
-            textAnchor="middle"
-            fill={themePalette.slate[500]}
-          >
-            {month}
-          </SvgText>
-        ))}
-      </Svg>
-    </View>
-  );
-};
+    <View style={[styles.cardBody, { marginTop: bodyGap }]}>{children}</View>
+  </View>
+);
 
 /* ---------------------------------------------------------------- screen -- */
 
 export const ManagerDashboardScreen = () => {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [leads, setLeads] = useState<DashboardLead[]>([]);
   const [inventory, setInventory] = useState<InventoryAsset[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
 
   const load = useCallback(async (silent = false) => {
     try {
@@ -313,14 +185,9 @@ export const ManagerDashboardScreen = () => {
       else setLoading(true);
       setError("");
 
-      const [leadRows, inventoryRows, userRows] = await Promise.all([
-        getAllLeads(),
-        getInventoryAssets(),
-        getUsers({ pagination: "false", fields: "_id,name,role,isActive" }),
-      ]);
+      const [leadRows, inventoryRows] = await Promise.all([getAllLeads(), getInventoryAssets()]);
       setLeads(Array.isArray(leadRows) ? (leadRows as DashboardLead[]) : []);
       setInventory(Array.isArray(inventoryRows) ? inventoryRows : []);
-      setUsers(Array.isArray(userRows?.users) ? userRows.users : []);
     } catch (e) {
       setError(toErrorMessage(e, "Failed to load dashboard"));
     } finally {
@@ -360,35 +227,22 @@ export const ManagerDashboardScreen = () => {
       .map((lead): DatedLead => ({ ...lead, when: dateOf(lead.nextFollowUp) }))
       .filter((lead) => lead.when?.toDateString() === now.toDateString())
       .sort((a, b) => (a.when?.getTime() || 0) - (b.when?.getTime() || 0))
-      .slice(0, 4);
-    const upcoming = leads
-      .map((lead): DatedLead => ({ ...lead, when: dateOf(lead.nextFollowUp || lead.siteVisitDate) }))
-      .filter((lead) => !!lead.when && lead.when >= now)
-      .sort((a, b) => (a.when?.getTime() || 0) - (b.when?.getTime() || 0))
       .slice(0, 3);
-    const recent = [...leads]
-      .sort((a, b) => (dateOf(b.updatedAt)?.getTime() || 0) - (dateOf(a.updatedAt)?.getTime() || 0))
-      .slice(0, 4);
-
-    const stages = buildStages().map((stage) => ({
-      ...stage,
-      value: leads.filter((lead) => String(lead.status).toUpperCase() === stage.key).length,
-    }));
+    const upcoming = leads
+      .map((lead): DatedLead => ({ ...lead, when: dateOf(lead.siteVisitDate || lead.nextFollowUp) }))
+      .filter((lead) => !!lead.when && lead.when >= now)
+      .sort((a, b) => (a.when?.getTime() || 0) - (b.when?.getTime() || 0))[0];
 
     return {
       total,
       available,
-      blocked,
-      maintenance,
       occupied,
       occupancy: total ? Math.round((occupied / total) * 100) : 0,
-      closed,
-      open,
+      clients: closed.length,
+      open: open.length,
       revenue,
       follow,
       upcoming,
-      recent,
-      stages,
     };
   }, [inventory, leads]);
 
@@ -397,655 +251,630 @@ export const ManagerDashboardScreen = () => {
     [navigation],
   );
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good Morning" : hour < 17 ? "Good Afternoon" : "Good Evening";
-  const stageMax = Math.max(...summary.stages.map((stage) => stage.value), 1);
-  const interested = summary.stages.find((stage) => stage.key === "INTERESTED")?.value || 0;
-  const activeTeam = users.filter((member) => member?.isActive !== false).length;
-  const scope = HOME_SCOPE[String(user?.role || "")] || "Workspace Command Center";
+  /*
+   * Inventory, Leads and Tasks are tabs. Navigating to them by name would push
+   * the stack's copy on top of the bar instead, which shows a navigator header
+   * above the page header those screens already draw.
+   */
+  const goTab = useCallback(
+    (screen: string) => () => navigation.navigate("MainTabs", { screen }),
+    [navigation],
+  );
 
-  const segments = [
-    { label: "Available", value: summary.available, color: themePalette.emerald[500] },
-    { label: "Occupied", value: summary.occupied, color: themePalette.blue[500] },
-    { label: "Blocked", value: summary.blocked, color: themePalette.amber[400] },
-    { label: "Under Maintenance", value: summary.maintenance, color: themePalette.rose[500] },
+  const now = new Date();
+
+  const stats: Array<{ icon: GlyphName; label: string; value: string; onPress: () => void }> = [
+    { icon: "home", label: "Properties", value: String(summary.total), onPress: goTab("Inventory") },
+    { icon: "people", label: "Open leads", value: String(summary.open), onPress: goTab("Leads") },
+    { icon: "pie-chart", label: "Occupancy", value: `${summary.occupancy}%`, onPress: goTab("Inventory") },
+    { icon: "person", label: "Clients", value: String(summary.clients), onPress: go("CoworkingClients") },
   ];
 
-  const kpis = [
-    {
-      label: "Total Properties",
-      value: String(summary.total),
-      help: "Active in portfolio",
-      icon: "inventory",
-      color: themePalette.blue[600],
-      tint: themePalette.blue[50],
-      down: false,
-      onPress: go("Inventory"),
-    },
-    {
-      label: "Total Clients",
-      value: String(summary.closed.length),
-      help: "Across all locations",
-      icon: "people",
-      color: themePalette.blue[600],
-      tint: themePalette.blue[50],
-      down: false,
-      onPress: go("CoworkingClients"),
-    },
-    {
-      label: "Current Occupancy",
-      value: `${summary.occupancy}%`,
-      help: `${summary.occupied}/${summary.total || 0} units occupied`,
-      icon: "targets",
-      color: themePalette.blue[600],
-      tint: themePalette.blue[50],
-      down: false,
-      onPress: go("Inventory"),
-    },
-    {
-      label: "Open Leads",
-      value: String(summary.open.length),
-      help: `${interested} interested`,
-      icon: "activity",
-      color: themePalette.rose[500],
-      tint: themePalette.rose[50],
-      down: true,
-      onPress: go("Leads"),
-    },
-    {
-      label: "Monthly Revenue",
-      value: money(summary.revenue),
-      help: "Expected this month",
-      icon: "revenue",
-      color: themePalette.emerald[500],
-      tint: themePalette.emerald[50],
-      down: false,
-      onPress: go("Finance"),
-    },
+  const quickActions: Array<{ icon: GlyphName; label: string; onPress: () => void }> = [
+    { icon: "add-circle", label: "Add property", onPress: go("AddProperty") },
+    { icon: "people", label: "Add client", onPress: go("CoworkingClients") },
+    { icon: "calendar-outline", label: "Schedule visit", onPress: go("Calendar") },
+    { icon: "checkbox", label: "Create task", onPress: go("NewTask") },
   ];
 
-  const quickActions = [
-    { label: "Add Property", icon: "inventory", tint: themePalette.blue[50], color: themePalette.blue[700], onPress: go("Inventory") },
-    { label: "Add Client", icon: "addUser", tint: themePalette.emerald[50], color: themePalette.emerald[700], onPress: go("CoworkingClients") },
-    { label: "Schedule Visit", icon: "calendarDays", tint: themePalette.amber[50], color: themePalette.amber[700], onPress: go("Calendar") },
-    { label: "Create Task", icon: "quickAction", tint: themePalette.violet[50], color: themePalette.violet[700], onPress: go("Tasks") },
-  ];
+  /*
+   * The split bar is drawn from the two counts rather than the comp's fixed
+   * proportions, so it stays honest when the portfolio changes. An empty
+   * portfolio leaves the track showing rather than dividing by zero.
+   */
+  const availableShare = summary.total ? summary.available / summary.total : 0;
 
   return (
-    <Screen title="Home" subtitle={scope} loading={loading} error={error} onRetry={() => load()}>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
-      >
-        <View style={styles.greeting}>
-          <Text style={styles.greetingTitle}>
-            {greeting}, {user?.name || "Admin"} 👋
-          </Text>
-          <Text style={styles.greetingSub}>Here&apos;s what&apos;s happening with your workspace today.</Text>
+    <SafeAreaView style={styles.root} edges={["left", "right"]}>
+      {loading ? (
+        <View style={styles.centred}>
+          <ActivityIndicator size="large" color={brand.green} />
         </View>
-
-        <View style={styles.tileGrid}>
-          {kpis.map((kpi) => (
-            <Pressable key={kpi.label} style={styles.kpiCard} onPress={kpi.onPress} accessibilityRole="button">
-              <View style={[styles.kpiIcon, { backgroundColor: kpi.tint }]}>
-                <Icon name={kpi.icon} size={20} color={kpi.color} />
-              </View>
-              <Text style={styles.kpiLabel} numberOfLines={1}>
-                {kpi.label}
-              </Text>
-              <View style={styles.kpiValueRow}>
-                <Text style={styles.kpiValue} numberOfLines={1}>
-                  {kpi.value}
-                </Text>
-                <View style={styles.kpiTrend}>
-                  <Icon
-                    name={kpi.down ? "trendDown" : "trend"}
-                    size={11}
-                    color={kpi.down ? themePalette.rose[500] : themePalette.emerald[600]}
-                  />
-                  <Text style={[styles.kpiTrendText, { color: kpi.down ? themePalette.rose[500] : themePalette.emerald[600] }]}>
-                    {kpi.down ? "6%" : "8%"}
-                  </Text>
-                </View>
-              </View>
-              <Text style={styles.kpiHelp} numberOfLines={1}>
-                {kpi.help}
-              </Text>
+      ) : (
+        <ScrollView
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: 24 + Math.max(insets.bottom, Platform.OS === "android" ? 16 : 0) },
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => load(true)}
+              tintColor={brand.green}
+            />
+          }
+        >
+          {/*
+           * A transient failure sits above the page rather than replacing it:
+           * the numbers behind it are the last good ones and still worth
+           * showing while a refresh is retried.
+           */}
+          {error ? (
+            <Pressable style={styles.errorBanner} onPress={() => load()} accessibilityRole="button">
+              <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorRetry}>Tap to retry</Text>
             </Pressable>
-          ))}
-        </View>
+          ) : null}
 
-        <DashCard title="Occupancy Overview" icon="inventory" action={<RangePill label="Last 6 Months" />}>
-          <OccupancyChart />
-        </DashCard>
-
-        <DashCard title="Inventory Status" icon="pieChart" action={<CardLink onPress={go("Inventory")} />}>
-          <View style={styles.donutRow}>
-            <InventoryDonut total={summary.total} segments={segments} />
-            <View style={styles.legend}>
-              {segments.map((segment) => (
-                <View key={segment.label} style={styles.legendRow}>
-                  <View style={[styles.legendDot, { backgroundColor: segment.color }]} />
-                  <Text style={styles.legendLabel} numberOfLines={1}>
-                    {segment.label}
-                  </Text>
-                  <Text style={styles.legendValue}>
-                    {segment.value} ({summary.total ? Math.round((segment.value / summary.total) * 100) : 0}%)
-                  </Text>
-                </View>
-              ))}
+          {/* ---- greeting ---- */}
+          <View style={styles.greetingRow}>
+            <View style={styles.greetingText}>
+              <Text style={styles.greeting} numberOfLines={2}>
+                {greetingFor(now.getHours())}, {firstNameOf(user?.name)}.
+              </Text>
+              <Text style={styles.date}>{dayLabel(now)}</Text>
             </View>
-          </View>
-        </DashCard>
 
-        <DashCard title="Today's Follow-ups" icon="list" action={<CardLink onPress={go("Leads")} />}>
-          <View style={styles.list}>
-            {summary.follow.length ? (
-              summary.follow.map((lead, index) => (
-                <Pressable key={lead._id} style={styles.listRow} onPress={go("Leads")} accessibilityRole="button">
-                  <View style={[styles.avatar, index % 2 ? styles.avatarAlt : null]}>
-                    <Text style={[styles.avatarText, index % 2 ? styles.avatarTextAlt : null]}>
-                      {initials(lead.name)}
-                    </Text>
-                  </View>
-                  <View style={styles.listBody}>
-                    <Text style={styles.listTitle} numberOfLines={1}>
-                      {lead.name || "Lead"}
-                    </Text>
-                    <Text style={styles.listSub} numberOfLines={1}>
-                      {statusLabel(lead.status)}
-                    </Text>
-                  </View>
-                  <Text style={styles.listTime}>{lead.when ? timeOf(lead.when) : ""}</Text>
-                </Pressable>
-              ))
-            ) : (
-              <EmptyNote label="No follow-ups today" tall />
-            )}
+            <Pressable
+              style={styles.cta}
+              onPress={goTab("Inventory")}
+              accessibilityRole="button"
+              accessibilityLabel="Find spaces"
+            >
+              <View style={styles.ctaText}>
+                <Text style={styles.ctaLine}>Find spaces</Text>
+                <Text style={styles.ctaLine}>Build tomorrow</Text>
+              </View>
+              <Glyph name="chevron-forward" size={18} color={brand.ink} />
+            </Pressable>
           </View>
-        </DashCard>
 
-        <DashCard title="Pipeline Snapshot">
-          <View style={[styles.tileGrid, styles.stageGrid]}>
-            {summary.stages.map((stage) => (
+          {/* ---- headline numbers ---- */}
+          <View style={styles.statRow}>
+            {stats.map((stat) => (
               <Pressable
-                key={stage.key}
-                style={[styles.stageCard, { backgroundColor: stage.soft }]}
-                onPress={go("Leads")}
+                key={stat.label}
+                style={styles.statTile}
+                onPress={stat.onPress}
                 accessibilityRole="button"
               >
-                <View style={styles.stageHead}>
-                  <Icon name={stage.icon} size={14} color={stage.color} />
-                  <Text style={styles.stageLabel} numberOfLines={1}>
-                    {stage.label}
-                  </Text>
-                </View>
-                <View style={styles.stageValueRow}>
-                  <Text style={styles.stageValue}>{stage.value}</Text>
-                  <Text style={styles.stageShare}>
-                    {leads.length ? Math.round((stage.value / leads.length) * 100) : 0}%
-                  </Text>
-                </View>
-                <View style={styles.stageTrack}>
-                  <View
-                    style={[
-                      styles.stageFill,
-                      { width: `${(stage.value / stageMax) * 100}%`, backgroundColor: stage.color },
-                    ]}
-                  />
-                </View>
+                <Glyph name={stat.icon} size={22} color={brand.green} />
+                <Text style={styles.statLabel} numberOfLines={1}>
+                  {stat.label}
+                </Text>
+                <Text
+                  style={styles.statValue}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
+                >
+                  {stat.value}
+                </Text>
               </Pressable>
             ))}
           </View>
-        </DashCard>
 
-        <DashCard title="Recent Activity" icon="activity" action={<CardLink onPress={go("Leads")} />}>
-          <View style={styles.list}>
-            {summary.recent.length ? (
-              summary.recent.map((lead, index) => (
-                <Pressable key={lead._id} style={styles.listRow} onPress={go("Leads")} accessibilityRole="button">
-                  <View style={styles.activityDot} />
-                  <View style={styles.listBody}>
-                    <Text style={styles.listTitle} numberOfLines={1}>
-                      {index ? statusLabel(lead.status) : "Lead updated"}
-                    </Text>
-                    <Text style={styles.listSub} numberOfLines={1}>
-                      {lead.name || lead.phone}
-                    </Text>
-                  </View>
-                  <Text style={styles.listTime}>
-                    {dateOf(lead.updatedAt)?.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) || ""}
-                  </Text>
-                </Pressable>
-              ))
-            ) : (
-              <EmptyNote label="No recent activity" />
-            )}
-          </View>
-        </DashCard>
+          {/* ---- revenue strip ---- */}
+          <Pressable style={styles.banner} onPress={go("Finance")} accessibilityRole="button">
+            <Glyph name="bar-chart" size={22} color={brand.green} />
+            <View style={styles.bannerText}>
+              <Text style={styles.bannerLabel}>Monthly revenue</Text>
+              <Text style={styles.bannerValue} numberOfLines={1}>
+                {money(summary.revenue)}
+              </Text>
+            </View>
+            {/* Decoration, not a chart - the comp draws four fixed bars. */}
+            <View style={styles.bannerBars} pointerEvents="none">
+              {[10, 20, 32, 50].map((height) => (
+                <View key={height} style={[styles.bannerBar, { height }]} />
+              ))}
+            </View>
+            <Glyph name="chevron-forward" size={20} color={brand.ink} />
+          </Pressable>
 
-        <DashCard title="Revenue Overview" icon="barChart" action={<RangePill label="This Year" />}>
-          <RevenueChart />
-        </DashCard>
-
-        <DashCard title="Upcoming Visits" action={<CardLink label="View Calendar" onPress={go("Calendar")} />}>
-          <View style={styles.list}>
-            {summary.upcoming.length ? (
-              summary.upcoming.map((lead) => (
-                <Pressable key={lead._id} style={styles.listRow} onPress={go("Calendar")} accessibilityRole="button">
-                  <View style={styles.visitIcon}>
-                    <Icon name="location-outline" size={16} color={themePalette.blue[600]} />
-                  </View>
-                  <View style={styles.listBody}>
-                    <Text style={styles.listTitle} numberOfLines={1}>
-                      {lead.projectInterested || lead.name}
-                    </Text>
-                    <Text style={styles.listSub} numberOfLines={1}>
-                      {lead.name}
-                    </Text>
-                  </View>
-                  <Text style={styles.listTime}>{lead.when ? timeOf(lead.when) : ""}</Text>
-                </Pressable>
-              ))
-            ) : (
-              <EmptyNote label="No upcoming visits" />
-            )}
-          </View>
-        </DashCard>
-
-        <DashCard title="Quick Actions">
-          <View style={[styles.tileGrid, styles.actionGrid]}>
+          {/* ---- quick actions ---- */}
+          <SectionHead title="Quick actions" style={styles.sectionTop} />
+          <View style={styles.statRow}>
             {quickActions.map((action) => (
               <Pressable
                 key={action.label}
-                style={[styles.actionCard, { backgroundColor: action.tint }]}
+                style={styles.actionTile}
                 onPress={action.onPress}
                 accessibilityRole="button"
               >
-                <Icon name={action.icon} size={20} color={action.color} />
-                <Text style={[styles.actionLabel, { color: action.color }]}>{action.label}</Text>
+                <Glyph name={action.icon} size={26} color={brand.green} />
+                <Text style={styles.actionLabel} numberOfLines={1}>
+                  {action.label}
+                </Text>
               </Pressable>
             ))}
           </View>
-        </DashCard>
 
-        <Text style={styles.footerNote}>{activeTeam} active team members</Text>
-      </ScrollView>
-    </Screen>
+          {/* ---- inventory split ---- */}
+          <SectionHead title="Inventory status" onPress={goTab("Inventory")} style={styles.sectionTop} />
+          <View style={styles.splitBar}>
+            {availableShare > 0 ? (
+              <View style={[styles.splitFill, { flex: availableShare }]} />
+            ) : null}
+            {availableShare < 1 ? (
+              <View style={[styles.splitTrack, { flex: 1 - availableShare }]} />
+            ) : null}
+          </View>
+          <View style={styles.legendRow}>
+            <View>
+              <View style={styles.legendLabelRow}>
+                <View style={[styles.legendDot, { backgroundColor: brand.greenBright }]} />
+                <Text style={styles.legendLabel}>Available</Text>
+              </View>
+              <Text style={styles.legendValue}>{summary.available}</Text>
+            </View>
+            <View>
+              <View style={styles.legendLabelRow}>
+                <View style={[styles.legendDot, { backgroundColor: brand.track }]} />
+                <Text style={styles.legendLabel}>Occupied</Text>
+              </View>
+              <Text style={styles.legendValue}>{summary.occupied}</Text>
+            </View>
+          </View>
+
+          {/* ---- today's follow-ups ---- */}
+          <ListCard
+            icon="list"
+            iconColor={brand.ink}
+            badgeColor={brand.neutralBadge}
+            title="Today's follow-ups"
+            onViewAll={goTab("Leads")}
+            style={styles.cardTop}
+          >
+            {summary.follow.length ? (
+              summary.follow.map((lead) => (
+                <Pressable
+                  key={lead._id}
+                  style={styles.row}
+                  onPress={() => navigation.navigate("LeadDetails", { leadId: lead._id })}
+                  accessibilityRole="button"
+                >
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle} numberOfLines={1}>
+                      {lead.name || "Lead"}
+                    </Text>
+                    <View style={styles.rowMeta}>
+                      <Glyph name="time-outline" size={14} color={brand.textMuted} />
+                      <Text style={styles.rowMetaText} numberOfLines={1}>
+                        {lead.when ? timeOf(lead.when) : statusLabel(lead.status)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Glyph name="chevron-forward" size={18} color={brand.textMuted} />
+                </Pressable>
+              ))
+            ) : (
+              <>
+                <Text style={styles.emptyTitle}>No follow-ups today.</Text>
+                <Text style={styles.emptyNote}>{"You're all caught up! 🎉"}</Text>
+              </>
+            )}
+          </ListCard>
+
+          {/* ---- next visit ---- */}
+          <ListCard
+            icon="calendar-outline"
+            iconColor={brand.green}
+            badgeColor={brand.tintBadge}
+            title="Upcoming visit"
+            onViewAll={go("Calendar")}
+            bodyGap={8}
+            style={styles.cardNext}
+          >
+            {summary.upcoming ? (
+              <Pressable
+                style={styles.row}
+                onPress={() => navigation.navigate("LeadDetails", { leadId: summary.upcoming?._id })}
+                accessibilityRole="button"
+              >
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {summary.upcoming.projectInterested || summary.upcoming.name || "Site visit"}
+                  </Text>
+                  <View style={styles.rowMeta}>
+                    <Glyph name="location-outline" size={14} color={brand.textMuted} />
+                    <Text style={styles.rowMetaText} numberOfLines={1}>
+                      {placeOf(summary.upcoming) || summary.upcoming.name || "Lead"}
+                    </Text>
+                  </View>
+                  <View style={styles.rowMeta}>
+                    <Glyph name="time-outline" size={14} color={brand.textMuted} />
+                    <Text style={styles.rowMetaText} numberOfLines={1}>
+                      {summary.upcoming.when ? timeOf(summary.upcoming.when) : ""}
+                    </Text>
+                  </View>
+                </View>
+                <Glyph name="chevron-forward" size={18} color={brand.textMuted} />
+              </Pressable>
+            ) : (
+              <>
+                <Text style={styles.emptyTitle}>No visits scheduled.</Text>
+                <Text style={styles.emptyNote}>Book one from a lead to see it here.</Text>
+              </>
+            )}
+          </ListCard>
+        </ScrollView>
+      )}
+    </SafeAreaView>
   );
 };
 
-const styles = themedStyles((c) => StyleSheet.create({
-  container: {
-    paddingBottom: spacing.xxl,
-    gap: spacing.xl,
-  },
+const styles = brandStyles((b) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: b.bg,
+    },
+    centred: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    container: {
+      paddingHorizontal: layout.gutter,
+      paddingTop: 12,
+    },
 
-  /* ---- greeting ---- */
-  greeting: {
-    gap: 2,
-  },
-  greetingTitle: {
-    fontSize: typography.displayLg,
-    fontWeight: "700",
-    letterSpacing: -0.4,
-    color: themePalette.slate[900],
-  },
-  greetingSub: {
-    fontSize: typography.label,
-    color: themePalette.slate[500],
-  },
+    errorBanner: {
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.card,
+      backgroundColor: b.surface,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      marginBottom: 12,
+    },
+    errorText: {
+      fontSize: t.body,
+      lineHeight: 17,
+      color: b.text,
+    },
+    errorRetry: {
+      marginTop: 2,
+      fontSize: t.label,
+      fontWeight: "600",
+      color: b.ink,
+    },
 
-  /* ---- shared two-up grid ---- */
-  tileGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    rowGap: spacing.lg,
-  },
+    /* ---- greeting ---- */
+    greetingRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 12,
+    },
+    greetingText: {
+      flex: 1,
+      /*
+       * Yoga treats a flex child's min-width as 0; CSS flexbox treats it as
+       * auto, so on the react-native-web build a row of flex children cannot
+       * shrink below its content and overflows the viewport. Every flex child
+       * in this file carries minWidth: 0 for that reason - it is a no-op
+       * natively and the fix on web.
+       */
+      minWidth: 0,
+    },
+    greeting: {
+      fontSize: t.hero,
+      lineHeight: 26,
+      fontWeight: "700",
+      letterSpacing: -0.45,
+      color: b.text,
+    },
+    date: {
+      marginTop: 2,
+      fontSize: t.body,
+      lineHeight: 16,
+      color: b.textMuted,
+    },
+    cta: {
+      width: 118,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      borderRadius: round.banner,
+      backgroundColor: b.tint,
+      paddingLeft: 13,
+      paddingRight: 5,
+      paddingTop: 9,
+      paddingBottom: 10,
+    },
+    ctaText: {
+      flex: 1,
+      minWidth: 0,
+    },
+    ctaLine: {
+      fontSize: t.cta,
+      lineHeight: 14,
+      fontWeight: "600",
+      color: b.ink,
+    },
 
-  /* ---- KPI tiles ---- */
-  kpiCard: {
-    width: "48%",
-    minHeight: 112,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radii.lg,
-    backgroundColor: c.surface,
-    padding: spacing.lg,
-    gap: spacing.xs,
-    ...elevation.card,
-  },
-  kpiIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: radii.md,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing.xs,
-  },
-  kpiLabel: {
-    fontSize: typography.label,
-    color: themePalette.slate[500],
-  },
-  kpiValueRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: spacing.sm,
-  },
-  kpiValue: {
-    flexShrink: 1,
-    fontSize: typography.displayMd,
-    fontWeight: "700",
-    letterSpacing: -0.4,
-    color: themePalette.slate[900],
-  },
-  kpiTrend: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  kpiTrendText: {
-    fontSize: typography.caption,
-    fontWeight: "600",
-  },
-  kpiHelp: {
-    fontSize: typography.caption,
-    color: themePalette.slate[500],
-  },
+    /* ---- the two four-up grids ---- */
+    statRow: {
+      marginTop: 15,
+      flexDirection: "row",
+      gap: layout.gridGap,
+    },
+    statTile: {
+      flex: 1,
+      minWidth: 0,
+      height: 100,
+      justifyContent: "center",
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.card,
+      backgroundColor: b.surface,
+    },
+    statLabel: {
+      marginTop: 6,
+      fontSize: t.label,
+      lineHeight: 14,
+      fontWeight: "500",
+      color: b.textSecondary,
+    },
+    statValue: {
+      marginTop: 4,
+      fontSize: t.hero,
+      lineHeight: 26,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    actionTile: {
+      flex: 1,
+      minWidth: 0,
+      height: 78,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 6,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.card,
+      backgroundColor: b.surface,
+    },
+    actionLabel: {
+      marginTop: 6,
+      fontSize: t.label,
+      lineHeight: 14,
+      fontWeight: "500",
+      textAlign: "center",
+      color: b.textSecondary,
+    },
 
-  /* ---- card shell ---- */
-  card: {
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radii.lg,
-    backgroundColor: c.surface,
-    ...elevation.card,
-  },
-  cardHeader: {
-    height: 48,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.lg,
-    paddingHorizontal: spacing.xl,
-    borderBottomWidth: 1,
-    borderBottomColor: c.border,
-  },
-  cardTitleWrap: {
-    flexShrink: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  cardTitle: {
-    flexShrink: 1,
-    fontSize: typography.section,
-    fontWeight: "700",
-    color: themePalette.slate[900],
-  },
-  cardLink: {
-    fontSize: typography.caption,
-    fontWeight: "600",
-    color: c.primary,
-  },
-  rangePill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    height: 30,
-    paddingHorizontal: spacing.lg,
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radii.sm,
-    backgroundColor: c.surface,
-  },
-  rangePillText: {
-    fontSize: typography.caption,
-    color: themePalette.slate[600],
-  },
-  emptyNote: {
-    paddingVertical: 28,
-    textAlign: "center",
-    fontSize: typography.label,
-    color: themePalette.slate[400],
-  },
-  emptyNoteTall: {
-    paddingVertical: 52,
-  },
+    /* ---- revenue strip ---- */
+    banner: {
+      marginTop: 10,
+      height: 70,
+      flexDirection: "row",
+      alignItems: "center",
+      overflow: "hidden",
+      borderRadius: round.banner,
+      backgroundColor: b.tintSoft,
+      paddingLeft: 15,
+      paddingRight: 14,
+    },
+    bannerText: {
+      flex: 1,
+      minWidth: 0,
+      marginLeft: 18,
+    },
+    bannerLabel: {
+      fontSize: t.label,
+      lineHeight: 15,
+      fontWeight: "500",
+      color: b.textSecondary,
+    },
+    bannerValue: {
+      fontSize: t.hero,
+      lineHeight: 26,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    bannerBars: {
+      /*
+       * Laid out in the row rather than positioned absolutely: Yoga measures
+       * an absolute child from the parent's padding box, so `right: 0` here
+       * would already be inset by the strip's 14pt and the bars would drift.
+       * flex-end drops them onto the strip's bottom edge, where the comp
+       * clips them.
+       */
+      alignSelf: "flex-end",
+      marginRight: 8,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 6,
+    },
+    bannerBar: {
+      width: 13,
+      borderTopLeftRadius: 3,
+      borderTopRightRadius: 3,
+      backgroundColor: b.tintBar,
+    },
 
-  /* ---- occupancy chart ---- */
-  occBox: {
-    height: 208,
-    padding: spacing.xl,
-  },
-  occGrid: {
-    position: "absolute",
-    left: spacing.xxl,
-    right: spacing.xl,
-    top: spacing.xl,
-    bottom: 30,
-    borderLeftWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: c.border,
-  },
-  occGridRow: {
-    flex: 1,
-    borderTopWidth: 1,
-    borderTopColor: themePalette.slate[100],
-  },
-  occChartLayer: {
-    position: "absolute",
-    left: spacing.xxl,
-    right: spacing.xl,
-    top: spacing.xl,
-    bottom: 30,
-  },
-  occMonths: {
-    position: "absolute",
-    left: spacing.xxl,
-    right: spacing.xl,
-    bottom: spacing.lg,
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  occMonth: {
-    fontSize: 10,
-    color: themePalette.slate[500],
-  },
+    /* ---- section heads ---- */
+    sectionHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    sectionTop: {
+      marginTop: 16,
+    },
+    sectionTitle: {
+      flexShrink: 1,
+      minWidth: 0,
+      fontSize: t.sectionTitle,
+      lineHeight: 20,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
+    sectionLink: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+    },
+    sectionLinkText: {
+      fontSize: t.label,
+      fontWeight: "600",
+      color: b.ink,
+    },
 
-  /* ---- inventory donut ---- */
-  donutRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xl,
-    padding: spacing.xl,
-  },
-  donutWrap: {
-    width: 128,
-    height: 128,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  donutCenter: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  donutTotal: {
-    fontSize: typography.title,
-    fontWeight: "700",
-    color: themePalette.slate[900],
-  },
-  donutCaption: {
-    fontSize: 10,
-    color: themePalette.slate[500],
-  },
-  legend: {
-    flex: 1,
-    gap: spacing.lg,
-  },
-  legendRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: radii.pill,
-  },
-  legendLabel: {
-    flex: 1,
-    fontSize: typography.caption,
-    color: themePalette.slate[500],
-  },
-  legendValue: {
-    fontSize: typography.caption,
-    fontWeight: "700",
-    color: themePalette.slate[900],
-  },
+    /* ---- inventory split ---- */
+    splitBar: {
+      marginTop: 8,
+      height: 14,
+      flexDirection: "row",
+      gap: 2,
+    },
+    splitFill: {
+      borderRadius: round.pill,
+      backgroundColor: b.greenBright,
+    },
+    splitTrack: {
+      borderRadius: round.pill,
+      backgroundColor: b.track,
+    },
+    legendRow: {
+      marginTop: 9,
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    legendLabelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    legendDot: {
+      width: 12,
+      height: 12,
+      borderRadius: round.pill,
+    },
+    legendLabel: {
+      fontSize: t.label,
+      lineHeight: 15,
+      fontWeight: "500",
+      color: b.textMuted,
+    },
+    legendValue: {
+      marginTop: 1,
+      marginLeft: 22,
+      fontSize: t.metric,
+      lineHeight: 21,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
 
-  /* ---- list rows: follow-ups, activity, visits ---- */
-  list: {
-    paddingHorizontal: spacing.xl,
-  },
-  listRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.lg,
-    paddingVertical: spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: themePalette.slate[100],
-  },
-  listBody: {
-    flex: 1,
-    gap: 1,
-  },
-  listTitle: {
-    fontSize: typography.label,
-    fontWeight: "700",
-    color: themePalette.slate[900],
-  },
-  listSub: {
-    fontSize: typography.caption,
-    color: themePalette.slate[500],
-  },
-  listTime: {
-    fontSize: 10,
-    color: themePalette.slate[600],
-  },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: radii.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: themePalette.blue[100],
-  },
-  avatarAlt: {
-    backgroundColor: themePalette.violet[100],
-  },
-  avatarText: {
-    fontSize: typography.caption,
-    fontWeight: "700",
-    color: themePalette.blue[700],
-  },
-  avatarTextAlt: {
-    color: themePalette.violet[700],
-  },
-  activityDot: {
-    width: 10,
-    height: 10,
-    borderRadius: radii.pill,
-    backgroundColor: themePalette.blue[500],
-  },
-  visitIcon: {
-    width: 44,
-    height: 36,
-    borderRadius: radii.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: themePalette.blue[50],
-  },
-
-  /* ---- pipeline snapshot ---- */
-  stageGrid: {
-    padding: spacing.lg,
-  },
-  stageCard: {
-    width: "48%",
-    borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radii.md,
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  stageHead: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  stageLabel: {
-    flexShrink: 1,
-    fontSize: typography.caption,
-    color: themePalette.slate[500],
-  },
-  stageValueRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-  },
-  stageValue: {
-    fontSize: typography.title,
-    fontWeight: "700",
-    color: themePalette.slate[900],
-  },
-  stageShare: {
-    fontSize: 10,
-    color: themePalette.slate[600],
-  },
-  stageTrack: {
-    height: 8,
-    borderRadius: radii.pill,
-    overflow: "hidden",
-    backgroundColor: c.surface,
-  },
-  stageFill: {
-    height: "100%",
-    borderRadius: radii.pill,
-  },
-
-  /* ---- revenue ---- */
-  revenueBox: {
-    padding: spacing.lg,
-  },
-
-  /* ---- quick actions ---- */
-  actionGrid: {
-    padding: spacing.lg,
-  },
-  actionCard: {
-    width: "48%",
-    minHeight: 80,
-    borderRadius: radii.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-  },
-  actionLabel: {
-    fontSize: typography.caption,
-    fontWeight: "600",
-  },
-
-  /* ---- footer ---- */
-  footerNote: {
-    textAlign: "right",
-    fontSize: 10,
-    color: themePalette.slate[400],
-  },
-}));
-
-export default ManagerDashboardScreen;
+    /* ---- list cards ---- */
+    card: {
+      padding: 14,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.card,
+      backgroundColor: b.surface,
+    },
+    cardTop: {
+      marginTop: 15,
+    },
+    cardNext: {
+      marginTop: 11,
+    },
+    cardHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+    },
+    cardBadge: {
+      width: 28,
+      height: 28,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    cardTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: t.cardTitle,
+      lineHeight: 18,
+      fontWeight: "700",
+      letterSpacing: -0.2,
+      color: b.text,
+    },
+    cardLink: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+    },
+    cardLinkText: {
+      fontSize: t.label,
+      fontWeight: "500",
+      color: b.textMuted,
+    },
+    cardBody: {
+      /* Indented to the title's column: the badge plus the gap beside it. */
+      paddingLeft: 28 + 14,
+    },
+    emptyTitle: {
+      fontSize: t.body,
+      lineHeight: 16,
+      fontWeight: "600",
+      color: b.text,
+    },
+    emptyNote: {
+      marginTop: 4,
+      fontSize: t.body,
+      lineHeight: 16,
+      color: b.textMuted,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 2,
+    },
+    rowText: {
+      flex: 1,
+      minWidth: 0,
+    },
+    rowTitle: {
+      fontSize: t.rowTitle,
+      lineHeight: 19,
+      fontWeight: "700",
+      letterSpacing: -0.2,
+      color: b.text,
+    },
+    rowMeta: {
+      marginTop: 3,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+    },
+    rowMetaText: {
+      flexShrink: 1,
+      minWidth: 0,
+      fontSize: t.body,
+      lineHeight: 16,
+      color: b.textMuted,
+    },
+  }),
+);

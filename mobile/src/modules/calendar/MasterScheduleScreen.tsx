@@ -12,11 +12,15 @@ import {
   addLeadDiaryEntry, clearLeadFollowUp, getAllLeads, getLeadDiary,
   updateLeadStatus, type LeadDiaryEntry,
 } from "../../services/leadService";
-import { getTasks, type Task } from "../../services/taskService";
+import { getTasks, updateTask, type Task } from "../../services/taskService";
 import { themedStyles, themeColor, themePalette } from "../../theme/themedStyles";
 import { radii, spacing, typography } from "../../theme/tokens";
 import type { Lead } from "../../types";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
+import { Glyph } from "../../components/ui/Glyph";
+import { brand, brandStyles, layout, round, type } from "../../theme/brand";
 
 type CalendarMode = "month" | "week" | "day" | "agenda";
 type EventKind = "FOLLOW_UP" | "SITE_VISIT" | "CALL" | "MEETING" | "TASK" | "OTHER";
@@ -27,9 +31,11 @@ type CalendarEntry = {
 };
 
 const WEEK = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+/* The comp offers three; the day view it drops was mobile-only anyway. */
 const MODES = [
-  { key: "month", label: "Month" }, { key: "week", label: "Week" },
-  { key: "day", label: "Day" }, { key: "agenda", label: "Agenda" },
+  { key: "month", label: "Month" },
+  { key: "week", label: "Week" },
+  { key: "agenda", label: "Agenda" },
 ];
 const EVENT_FILTERS: Array<{ key: EventKind; label: string; icon: string }> = [
   { key: "FOLLOW_UP", label: "Follow-up", icon: "calendar" },
@@ -40,6 +46,74 @@ const EVENT_FILTERS: Array<{ key: EventKind; label: string; icon: string }> = [
   { key: "OTHER", label: "Other", icon: "ellipsis-horizontal" },
 ];
 const ALL_EVENT_KINDS = EVENT_FILTERS.map((item) => item.key);
+
+/* ----------------------------------------------------- comp vocabulary -- */
+
+/*
+ * The comp files the six event kinds into three chips. The kinds stay as they
+ * are - they are what the lead status and the task deadline actually say - and
+ * this is the grouping the chips, the dots and the coloured bar all read.
+ */
+type GroupKey = "ALL" | "MEETINGS" | "VISITS" | "REMINDERS";
+
+const GROUPS: Array<{ key: GroupKey; label: string; kinds: EventKind[] }> = [
+  { key: "ALL", label: "All", kinds: ALL_EVENT_KINDS },
+  { key: "MEETINGS", label: "Meetings", kinds: ["MEETING", "CALL"] },
+  { key: "VISITS", label: "Property Visits", kinds: ["SITE_VISIT"] },
+  { key: "REMINDERS", label: "Reminders", kinds: ["FOLLOW_UP", "TASK", "OTHER"] },
+];
+
+const groupOf = (kind: EventKind): Exclude<GroupKey, "ALL"> => {
+  if (kind === "MEETING" || kind === "CALL") return "MEETINGS";
+  if (kind === "SITE_VISIT") return "VISITS";
+  return "REMINDERS";
+};
+
+/* Measured off the comp: the bar down a row, its pill, and the grid dot. */
+const GROUP_TONE: Record<Exclude<GroupKey, "ALL">, { accent: string; bg: string; fg: string; label: string }> = {
+  MEETINGS: { accent: "#018c66", bg: "#d8f3ea", fg: "#007952", label: "Meeting" },
+  VISITS: { accent: "#e99a06", bg: "#fef3dc", fg: "#b4791a", label: "Property Visit" },
+  REMINDERS: { accent: "#e8433e", bg: "#fde7e8", fg: "#b42726", label: "Reminder" },
+};
+
+const toneForEntry = (kind: EventKind) => GROUP_TONE[groupOf(kind)];
+
+/* The comp's week runs Monday to Sunday. */
+const WEEK_MON = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+const startOfMondayWeek = (date: Date) => {
+  const result = startOfDay(date);
+  /* getDay() is 0 on Sunday, which is the last column here, not the first. */
+  const shift = (result.getDay() + 6) % 7;
+  result.setDate(result.getDate() - shift);
+  return result;
+};
+
+/** Six weeks of cells covering the month, Monday first. */
+const monthGrid = (cursor: Date) => {
+  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const start = startOfMondayWeek(first);
+  const weeks: Date[][] = [];
+  const walker = new Date(start);
+  for (let week = 0; week < 6; week += 1) {
+    const row: Date[] = [];
+    for (let day = 0; day < 7; day += 1) {
+      row.push(new Date(walker));
+      walker.setDate(walker.getDate() + 1);
+    }
+    weeks.push(row);
+    /* A month that fits in five rows should not draw a sixth empty one. */
+    if (week >= 4 && walker.getMonth() !== cursor.getMonth()) break;
+  }
+  return weeks;
+};
+
+const longDay = (date: Date) =>
+  date.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+
+const monthTitle = (date: Date) =>
+  date.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+
 const toDate = (value?: string | null) => {
   const date = value ? new Date(value) : null;
   return date && !Number.isNaN(date.getTime()) ? date : null;
@@ -56,7 +130,8 @@ const calendarGrid = (cursor: Date) => {
 };
 const EVENT_MINUTES = 60;
 const endOf = (date: Date) => new Date(date.getTime() + EVENT_MINUTES * 60000);
-const formatTime = (date: Date) => date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
+const formatTime = (date: Date) =>
+  date.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toUpperCase();
 const formatDateTime = (value?: string | null) => {
   const date = toDate(value);
   return date ? date.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "-";
@@ -130,6 +205,9 @@ export const MasterScheduleScreen = () => {
   const [diaryDraft, setDiaryDraft] = useState("");
   const [diarySaving, setDiarySaving] = useState(false);
   const [eventKinds, setEventKinds] = useState<EventKind[]>(ALL_EVENT_KINDS);
+  /* The comp's chip row, which narrows the selected day rather than the feed. */
+  const [group, setGroup] = useState<GroupKey>("ALL");
+  const [search, setSearch] = useState("");
   const [teamIds, setTeamIds] = useState<string[]>([]);
   const [locationFilter, setLocationFilter] = useState("");
   const [dateRange, setDateRange] = useState<DateRange>("ALL");
@@ -273,6 +351,24 @@ export const MasterScheduleScreen = () => {
     catch (caught) { setError(toErrorMessage(caught, "Failed to complete follow-up")); }
     finally { setDeletingId(""); }
   };
+  /*
+   * Web's handleToggleTaskComplete: a task deadline on the calendar can be
+   * ticked off (or reopened) where it sits, without opening the task.
+   */
+  const [togglingTaskId, setTogglingTaskId] = useState("");
+  const toggleTaskComplete = async (task: Task) => {
+    const nextStatus = String(task.status).toUpperCase() === "COMPLETED" ? "TODO" : "COMPLETED";
+    try {
+      setTogglingTaskId(task._id);
+      const updated = await updateTask(task._id, { status: nextStatus } as Partial<Task>);
+      setTasks((prev) => prev.map((row) => (row._id === task._id ? { ...row, ...(updated || {}), status: nextStatus } : row)));
+      setSuccess(`Task marked as ${nextStatus.toLowerCase()}`);
+    } catch (caught) {
+      setError(toErrorMessage(caught, "Failed to update task status"));
+    } finally {
+      setTogglingTaskId("");
+    }
+  };
   const saveDiary = async () => {
     if (!detailsLead || !diaryDraft.trim()) return;
     try { setDiarySaving(true); const entry = await addLeadDiaryEntry(detailsLead._id, { note: diaryDraft.trim() }); if (entry?._id) setDiary((p) => ({ ...p, [detailsLead._id]: [entry, ...(p[detailsLead._id] || [])] })); setDiaryDraft(""); setSuccess("Lead diary updated"); }
@@ -375,64 +471,456 @@ export const MasterScheduleScreen = () => {
     return { title: "All dates", span: "Every scheduled follow-up and deadline" };
   }, [dateRange]);
 
-  const monthView = <>
-    <View style={styles.metrics}>
-      <MetricCard icon="document-text-outline" color={themePalette.blue[600]} tint={themePalette.blue[50]} label="Total Follow-ups" value={followUps.length} helper={`${leads.length} leads loaded`} />
-      <MetricCard icon="checkmark-circle-outline" color={themePalette.emerald[600]} tint={themePalette.emerald[50]} label="Today" value={todayEntries.length} helper={`${todayEntries.filter((entry) => entry.lead).length} follow-ups, ${todayEntries.filter((entry) => entry.task).length} tasks`} />
-      <MetricCard icon="time-outline" color={themePalette.amber[600]} tint={themePalette.amber[50]} label="Task Deadlines" value={tasks.length} helper={`${completedTasks} completed`} />
-    </View>
-    <View style={styles.calendarCard}>
-      <View style={styles.calendarHead}><Text style={styles.calendarTitle}>{month.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</Text><View style={styles.navButtons}><IconButton icon="chevron-back" label="Previous month" onPress={() => moveCursor(-1)} /><IconButton icon="chevron-forward" label="Next month" onPress={() => moveCursor(1)} /></View></View>
-      <View style={styles.weekHead}>{WEEK.map((day) => <Text key={day} style={styles.weekLabel}>{day}</Text>)}</View>
-      <View style={styles.monthGrid}>{calendarGrid(month).map((date) => {
-        const entries = entriesByDay.get(dayKey(date)) || []; const leadCount = entries.filter((entry) => entry.lead).length; const taskCount = entries.filter((entry) => entry.task).length; const selected = sameDay(date, selectedDate); const isToday = sameDay(date, new Date()); const inMonth = date.getMonth() === month.getMonth();
-        return <Pressable key={dayKey(date)} style={[styles.dayCell, !inMonth && styles.dayCellMuted, selected && styles.dayCellSelected]} onPress={() => setSelectedDate(date)}><View style={[styles.dayNumberCircle, isToday && !selected && styles.dayNumberCircleToday, selected && styles.dayNumberCircleSelected]}><Text style={[styles.dayNumber, !inMonth && styles.dayNumberMuted, isToday && !selected && styles.dayNumberToday, selected && styles.dayNumberSelected]}>{date.getDate()}</Text></View>{taskCount ? <Text style={styles.monthTaskBadge}>{taskCount} T</Text> : null}{leadCount ? <Text style={styles.monthLeadBadge}>{leadCount} L</Text> : null}</Pressable>;
-      })}</View>
-    </View>
-    <View style={styles.daySummaryCard}>
-      <Text style={styles.daySummaryTitle}>{selectedDate.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</Text>
-      <Text style={styles.daySummaryMeta}>{selectedLeadEntries.length} follow-ups, {selectedTaskEntries.length} tasks</Text>
-      {selectedLeadEntries.length ? <>
-        <View style={styles.daySectionHead}><Text style={styles.daySectionTitle}>LEAD FOLLOW-UPS</Text><Text style={styles.daySectionCount}>{selectedLeadEntries.length}</Text></View>
-        {selectedLeadEntries.map((entry, index) => renderFollowUpCard(entry, index === 0))}
-      </> : null}
-      {selectedTaskEntries.length ? <>
-        <View style={styles.daySectionHead}><Text style={styles.daySectionTitle}>TASK DEADLINES</Text><Text style={styles.daySectionCount}>{selectedTaskEntries.length}</Text></View>
-        {selectedTaskEntries.map((entry) => renderEntryRow(entry, true))}
-      </> : null}
-      {selectedEntries.length === 0 ? <Text style={styles.empty}>No calendar items on this date</Text> : null}
-    </View>
-  </>;
-  const weekDates = Array.from({ length: 7 }, (_, index) => { const date = startOfWeek(selectedDate); date.setDate(date.getDate() + index); return date; });
-  const weekView = <View style={styles.viewCard}>
-    <View style={styles.dateNavigator}><IconButton icon="chevron-back" label="Previous week" onPress={() => moveCursor(-1)} /><View style={styles.dateNavigatorCopy}><Icon name="calendar" size={20} color={themePalette.blue[600]} /><Text style={styles.dateNavigatorTitle}>{weekDates[0].toLocaleDateString("en-IN", { day: "numeric", month: "short" })} - {weekDates[6].toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</Text></View><IconButton icon="chevron-forward" label="Next week" onPress={() => moveCursor(1)} /></View>
-    <View style={styles.weekStrip}>{weekDates.map((date) => { const active = sameDay(date, selectedDate); return <Pressable key={dayKey(date)} style={[styles.weekDay, active && styles.weekDayActive]} onPress={() => setSelectedDate(date)}><Text style={[styles.weekDayName, active && styles.weekDayTextActive]}>{WEEK[date.getDay()]}</Text><Text style={[styles.weekDayNumber, active && styles.weekDayTextActive]}>{date.getDate()}</Text><View style={[styles.weekDot, (entriesByDay.get(dayKey(date)) || []).length > 0 && styles.weekDotActive]} /></Pressable>; })}</View>
-    <Text style={styles.sectionTitle}>{selectedDate.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</Text>{selectedEntries.length ? selectedEntries.map((entry) => renderEntryRow(entry)) : <Text style={styles.empty}>No events scheduled</Text>}
-  </View>;
-  const dayView = <View style={styles.viewCard}>
-    <View style={styles.dateNavigator}><IconButton icon="chevron-back" label="Previous day" onPress={() => moveCursor(-1)} /><View style={styles.dateNavigatorCopy}><Icon name="calendar" size={20} color={themePalette.blue[600]} /><Text style={styles.dateNavigatorTitle}>{selectedDate.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</Text></View><IconButton icon="chevron-forward" label="Next day" onPress={() => moveCursor(1)} /></View>
-    <View style={styles.timeline}>{Array.from({ length: 11 }, (_, index) => index + 8).map((hour) => <View key={hour} style={styles.timelineRow}><Text style={styles.timelineTime}>{new Date(2020, 0, 1, hour).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</Text><View style={styles.timelineSlot}>{selectedEntries.filter((entry) => entry.date.getHours() === hour).map((entry) => { const tone = toneFor(entry.kind); return <Pressable key={entry.id} style={[styles.timelineEvent, { borderColor: tone.border, backgroundColor: tone.bg }]} onPress={() => entry.lead && openDetails(entry.lead)} disabled={!entry.lead}><View style={[styles.timelineEventBar, { backgroundColor: tone.color }]} /><View style={[styles.timelineEventIcon, { backgroundColor: tone.border }]}><Icon name={kindIcon(entry.kind)} size={20} color={tone.color} /></View><View style={styles.timelineEventCopy}><Text style={styles.timelineEventTitle} numberOfLines={1}>{entry.title}</Text><Text style={styles.timelineEventMeta}>{formatTime(entry.date)} – {formatTime(endOf(entry.date))}</Text><View style={styles.timelineEventWho}><Icon name={entry.kind === "SITE_VISIT" ? "location-outline" : "person-outline"} size={12} color={themePalette.slate[500]} /><Text style={styles.timelineEventMeta} numberOfLines={1}>{entry.kind === "SITE_VISIT" ? entry.subtitle : entry.assignee}</Text></View></View><View style={[styles.kindChip, { backgroundColor: tone.border }]}><Text style={[styles.kindChipText, { color: tone.color }]}>{kindLabel(entry.kind)}</Text></View></Pressable>; })}</View></View>)}</View>
-  </View>;
+  /* ------------------------------------------------------- comp views -- */
+
+  const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
+
+  /* Agenda is everything still ahead, in day blocks, narrowed by the same
+     chip row and search box the month and week views use. */
   const agendaGroups = useMemo(() => {
-    const now = startOfDay(new Date()); const groups = new Map<string, CalendarEntry[]>();
-    filteredEntries.filter((entry) => entry.date >= now).slice(0, 80).forEach((entry) => groups.set(dayKey(entry.date), [...(groups.get(dayKey(entry.date)) || []), entry]));
-    return [...groups.entries()].slice(0, 12);
-  }, [filteredEntries]);
-  const agendaView = <View style={styles.agendaWrap}>{agendaGroups.length ? agendaGroups.map(([key, entries], index) => {
-    const date = entries[0].date; const heading = sameDay(date, new Date()) ? "Today" : sameDay(date, new Date(Date.now() + 86400000)) ? "Tomorrow" : date.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
-    return <View key={key} style={styles.agendaGroup}><View style={styles.agendaHead}><View><Text style={styles.agendaTitle}>{heading}</Text><Text style={styles.agendaDate}>{date.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</Text></View><View style={styles.agendaCounts}><Text style={styles.agendaCountBlue}>{entries.filter((entry) => entry.lead).length} follow-ups</Text><Text style={styles.agendaCountGray}>{entries.filter((entry) => entry.task).length} tasks</Text></View></View>{entries.map((entry) => renderEntryRow(entry))}</View>;
-  }) : <View style={styles.viewCard}><Text style={styles.empty}>No upcoming calendar items</Text></View>}</View>;
+    const from = startOfDay(new Date());
+    const wanted = group === "ALL" ? null : GROUPS.find((row) => row.key === group)?.kinds;
+    const query = search.trim().toLowerCase();
+    const map = new Map<string, CalendarEntry[]>();
+    filteredEntries
+      .filter((entry) => entry.date >= from)
+      .filter((entry) => !wanted || wanted.includes(entry.kind))
+      .filter(
+        (entry) =>
+          !query
+          || [entry.title, entry.subtitle, entry.assignee].some((value) =>
+            String(value || "").toLowerCase().includes(query)),
+      )
+      .forEach((entry) => {
+        const key = dayKey(entry.date);
+        map.set(key, [...(map.get(key) || []), entry]);
+      });
+    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [filteredEntries, group, search]);
+
+  const groupCounts = useMemo(() => {
+    const rows = entriesByDay.get(dayKey(selectedDate)) || [];
+    return {
+      ALL: rows.length,
+      MEETINGS: rows.filter((row) => groupOf(row.kind) === "MEETINGS").length,
+      VISITS: rows.filter((row) => groupOf(row.kind) === "VISITS").length,
+      REMINDERS: rows.filter((row) => groupOf(row.kind) === "REMINDERS").length,
+    } as Record<GroupKey, number>;
+  }, [entriesByDay, selectedDate]);
+
+  const dayRows = useMemo(() => {
+    const rows = entriesByDay.get(dayKey(selectedDate)) || [];
+    const wanted = group === "ALL" ? null : GROUPS.find((row) => row.key === group)?.kinds;
+    const query = search.trim().toLowerCase();
+    return rows
+      .filter((row) => !wanted || wanted.includes(row.kind))
+      .filter(
+        (row) =>
+          !query
+          || [row.title, row.subtitle, row.assignee].some((value) =>
+            String(value || "").toLowerCase().includes(query)),
+      );
+  }, [entriesByDay, selectedDate, group, search]);
+
+  const EventRow = (entry: CalendarEntry) => {
+    const tone = toneForEntry(entry.kind);
+    const place = entry.lead
+      ? [entry.lead.projectInterested, entry.lead.city].filter(Boolean).join(", ")
+      : entry.subtitle;
+
+    return (
+      <View key={entry.id} style={cal.eventRow}>
+        <Text style={cal.eventTime}>{formatTime(entry.date)}</Text>
+        <Pressable
+          style={cal.eventCard}
+          onPress={() =>
+            entry.lead
+              ? openDetails(entry.lead)
+              : entry.task
+                ? navigation.navigate("TaskDetails", { taskId: entry.task._id })
+                : undefined}
+          accessibilityRole="button"
+        >
+          <View style={[cal.eventAccent, { backgroundColor: tone.accent }]} />
+          <View style={cal.eventBody}>
+            <View style={cal.eventTopRow}>
+              {entry.task ? (
+                <Pressable
+                  onPress={() => entry.task && void toggleTaskComplete(entry.task)}
+                  disabled={togglingTaskId === entry.task._id}
+                  hitSlop={8}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: String(entry.task.status).toUpperCase() === "COMPLETED" }}
+                  accessibilityLabel={`Mark ${entry.title} ${String(entry.task.status).toUpperCase() === "COMPLETED" ? "not done" : "done"}`}
+                >
+                  <Glyph
+                    name={String(entry.task.status).toUpperCase() === "COMPLETED" ? "checkmark-circle" : "ellipse-outline"}
+                    size={20}
+                    color={String(entry.task.status).toUpperCase() === "COMPLETED" ? brand.primary : brand.textMuted}
+                  />
+                </Pressable>
+              ) : null}
+              <Text
+                style={[
+                  cal.eventTitle,
+                  entry.task && String(entry.task.status).toUpperCase() === "COMPLETED" ? cal.eventTitleDone : null,
+                ]}
+                numberOfLines={1}
+              >
+                {entry.title}
+              </Text>
+              <Pressable
+                onPress={() => (entry.lead ? openSchedule(entry.lead) : undefined)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Event actions"
+              >
+                <Glyph name="ellipsis-horizontal" size={20} color={brand.textMuted} />
+              </Pressable>
+            </View>
+
+            <View style={cal.eventMetaRow}>
+              <View style={[cal.kindPill, { backgroundColor: tone.bg }]}>
+                <Text style={[cal.kindPillText, { color: tone.fg }]}>{tone.label}</Text>
+              </View>
+            </View>
+
+            <View style={cal.eventBottom}>
+              <View style={cal.eventPlace}>
+                <Glyph
+                  name={entry.task ? "business-outline" : "location-outline"}
+                  size={15}
+                  color={brand.textMuted}
+                />
+                <Text style={cal.eventPlaceText} numberOfLines={1}>
+                  {place || "No location"}
+                </Text>
+              </View>
+              {entry.assignee ? (
+                <View style={cal.eventWho}>
+                  <View style={cal.eventAvatar}>
+                    <Text style={cal.eventAvatarText}>{initials(entry.assignee)}</Text>
+                  </View>
+                  <Text style={cal.eventWhoName} numberOfLines={1}>
+                    {entry.assignee}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        </Pressable>
+      </View>
+    );
+  };
+
+  const DayList = () => (
+    <>
+      <View style={cal.chipRowWrap}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={cal.chipRow}
+        >
+          {GROUPS.map((row) => {
+            const active = group === row.key;
+            return (
+              <Pressable
+                key={row.key}
+                style={[cal.chip, active && cal.chipOn]}
+                onPress={() => setGroup(row.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[cal.chipLabel, active && cal.chipLabelOn]}>{row.label}</Text>
+                <View style={[cal.chipCount, active && cal.chipCountOn]}>
+                  <Text style={[cal.chipCountText, active && cal.chipCountTextOn]}>
+                    {groupCounts[row.key] || 0}
+                  </Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      <Text style={cal.dayHeading}>{longDay(selectedDate)}</Text>
+
+      {dayRows.length ? (
+        dayRows.map((entry) => EventRow(entry))
+      ) : (
+        <View style={cal.empty}>
+          <Glyph name="calendar-outline" size={34} color={brand.textMuted} />
+          <Text style={cal.emptyText}>Nothing scheduled for this day</Text>
+        </View>
+      )}
+    </>
+  );
+
+  const monthView = (
+    <>
+      <View style={cal.gridCard}>
+        <View style={cal.gridHead}>
+          <Text style={cal.gridTitle}>{monthTitle(month)}</Text>
+          <Pressable
+            style={cal.stepBtn}
+            onPress={() => moveCursor(-1)}
+            accessibilityRole="button"
+            accessibilityLabel="Previous month"
+          >
+            <Glyph name="chevron-back" size={19} color={brand.textSecondary} />
+          </Pressable>
+          <Pressable
+            style={cal.stepBtn}
+            onPress={() => moveCursor(1)}
+            accessibilityRole="button"
+            accessibilityLabel="Next month"
+          >
+            <Glyph name="chevron-forward" size={19} color={brand.textSecondary} />
+          </Pressable>
+        </View>
+
+        <View style={cal.weekRow}>
+          {WEEK_MON.map((label) => (
+            <Text key={label} style={cal.weekLabel}>
+              {label}
+            </Text>
+          ))}
+        </View>
+
+        {monthGrid(month).map((week, index) => (
+          <View key={`week-${index}`} style={cal.dateRow}>
+            {week.map((date) => {
+              const inMonth = date.getMonth() === month.getMonth();
+              const selected = sameDay(date, selectedDate);
+              const rows = entriesByDay.get(dayKey(date)) || [];
+              const kinds = [...new Set(rows.map((row) => groupOf(row.kind)))];
+
+              return (
+                <Pressable
+                  key={dayKey(date)}
+                  style={cal.dateCell}
+                  onPress={() => setSelectedDate(date)}
+                  accessibilityRole="button"
+                  accessibilityLabel={longDay(date)}
+                >
+                  <View style={[cal.dateBubble, selected && cal.dateBubbleOn]}>
+                    <Text
+                      style={[
+                        cal.dateText,
+                        !inMonth && cal.dateTextOut,
+                        selected && cal.dateTextOn,
+                      ]}
+                    >
+                      {date.getDate()}
+                    </Text>
+                    {/* On the selected day the marker moves inside the filled
+                        circle, where the comp draws it in white. */}
+                    {selected && rows.length ? <View style={cal.dotInside} /> : null}
+                  </View>
+                  <View style={cal.dotRow}>
+                    {selected
+                      ? null
+                      : kinds.slice(0, 3).map((key) => (
+                        <View
+                          key={key}
+                          style={[cal.dot, { backgroundColor: GROUP_TONE[key].accent }]}
+                        />
+                      ))}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        ))}
+      </View>
+
+      <DayList />
+    </>
+  );
+
+  const weekView = (
+    <>
+      <View style={cal.gridCard}>
+        <View style={cal.gridHead}>
+          <Text style={cal.gridTitle}>
+            {startOfMondayWeek(selectedDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+            {" – "}
+            {new Date(startOfMondayWeek(selectedDate).getTime() + 6 * 86400000).toLocaleDateString("en-IN", {
+              day: "numeric",
+              month: "short",
+            })}
+          </Text>
+          <Pressable style={cal.stepBtn} onPress={() => moveCursor(-1)} accessibilityRole="button" accessibilityLabel="Previous week">
+            <Glyph name="chevron-back" size={19} color={brand.textSecondary} />
+          </Pressable>
+          <Pressable style={cal.stepBtn} onPress={() => moveCursor(1)} accessibilityRole="button" accessibilityLabel="Next week">
+            <Glyph name="chevron-forward" size={19} color={brand.textSecondary} />
+          </Pressable>
+        </View>
+
+        <View style={cal.weekRow}>
+          {WEEK_MON.map((label) => (
+            <Text key={label} style={cal.weekLabel}>
+              {label}
+            </Text>
+          ))}
+        </View>
+
+        <View style={cal.dateRow}>
+          {[0, 1, 2, 3, 4, 5, 6].map((offset) => {
+            const date = new Date(startOfMondayWeek(selectedDate).getTime() + offset * 86400000);
+            const selected = sameDay(date, selectedDate);
+            const rows = entriesByDay.get(dayKey(date)) || [];
+            const kinds = [...new Set(rows.map((row) => groupOf(row.kind)))];
+            return (
+              <Pressable
+                key={dayKey(date)}
+                style={cal.dateCell}
+                onPress={() => setSelectedDate(date)}
+                accessibilityRole="button"
+                accessibilityLabel={longDay(date)}
+              >
+                <View style={[cal.dateBubble, selected && cal.dateBubbleOn]}>
+                  <Text style={[cal.dateText, selected && cal.dateTextOn]}>{date.getDate()}</Text>
+                  {selected && rows.length ? <View style={cal.dotInside} /> : null}
+                </View>
+                <View style={cal.dotRow}>
+                  {selected
+                    ? null
+                    : kinds.slice(0, 3).map((key) => (
+                      <View key={key} style={[cal.dot, { backgroundColor: GROUP_TONE[key].accent }]} />
+                    ))}
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <DayList />
+    </>
+  );
+
+  const agendaView = (
+    <>
+      {agendaGroups.length ? (
+        agendaGroups.map(([key, entries]) => (
+          <View key={key}>
+            <Text style={cal.dayHeading}>{longDay(entries[0].date)}</Text>
+            {entries.map((entry) => EventRow(entry))}
+          </View>
+        ))
+      ) : (
+        <View style={cal.empty}>
+          <Glyph name="calendar-outline" size={34} color={brand.textMuted} />
+          <Text style={cal.emptyText}>Nothing scheduled</Text>
+        </View>
+      )}
+    </>
+  );
 
   return (
-    <Screen title="Calendar" description={mode === "agenda" ? "Upcoming follow-ups, site visits and meetings" : mode === "month" ? "Meetings, reminders and execution timeline visibility" : "Meetings, reminders and execution timeline"} loading={loading} error={error} onRetry={() => void load()} right={<IconButton icon="funnel-outline" label="Calendar filters" onPress={() => setFiltersVisible(true)} />}>
-      {success ? <Text style={styles.success}>{success}</Text> : null}
-      <AppSegmentedTabs tabs={MODES} activeKey={mode} onChange={(key) => setMode(key as CalendarMode)} style={styles.modeTabs} />
-      <ScrollView style={{ width: contentWidth, alignSelf: "center" }} contentContainerStyle={styles.page} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} />} showsVerticalScrollIndicator={false}>
-        {mode === "month" ? monthView : mode === "week" ? weekView : mode === "day" ? dayView : agendaView}
-      </ScrollView>
-      <Pressable style={styles.fab} onPress={() => openSchedule()} accessibilityRole="button" accessibilityLabel="Schedule follow-up"><Icon name="add" size={29} color="#ffffff" strokeWidth={2} /></Pressable>
+    <SafeAreaView style={cal.root} edges={["top", "left", "right"]}>
+      <View style={cal.header}>
+        {/*
+         * The comp draws no back control - it shows Calendar with the tab bar
+         * still under it, as though it lived inside the More tab. It does not:
+         * it is pushed over the bar, so without this there is no way out. A
+         * nested stack inside More would match the comp exactly and is noted
+         * in docs/mobile/00_MOBILE_PARITY_SPEC.md.
+         */}
+        {navigation.canGoBack() ? (
+          <Pressable
+            style={cal.back}
+            onPress={() => navigation.goBack()}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+          >
+            <Glyph name="arrow-back" size={24} color={brand.text} />
+          </Pressable>
+        ) : null}
+        <Text style={cal.pageTitle} numberOfLines={1}>
+          Calendar
+        </Text>
+        <Text style={cal.pageSubtitle}>Meetings, visits &amp; reminders</Text>
+        <Pressable
+          style={cal.fabRound}
+          onPress={() => openSchedule()}
+          accessibilityRole="button"
+          accessibilityLabel="Add event"
+        >
+          <Glyph name="add" size={26} color={brand.onPrimary} />
+        </Pressable>
+      </View>
 
-      {nativeMode ? <DateTimePicker value={scheduleAt} mode={nativeMode} is24Hour={false} onChange={onNativeDate} /> : null}
+      {loading ? (
+        <View style={cal.centred}>
+          <ActivityIndicator size="large" color={brand.primary} />
+        </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={[cal.body, { paddingBottom: 96 + Math.max(insets.bottom, 16) }]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={brand.primary} />
+          }
+        >
+          {error ? (
+            <Pressable style={cal.banner} onPress={() => void load()} accessibilityRole="button">
+              <Text style={cal.bannerText}>{error}</Text>
+            </Pressable>
+          ) : null}
+          {success ? (
+            <Pressable style={[cal.banner, cal.bannerOk]} onPress={() => setSuccess("")} accessibilityRole="button">
+              <Text style={[cal.bannerText, cal.bannerOkText]}>{success}</Text>
+            </Pressable>
+          ) : null}
+
+          <View style={cal.searchBox}>
+            <Glyph name="search" size={18} color={brand.textMuted} />
+            <TextInput
+              style={cal.searchInput}
+              placeholder="Search meetings, properties or people..."
+              placeholderTextColor={brand.placeholder}
+              value={search}
+              onChangeText={setSearch}
+            />
+          </View>
+
+          <View style={cal.segment}>
+            {MODES.map((row) => {
+              const active = mode === row.key;
+              return (
+                <Pressable
+                  key={row.key}
+                  style={[cal.segmentItem, active && cal.segmentItemOn]}
+                  onPress={() => setMode(row.key as CalendarMode)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text style={[cal.segmentLabel, active && cal.segmentLabelOn]}>{row.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {mode === "month" ? monthView : mode === "week" ? weekView : agendaView}
+        </ScrollView>
+      )}
+
+      <Pressable
+        style={[cal.fabPill, { bottom: 20 + Math.max(insets.bottom, 12) }]}
+        onPress={() => openSchedule()}
+        accessibilityRole="button"
+        accessibilityLabel="Add event"
+      >
+        <Glyph name="add" size={22} color={brand.onPrimary} />
+        <Text style={cal.fabPillText}>Add event</Text>
+      </Pressable>
+
       <Modal visible={webCalendarPickerVisible} transparent animationType="fade" onRequestClose={() => setWebCalendarPickerVisible(false)}><View style={styles.modalBackdrop}><View style={styles.pickerCard}><Text style={styles.sheetTitle}>Select date and time</Text><input ref={webCalendarInputRef} type="datetime-local" value={webCalendarValue} onChange={(event: any) => { const value = String(event?.target?.value || ""); setWebCalendarValue(value); const next = new Date(value); if (!Number.isNaN(next.getTime())) setScheduleAt(next); setWebCalendarPickerVisible(false); }} onBlur={() => setWebCalendarPickerVisible(false)} style={styles.webDateInput as any} /></View></View></Modal>
       <Modal visible={leadPickerVisible} transparent animationType="fade" onRequestClose={() => setLeadPickerVisible(false)}><View style={styles.modalBackdrop}><View style={styles.pickerCard}><View style={styles.sheetHeader}><Text style={styles.sheetTitle}>Select Lead / Client</Text><IconButton icon="close" label="Close lead picker" onPress={() => setLeadPickerVisible(false)} /></View><View style={styles.searchField}><Icon name="search" size={17} color={themePalette.slate[500]} /><TextInput style={styles.searchInput} value={leadSearch} onChangeText={setLeadSearch} placeholder="Search by name, phone or city" placeholderTextColor={themeColor("#98a3b5")} /></View><ScrollView style={styles.pickerList}>{leadRows.map((lead) => <Pressable key={lead._id} style={[styles.leadPickerRow, selectedLeadId === lead._id && styles.leadPickerRowActive]} onPress={() => { setSelectedLeadId(lead._id); setLeadPickerVisible(false); }}><View style={styles.leadAvatar}><Text style={styles.leadAvatarText}>{initials(lead.name)}</Text></View><View style={styles.entryCopy}><Text style={styles.entryTitle}>{lead.name}</Text><Text style={styles.entrySubtitle}>{lead.phone || "No phone"} · {lead.city || "No city"}</Text></View>{selectedLeadId === lead._id ? <Icon name="checkmark" size={18} color={themePalette.blue[600]} /> : null}</Pressable>)}{leadRows.length === 0 ? <Text style={styles.empty}>No lead found</Text> : null}</ScrollView></View></View></Modal>
 
@@ -484,9 +972,434 @@ export const MasterScheduleScreen = () => {
         </ScrollView>
         <View style={styles.filterFooter}><Pressable style={styles.applyButton} onPress={() => setFiltersVisible(false)}><Icon name="funnel-outline" size={19} color="#ffffff" /><Text style={styles.primaryButtonText}>Apply Filters</Text></Pressable></View>
       </View></Modal>
-    </Screen>
+    </SafeAreaView>
   );
 };
+
+/*
+ * The comp's calendar chrome. Kept apart from the stylesheet below, which is
+ * written against the web-parity tokens the schedule, lead and filter sheets
+ * still use.
+ */
+const cal = brandStyles((b) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: b.bg,
+    },
+    centred: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+
+    header: {
+      paddingHorizontal: layout.pageGutter,
+      paddingTop: 8,
+      paddingBottom: 12,
+    },
+    back: {
+      marginBottom: 6,
+    },
+    pageTitle: {
+      width: "62%",
+      fontSize: type.pageTitle,
+      lineHeight: 30,
+      fontWeight: "700",
+      letterSpacing: -0.8,
+      color: b.text,
+    },
+    pageSubtitle: {
+      marginTop: 2,
+      fontSize: type.cardTitle,
+      lineHeight: 18,
+      color: b.textMuted,
+    },
+    fabRound: {
+      position: "absolute",
+      right: layout.pageGutter,
+      top: 4,
+      width: 44,
+      height: 44,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: b.primary,
+    },
+
+    body: {
+      paddingHorizontal: layout.pageGutter,
+    },
+    banner: {
+      marginBottom: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: b.alert,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    bannerText: {
+      fontSize: type.body,
+      lineHeight: 17,
+      color: b.alert,
+    },
+    bannerOk: {
+      borderColor: b.primary,
+    },
+    bannerOkText: {
+      color: b.deep,
+    },
+
+    searchBox: {
+      height: 39,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingHorizontal: 15,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    searchInput: {
+      flex: 1,
+      minWidth: 0,
+      paddingVertical: 0,
+      fontSize: type.body,
+      color: b.text,
+    },
+
+    segment: {
+      marginTop: 12,
+      flexDirection: "row",
+      gap: 8,
+    },
+    segmentItem: {
+      flex: 1,
+      minWidth: 0,
+      height: 36,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    segmentItemOn: {
+      borderColor: b.greenBright,
+      backgroundColor: b.chipActiveBg,
+    },
+    segmentLabel: {
+      fontSize: type.rowTitle,
+      fontWeight: "500",
+      color: b.text,
+    },
+    segmentLabelOn: {
+      fontWeight: "600",
+      color: b.text,
+    },
+
+    /* ---- month grid ---- */
+    gridCard: {
+      marginTop: 12,
+      paddingHorizontal: 12,
+      paddingTop: 16,
+      paddingBottom: 12,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+    },
+    gridHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingHorizontal: 2,
+      marginBottom: 14,
+    },
+    gridTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: type.barTitle,
+      lineHeight: 23,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
+    stepBtn: {
+      width: 34,
+      height: 34,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: b.border,
+      backgroundColor: b.surface,
+    },
+    weekRow: {
+      flexDirection: "row",
+      marginBottom: 6,
+    },
+    weekLabel: {
+      flex: 1,
+      minWidth: 0,
+      textAlign: "center",
+      fontSize: type.label,
+      fontWeight: "500",
+      color: "#5a6478",
+    },
+    dateRow: {
+      flexDirection: "row",
+    },
+    dateCell: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: "center",
+      paddingTop: 5,
+      paddingBottom: 3,
+    },
+    dateBubble: {
+      width: 32,
+      height: 32,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    dateBubbleOn: {
+      backgroundColor: b.primary,
+    },
+    dateText: {
+      /* Nudged up so the in-circle marker has room under it. */
+      marginBottom: 3,
+      fontSize: type.rowTitle,
+      fontWeight: "500",
+      color: b.text,
+    },
+    dateTextOut: {
+      color: "#aeb4c6",
+    },
+    dateTextOn: {
+      fontWeight: "700",
+      color: b.onPrimary,
+    },
+    dotRow: {
+      height: 10,
+      marginTop: 2,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+    },
+    dot: {
+      width: 6,
+      height: 6,
+      borderRadius: round.pill,
+    },
+    dotInside: {
+      position: "absolute",
+      bottom: 4,
+      width: 5,
+      height: 5,
+      borderRadius: round.pill,
+      backgroundColor: b.onPrimary,
+    },
+
+    /* ---- filter chips ---- */
+    chipRowWrap: {
+      marginTop: 16,
+      marginHorizontal: -layout.pageGutter,
+    },
+    chipRow: {
+      flexDirection: "row",
+      gap: 6,
+      paddingHorizontal: layout.pageGutter,
+    },
+    chip: {
+      height: 32,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      paddingHorizontal: 12,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.chip,
+      backgroundColor: b.surface,
+    },
+    chipOn: {
+      borderColor: b.greenBright,
+      backgroundColor: b.chipActiveBg,
+    },
+    chipLabel: {
+      fontSize: type.cardTitle,
+      fontWeight: "500",
+      color: b.text,
+    },
+    chipLabelOn: {
+      fontWeight: "600",
+    },
+    chipCount: {
+      minWidth: 19,
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+      alignItems: "center",
+      borderRadius: round.pill,
+      backgroundColor: b.hairline,
+    },
+    chipCountOn: {
+      backgroundColor: b.primary,
+    },
+    chipCountText: {
+      fontSize: type.label,
+      fontWeight: "600",
+      color: b.textSecondary,
+    },
+    chipCountTextOn: {
+      color: b.onPrimary,
+    },
+
+    dayHeading: {
+      marginTop: 18,
+      marginBottom: 10,
+      fontSize: type.barTitle,
+      lineHeight: 23,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
+
+    /* ---- event rows ---- */
+    eventRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 12,
+      marginBottom: 10,
+    },
+    eventTime: {
+      width: 66,
+      paddingTop: 13,
+      fontSize: type.body,
+      fontWeight: "500",
+      color: b.textSecondary,
+    },
+    eventCard: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+    },
+    eventAccent: {
+      width: 5,
+    },
+    eventBody: {
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: 14,
+      paddingTop: 10,
+      paddingBottom: 9,
+    },
+    eventTopRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    eventTitleDone: { textDecorationLine: "line-through", color: b.textMuted },
+    eventTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: type.sectionTitle,
+      lineHeight: 19,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
+    eventMetaRow: {
+      marginTop: 5,
+      flexDirection: "row",
+    },
+    kindPill: {
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+      borderRadius: round.button,
+    },
+    kindPillText: {
+      fontSize: type.body,
+      fontWeight: "600",
+    },
+    eventBottom: {
+      marginTop: 4,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    eventPlace: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    eventPlaceText: {
+      flexShrink: 1,
+      minWidth: 0,
+      fontSize: type.body,
+      color: b.textMuted,
+    },
+    eventWho: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+    },
+    eventAvatar: {
+      width: 26,
+      height: 26,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: b.tint,
+    },
+    eventAvatarText: {
+      fontSize: type.body,
+      fontWeight: "700",
+      color: b.deep,
+    },
+    eventWhoName: {
+      maxWidth: 108,
+      fontSize: type.body,
+      color: b.textSecondary,
+    },
+
+    empty: {
+      alignItems: "center",
+      gap: 10,
+      paddingVertical: 44,
+    },
+    emptyText: {
+      fontSize: type.field,
+      color: b.textMuted,
+    },
+
+    fabPill: {
+      position: "absolute",
+      right: layout.pageGutter,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      height: 54,
+      paddingHorizontal: 22,
+      borderRadius: round.pill,
+      backgroundColor: b.primary,
+    },
+    fabPillText: {
+      fontSize: type.sectionTitle,
+      fontWeight: "700",
+      color: b.onPrimary,
+    },
+  }),
+);
 
 const styles = themedStyles((c) => StyleSheet.create({
   page: { gap: spacing.lg, paddingTop: spacing.lg, paddingBottom: 110 }, success: { marginBottom: spacing.md, borderWidth: 1, borderColor: c.emerald[200], borderRadius: radii.md, backgroundColor: c.emerald[50], color: c.emerald[700], padding: spacing.md, fontSize: typography.label, fontWeight: "700" }, modeTabs: { width: "100%" },

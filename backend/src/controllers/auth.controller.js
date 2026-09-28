@@ -268,6 +268,14 @@ exports.login = async (req, res) => {
     });
 
     user.lastLoginAt = new Date();
+    /*
+     * An invitation is accepted by using it. Stamping that here rather than on
+     * a separate accept route means the team list's "Invited" chip clears
+     * itself the first time the person signs in, whichever client they use.
+     */
+    if (user.invitedAt && !user.inviteAcceptedAt) {
+      user.inviteAcceptedAt = user.lastLoginAt;
+    }
     await user.save({ validateBeforeSave: false });
 
     setFileAccessCookie(res, user);

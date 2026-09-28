@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, MapPin } from "lucide-react";
-import { getPlacesApiKey, loadPlaces, fetchPlacePredictions, geocodePlaceId } from "../../utils/googlePlaces";
+import {
+  createPlacesAutocompleteSession,
+  fetchPlacePredictions,
+  getPlacesApiKey,
+  loadPlaces,
+  resolvePlaceSuggestion,
+} from "../../utils/googlePlaces";
 
 /*
  * A location box backed by Google Places.
@@ -40,6 +46,7 @@ const PlaceAutocompleteInput = ({
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [ready, setReady] = useState(false);
   const serviceRef = useRef(null);
   const boxRef = useRef(null);
   // The text a pick just wrote, so the lookup below can tell it apart from
@@ -50,8 +57,12 @@ const PlaceAutocompleteInput = ({
     let active = true;
     if (!getPlacesApiKey()) return undefined;
     loadPlaces()
-      .then((google) => { if (active) serviceRef.current = new google.maps.places.AutocompleteService(); })
-      .catch(() => { serviceRef.current = null; });
+      .then(() => {
+        if (!active) return;
+        serviceRef.current = createPlacesAutocompleteSession();
+        setReady(true);
+      })
+      .catch(() => { if (active) serviceRef.current = null; });
     return () => { active = false; };
   }, []);
 
@@ -86,11 +97,12 @@ const PlaceAutocompleteInput = ({
       if (active) setLoading(true);
       fetchPlacePredictions(serviceRef.current, query, country)
         .then((rows) => { if (active) { setSuggestions(rows); setOpen(rows.length > 0); } })
+        .catch(() => { if (active) { setSuggestions([]); setOpen(false); } })
         .finally(() => { if (active) setLoading(false); });
     }, 300);
 
     return () => { active = false; clearTimeout(timer); };
-  }, [value, country, multiValue]);
+  }, [value, country, multiValue, ready]);
 
   const choose = async (suggestion) => {
     /*
@@ -107,8 +119,9 @@ const PlaceAutocompleteInput = ({
     setOpen(false);
     setSuggestions([]);
     onChange?.(next);
-    const coordinates = await geocodePlaceId(suggestion.placeId);
-    onSelect?.({ label: suggestion.label, ...(coordinates || {}) });
+    const resolved = await resolvePlaceSuggestion(suggestion);
+    serviceRef.current = createPlacesAutocompleteSession();
+    onSelect?.({ label: resolved?.label || suggestion.label, ...(resolved || {}) });
   };
 
   return (

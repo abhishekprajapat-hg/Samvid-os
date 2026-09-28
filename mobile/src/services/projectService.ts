@@ -2,15 +2,26 @@ import api from "./api";
 
 /* Mirrors frontend/src/services/projectService.js. */
 
+/*
+ * The fields the Project model actually carries (backend/src/models/Project.js,
+ * as web's Projects.jsx reads them). This used to declare name / developer /
+ * unitCount, none of which exist, so every project listed as "Untitled".
+ */
 export type Project = {
   _id?: string;
-  name?: string;
-  location?: string;
-  developer?: string;
+  projectId?: string;
+  projectName?: string;
+  projectCategory?: string;
+  projectType?: string;
+  totalLandArea?: string;
+  totalPlots?: number;
+  plotsAvailable?: number;
+  totalOffices?: number;
   status?: string;
-  description?: string;
+  location?: string;
+  currentRate?: number;
+  startingRate?: number;
   images?: string[];
-  unitCount?: number;
   createdAt?: string;
   [key: string]: unknown;
 };

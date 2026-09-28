@@ -23,8 +23,19 @@ export type Task = {
     _id?: string;
     title: string;
     isCompleted: boolean;
+    /* What web's SubtaskDetailPanel edits: a note and the date it is wanted by. */
+    description?: string;
+    dueDate?: string | null;
   }>;
   tags?: string[];
+  /* Who handed the task to whom, and when - what the details page's activity
+     list is built from. */
+  assignmentHistory?: Array<{
+    fromUser?: { _id?: string; name?: string } | string | null;
+    toUser?: { _id?: string; name?: string } | string | null;
+    actor?: { _id?: string; name?: string } | string | null;
+    at?: string;
+  }>;
   createdBy?: string | {
     _id: string;
     name: string;
@@ -67,4 +78,14 @@ export const getTaskStats = async (params: Record<string, any> = {}): Promise<an
 export const getTaskStatsByUser = async (): Promise<Record<string, any>> => {
   const res = await api.get("/tasks/stats/by-user");
   return res.data || {};
+};
+
+/*
+ * Who this user may hand a task to - web's getTaskAssignees. The route answers
+ * for every role, where GET /users is admin- and manager-only: filling the
+ * picker from /users left an executive's assignee list empty.
+ */
+export const getTaskAssignees = async (): Promise<{ users: Array<{ _id: string; name?: string; role?: string; isActive?: boolean; profileImageUrl?: string }> }> => {
+  const res = await api.get("/tasks/assignees");
+  return { users: Array.isArray(res.data?.users) ? res.data.users : [] };
 };

@@ -40,6 +40,7 @@ export const LEAD_SOURCE_CHANNELS = [
   { value: "OLX", label: "OLX" },
   { value: "MYBRICKS", label: "MyBricks" },
   { value: "99ACRES", label: "99acres" },
+  { value: "WEBSITE", label: "Website" },
   { value: "REFERENCE", label: "Reference" },
   { value: "BROKER", label: "Broker" },
   { value: "DIRECT_CALL", label: "Direct call" },

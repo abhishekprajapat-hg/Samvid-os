@@ -147,6 +147,8 @@ const LEAD_SELECTABLE_FIELDS = [
   "company",
   "sourceChannel",
   "hotClient",
+  "temperature",
+  "followUpPurpose",
   "brokerContactId",
   "qualifiedBy",
   "qualifiedAt",
@@ -234,9 +236,11 @@ const MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH = 500;
 const MAX_BULK_LEAD_UPLOAD_ROWS = 5000;
 // Kept in step with the sourceChannel enum on the Lead model.
 const LEAD_SOURCE_CHANNELS = Object.freeze([
-  "META", "JUSTDIAL", "OLX", "MYBRICKS", "99ACRES",
+  "META", "JUSTDIAL", "OLX", "MYBRICKS", "99ACRES", "WEBSITE",
   "REFERENCE", "BROKER", "DIRECT_CALL", "DIRECT_VISIT",
 ]);
+// Kept in step with the temperature enum on the Lead model.
+const LEAD_TEMPERATURES = Object.freeze(["COLD", "WARM", "HOT"]);
 const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "COWORKING"]);
 const LEAD_REQUIREMENT_TRANSACTION_TYPES = Object.freeze(["SALE", "LEASE", "RENT"]);
 const LEAD_REQUIREMENT_AREA_UNITS = Object.freeze(["SQ_FT", "SQ_M"]);
@@ -503,6 +507,26 @@ const normalizeLeadRequirementNumber = (value, fallback = null, { round = false 
   const parsed = toFiniteNumber(value);
   if (parsed === null || parsed < 0) return fallback;
   return round ? Math.round(parsed) : parsed;
+};
+
+/*
+ * `temperature` and `hotClient` describe the same thing at different
+ * resolutions, so every write goes through here: whichever the caller sent,
+ * both come out agreeing. A client that only knows the old flag keeps working,
+ * and one that sets WARM does not leave a stale flame behind.
+ */
+const applyLeadTemperature = (lead, body) => {
+  const raw = String(body?.temperature || "").trim().toUpperCase();
+  if (LEAD_TEMPERATURES.includes(raw)) {
+    lead.temperature = raw;
+    lead.hotClient = raw === "HOT";
+    return;
+  }
+  if (body?.hotClient !== undefined) {
+    lead.hotClient = Boolean(body.hotClient);
+    if (body.hotClient) lead.temperature = "HOT";
+    else if (String(lead.temperature || "") === "HOT") lead.temperature = "WARM";
+  }
 };
 
 const createLeadRequirementValidationError = (message) => {
@@ -2122,6 +2146,8 @@ exports.createLead = async (req, res) => {
       clientProfession,
       company,
       sourceChannel,
+      temperature: rawTemperature,
+      followUpPurpose: rawFollowUpPurpose,
       inventoryId: rawInventoryId,
       relatedInventoryIds: rawRelatedInventoryIds,
       siteLocation: rawSiteLocation,
@@ -2232,6 +2258,11 @@ exports.createLead = async (req, res) => {
       sourceChannel: LEAD_SOURCE_CHANNELS.includes(String(sourceChannel || "").toUpperCase())
         ? String(sourceChannel).toUpperCase()
         : "",
+      temperature: LEAD_TEMPERATURES.includes(String(rawTemperature || "").toUpperCase())
+        ? String(rawTemperature).toUpperCase()
+        : "",
+      hotClient: String(rawTemperature || "").toUpperCase() === "HOT",
+      followUpPurpose: String(rawFollowUpPurpose || "").trim().slice(0, 200),
       createdBy: req.user._id,
       ...(await buildCreatorLeadAssignment(req.user)),
     };
@@ -3663,6 +3694,12 @@ exports.updateLeadStatus = async (req, res) => {
     } = req.body;
     const requestedStatus = normalizeLeadStatusValue(rawStatus);
     if (req.body.hotClient !== undefined && typeof req.body.hotClient !== "boolean") return res.status(400).json({ message: "hotClient must be boolean" });
+    if (
+      req.body.temperature !== undefined
+      && !LEAD_TEMPERATURES.includes(String(req.body.temperature || "").trim().toUpperCase())
+    ) {
+      return res.status(400).json({ message: "temperature must be COLD, WARM or HOT" });
+    }
 
     if (!requestedStatus) {
       return res.status(400).json({ message: "Status is required" });
@@ -4299,7 +4336,10 @@ exports.updateLeadStatus = async (req, res) => {
       releasedInventory = releaseResult?.inventory || null;
     }
 
-    if (req.body.hotClient !== undefined) lead.hotClient = req.body.hotClient;
+    applyLeadTemperature(lead, req.body);
+    if (req.body.followUpPurpose !== undefined) {
+      lead.followUpPurpose = String(req.body.followUpPurpose || "").trim().slice(0, 200);
+    }
     await lead.save();
 
     const didTransitionToClosed =

@@ -157,6 +157,8 @@ app.use("/api/roles", require("./routes/customRole.routes"));
 app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/tasks", require("./routes/task.routes"));
 app.use("/api/coworking", require("./routes/coworkingAccess.routes"));
+app.use("/api/finance", require("./routes/finance.routes"));
+app.use("/api/reports", require("./routes/report.routes"));
 app.use("/api/portal/auth", require("./routes/clientPortalAuth.routes"));
 app.use("/api/portal", require("./routes/clientPortalData.routes"));
 

@@ -28,3 +28,14 @@ export const getCurrentUser = async (): Promise<{ user: AuthPayload["user"] | nu
     user: res.data?.user || null,
   };
 };
+
+/*
+ * Revokes this device's refresh token on the server. Clearing local storage
+ * alone signs the phone out but leaves the token valid for its full lifetime,
+ * so anyone who had copied it could keep minting access tokens. Web has always
+ * sent this; the body names the one token so other devices stay signed in.
+ */
+export const logoutUser = async (refreshToken: string | null) => {
+  const res = await api.post("/auth/logout", { refreshToken: refreshToken || undefined });
+  return res.data;
+};

@@ -200,6 +200,23 @@ const leadSchema = new mongoose.Schema(
     },
 
     hotClient: { type: Boolean, default: false },
+
+    /*
+     * How warm the lead is.
+     *
+     * `hotClient` came first and is a boolean, which the web flame toggle and
+     * the Hot filters still read; the mobile comps ask for three steps. The two
+     * are kept in step by the controller - HOT sets the flag, anything else
+     * clears it - so neither client has to know about the other. "" means the
+     * lead predates this field; read it as HOT when `hotClient` is set and WARM
+     * otherwise rather than writing a value nobody chose.
+     */
+    temperature: {
+      type: String,
+      enum: ["COLD", "WARM", "HOT", ""],
+      default: "",
+      trim: true,
+    },
     brokerContactId: { type: mongoose.Schema.Types.ObjectId, ref: "CrmContact", default: null },
     // Optional: a coworking enquiry is often a single person, not a firm.
     company: { type: String, default: "", trim: true, maxlength: 200 },
@@ -221,7 +238,7 @@ const leadSchema = new mongoose.Schema(
     sourceChannel: {
       type: String,
       enum: [
-        "META", "JUSTDIAL", "OLX", "MYBRICKS", "99ACRES",
+        "META", "JUSTDIAL", "OLX", "MYBRICKS", "99ACRES", "WEBSITE",
         "REFERENCE", "BROKER", "DIRECT_CALL", "DIRECT_VISIT", "",
       ],
       default: "",
@@ -489,6 +506,19 @@ const leadSchema = new mongoose.Schema(
     },
 
     // 🔥 NEW FIELDS
+    /*
+     * Why the next follow-up exists - "Discuss shortlisted properties". The
+     * mobile comps show it under the date on Lead Details and set it on Update
+     * Lead; without a column it could only ever live in a reminder that one
+     * phone had scheduled.
+     */
+    followUpPurpose: {
+      type: String,
+      default: "",
+      trim: true,
+      maxlength: 200,
+    },
+
     nextFollowUp: {
       type: Date,
       default: null

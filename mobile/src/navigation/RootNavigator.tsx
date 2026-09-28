@@ -10,13 +10,18 @@ import { navigateFromAnywhere, navigationRef } from "./navigationRef";
 import { linking } from "./linking";
 import * as ExpoLinking from "expo-linking";
 import { ensureNotificationSetup, registerNotificationTapListener } from "../services/pushNotifications";
+import { useLiveLocationSync } from "../services/liveLocation";
 import { RealtimePopupOverlay } from "../components/common/RealtimePopupOverlay";
+import { FollowUpReminderCard } from "../components/common/FollowUpReminderCard";
 import { palette } from "../theme/tokens";
 import { themePalette } from "../theme/themedStyles";
 import { useTheme } from "../theme/ThemeContext";
 
 const AppShell = () => {
   const { loading, isLoggedIn, role } = useAuth();
+
+  // Field Ops' map is drawn from this; web streams it for the same role.
+  useLiveLocationSync(isLoggedIn && role === "FIELD_EXECUTIVE");
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -100,6 +105,7 @@ const NavigationRoot = () => {
     >
       <AppShell />
       <RealtimePopupOverlay />
+      <FollowUpReminderCard />
     </NavigationContainer>
   );
 };

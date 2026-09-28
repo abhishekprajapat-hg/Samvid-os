@@ -1,294 +1,180 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
-import { Screen } from "../../components/common/Screen";
-import {
-  AppBadge,
-  AppCard,
-  AppEmptyState,
-  AppSearchInput,
-  AppSheet,
-  AppSkeletonList,
-} from "../../components/ui";
-import { palette, spacing, typography } from "../../theme/tokens";
-import { toErrorMessage } from "../../utils/errorMessage";
-import {
-  getClientActivity,
-  getClientAssignments,
-  getClientById,
-  getClients,
-  type CoworkingClient,
-} from "../../services/coworkingService";
-import { themedStyles, themePalette } from "../../theme/themedStyles";
+import React, { useCallback, useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { Glyph } from "../../components/ui/Glyph";
+import { TextField } from "../../components/ui/form";
+import { Avatar, Banner, BrandButton, BrandPage, Chip, ChipRow, EmptyNote } from "../../components/brand/kit";
+import { brand, brandStyles, round, type as t } from "../../theme/brand";
+import { shareTextFile } from "../../utils/shareFile";
+import { refreshBoardIfIdle, reloadBoard, useBoard } from "./boardStore";
+import { directoryFrom, toCsv, type DirectoryClient } from "./boardReducer";
+import { kycStatusOf } from "./kycDocuments";
+import { BirthdayReminders } from "./components/BoardPanels";
 
 /*
- * Mirrors modules/coworking/clients/ClientsPage.jsx and ClientProfile.jsx.
+ * Clients in this coworking space, current and former - web's ClientsPage.jsx.
  *
- * Web puts the list and the profile side by side; a phone opens the profile as
- * a sheet over the list, which keeps the search results in place behind it.
+ * The directory is derived from the board's cabins, so there is no client table
+ * to fall out of step with it: a former client is the history a cabin keeps.
+ * Web puts the profile beside the list; a phone opens it as its own page.
  */
 
-const statusVariant = (status?: string) => {
-  const value = String(status || "").toUpperCase();
-  if (value === "ACTIVE") return "emerald" as const;
-  if (value === "PENDING" || value === "ONBOARDING") return "amber" as const;
-  if (value === "CHURNED" || value === "TERMINATED") return "rose" as const;
-  return "slate" as const;
-};
-
-const kycVariant = (status?: string) => {
-  const value = String(status || "").toUpperCase();
-  if (value === "VERIFIED" || value === "COMPLETE") return "emerald" as const;
-  if (value === "REJECTED") return "rose" as const;
-  return "amber" as const;
-};
-
-const formatDate = (value?: string) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
-};
+type Tab = "all" | "active" | "former" | "kyc";
 
 export const CoworkingClientsScreen = () => {
-  const [clients, setClients] = useState<CoworkingClient[]>([]);
-  const [total, setTotal] = useState(0);
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const navigation = useNavigation<any>();
+  const [board, , sync] = useBoard();
+  const [tab, setTab] = useState<Tab>("all");
+  const [query, setQuery] = useState("");
+  const [notice, setNotice] = useState("");
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
 
-  const [selected, setSelected] = useState<CoworkingClient | null>(null);
-  const [assignments, setAssignments] = useState<any[]>([]);
-  const [activity, setActivity] = useState<any[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
+  useFocusEffect(
+    useCallback(() => {
+      void refreshBoardIfIdle();
+    }, []),
+  );
 
-  const load = useCallback(async () => {
-    try {
-      const data = await getClients(search ? { search } : {});
-      setClients(data.clients);
-      setTotal(data.total || data.clients.length);
-      setError("");
-    } catch (err) {
-      setError(toErrorMessage(err, "Could not load clients"));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [search]);
+  const directory = useMemo(() => directoryFrom(board.cabins), [board.cabins]);
+  const active = directory.filter((client) => client.kind === "active");
+  const former = directory.filter((client) => client.kind === "former");
+  const pendingKyc = active.filter(
+    (client) => !kycStatusOf({ kind: client.entityKind, documents: client.documents }).complete,
+  );
 
-  // Debounced: search is a server parameter, so a request per keystroke is real
-  // traffic on a phone.
-  useEffect(() => {
-    const timer = setTimeout(() => void load(), 250);
-    return () => clearTimeout(timer);
-  }, [load]);
+  const term = query.trim().toLowerCase();
+  const shown = directory
+    .filter((client) => {
+      if (tab === "all") return true;
+      if (tab === "kyc") return pendingKyc.includes(client);
+      return client.kind === tab;
+    })
+    .filter((client) =>
+      term
+        ? `${client.name} ${client.industry || ""} ${client.contactPerson || ""} ${client.phone || ""} ${client.cabins
+            .map((cabin) => cabin.label)
+            .join(" ")} ${client.stays.map((stay) => stay.cabinLabel).join(" ")}`
+            .toLowerCase()
+            .includes(term)
+        : true,
+    );
 
-  const openClient = useCallback(async (client: CoworkingClient) => {
-    setSelected(client);
-    setAssignments([]);
-    setActivity([]);
-    setDetailLoading(true);
-
-    const id = String(client._id || "");
-    // Each part is independent - a missing activity feed should not hide the
-    // cabins the client actually holds.
-    const [full, held, history] = await Promise.allSettled([
-      getClientById(id),
-      getClientAssignments(id),
-      getClientActivity(id),
+  const exportCsv = async () => {
+    const header = ["Client", "Status", "Type", "Industry", "Contact", "Phone", "Cabins", "Seats", "Monthly rent", "Dues", "KYC"];
+    const rows = directory.map((client) => [
+      client.name,
+      client.kind === "active" ? (client.returning ? "Current (returning)" : "Current") : "Former",
+      client.kind === "active" ? (client.entityKind === "individual" ? "Individual" : "Company") : "",
+      client.industry,
+      client.contactPerson,
+      client.phone,
+      (client.kind === "active" ? client.cabins.map((cabin) => cabin.label) : client.stays.map((stay) => stay.cabinLabel)).join(" / "),
+      client.capacity || client.stays.reduce((sum, stay) => sum + stay.seats, 0),
+      client.monthlyRent,
+      client.duesAmount,
+      client.kind === "active"
+        ? (() => {
+            const status = kycStatusOf({ kind: client.entityKind, documents: client.documents });
+            return status.complete ? "Complete" : `${status.uploaded}/${status.required}`;
+          })()
+        : "",
     ]);
+    try {
+      await shareTextFile("coworking-clients.csv", toCsv([header, ...rows]));
+      setNotice(`Exported ${directory.length} clients to CSV.`);
+    } catch {
+      setNotice("Could not export the clients.");
+    }
+  };
 
-    if (full.status === "fulfilled" && full.value) setSelected(full.value);
-    setAssignments(held.status === "fulfilled" ? held.value : []);
-    setActivity(history.status === "fulfilled" ? history.value : []);
-    setDetailLoading(false);
-  }, []);
+  const renderClient = (client: DirectoryClient) => (
+    <Pressable
+      key={client.id}
+      onPress={() => navigation.navigate("CoworkingClientProfile", { clientId: client.id })}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${client.name}`}
+    >
+      <Avatar name={client.name} size={34} muted={client.kind !== "active"} />
+      <View style={styles.flex}>
+        <View style={styles.nameLine}>
+          <Text style={styles.name} numberOfLines={1}>
+            {client.name}
+          </Text>
+          {client.returning ? <Glyph name="repeat" size={13} color={brand.infoInk} /> : null}
+          {client.duesAmount > 0 ? <Glyph name="warning" size={13} color={brand.alert} /> : null}
+          {pendingKyc.includes(client) ? <Glyph name="document-attach" size={13} color={brand.warning} /> : null}
+        </View>
+        <Text style={styles.meta} numberOfLines={1}>
+          {client.kind === "active"
+            ? `${client.cabins.length} ${client.cabins.length === 1 ? "cabin" : "cabins"} · ${client.capacity} seats`
+            : `${client.stays.length} past ${client.stays.length === 1 ? "stay" : "stays"} · ${client.totalMonths} mo`}
+        </Text>
+      </View>
+      <Glyph name="chevron-forward" size={16} color={brand.textMuted} />
+    </Pressable>
+  );
 
   return (
-    <Screen
-      title="Coworking Clients"
-      subtitle={total ? `${total} on file` : "Members"}
-      error={error}
-      onRetry={load}
+    <BrandPage
+      title="Clients"
+      subtitle={`${active.length} current · ${former.length} former${pendingKyc.length ? ` · ${pendingKyc.length} awaiting documents` : ""}`}
+      onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
+      right={<BrandButton title="Export CSV" icon="download-outline" size="sm" variant="secondary" onPress={exportCsv} />}
+      refreshing={refreshing}
+      onRefresh={async () => {
+        setRefreshing(true);
+        await reloadBoard();
+        setRefreshing(false);
+      }}
     >
-      <AppSearchInput
-        value={search}
-        onChangeText={setSearch}
-        placeholder="Name, company or phone"
-        style={styles.search}
-      />
+      {sync.error ? <Banner tone="warn" icon="cloud-offline-outline" message={sync.error} /> : null}
+      {notice ? <Banner tone="success" message={notice} action="Dismiss" onAction={() => setNotice("")} /> : null}
+      <BirthdayReminders clients={directory} />
 
-      {loading ? (
-        <AppSkeletonList rows={4} />
+      <BrandButton title="Booking board" icon="grid-outline" variant="secondary" onPress={() => navigation.navigate("CoworkingBooking")} />
+
+      <TextField value={query} onChangeText={setQuery} placeholder="Search name, contact or cabin" icon="search" />
+      <ChipRow>
+        <Chip label="All" count={directory.length} active={tab === "all"} onPress={() => setTab("all")} />
+        <Chip label="Current" count={active.length} active={tab === "active"} onPress={() => setTab("active")} />
+        <Chip label="Former" count={former.length} active={tab === "former"} onPress={() => setTab("former")} />
+        <Chip label="KYC due" count={pendingKyc.length} active={tab === "kyc"} onPress={() => setTab("kyc")} />
+      </ChipRow>
+
+      {shown.length ? (
+        <View style={styles.list}>{shown.map(renderClient)}</View>
       ) : (
-        <FlatList
-          data={clients}
-          keyExtractor={(item, index) => String(item._id || index)}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                void load();
-              }}
-            />
-          }
-          ListEmptyComponent={
-            <AppEmptyState
-              title={search ? "No matches" : "No clients yet"}
-              description={
-                search ? "Try a different name or number." : "Clients onboarded here will appear in this list."
-              }
-            />
-          }
-          renderItem={({ item }) => (
-            <Pressable onPress={() => openClient(item)}>
-              <AppCard style={styles.card} interactive>
-                <View style={styles.head}>
-                  <Text style={styles.name} numberOfLines={1}>
-                    {item.name || item.companyName || "Unnamed client"}
-                  </Text>
-                  <AppBadge variant={statusVariant(item.status)}>
-                    {String(item.status || "—").replace(/_/g, " ")}
-                  </AppBadge>
-                </View>
-                {item.companyName && item.name ? (
-                  <Text style={styles.meta} numberOfLines={1}>
-                    {item.companyName}
-                  </Text>
-                ) : null}
-                <Text style={styles.meta}>{item.phone || item.email || "—"}</Text>
-              </AppCard>
-            </Pressable>
-          )}
-        />
+        <EmptyNote icon="people-outline" title="No client matches that." />
       )}
-
-      <AppSheet
-        visible={Boolean(selected)}
-        onClose={() => setSelected(null)}
-        title={String(selected?.name || selected?.companyName || "Client")}
-        subtitle={selected?.companyName && selected?.name ? selected.companyName : undefined}
-      >
-        {detailLoading ? (
-          <AppSkeletonList rows={2} />
-        ) : selected ? (
-          <>
-            <AppCard>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Status</Text>
-                <AppBadge variant={statusVariant(selected.status)}>
-                  {String(selected.status || "—").replace(/_/g, " ")}
-                </AppBadge>
-              </View>
-              {selected.kycStatus ? (
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>KYC</Text>
-                  <AppBadge variant={kycVariant(selected.kycStatus)}>
-                    {String(selected.kycStatus).replace(/_/g, " ")}
-                  </AppBadge>
-                </View>
-              ) : null}
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Phone</Text>
-                <Text style={styles.detailValue}>{selected.phone || "—"}</Text>
-              </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Email</Text>
-                <Text style={styles.detailValue}>{selected.email || "—"}</Text>
-              </View>
-              {selected.birthday ? (
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Birthday</Text>
-                  <Text style={styles.detailValue}>{formatDate(selected.birthday)}</Text>
-                </View>
-              ) : null}
-            </AppCard>
-
-            <Text style={styles.sectionTitle}>Holding</Text>
-            {assignments.length === 0 ? (
-              <Text style={styles.empty}>No cabins or seats assigned.</Text>
-            ) : (
-              assignments.map((assignment: any, index: number) => (
-                <AppCard key={assignment?._id || index} style={styles.subCard}>
-                  <Text style={styles.assignmentCode}>
-                    {assignment?.cabinCode || assignment?.code || assignment?.seatCode || "Assignment"}
-                  </Text>
-                  <Text style={styles.meta}>
-                    {[assignment?.startDate && formatDate(assignment.startDate), assignment?.endDate && formatDate(assignment.endDate)]
-                      .filter(Boolean)
-                      .join(" → ") || "—"}
-                  </Text>
-                </AppCard>
-              ))
-            )}
-
-            <Text style={styles.sectionTitle}>Recent activity</Text>
-            {activity.length === 0 ? (
-              <Text style={styles.empty}>Nothing recorded yet.</Text>
-            ) : (
-              activity.slice(0, 8).map((entry: any, index: number) => (
-                <View key={entry?._id || index} style={styles.activityRow}>
-                  <Text style={styles.activityText} numberOfLines={2}>
-                    {entry?.action || entry?.message || "Activity"}
-                  </Text>
-                  <Text style={styles.activityWhen}>{formatDate(entry?.createdAt)}</Text>
-                </View>
-              ))
-            )}
-          </>
-        ) : null}
-      </AppSheet>
-    </Screen>
+    </BrandPage>
   );
 };
 
-const styles = themedStyles((c) => StyleSheet.create({
-  search: { marginBottom: spacing.md },
-  list: { paddingBottom: spacing.xxl },
-  card: { marginBottom: spacing.md },
-  subCard: { marginBottom: spacing.md },
-  head: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.md,
-  },
-  name: { flex: 1, fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
-  meta: { marginTop: 3, fontSize: typography.label, color: themePalette.slate[500] },
-  detailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  detailLabel: { fontSize: typography.label, color: themePalette.slate[500] },
-  detailValue: {
-    flex: 1,
-    fontSize: typography.label,
-    fontWeight: "600",
-    color: themePalette.slate[800],
-    textAlign: "right",
-  },
-  sectionTitle: {
-    marginTop: spacing.lg,
-    marginBottom: spacing.md,
-    fontSize: typography.caption,
-    fontWeight: "700",
-    color: themePalette.slate[500],
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-  },
-  assignmentCode: { fontSize: typography.body, fontWeight: "600", color: themePalette.slate[900] },
-  empty: { fontSize: typography.label, color: themePalette.slate[500] },
-  activityRow: {
-    paddingVertical: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: themePalette.slate[200],
-  },
-  activityText: { fontSize: typography.label, color: themePalette.slate[700] },
-  activityWhen: { marginTop: 2, fontSize: typography.caption, color: themePalette.slate[500] },
-}));
+const styles = brandStyles((b) =>
+  StyleSheet.create({
+    flex: { flex: 1, minWidth: 0 },
+    list: {
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+      overflow: "hidden",
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 11,
+      paddingHorizontal: 12,
+      paddingVertical: 11,
+      borderBottomWidth: 1,
+      borderBottomColor: b.hairline,
+    },
+    rowPressed: { backgroundColor: b.fieldMuted },
+    nameLine: { flexDirection: "row", alignItems: "center", gap: 5 },
+    name: { flexShrink: 1, fontSize: t.body, fontWeight: "700", color: b.text },
+    meta: { marginTop: 2, fontSize: t.label, color: b.textMuted },
+  }),
+);
+
+export default CoworkingClientsScreen;

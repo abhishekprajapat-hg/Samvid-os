@@ -1,10 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
 import { getUserProfileById, getUsers, updateUserByAdmin } from "../../services/userService";
+import {
+  getAdminLeaveRequests,
+  getLeaveBalanceForAdmin,
+  getUserAttendanceForAdmin,
+} from "../../services/attendanceService";
+import { getProjectsWithMeta } from "../../services/projectService";
+import { getTasks } from "../../services/taskService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { themedStyles } from "../../theme/themedStyles";
 
@@ -58,6 +65,28 @@ const formatDate = (value?: string | null) => {
   });
 };
 
+const monthValue = (date = new Date()) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+const shiftMonth = (value: string, delta: number) => {
+  const [year, month] = value.split("-").map(Number);
+  return monthValue(new Date(year, Math.max(1, month) - 1 + delta, 1));
+};
+
+const buildCalendar = (value: string) => {
+  const [year, month] = value.split("-").map(Number);
+  const first = new Date(year, Math.max(1, month) - 1, 1);
+  const days = new Date(year, Math.max(1, month), 0).getDate();
+  const mondayOffset = (first.getDay() + 6) % 7;
+  return [
+    ...Array.from({ length: mondayOffset }, (_, index) => ({ key: `blank-${index}`, day: 0, date: "" })),
+    ...Array.from({ length: days }, (_, index) => {
+      const day = index + 1;
+      return { key: String(day), day, date: `${value}-${String(day).padStart(2, "0")}` };
+    }),
+  ];
+};
+
 export const UserDetailsEditorScreen = () => {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
@@ -71,6 +100,14 @@ export const UserDetailsEditorScreen = () => {
   const [success, setSuccess] = useState("");
   const [profile, setProfile] = useState<any>(null);
   const [users, setUsers] = useState<any[]>([]);
+  const [attendanceMonth, setAttendanceMonth] = useState(monthValue());
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [insightsError, setInsightsError] = useState("");
+  const [attendanceData, setAttendanceData] = useState<any>({ summary: {}, attendance: [] });
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [leaveBalance, setLeaveBalance] = useState<any>(null);
+  const [leaveRows, setLeaveRows] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -118,6 +155,38 @@ export const UserDetailsEditorScreen = () => {
     loadData();
   }, [loadData]);
 
+  const loadInsights = useCallback(async () => {
+    if (!userId) return;
+    try {
+      setInsightsLoading(true);
+      setInsightsError("");
+      const [attendance, taskRows, balance, approvedLeave, projectPayload] = await Promise.all([
+        getUserAttendanceForAdmin(userId, { month: attendanceMonth }).catch(() => ({ summary: {}, attendance: [] })),
+        getTasks({ assignedTo: userId }).catch(() => []),
+        profile?.role === "ADMIN"
+          ? Promise.resolve(null)
+          : getLeaveBalanceForAdmin(userId, { month: attendanceMonth }).catch(() => null),
+        profile?.role === "ADMIN"
+          ? Promise.resolve([])
+          : getAdminLeaveRequests({ userId, status: "APPROVED" }).catch(() => []),
+        getProjectsWithMeta({ createdBy: userId, limit: 200 }).catch(() => ({ projects: [] })),
+      ]);
+      setAttendanceData(attendance);
+      setTasks(Array.isArray(taskRows) ? taskRows : []);
+      setLeaveBalance(balance);
+      setLeaveRows(Array.isArray(approvedLeave) ? approvedLeave : []);
+      setProjects(Array.isArray(projectPayload?.projects) ? projectPayload.projects : []);
+    } catch (insightError) {
+      setInsightsError(toErrorMessage(insightError, "Failed to load activity details"));
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, [attendanceMonth, profile?.role, userId]);
+
+  useEffect(() => {
+    void loadInsights();
+  }, [loadInsights]);
+
   useEffect(() => {
     if (!success) return;
     const timer = setTimeout(() => setSuccess(""), 1800);
@@ -135,6 +204,43 @@ export const UserDetailsEditorScreen = () => {
       return row?.isActive && allowedParentRoles.includes(String(row?.role || "")) && candidateId !== userId;
     });
   }, [allowedParentRoles, userId, users]);
+
+  const attendanceByDate = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const row of attendanceData?.attendance || []) {
+      const date = String(row?.attendanceDate || row?.date || "").slice(0, 10);
+      if (date) map.set(date, row);
+    }
+    return map;
+  }, [attendanceData]);
+  const calendarDays = useMemo(() => buildCalendar(attendanceMonth), [attendanceMonth]);
+  const taskStats = useMemo(() => {
+    const completed = tasks.filter((task) => String(task.status || "") === "COMPLETED").length;
+    const inProgress = tasks.filter((task) => String(task.status || "") === "IN_PROGRESS").length;
+    const overdue = tasks.filter((task) => {
+      if (!task.dueDate || String(task.status || "") === "COMPLETED") return false;
+      return new Date(task.dueDate).getTime() < new Date().setHours(0, 0, 0, 0);
+    }).length;
+    return { total: tasks.length, completed, inProgress, overdue };
+  }, [tasks]);
+  const leaveTypes = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of leaveRows) {
+      const key = String(row?.leaveType || "OTHER").replaceAll("_", " ");
+      counts.set(key, (counts.get(key) || 0) + Number(row?.days || 0));
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [leaveRows]);
+  const projectStats = useMemo(() => {
+    const result = { total: projects.length, active: 0, completed: 0, upcoming: 0 };
+    for (const project of projects) {
+      const status = String(project?.status || "").toUpperCase();
+      if (["COMPLETED", "DELIVERED", "SOLD_OUT"].includes(status)) result.completed += 1;
+      else if (["UPCOMING", "PLANNED", "DRAFT"].includes(status)) result.upcoming += 1;
+      else result.active += 1;
+    }
+    return result;
+  }, [projects]);
 
   useEffect(() => {
     if (!needsReporting) {
@@ -307,6 +413,167 @@ export const UserDetailsEditorScreen = () => {
             <AppButton title={saving ? "Saving..." : "Save Changes"} onPress={handleSave} disabled={saving || isEditingSelf} />
           </AppCard>
 
+          {insightsError ? (
+            <Pressable style={styles.warningCard} onPress={() => loadInsights()} accessibilityRole="button">
+              <Text style={styles.warningText}>{insightsError} Tap to retry.</Text>
+            </Pressable>
+          ) : null}
+
+          <AppCard style={styles.sectionCard as object}>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionTitle}>Attendance Calendar</Text>
+                <Text style={styles.meta}>{attendanceMonth} {insightsLoading ? "· Loading…" : ""}</Text>
+              </View>
+              <View style={styles.monthActions}>
+                <AppButton title="‹" variant="ghost" onPress={() => setAttendanceMonth((value) => shiftMonth(value, -1))} />
+                <AppButton title="Today" variant="ghost" onPress={() => setAttendanceMonth(monthValue())} />
+                <AppButton title="›" variant="ghost" onPress={() => setAttendanceMonth((value) => shiftMonth(value, 1))} />
+              </View>
+            </View>
+
+            <View style={styles.statsGrid}>
+              {[
+                ["Present", attendanceData?.summary?.presentDays || attendanceData?.summary?.present || 0],
+                ["Half days", attendanceData?.summary?.halfDays || 0],
+                ["Leave", attendanceData?.summary?.leaveDays || 0],
+                ["Absent", attendanceData?.summary?.absentDays || attendanceData?.summary?.absent || 0],
+                ["Late", attendanceData?.summary?.lateDays || 0],
+                ["Hours", Math.round(Number(attendanceData?.summary?.workedMinutes || 0) / 60)],
+              ].map(([label, value]) => (
+                <View key={String(label)} style={styles.statTile}>
+                  <Text style={styles.statValue}>{String(value)}</Text>
+                  <Text style={styles.statLabel}>{String(label)}</Text>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.weekHeader}>
+              {["M", "T", "W", "T", "F", "S", "S"].map((label, index) => (
+                <Text key={`${label}-${index}`} style={styles.weekLabel}>{label}</Text>
+              ))}
+            </View>
+            <View style={styles.calendarGrid}>
+              {calendarDays.map((day) => {
+                const row = day.date ? attendanceByDate.get(day.date) : null;
+                const status = String(row?.status || "").replaceAll("_", " ");
+                return (
+                  <View key={day.key} style={[styles.dayCell, !day.date && styles.dayCellBlank]}>
+                    {day.date ? (
+                      <>
+                        <Text style={styles.dayNumber}>{day.day}</Text>
+                        <Text style={styles.dayStatus} numberOfLines={1}>{status ? status.slice(0, 3) : "—"}</Text>
+                      </>
+                    ) : null}
+                  </View>
+                );
+              })}
+            </View>
+          </AppCard>
+
+          <AppCard style={styles.sectionCard as object}>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionTitle}>Task History</Text>
+                <Text style={styles.meta}>{taskStats.total} assigned tasks</Text>
+              </View>
+              <AppButton title="Refresh" variant="ghost" onPress={() => loadInsights()} disabled={insightsLoading} />
+            </View>
+            <View style={styles.statsGrid}>
+              {[
+                ["Total", taskStats.total],
+                ["Completed", taskStats.completed],
+                ["In progress", taskStats.inProgress],
+                ["Overdue", taskStats.overdue],
+              ].map(([label, value]) => (
+                <View key={String(label)} style={styles.statTile}>
+                  <Text style={styles.statValue}>{String(value)}</Text>
+                  <Text style={styles.statLabel}>{String(label)}</Text>
+                </View>
+              ))}
+            </View>
+            {tasks.length === 0 ? <Text style={styles.meta}>No tasks assigned to this user yet.</Text> : null}
+            {tasks.slice(0, 12).map((task) => (
+              <Pressable
+                key={task._id}
+                style={styles.detailRow}
+                onPress={() => navigation.navigate("TaskDetails", { taskId: task._id })}
+                accessibilityRole="button"
+              >
+                <View style={styles.detailCopy}>
+                  <Text style={styles.detailTitle} numberOfLines={1}>{task.title}</Text>
+                  <Text style={styles.meta} numberOfLines={1}>
+                    {task.status || "TODO"} · {task.priority || "MEDIUM"} · Due {formatDate(task.dueDate)}
+                  </Text>
+                </View>
+                <Text style={styles.linkText}>Open</Text>
+              </Pressable>
+            ))}
+          </AppCard>
+
+          <AppCard style={styles.sectionCard as object}>
+            <Text style={styles.sectionTitle}>Leave Summary</Text>
+            {profile.role === "ADMIN" ? (
+              <Text style={styles.meta}>Admin users do not accrue leave.</Text>
+            ) : (
+              <>
+                <View style={styles.statsGrid}>
+                  {[
+                    ["Accrued", leaveBalance?.accrued || 0],
+                    ["Used", leaveBalance?.used || 0],
+                    ["Pending", leaveBalance?.pending || 0],
+                    ["Available", leaveBalance?.available || 0],
+                    ["Carry forward", leaveBalance?.carryForward || 0],
+                  ].map(([label, value]) => (
+                    <View key={String(label)} style={styles.statTile}>
+                      <Text style={styles.statValue}>{String(value)}</Text>
+                      <Text style={styles.statLabel}>{String(label)}</Text>
+                    </View>
+                  ))}
+                </View>
+                {leaveTypes.length ? (
+                  leaveTypes.map(([label, days]) => (
+                    <View key={label} style={styles.simpleRow}>
+                      <Text style={styles.detailTitle}>{label}</Text>
+                      <Text style={styles.meta}>{days} day{days === 1 ? "" : "s"}</Text>
+                    </View>
+                  ))
+                ) : <Text style={styles.meta}>No approved leave in the selected history.</Text>}
+              </>
+            )}
+          </AppCard>
+
+          <AppCard style={styles.sectionCard as object}>
+            <Text style={styles.sectionTitle}>Project Assignment</Text>
+            <View style={styles.statsGrid}>
+              {[
+                ["Total", projectStats.total],
+                ["Active", projectStats.active],
+                ["Completed", projectStats.completed],
+                ["Upcoming", projectStats.upcoming],
+              ].map(([label, value]) => (
+                <View key={String(label)} style={styles.statTile}>
+                  <Text style={styles.statValue}>{String(value)}</Text>
+                  <Text style={styles.statLabel}>{String(label)}</Text>
+                </View>
+              ))}
+            </View>
+            {projects.slice(0, 8).map((project) => (
+              <Pressable
+                key={String(project._id || project.projectId)}
+                style={styles.detailRow}
+                onPress={() => navigation.navigate("ProjectDetails", { projectId: project._id })}
+                accessibilityRole="button"
+              >
+                <View style={styles.detailCopy}>
+                  <Text style={styles.detailTitle} numberOfLines={1}>{project.projectName || project.title || "Project"}</Text>
+                  <Text style={styles.meta} numberOfLines={1}>{project.status || "—"} · {project.location || "Location not set"}</Text>
+                </View>
+                <Text style={styles.linkText}>Open</Text>
+              </Pressable>
+            ))}
+          </AppCard>
+
           <AppCard style={styles.sectionCard as object}>
             <Text style={styles.sectionTitle}>Metadata</Text>
             <Text style={styles.meta}>User ID: {String(profile._id || "-")}</Text>
@@ -354,6 +621,118 @@ const styles = themedStyles((c) => StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     marginBottom: 6,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    marginBottom: 8,
+  },
+  monthActions: {
+    flexDirection: "row",
+    gap: 4,
+  },
+  statsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+    marginBottom: 10,
+  },
+  statTile: {
+    minWidth: "30%",
+    flexGrow: 1,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 9,
+    backgroundColor: c.surfaceMuted,
+    padding: 9,
+  },
+  statValue: {
+    color: c.text,
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  statLabel: {
+    marginTop: 2,
+    color: c.textMuted,
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  weekHeader: {
+    flexDirection: "row",
+    marginTop: 2,
+  },
+  weekLabel: {
+    width: "14.2857%",
+    textAlign: "center",
+    color: c.textMuted,
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  calendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 5,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderColor: c.border,
+  },
+  dayCell: {
+    width: "14.2857%",
+    minHeight: 46,
+    padding: 5,
+    borderRightWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: c.border,
+    backgroundColor: c.surface,
+  },
+  dayCellBlank: {
+    backgroundColor: c.surfaceMuted,
+  },
+  dayNumber: {
+    color: c.text,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  dayStatus: {
+    marginTop: 5,
+    color: c.primary,
+    fontSize: 8,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minHeight: 52,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: c.border,
+  },
+  detailCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  detailTitle: {
+    color: c.text,
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  linkText: {
+    color: c.primary,
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  simpleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    paddingVertical: 7,
+    borderTopWidth: 1,
+    borderTopColor: c.border,
   },
   label: {
     color: c.slate[700],

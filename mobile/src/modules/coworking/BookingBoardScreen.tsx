@@ -1,423 +1,463 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Screen } from "../../components/common/Screen";
+import { Alert, StyleSheet, Text, View } from "react-native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
+import { TextField, Segmented } from "../../components/ui/form";
 import {
-  AppBadge,
-  AppButton,
-  AppCard,
-  AppEmptyState,
-  AppInput,
-  AppSearchInput,
-  AppSheet,
-  AppSkeletonList,
-} from "../../components/ui";
-import { usePermissions } from "../../context/PermissionContext";
-import { palette, spacing, typography } from "../../theme/tokens";
-import { toErrorMessage } from "../../utils/errorMessage";
+  Banner,
+  BrandButton,
+  BrandPage,
+  Chip,
+  ChipRow,
+} from "../../components/brand/kit";
+import { brandStyles, type as t } from "../../theme/brand";
+import { formatCurrency } from "../../utils/format";
+import { shareTextFile } from "../../utils/shareFile";
+import { reloadBoard, refreshBoardIfIdle, replaceBoard, useBoard } from "./boardStore";
+import { toCsv, type BoardAction, type Cabin } from "./boardReducer";
+import { SEAT_BANDS, STATUS_META, STATUS_ORDER, WINGS } from "./cabinData";
+import { pickBackup, restoreBackup, shareBackup } from "./boardBackup";
+import { WingSeatMap } from "./components/WingSeatMap";
+import { FloorLayoutMap } from "./components/FloorLayoutMap";
 import {
-  blockCabin,
-  getFloorView,
-  unblockCabin,
-  type CoworkingCabin,
-} from "../../services/coworkingService";
-import {
-  STATUS_ORDER,
-  WINGS,
-  seatsFor,
-  statusMetaFor,
-  summariseByStatus,
-  wingOf,
-} from "./cabinData";
-import { themedStyles, themePalette } from "../../theme/themedStyles";
+  ActivitySheet,
+  BirthdayReminders,
+  CabinDetailSheet,
+  FreeingSoonCard,
+  HoldSheet,
+  OccupancyCard,
+  SelectionBar,
+  StatusCard,
+  TransferSheet,
+} from "./components/BoardPanels";
 
 /*
- * The booking board.
+ * Cabin Booking Board - web's BookingBoard.jsx.
  *
- * Web draws a scaled floor plan: cabins absolutely positioned to the architect's
- * drawing, with the temple, lift, waiting area and passage band placed around
- * them so a reader can tell which way up the floor is. That works at 1440px.
+ * Built around the three questions a coworking desk answers all day: what is
+ * free right now, who is in the cabin someone is asking about, and can I put a
+ * client into it today. Every action runs through the shared board store, which
+ * owns the floor, keeps an undo stack and saves to the same /coworking/board
+ * document the desktop reads - so a cabin let from this phone is let on the
+ * desktop, and the reverse. This screen holds only view state.
  *
- * At 390px it does not. A 65-cabin plan scaled to a phone gives tiles roughly
- * 20px across - too small to read a label, let alone tap one - and pinch-zoom
- * on a board people scan rather than study is a poor trade. So the phone gets
- * the same cabins grouped by wing, in a legible grid, with the same status
- * colours and the same legend. The floor plan stays on web, which is where the
- * spatial question ("which cabin is next to the lift?") actually gets asked.
- *
- * The legend is not optional: the colours read from the landlord's side, so red
- * is an empty cabin and green is a let one. See cabinData.ts.
+ * The September version of this screen read the relational /coworking/cabins
+ * API instead, which the desktop board never writes to; the two apps showed
+ * different floors. That is what this rebuild fixes.
  */
 
-const Legend = () => (
-  <View style={styles.legend}>
-    {STATUS_ORDER.map((status) => {
-      const meta = statusMetaFor(status);
-      return (
-        <View key={status} style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: meta.dot }]} />
-          <Text style={styles.legendLabel}>{meta.label}</Text>
-        </View>
-      );
-    })}
-  </View>
-);
-
-const CabinTile = ({
-  cabin,
-  onPress,
-}: {
-  cabin: CoworkingCabin;
-  onPress: () => void;
-}) => {
-  const meta = statusMetaFor(cabin.status);
-  const code = String(cabin.code || cabin.name || "?");
-  const seats = seatsFor(code, cabin.seats as number);
-
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Cabin ${code}, ${meta.label}`}
-      style={({ pressed }) => [
-        styles.tile,
-        { backgroundColor: meta.tileBackground, borderColor: meta.tileBorder },
-        pressed && styles.tilePressed,
-      ]}
-    >
-      <Text style={[styles.tileCode, { color: meta.tileText }]} numberOfLines={1}>
-        {code}
-      </Text>
-      {seats ? <Text style={[styles.tileSeats, { color: meta.tileText }]}>{seats} seats</Text> : null}
-    </Pressable>
-  );
+const ACTION_MESSAGES: Partial<Record<BoardAction["type"], (cabin: Cabin) => string>> = {
+  RELEASE: (cabin) => `${cabin.label} released. ${cabin.client?.name} moved to its history.`,
+  RENEW: (cabin) => `${cabin.label} renewed by 12 months.`,
+  CONFIRM_HOLD: (cabin) => `${cabin.label} confirmed for ${cabin.client?.name}.`,
+  DROP_HOLD: (cabin) => `Hold dropped on ${cabin.label}.`,
+  RECORD_PAYMENT: (cabin) => `Payment recorded for ${cabin.label}.`,
+  SET_UNAVAILABLE: (cabin) => `${cabin.label} taken off the market.`,
+  RETURN_TO_INVENTORY: (cabin) => `${cabin.label} is back in inventory.`,
 };
 
 export const BookingBoardScreen = () => {
-  const { can } = usePermissions();
-  const canBlock = can("cabins.block");
-
-  const [cabins, setCabins] = useState<CoworkingCabin[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  const [board, dispatch, sync] = useBoard();
+  const [view, setView] = useState<"wings" | "layout">("wings");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [wingFilter, setWingFilter] = useState("");
+  const [seatBand, setSeatBand] = useState("");
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("");
-  const [selected, setSelected] = useState<CoworkingCabin | null>(null);
-  const [blockReason, setBlockReason] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [cart, setCart] = useState<string[]>([]);
+  const [detailCode, setDetailCode] = useState("");
+  const [holdCode, setHoldCode] = useState("");
+  const [transferCode, setTransferCode] = useState("");
+  const [showActivity, setShowActivity] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "success" | "info" | "alert"; message: string } | null>(null);
+  const [backingUp, setBackingUp] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const data = await getFloorView();
-      setCabins(data.cabins);
-      setError("");
-    } catch (err) {
-      setError(toErrorMessage(err, "Could not load the board"));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  const { cabins, activity, undoStack } = board;
 
+  // A cabin or a notice handed over by another screen: the client profile's
+  // "open cabin", or the onboarding page reporting what it just did.
   useEffect(() => {
-    void load();
-  }, [load]);
-
-  const summary = useMemo(() => summariseByStatus(cabins), [cabins]);
-
-  const visible = useMemo(() => {
-    const key = search.trim().toLowerCase();
-    return cabins.filter((cabin) => {
-      if (statusFilter && String(cabin.status || "").toUpperCase() !== statusFilter) return false;
-      if (!key) return true;
-      const client =
-        typeof cabin.clientId === "object" && cabin.clientId ? cabin.clientId.name || "" : "";
-      return [cabin.code, cabin.name, client]
-        .map((value) => String(value || "").toLowerCase())
-        .some((value) => value.includes(key));
-    });
-  }, [cabins, search, statusFilter]);
-
-  const byWing = useMemo(() => {
-    const groups = new Map<string, CoworkingCabin[]>();
-    for (const cabin of visible) {
-      const wing = wingOf(String(cabin.code || cabin.name || ""));
-      if (!groups.has(wing)) groups.set(wing, []);
-      groups.get(wing)!.push(cabin);
+    const params = route.params || {};
+    if (params.cabin) setDetailCode(String(params.cabin));
+    if (params.notice) {
+      setNotice({ tone: "success", message: String(params.notice) });
+      setCart([]);
+      setSelectMode(false);
     }
-    // Known wings in plan order first, then anything the data adds.
-    const ordered: Array<{ id: string; label: string; hint?: string; cabins: CoworkingCabin[] }> = [];
-    for (const wing of WINGS) {
-      const rows = groups.get(wing.id);
-      if (rows?.length) ordered.push({ ...wing, cabins: rows });
-      groups.delete(wing.id);
-    }
-    for (const [id, rows] of groups) {
-      ordered.push({ id, label: id ? `Wing ${id}` : "Other", cabins: rows });
-    }
-    return ordered;
-  }, [visible]);
+    if (params.cabin || params.notice) navigation.setParams({ cabin: undefined, notice: undefined });
+  }, [navigation, route.params]);
 
-  const applyBlock = useCallback(async () => {
-    if (!selected?._id) return;
-    setBusy(true);
+  useFocusEffect(
+    useCallback(() => {
+      void refreshBoardIfIdle();
+    }, []),
+  );
+
+  const passesNonStatus = useCallback(
+    (cabin: Cabin) => {
+      if (wingFilter && cabin.wing !== wingFilter) return false;
+      if (seatBand && !SEAT_BANDS.find((band) => band.id === seatBand)?.test(cabin.seats)) return false;
+      const query = search.trim().toLowerCase();
+      if (!query) return true;
+      return `${cabin.label} ${cabin.code} ${cabin.client?.name || ""} ${cabin.client?.contactPerson || ""}`
+        .toLowerCase()
+        .includes(query);
+    },
+    [search, seatBand, wingFilter],
+  );
+
+  // Filters dim rather than remove: a missing cabin reads as a gap in the building.
+  const matches = useCallback(
+    (cabin: Cabin) => passesNonStatus(cabin) && (statusFilter === "all" || cabin.status === statusFilter),
+    [passesNonStatus, statusFilter],
+  );
+
+  const scoped = useMemo(() => cabins.filter(passesNonStatus), [cabins, passesNonStatus]);
+  const counts = useMemo(
+    () =>
+      STATUS_ORDER.reduce<Record<string, number>>(
+        (tally, status) => ({ ...tally, [status]: scoped.filter((cabin) => cabin.status === status).length }),
+        { all: scoped.length },
+      ),
+    [scoped],
+  );
+
+  const byCode = (code: string) => cabins.find((cabin) => cabin.code === code) || null;
+  const detailCabin = byCode(detailCode);
+  const holdCabin = byCode(holdCode);
+  const transferCabin = byCode(transferCode);
+  const cartCabins = cart.map(byCode).filter(Boolean) as Cabin[];
+  const vacantCount = cabins.filter((cabin) => cabin.status === "VACANT").length;
+
+  const toggleSelectMode = () => {
+    if (selectMode) setCart([]);
+    setSelectMode((value) => !value);
+  };
+
+  const handleSelect = (cabin: Cabin) => {
+    if (selectMode && cabin.status === "VACANT") {
+      setCart((current) =>
+        current.includes(cabin.code) ? current.filter((code) => code !== cabin.code) : [...current, cabin.code],
+      );
+      return;
+    }
+    if (selectMode) {
+      setNotice({
+        tone: "info",
+        message: `${cabin.label} is ${STATUS_META[cabin.status].label.toLowerCase()} and cannot be allotted. Opened its details instead.`,
+      });
+    }
+    setDetailCode(cabin.code);
+  };
+
+  const runAction = (action: BoardAction, message?: string) => {
+    dispatch(action);
+    if (message) setNotice({ tone: "success", message });
+  };
+
+  const openOnboarding = (codes: string[]) => {
+    setDetailCode("");
+    navigation.navigate("CoworkingOnboard", { cabinCodes: codes });
+  };
+
+  const exportCsv = async () => {
+    const header = ["Cabin", "Wing", "Capacity", "Status", "Client", "Monthly rent", "Agreement ends", "Dues"];
+    const rows = cabins.map((cabin) => [
+      cabin.label,
+      cabin.wing,
+      `${cabin.seats} seater`,
+      STATUS_META[cabin.status].label,
+      cabin.client?.name || "",
+      cabin.contract?.monthlyRent ?? cabin.monthlyRent,
+      cabin.contract ? new Date(cabin.contract.endDate).toISOString().slice(0, 10) : "",
+      cabin.contract?.duesAmount || 0,
+    ]);
     try {
-      if (selected.isBlocked) {
-        await unblockCabin(String(selected._id));
-      } else {
-        if (!blockReason.trim()) {
-          Alert.alert("Block cabin", "Give a reason so the board explains itself later.");
-          return;
-        }
-        await blockCabin(String(selected._id), { reason: blockReason.trim() });
-      }
-      setSelected(null);
-      setBlockReason("");
-      await load();
-    } catch (err) {
-      Alert.alert("Cabin", toErrorMessage(err, "That did not go through"));
-    } finally {
-      setBusy(false);
+      await shareTextFile("coworking-booking-board.csv", toCsv([header, ...rows]));
+      setNotice({ tone: "success", message: `Exported ${cabins.length} cabins to CSV.` });
+    } catch {
+      setNotice({ tone: "alert", message: "Could not export the board." });
     }
-  }, [selected, blockReason, load]);
+  };
 
-  const selectedMeta = selected ? statusMetaFor(selected.status) : null;
-  const selectedClient =
-    selected && typeof selected.clientId === "object" && selected.clientId
-      ? selected.clientId.name
-      : null;
+  const handleBackup = async () => {
+    setBackingUp(true);
+    try {
+      const backup = await shareBackup(board);
+      setNotice({
+        tone: backup.counts.cabinsLet ? "success" : "info",
+        message: backup.counts.cabinsLet
+          ? `Backed up ${backup.counts.cabinsLet} let cabin(s) and ${backup.counts.documents} document(s). Keep this file safe.`
+          : "Backup saved, but this board holds no let cabins.",
+      });
+    } catch {
+      setNotice({ tone: "alert", message: "Could not create the backup." });
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  const handleRestore = async () => {
+    let payload;
+    try {
+      payload = await pickBackup();
+    } catch {
+      setNotice({ tone: "alert", message: "Could not read that backup file." });
+      return;
+    }
+    if (!payload) return;
+    Alert.alert(
+      "Restore this backup?",
+      "Restoring replaces the booking board with the contents of the file, and saves it for everyone who uses the board. Undo can take it back.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Restore",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const result = await restoreBackup(payload);
+              replaceBoard(result.board);
+              setNotice({
+                tone: "success",
+                message: `Restored ${result.cabinsLet || 0} let cabin(s) and ${result.restoredDocuments} document(s).`,
+              });
+            } catch (error: any) {
+              setNotice({ tone: "alert", message: error?.message || "Could not read that backup file." });
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await reloadBoard();
+    setRefreshing(false);
+  };
+
+  const boardClients = useMemo(
+    () => [...new Map(cabins.filter((cabin) => cabin.client).map((cabin) => [cabin.client!.id, cabin.client!])).values()],
+    [cabins],
+  );
+
+  const mapProps = { cabins, selectedCode: detailCode, cart, matches, onSelect: handleSelect };
 
   return (
-    <Screen
+    <BrandPage
       title="Booking Board"
-      subtitle={cabins.length ? `${cabins.length} cabins` : "Coworking"}
-      error={error}
-      onRetry={load}
-    >
-      {loading ? (
-        <AppSkeletonList rows={4} />
-      ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.body}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => {
-                setRefreshing(true);
-                void load();
-              }}
-            />
-          }
-        >
-          <Legend />
-
-          <AppSearchInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Cabin or client"
-            style={styles.search}
+      subtitle="Coworking space"
+      onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}
+      right={
+        <BrandButton
+          title="Onboard"
+          icon="person-add"
+          size="sm"
+          disabled={!vacantCount}
+          onPress={() => {
+            setSelectMode(true);
+            setNotice({ tone: "info", message: "Pick the vacant cabins to allot, then confirm from the bar at the bottom." });
+          }}
+        />
+      }
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      footer={
+        cartCabins.length ? (
+          <SelectionBar
+            cabins={cartCabins}
+            onRemove={(code) => setCart((current) => current.filter((value) => value !== code))}
+            onClear={() => setCart([])}
+            onOnboard={() => openOnboarding(cartCabins.map((cabin) => cabin.code))}
           />
+        ) : undefined
+      }
+    >
+      {sync.error ? (
+        <Banner
+          tone="warn"
+          icon="cloud-offline-outline"
+          message={sync.error}
+          action="Reload the board"
+          onAction={() => void reloadBoard()}
+        />
+      ) : null}
+      {sync.loading ? <Text style={styles.muted}>Loading the board…</Text> : null}
+      {notice ? (
+        <Banner tone={notice.tone} message={notice.message} action="Dismiss" onAction={() => setNotice(null)} />
+      ) : null}
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.filterRow}
-          >
-            <Pressable
-              onPress={() => setStatusFilter("")}
-              style={[styles.filterChip, !statusFilter && styles.filterChipActive]}
-            >
-              <Text style={[styles.filterLabel, !statusFilter && styles.filterLabelActive]}>
-                All {cabins.length}
-              </Text>
-            </Pressable>
-            {STATUS_ORDER.map((status) => {
-              const meta = statusMetaFor(status);
-              const active = statusFilter === status;
-              return (
-                <Pressable
-                  key={status}
-                  onPress={() => setStatusFilter(active ? "" : status)}
-                  style={[styles.filterChip, active && styles.filterChipActive]}
-                >
-                  <View style={[styles.legendDot, { backgroundColor: meta.dot }]} />
-                  <Text style={[styles.filterLabel, active && styles.filterLabelActive]}>
-                    {meta.short} {summary[status] || 0}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+      <BirthdayReminders clients={boardClients} />
 
-          {byWing.length === 0 ? (
-            <AppEmptyState
-              title={search || statusFilter ? "No cabins match" : "No cabins yet"}
-              description={
-                search || statusFilter
-                  ? "Clear the filter to see the whole floor."
-                  : "Cabins added on the web app appear here."
-              }
-            />
-          ) : (
-            byWing.map((wing) => (
-              <View key={wing.id} style={styles.wing}>
-                <View style={styles.wingHead}>
-                  <Text style={styles.wingLabel}>{wing.label}</Text>
-                  {wing.hint ? <Text style={styles.wingHint}>{wing.hint}</Text> : null}
-                  <View style={styles.spacer} />
-                  <Text style={styles.wingCount}>{wing.cabins.length}</Text>
-                </View>
-                <View style={styles.grid}>
-                  {wing.cabins.map((cabin, index) => (
-                    <CabinTile
-                      key={String(cabin._id || index)}
-                      cabin={cabin}
-                      onPress={() => {
-                        setSelected(cabin);
-                        setBlockReason(String(cabin.blockReason || ""));
-                      }}
-                    />
-                  ))}
-                </View>
-              </View>
-            ))
-          )}
-        </ScrollView>
+      <TextField value={search} onChangeText={setSearch} placeholder="Search cabins, clients, or IDs…" icon="search" />
+
+      <View style={styles.tools}>
+        <Segmented
+          options={[
+            { label: "Wings", value: "wings" },
+            { label: "Layout", value: "layout" },
+          ]}
+          value={view}
+          onChange={(value) => setView(value as "wings" | "layout")}
+        />
+        <View style={styles.toolGrid}>
+          <BrandButton title="Clients" icon="people-outline" size="sm" variant="secondary" style={styles.tool} onPress={() => navigation.navigate("CoworkingClients")} />
+          <BrandButton title="Activity" icon="time-outline" size="sm" variant="secondary" style={styles.tool} onPress={() => setShowActivity(true)} />
+          <BrandButton title="Export" icon="download-outline" size="sm" variant="secondary" style={styles.tool} onPress={exportCsv} />
+          <BrandButton title={backingUp ? "Saving…" : "Backup"} icon="save-outline" size="sm" variant="secondary" style={styles.tool} disabled={backingUp} onPress={handleBackup} />
+          <BrandButton title="Restore" icon="cloud-upload-outline" size="sm" variant="secondary" style={styles.tool} onPress={handleRestore} />
+          <BrandButton
+            title="Undo"
+            icon="arrow-undo-outline"
+            size="sm"
+            variant="secondary"
+            style={styles.tool}
+            disabled={!undoStack.length}
+            accessibilityLabel={undoStack.length ? `Undo: ${activity[0]?.title}` : "Nothing to undo"}
+            onPress={() => {
+              const undone = activity[0]?.title;
+              dispatch({ type: "UNDO" });
+              setNotice({ tone: "info", message: undone ? `Undone: ${undone}` : "Undone." });
+            }}
+          />
+        </View>
+      </View>
+
+      <OccupancyCard cabins={scoped} vacantCount={counts.VACANT || 0} />
+
+      {view === "layout" ? (
+        <>
+          <BrandButton
+            title={selectMode ? "Selecting cabins" : "Select cabins"}
+            icon={selectMode ? "checkbox" : "square-outline"}
+            size="sm"
+            variant={selectMode ? "primary" : "secondary"}
+            onPress={toggleSelectMode}
+          />
+          <FloorLayoutMap {...mapProps} />
+        </>
+      ) : (
+        <>
+          <ChipRow>
+            <Chip label="All" count={counts.all} active={statusFilter === "all"} onPress={() => setStatusFilter("all")} />
+            {STATUS_ORDER.map((status) => (
+              <Chip
+                key={status}
+                label={STATUS_META[status].label}
+                count={counts[status]}
+                dot={STATUS_META[status].dot}
+                active={statusFilter === status}
+                onPress={() => setStatusFilter(status)}
+              />
+            ))}
+          </ChipRow>
+          <ChipRow>
+            <Chip label="All wings" active={!wingFilter} onPress={() => setWingFilter("")} />
+            {WINGS.map((wing) => (
+              <Chip
+                key={wing.id}
+                label={wing.id}
+                active={wingFilter === wing.id}
+                onPress={() => setWingFilter(wingFilter === wing.id ? "" : wing.id)}
+              />
+            ))}
+            {SEAT_BANDS.map((band) => (
+              <Chip
+                key={band.id}
+                label={band.label}
+                active={seatBand === band.id}
+                onPress={() => setSeatBand(seatBand === band.id ? "" : band.id)}
+              />
+            ))}
+          </ChipRow>
+          <BrandButton
+            title={selectMode ? "Selecting cabins" : "Select cabins"}
+            icon={selectMode ? "checkbox" : "square-outline"}
+            size="sm"
+            variant={selectMode ? "primary" : "secondary"}
+            onPress={toggleSelectMode}
+          />
+          <Text style={styles.heading}>Cabins by wing</Text>
+          <WingSeatMap {...mapProps} />
+        </>
       )}
 
-      <AppSheet
-        visible={Boolean(selected)}
-        onClose={() => setSelected(null)}
-        title={String(selected?.code || selected?.name || "Cabin")}
-        subtitle={selectedMeta?.label}
-        footer={
-          canBlock && selected ? (
-            <AppButton
-              title={selected.isBlocked ? "Unblock cabin" : "Block cabin"}
-              variant={selected.isBlocked ? "secondary" : "danger"}
-              onPress={applyBlock}
-              loading={busy}
-              fullWidth
-            />
-          ) : null
-        }
-      >
-        {selected ? (
-          <AppCard>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Status</Text>
-              <AppBadge
-                variant={
-                  selected.status === "BOOKED"
-                    ? "emerald"
-                    : selected.status === "VACANT"
-                      ? "rose"
-                      : selected.status === "RESERVED"
-                        ? "amber"
-                        : selected.status === "BLOCKED"
-                          ? "violet"
-                          : "slate"
-                }
-              >
-                {selectedMeta?.label || "—"}
-              </AppBadge>
-            </View>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Seats</Text>
-              <Text style={styles.detailValue}>
-                {seatsFor(String(selected.code || ""), selected.seats as number) || "—"}
-              </Text>
-            </View>
-            {selectedClient ? (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Client</Text>
-                <Text style={styles.detailValue}>{selectedClient}</Text>
-              </View>
-            ) : null}
-            {selected.blockReason ? (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Block reason</Text>
-                <Text style={styles.detailValue}>{selected.blockReason}</Text>
-              </View>
-            ) : null}
-          </AppCard>
-        ) : null}
+      <StatusCard counts={counts} statusFilter={statusFilter} onStatusFilter={setStatusFilter} />
+      <FreeingSoonCard cabins={scoped} />
+      {cartCabins.length ? (
+        <Text style={styles.muted}>
+          {cartCabins.length} selected · {formatCurrency(cartCabins.reduce((sum, cabin) => sum + cabin.monthlyRent, 0))} / month
+        </Text>
+      ) : null}
 
-        {canBlock && selected && !selected.isBlocked ? (
-          <AppInput
-            label="Reason for blocking"
-            value={blockReason}
-            onChangeText={setBlockReason}
-            placeholder="Why is this cabin off the market?"
-            multiline
-          />
-        ) : null}
-      </AppSheet>
-    </Screen>
+      <CabinDetailSheet
+        cabin={detailCabin}
+        onClose={() => setDetailCode("")}
+        onAction={(action) => detailCabin && runAction(action, ACTION_MESSAGES[action.type]?.(detailCabin))}
+        onOnboard={(cabin) => openOnboarding([cabin.code])}
+        onHold={(cabin) => {
+          setDetailCode("");
+          setHoldCode(cabin.code);
+        }}
+        onTransfer={(cabin) => {
+          setDetailCode("");
+          setTransferCode(cabin.code);
+        }}
+        onEditClient={(cabin) => {
+          setDetailCode("");
+          navigation.navigate("CoworkingOnboard", { clientId: cabin.client?.id });
+        }}
+        onOpenClient={(cabin) => {
+          setDetailCode("");
+          navigation.navigate("CoworkingClientProfile", { clientId: cabin.client?.id });
+        }}
+      />
+
+      <HoldSheet
+        cabin={holdCabin}
+        onClose={() => setHoldCode("")}
+        onConfirm={(payload) => {
+          const label = holdCabin?.label;
+          setHoldCode("");
+          runAction({ type: "HOLD", ...payload }, `${label} held for ${payload.name} for ${payload.days} days.`);
+        }}
+      />
+
+      <TransferSheet
+        cabin={transferCabin}
+        cabins={cabins}
+        onClose={() => setTransferCode("")}
+        onConfirm={(payload) => {
+          const name = transferCabin?.client?.name;
+          setTransferCode("");
+          runAction({ type: "TRANSFER", ...payload }, `${name} moved to ${payload.toCode.replace(/^([A-D])/, "$1-")}.`);
+        }}
+      />
+
+      <ActivitySheet
+        visible={showActivity}
+        activity={activity}
+        onClose={() => setShowActivity(false)}
+        onOpenCabin={(code) => {
+          setShowActivity(false);
+          setDetailCode(code);
+        }}
+      />
+    </BrandPage>
   );
 };
 
-const styles = themedStyles((c) => StyleSheet.create({
-  body: { paddingBottom: spacing.xxl },
-  legend: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.lg,
-    marginBottom: spacing.lg,
-  },
-  legendItem: { flexDirection: "row", alignItems: "center", gap: 6 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendLabel: { fontSize: typography.caption, color: themePalette.slate[600] },
-  search: { marginBottom: spacing.md },
-  filterRow: { gap: spacing.md, paddingBottom: spacing.lg },
-  filterChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    height: 32,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: themePalette.slate[300],
-    backgroundColor: c.surface,
-  },
-  filterChipActive: { borderColor: themePalette.blue[600], backgroundColor: themePalette.blue[50] },
-  filterLabel: { fontSize: typography.label, fontWeight: "600", color: themePalette.slate[700] },
-  filterLabelActive: { color: themePalette.blue[700] },
-  wing: { marginBottom: spacing.xl },
-  wingHead: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md },
-  wingLabel: { fontSize: typography.cardTitle, fontWeight: "600", color: themePalette.slate[900] },
-  wingHint: { fontSize: typography.caption, color: themePalette.slate[500] },
-  spacer: { flex: 1 },
-  wingCount: { fontSize: typography.caption, fontWeight: "600", color: themePalette.slate[500] },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
-  tile: {
-    width: 78,
-    height: 62,
-    borderWidth: 1,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 4,
-  },
-  tilePressed: { opacity: 0.7 },
-  tileCode: { fontSize: typography.body, fontWeight: "700" },
-  tileSeats: { marginTop: 2, fontSize: 10, fontWeight: "600", opacity: 0.8 },
-  detailRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  detailLabel: { fontSize: typography.label, color: themePalette.slate[500] },
-  detailValue: {
-    flex: 1,
-    fontSize: typography.label,
-    fontWeight: "600",
-    color: themePalette.slate[800],
-    textAlign: "right",
-  },
-}));
+const styles = brandStyles((b) =>
+  StyleSheet.create({
+    muted: { fontSize: t.label, color: b.textMuted },
+    heading: { fontSize: t.cardTitle, fontWeight: "700", color: b.text },
+    tools: { gap: 8 },
+    toolGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+    tool: { flexGrow: 1, flexBasis: "30%" },
+  }),
+);
+
+export default BookingBoardScreen;

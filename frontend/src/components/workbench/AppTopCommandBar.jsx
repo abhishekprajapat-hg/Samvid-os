@@ -12,13 +12,17 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
   const [searchOpen, setSearchOpen] = useState(false);
   const isInventory = location.pathname === "/inventory";
   const role = userRole || user?.role;
+  const isFieldHome = role === "FIELD_EXECUTIVE" && ["/", "/dashboard"].includes(location.pathname);
   const menuItems = getAllVisibleMenuGroups(role, user).flatMap((group) => group.items);
   const items = [...new Map(menuItems.map((item) => [item.path, item])).values()];
   const canNotify = items.some((item) => item.path === "/admin/notifications");
   const canChat = items.some((item) => item.path === "/chat");
   const canProfile = roleCanSeeItem(PROFILE_ITEM, role, user);
   const currentItem = items.filter((item) => location.pathname === item.path || location.pathname.startsWith(item.path + "/")).sort((a, b) => b.path.length - a.path.length)[0];
-  const title = currentItem?.label || String(pageHeader?.title || "Workspace").replace(/\s+Command\s+Center$/i, "").replace(/\s+Dashboard$/i, "") || "Home";
+  const firstName = String(user?.name || user?.fullName || "there").trim().split(/\s+/)[0];
+  const title = isFieldHome
+    ? `Welcome back, ${firstName} 👋`
+    : currentItem?.label || String(pageHeader?.title || "Workspace").replace(/\s+Command\s+Center$/i, "").replace(/\s+Dashboard$/i, "") || "Home";
   const initials = String(user?.name || user?.fullName || "User").trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }).format(new Date());
   const results = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
@@ -53,7 +57,7 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
   return (
     <header className="app-context-header">
       <button type="button" className="app-header-menu app-header-icon" aria-label="Open navigation" onClick={onMenuOpen}><Menu size={20} /></button>
-      <div className="app-header-heading"><h1>{title}</h1><p>{pageHeader?.subtitle || "Manage your workspace and daily activities."}</p></div>
+      <div className="app-header-heading"><h1>{title}</h1><p>{isFieldHome ? "Here's what's happening with your pipeline today." : pageHeader?.subtitle || "Manage your workspace and daily activities."}</p></div>
       <div className="app-header-search" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false); }}>
         <Search size={18} />
         <input ref={searchRef} aria-label={isInventory ? "Search inventory" : "Search pages"} placeholder={isInventory ? "Search properties, projects, locations..." : "Search pages..."} value={query} onChange={(event) => search(event.target.value)} onFocus={() => setSearchOpen(true)} />

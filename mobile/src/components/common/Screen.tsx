@@ -1,9 +1,8 @@
 import React from "react";
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
-import { Icon } from "../ui/Icon";
-import { themedStyles, themePalette } from "../../theme/themedStyles";
+import { Glyph } from "../ui/Glyph";
+import { brand, brandStyles, layout, round, type as t } from "../../theme/brand";
 
 /*
  * The page shell. Plays the part of the web app's page header inside
@@ -58,7 +57,7 @@ export const Screen = ({
             accessibilityLabel="Back"
             style={styles.back}
           >
-            <Icon name="arrow-back" size={20} color={themePalette.slate[900]} />
+            <Glyph name="arrow-back" size={20} color={brand.text} />
           </Pressable>
         ) : null}
         <View style={styles.headerText}>
@@ -73,12 +72,10 @@ export const Screen = ({
 
       {loading ? (
         <View style={styles.centred}>
-          <ActivityIndicator size="large" color={themePalette.blue[600]} />
+          <ActivityIndicator size="large" color={brand.primary} />
         </View>
       ) : (
-        <View
-          style={[styles.body, { paddingBottom: spacing.lg + Math.max(insets.bottom, androidBottom) }]}
-        >
+        <View style={[styles.body, { paddingBottom: 12 + Math.max(insets.bottom, androidBottom) }]}>
           {/*
            * The banner sits above the body rather than replacing it. Several
            * screens pass a transient failure here - a message that would not
@@ -104,29 +101,29 @@ export const Screen = ({
   );
 };
 
-const styles = themedStyles((c) => StyleSheet.create({
+const styles = brandStyles((b) => StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: c.bg,
+    backgroundColor: b.bg,
   },
   back: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.pill,
+    width: 38,
+    height: 38,
+    borderRadius: round.pill,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: themePalette.surfaceMuted,
+    backgroundColor: b.surface,
     borderWidth: 1,
-    borderColor: themePalette.border,
+    borderColor: b.border,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: spacing.lg,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.lg,
+    gap: 12,
+    paddingHorizontal: layout.pageGutter,
+    paddingTop: 8,
+    paddingBottom: 14,
   },
   headerText: {
     flex: 1,
@@ -134,30 +131,33 @@ const styles = themedStyles((c) => StyleSheet.create({
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
+    gap: 8,
   },
   eyebrow: {
-    fontSize: typography.caption,
-    fontWeight: "600",
-    color: themePalette.slate[500],
+    fontSize: t.micro,
+    lineHeight: 12,
+    fontWeight: "700",
+    color: b.textMuted,
     textTransform: "uppercase",
-    letterSpacing: 0.8,
-    marginBottom: 3,
+    letterSpacing: 1,
+    marginBottom: 2,
   },
   title: {
-    fontSize: typography.displayMd,
-    fontWeight: "600",
-    color: themePalette.slate[900],
-    letterSpacing: -0.25,
+    fontSize: t.pageTitle,
+    lineHeight: 31,
+    fontWeight: "800",
+    color: b.text,
+    letterSpacing: -0.55,
   },
   description: {
-    marginTop: 2,
-    fontSize: typography.label,
-    color: themePalette.slate[500],
+    marginTop: 3,
+    fontSize: t.body,
+    lineHeight: 17,
+    color: b.textMuted,
   },
   body: {
     flex: 1,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: layout.pageGutter,
   },
   centred: {
     flex: 1,
@@ -166,22 +166,22 @@ const styles = themedStyles((c) => StyleSheet.create({
   },
   errorBanner: {
     borderWidth: 1,
-    borderColor: themePalette.rose[200],
-    borderRadius: radii.md,
-    backgroundColor: themePalette.rose[50],
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    marginBottom: spacing.lg,
+    borderColor: b.alertChip,
+    borderRadius: round.banner,
+    backgroundColor: b.alertTint,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
   },
   errorText: {
-    fontSize: typography.label,
-    lineHeight: 18,
-    color: themePalette.rose[700],
+    fontSize: t.body,
+    lineHeight: 17,
+    color: b.alertInk,
   },
   errorRetry: {
     marginTop: 2,
-    fontSize: typography.caption,
-    fontWeight: "600",
-    color: themePalette.rose[700],
+    fontSize: t.label,
+    fontWeight: "700",
+    color: b.alertInk,
   },
 }));

@@ -74,9 +74,18 @@ export const getBlockedLeads = async (contactId: string) => {
 };
 
 /** Is this phone number already an owner or a broker? Used when adding a lead. */
+/*
+ * Whether a number belongs to the Broker Database. The route answers
+ * { isBroker, contactId, name } - there is no `contact` field, which is what
+ * this used to read, so it could never have reported a broker.
+ */
 export const identifyContact = async (phone: string) => {
   const res = await api.get("/contacts/identify", { params: { phone } });
-  return res.data?.contact || null;
+  return {
+    isBroker: Boolean(res.data?.isBroker),
+    contactId: res.data?.contactId ? String(res.data.contactId) : "",
+    name: String(res.data?.name || ""),
+  };
 };
 
 export const bulkImportContacts = async (kind: ContactKind, rows: Record<string, unknown>[]) => {

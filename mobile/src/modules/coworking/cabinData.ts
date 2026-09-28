@@ -1,103 +1,11 @@
-import { themePalette } from "../../theme/themedStyles";
-
 /*
- * Cabin status model for the booking board, ported from
+ * The cabin catalogue for the booking board - a port of
  * frontend/src/modules/coworking/booking/cabinData.js.
  *
- * The Tailwind class strings there become RN style objects here; the colours,
- * labels and ordering are unchanged, and that matters more than usual:
- *
- *   Status colours are read from the landlord's side of the desk rather than
- *   the guest's: RED is an empty cabin earning nothing, GREEN is one that is
- *   let. That inverts the usual "green means available" ticketing convention,
- *   so the legend sits above the board and every status is spelled out next to
- *   its dot.
- *
- * Getting this backwards on mobile would have a manager reading the board
- * inside out, so the legend is not optional here either.
- *
- * The floor-plan geometry (SHARED_ROOMS, PASSAGE_BAND, per-cabin coordinates)
- * is deliberately not ported - see BookingBoardScreen for why a phone gets a
- * wing-grouped grid instead of a scaled drawing.
+ * 65 cabins across four wings, transcribed from the supplied plan, plus the
+ * shared rooms that give the floor plan its orientation. The data literals are
+ * web's, unchanged, so a diff against that file is the drift check.
  */
-
-export type CabinStatus = "VACANT" | "BOOKED" | "RESERVED" | "BLOCKED" | "MAINTENANCE";
-
-export type StatusMeta = {
-  label: string;
-  short: string;
-  dot: string;
-  tileBackground: string;
-  tileBorder: string;
-  tileText: string;
-};
-
-/*
- * Built per call rather than held as a constant. themePalette resolves against
- * whichever scheme is active when it is read, and a module-level table reads it
- * once at import - while the scheme is still the default light - which left the
- * whole booking board in light colours after a switch to dark.
- */
-export const statusMetaTable = (): Record<CabinStatus, StatusMeta> => ({
-  VACANT: {
-    label: "Vacant",
-    short: "Vacant",
-    dot: themePalette.rose[600],
-    tileBackground: themePalette.rose[50],
-    tileBorder: themePalette.rose[200],
-    tileText: themePalette.rose[900],
-  },
-  BOOKED: {
-    label: "Booked",
-    short: "Booked",
-    dot: themePalette.emerald[600],
-    tileBackground: themePalette.emerald[50],
-    tileBorder: themePalette.emerald[200],
-    tileText: themePalette.emerald[900],
-  },
-  RESERVED: {
-    label: "Reserved",
-    short: "Held",
-    dot: themePalette.amber[600],
-    tileBackground: themePalette.amber[50],
-    tileBorder: themePalette.amber[200],
-    tileText: themePalette.amber[900],
-  },
-  BLOCKED: {
-    // Violet, not a second red: two different reds - "nobody in it" and
-    // "deliberately off the market" - would be the one pair on this board a
-    // manager could actually act on wrongly.
-    label: "Blocked",
-    short: "Blocked",
-    dot: themePalette.violet[700],
-    tileBackground: themePalette.violet[50],
-    tileBorder: themePalette.violet[200],
-    tileText: themePalette.violet[900],
-  },
-  MAINTENANCE: {
-    label: "Maintenance",
-    short: "Upkeep",
-    dot: themePalette.slate[500],
-    tileBackground: themePalette.slate[100],
-    tileBorder: themePalette.slate[200],
-    tileText: themePalette.slate[600],
-  },
-});
-
-export const STATUS_ORDER: CabinStatus[] = [
-  "VACANT",
-  "BOOKED",
-  "RESERVED",
-  "BLOCKED",
-  "MAINTENANCE",
-];
-
-export const WINGS = [
-  { id: "A", label: "Wing A", hint: "Entrance side" },
-  { id: "B", label: "Wing B", hint: "Centre" },
-  { id: "C", label: "Wing C", hint: "Temple side" },
-  { id: "D", label: "Wing D", hint: "By conference" },
-];
 
 /** Seats printed under each cabin label on the plan. */
 export const CABIN_SEATS: Record<string, number> = {
@@ -111,27 +19,111 @@ export const CABIN_SEATS: Record<string, number> = {
   D1: 4, D2: 4,
 };
 
-export const statusMetaFor = (status?: string): StatusMeta => {
-  const table = statusMetaTable();
-  return table[String(status || "").toUpperCase() as CabinStatus] || table.MAINTENANCE;
+export const WINGS = [
+  { id: "A", label: "Wing A", hint: "Entrance side" },
+  { id: "B", label: "Wing B", hint: "Centre" },
+  { id: "C", label: "Wing C", hint: "Temple side" },
+  { id: "D", label: "Wing D", hint: "By conference" },
+] as const;
+
+export type SharedRoom = {
+  id: string;
+  label: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  glyph?: string;
+  icon?: "cog" | "wash" | "canteen" | "smoke";
+  decor?: "seating" | "stairs" | "lift" | "table";
 };
 
-/** The wing a cabin code belongs to - "B12" → "B". */
-export const wingOf = (code?: string) => String(code || "").trim().charAt(0).toUpperCase();
+export const SHARED_ROOMS: SharedRoom[] = [
+  { id: "temple", label: "Temple / Pooja", glyph: "ॐ", left: 7.8, top: 3.4, width: 15.5, height: 4.2 },
+  { id: "machine", label: "Machine Room", icon: "cog", left: 57, top: 13, width: 17, height: 10 },
+  { id: "waiting", label: "Waiting Area", decor: "seating", left: 55, top: 26, width: 22, height: 15 },
+  { id: "entrance", label: "Entrance", decor: "stairs", left: 60, top: 44, width: 14, height: 9 },
+  { id: "lift", label: "Lift", decor: "lift", left: 55, top: 55, width: 5, height: 8 },
+  { id: "conference", label: "Conference Room", decor: "table", left: 62, top: 55, width: 12, height: 12 },
+  { id: "wash", label: "Wash Area", icon: "wash", left: 76, top: 55, width: 9, height: 10 },
+  { id: "canteen", label: "Canteen", icon: "canteen", left: 76, top: 69, width: 13, height: 14 },
+  { id: "smoke-a", label: "Smoking Zone", icon: "smoke", left: 28, top: 90.5, width: 13, height: 4 },
+  { id: "smoke-b", label: "Smoking Zone", icon: "smoke", left: 44, top: 90.5, width: 13, height: 4 },
+];
 
-export const seatsFor = (code?: string, fallback?: number | null) => {
-  const known = CABIN_SEATS[String(code || "").toUpperCase()];
-  if (Number.isFinite(known)) return known;
-  return Number.isFinite(Number(fallback)) ? Number(fallback) : 0;
+/** Potted greenery, as on the drawing. Purely decorative. */
+export const PLANTS = [
+  { left: 54.6, top: 34.5 }, { left: 54.6, top: 45.5 }, { left: 57.5, top: 66 },
+  { left: 74.5, top: 62 }, { left: 74.5, top: 84 }, { left: 44.6, top: 86.5 },
+  { left: 26.5, top: 86.5 }, { left: 90, top: 88 },
+];
+
+/** The horizontal passage that splits every cabin column. */
+export const PASSAGE_BAND = { left: 7.8, top: 47.8, width: 46.0, height: 5.0 };
+
+export type CabinStatus = "VACANT" | "BOOKED" | "RESERVED" | "BLOCKED" | "MAINTENANCE";
+
+export const STATUS_ORDER: CabinStatus[] = ["VACANT", "BOOKED", "RESERVED", "BLOCKED", "MAINTENANCE"];
+
+/*
+ * Status colours, read from the landlord's side of the desk: red is an empty
+ * cabin earning nothing, green is one that is let. That inverts the usual
+ * "green means available" convention, so the legend is always on screen.
+ *
+ * Each status carries a light and a dark tile, the RN counterpart of web's
+ * Tailwind `tile` / `badge` classes (rose / emerald / amber / violet / slate).
+ */
+export type StatusTone = { bg: string; border: string; ink: string };
+
+export const STATUS_META: Record<
+  CabinStatus,
+  { label: string; short: string; dot: string; light: StatusTone; dark: StatusTone }
+> = {
+  VACANT: {
+    label: "Vacant",
+    short: "Vacant",
+    dot: "#b83232",
+    light: { bg: "#fff1f2", border: "#fecdd3", ink: "#881337" },
+    dark: { bg: "rgba(244, 63, 94, 0.10)", border: "rgba(244, 63, 94, 0.30)", ink: "#ffe4e6" },
+  },
+  BOOKED: {
+    label: "Booked",
+    short: "Booked",
+    dot: "#0d8055",
+    light: { bg: "#ecfdf5", border: "#a7f3d0", ink: "#064e3b" },
+    dark: { bg: "rgba(16, 185, 129, 0.10)", border: "rgba(16, 185, 129, 0.30)", ink: "#d1fae5" },
+  },
+  RESERVED: {
+    label: "Reserved",
+    short: "Held",
+    dot: "#a26f06",
+    light: { bg: "#fffbeb", border: "#fde68a", ink: "#78350f" },
+    dark: { bg: "rgba(245, 158, 11, 0.10)", border: "rgba(245, 158, 11, 0.30)", ink: "#fef3c7" },
+  },
+  BLOCKED: {
+    label: "Blocked",
+    short: "Blocked",
+    dot: "#6d28d9",
+    light: { bg: "#f5f3ff", border: "#ddd6fe", ink: "#4c1d95" },
+    dark: { bg: "rgba(139, 92, 246, 0.10)", border: "rgba(139, 92, 246, 0.30)", ink: "#ede9fe" },
+  },
+  MAINTENANCE: {
+    label: "Maintenance",
+    short: "Upkeep",
+    dot: "#6c7789",
+    light: { bg: "#f1f5f9", border: "#e2e8f0", ink: "#475569" },
+    dark: { bg: "#1e293b", border: "#475569", ink: "#cbd5e1" },
+  },
 };
 
-/** Counts per status, for the board summary. */
-export const summariseByStatus = (cabins: Array<{ status?: string }>) => {
-  const counts: Record<string, number> = {};
-  for (const status of STATUS_ORDER) counts[status] = 0;
-  for (const cabin of cabins) {
-    const key = String(cabin?.status || "").toUpperCase();
-    if (key in counts) counts[key] += 1;
-  }
-  return counts;
-};
+export const statusTone = (status: CabinStatus, scheme: "light" | "dark") =>
+  (STATUS_META[status] || STATUS_META.VACANT)[scheme];
+
+/** "C12" -> "C-12", the label form the board prints. */
+export const cabinLabel = (code: string) => String(code || "").replace(/^([A-D])/, "$1-");
+
+export const SEAT_BANDS = [
+  { id: "small", label: "Up to 4", test: (seats: number) => seats <= 4 },
+  { id: "medium", label: "5 to 6", test: (seats: number) => seats >= 5 && seats <= 6 },
+  { id: "large", label: "8+", test: (seats: number) => seats >= 8 },
+];

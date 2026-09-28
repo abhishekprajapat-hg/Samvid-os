@@ -56,6 +56,12 @@ export const NAV_GROUPS: NavGroup[] = [
       { screen: "Inventory", label: "Inventory", icon: "inventory", page: "inventory", path: "/inventory", roles: [...SALES_ROLES, ...PARTNER_ROLES], requiresInventoryAccessForPartner: true },
       // Both contact directories are internal, so channel partners are left out
       // here exactly as the API leaves them out.
+      /*
+       * Mobile-only. Web lists the owner and broker directories separately in
+       * the sidebar; the phone wraps both in one Contacts screen, so this is
+       * the entry More offers and the two below stay hidden behind it.
+       */
+      { screen: "Contacts", label: "Contacts", icon: "leads", page: "inventory", path: "/inventory/owners", roles: SALES_ROLES },
       { screen: "OwnerDatabase", label: "Owner Database", icon: "leads", page: "inventory", path: "/inventory/owners", roles: SALES_ROLES },
       { screen: "BrokerDatabase", label: "Broker Database", icon: "leads", page: "inventory", path: "/inventory/brokers", roles: SALES_ROLES },
       { screen: "Projects", label: "Projects", icon: "projects", page: "projects", path: "/projects", roles: [...SALES_ROLES, ...PARTNER_ROLES], requiresInventoryAccessForPartner: true },

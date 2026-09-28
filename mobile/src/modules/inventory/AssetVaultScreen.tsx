@@ -16,12 +16,15 @@ import {
   Platform,
 } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { SafeAreaView } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Icon } from "../../components/ui/Icon";
+import { Glyph } from "../../components/ui/Glyph";
+import { AppSheet } from "../../components/ui/Overlay";
 import { useNavigation } from "@react-navigation/native";
 import { useRoute } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
-import { Screen } from "../../components/common/Screen";
 import {
   createInventoryAsset,
   deleteInventoryAsset,
@@ -38,8 +41,10 @@ import { useAuth } from "../../context/AuthContext";
 import { usePermissions } from "../../context/PermissionContext";
 import { resolveInventoryAccess } from "./inventoryAccess";
 import { MyInventoryRequests } from "./components/MyInventoryRequests";
+import { PendingInventoryRequests } from "./components/PendingInventoryRequests";
 import type { InventoryAsset } from "../../types";
 import { themedStyles, themeColor } from "../../theme/themedStyles";
+import { brand, brandStyles, layout, round, type } from "../../theme/brand";
 
 const STATUS_OPTIONS = ["Available", "Blocked", "Sold"];
 const STATUS_MODAL_OPTIONS = new Set(["Available", "Blocked", "Sold"]);
@@ -149,6 +154,96 @@ const toObjectIdString = (value: unknown) => {
 
 const pickUriString = (value: unknown) => String(value || "").trim();
 
+/* ------------------------------------------------ inventory list (comp) -- */
+
+/*
+ * The comp's status tabs are web's, so they behave the way web's do: four of
+ * them filter on status, and "Rented" is not a status at all - it is the
+ * rental side of the book, so it switches the listing mode and clears the
+ * status filter. See frontend/src/modules/inventory/components/InventoryToolbar.jsx.
+ */
+const STATUS_TABS = [
+  { key: "all", label: "All" },
+  { key: "Available", label: "Available" },
+  { key: "Blocked", label: "Blocked" },
+  { key: "Sold", label: "Sold" },
+  { key: "Rented", label: "Rented" },
+] as const;
+
+const SORT_OPTIONS = [
+  { key: "latest", label: "Latest added" },
+  { key: "oldest", label: "Oldest first" },
+  { key: "priceHigh", label: "Price: high to low" },
+  { key: "priceLow", label: "Price: low to high" },
+] as const;
+
+const LISTING_FILTERS = [
+  { key: "sale", label: "For sale" },
+  { key: "rent", label: "For rent" },
+] as const;
+
+const KIND_FILTERS = [
+  { key: "ALL", label: "All types" },
+  { key: "COMMERCIAL", label: "Commercial" },
+  { key: "RESIDENTIAL", label: "Residential" },
+] as const;
+
+const FURNISHING_LABEL: Record<string, string> = {
+  FULLY_FURNISHED: "Fully furnished",
+  SEMI_FURNISHED: "Semi furnished",
+  UNFURNISHED: "Unfurnished",
+  BARE_SHELL: "Bare shell",
+  WARM_SHELL: "Warm shell",
+  MANAGED_OFFICE: "Managed office",
+  COWORKING: "Coworking",
+};
+
+const FAVOURITES_KEY = "inventory.favourites";
+
+const labelForSort = (key: string) =>
+  SORT_OPTIONS.find((option) => option.key === key)?.label || "Latest added";
+
+/* The comp writes a whole figure bare and a fractional one to two places:
+   "42 L", "1.50 Cr". */
+const compact = (value: number) => {
+  const fixed = value.toFixed(2);
+  return fixed.endsWith(".00") ? fixed.slice(0, -3) : fixed;
+};
+
+const compactMoney = (value?: number | null) => {
+  const amount = Number(value || 0);
+  if (!amount) return "₹0";
+  if (amount >= 10000000) return `₹${compact(amount / 10000000)} Cr`;
+  if (amount >= 100000) return `₹${compact(amount / 100000)} L`;
+  return `₹${amount.toLocaleString("en-IN")}`;
+};
+
+const priceLabel = (asset: InventoryAsset) => {
+  const rent = Number(asset.rent || 0);
+  if (normalizeAssetType(asset.type) === "rent" && rent > 0) return `${compactMoney(rent)}/mo`;
+  return compactMoney(asset.price);
+};
+
+const areaOf = (asset: InventoryAsset) => {
+  const value = asset.carpetArea ?? asset.builtUpArea ?? asset.totalArea;
+  const amount = Number(value || 0);
+  return amount > 0 ? `${amount.toLocaleString("en-IN")} sq ft` : "";
+};
+
+const kindOf = (asset: InventoryAsset) => {
+  const raw = String(asset.inventoryType || "").toUpperCase();
+  const kind = raw === "RESIDENTIAL" ? "Residential" : raw === "COMMERCIAL" ? "Commercial" : "";
+  return [kind, asset.category].filter(Boolean).join(" ");
+};
+
+/* Read at call time so the tone follows the active colour scheme. */
+const statusTone = (status?: string) => {
+  const value = String(status || "Available");
+  if (value === "Blocked") return brand.warning;
+  if (value === "Sold") return brand.alert;
+  return brand.primary;
+};
+
 const normalizeAssetType = (value: unknown): "sale" | "rent" => {
   const normalized = String(value || "").trim().toLowerCase();
   if (["rent", "rental", "rentals", "for rent", "lease"].includes(normalized)) return "rent";
@@ -245,6 +340,63 @@ export const AssetVaultScreen = () => {
   const [pickedFiles, setPickedFiles] = useState<UploadInput[]>([]);
   const handledRouteEditTokenRef = useRef("");
 
+  /* ---- the comp's list controls ---- */
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [kindFilter, setKindFilter] = useState<string>("ALL");
+  const [sortKey, setSortKey] = useState<string>("latest");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  /*
+   * The heart is local. There is no favourite on the inventory model, and
+   * inventing a column for one is not this screen's call - so it is kept on
+   * the device, which is enough for the "shortlist as I scroll" the comp
+   * draws it for.
+   */
+  const [favourites, setFavourites] = useState<string[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(FAVOURITES_KEY);
+        if (raw) setFavourites(JSON.parse(raw));
+      } catch {
+        // A remembered shortlist is a nicety; losing it is not an error.
+      }
+    })();
+  }, []);
+
+  const toggleFavourite = useCallback((assetId: string) => {
+    setFavourites((prev) => {
+      const next = prev.includes(assetId)
+        ? prev.filter((id) => id !== assetId)
+        : [...prev, assetId];
+      AsyncStorage.setItem(FAVOURITES_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { all: assets.length, Available: 0, Blocked: 0, Sold: 0, Rented: 0 };
+    assets.forEach((asset) => {
+      const status = String(asset.status || "");
+      if (counts[status] !== undefined) counts[status] += 1;
+      if (["RENT", "BOTH"].includes(String(asset.type || "").trim().toUpperCase())) counts.Rented += 1;
+    });
+    return counts;
+  }, [assets]);
+
+  const activeTab = modeType === "rent" && statusFilter === "all" ? "Rented" : statusFilter;
+
+  const selectStatusTab = useCallback((value: string) => {
+    if (value === "Rented") {
+      setModeType("rent");
+      setStatusFilter("all");
+      return;
+    }
+    setModeType("sale");
+    setStatusFilter(value);
+  }, []);
+
   const load = useCallback(async (silent = false) => {
     try {
       if (silent) {
@@ -314,19 +466,38 @@ export const AssetVaultScreen = () => {
 
   const filtered = useMemo(() => {
     const key = search.trim().toLowerCase();
-    return assets.filter((asset) => {
+    const rows = assets.filter((asset) => {
       const typeMatch = modeType === "sale"
         ? normalizeAssetType(asset.type) === "sale"
         : normalizeAssetType(asset.type) === "rent";
 
       if (!typeMatch) return false;
+      if (statusFilter !== "all" && String(asset.status || "") !== statusFilter) return false;
+      if (kindFilter !== "ALL" && String(asset.inventoryType || "").toUpperCase() !== kindFilter) {
+        return false;
+      }
       if (!key) return true;
 
-      return [asset.title, asset.location, asset.category, asset.status, ...(asset.amenities || [])].some((v) =>
-        String(v || "").toLowerCase().includes(key),
-      );
+      return [
+        asset.title,
+        asset.location,
+        asset.category,
+        asset.status,
+        asset.city,
+        asset.area,
+        asset.buildingName,
+        ...(asset.amenities || []),
+      ].some((v) => String(v || "").toLowerCase().includes(key));
     });
-  }, [assets, modeType, search]);
+
+    const at = (value?: string) => new Date(value || 0).getTime() || 0;
+    const sorted = [...rows];
+    if (sortKey === "oldest") sorted.sort((a, b) => at(a.createdAt) - at(b.createdAt));
+    else if (sortKey === "priceHigh") sorted.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+    else if (sortKey === "priceLow") sorted.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
+    else sorted.sort((a, b) => at(b.createdAt) - at(a.createdAt));
+    return sorted;
+  }, [assets, modeType, search, statusFilter, kindFilter, sortKey]);
   const selectedBlockedLeadLabel = useMemo(() => {
     const selected = leadOptions.find((row) => row._id === blockedLeadIdDraft);
     if (!selected) return "Select lead";
@@ -595,7 +766,24 @@ export const AssetVaultScreen = () => {
     }
   };
 
+  /* Editing opens web's full property form; the list refreshes on return. */
+  const reloadOnReturnRef = useRef(false);
+  useEffect(
+    () =>
+      navigation.addListener?.("focus", () => {
+        if (!reloadOnReturnRef.current) return;
+        reloadOnReturnRef.current = false;
+        void load(true);
+      }),
+    [navigation, load],
+  );
+
   const openEditModal = (asset: InventoryAsset) => {
+    if (asset?._id) {
+      reloadOnReturnRef.current = true;
+      navigation.navigate("PropertyForm", { assetId: asset._id });
+      return;
+    }
     setEditingAssetId(asset._id);
     setForm({
       title: String(asset.title || ""),
@@ -1016,194 +1204,267 @@ export const AssetVaultScreen = () => {
   };
 
   return (
-    <Screen title="Asset Vault" subtitle="Inventory" loading={loading} error={error}>
-      {success ? <Text style={styles.success}>{success}</Text> : null}
-
-      <TextInput
-        style={styles.search}
-        placeholder="Search title, location, status"
-        placeholderTextColor={inputPlaceholder()}
-        value={search}
-        onChangeText={setSearch}
-      />
-
-      <View style={styles.topRow}>
-        <View style={styles.modeToggle}>
-          <Pressable
-            style={[styles.modeBtn, modeType === "sale" && styles.modeBtnActive]}
-            onPress={() => setModeType("sale")}
-          >
-            <Text style={[styles.modeBtnText, modeType === "sale" && styles.modeBtnTextActive]}>For Sale</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.modeBtn, modeType === "rent" && styles.modeBtnActive]}
-            onPress={() => setModeType("rent")}
-          >
-            <Text style={[styles.modeBtnText, modeType === "rent" && styles.modeBtnTextActive]}>Rentals</Text>
-          </Pressable>
-        </View>
+    <SafeAreaView style={vault.root} edges={["top", "left", "right"]}>
+      <View style={vault.header}>
+        <Text style={vault.pageTitle} numberOfLines={1}>
+          Inventory
+        </Text>
+        <Text style={vault.pageSubtitle}>Manage your properties and grow your business</Text>
+        {/*
+         * Out of flow on purpose. The comp centres the button on the title and
+         * lets the strapline run the full width underneath it; in a row the
+         * strapline would be cut to the space beside the button and wrap.
+         */}
         {canCreateInventory ? (
-          <Pressable style={styles.primaryBtn} onPress={openCreateModal}>
-            <Text style={styles.primaryText}>+ Add Asset</Text>
+          <Pressable
+            style={vault.addBtn}
+            onPress={() => navigation.navigate("AddProperty")}
+            accessibilityRole="button"
+          >
+            <Glyph name="add" size={20} color={brand.onPrimary} />
+            <Text style={vault.addBtnText}>Add Property</Text>
           </Pressable>
         ) : null}
       </View>
 
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item._id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
-        // Reviewers approve from Notifications; everyone else needs to see what
-        // became of the requests they raised.
-        ListHeaderComponent={
-          canReviewInventoryRequests ? null : <MyInventoryRequests refreshKey={requestsRefreshKey} />
-        }
-        ListEmptyComponent={<Text style={styles.empty}>No assets found</Text>}
-        renderItem={({ item }) => {
-          const displayImages = item.images?.length ? item.images : buildDefaultImageSet(item.title || item._id);
-          const imageIndex = Math.min(cardImageIndexMap[item._id] || 0, Math.max(displayImages.length - 1, 0));
-          const cover = resolveFileUrl(displayImages[imageIndex]);
-          const remainingPhotos = Math.max(displayImages.length - 1, 0);
-          return (
-            <Pressable style={styles.card} onPress={() => navigation.navigate("InventoryDetails", { assetId: item._id, asset: item })}>
-              {cover ? (
-                <View style={styles.cardImageWrap}>
-                  <View style={styles.imageOverlayTop}>
-                    {isAdmin ? (
-                      <Pressable
-                        style={[styles.imageIconBtn, styles.imageIconBtnDanger]}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          removeAsset(item._id);
-                        }}
-                      >
-                        <Icon name="trash-outline" size={14} color={themeColor("#d64545")} />
-                      </Pressable>
-                    ) : (
-                      <View />
-                    )}
-                    <View style={styles.imageRightActions}>
-                      {canEditInventory ? (
-                        <Pressable
-                          style={styles.imageIconBtn}
-                          onPress={(event) => {
-                            event.stopPropagation();
-                            openEditModal(item);
-                          }}
-                        >
-                          <Icon name="create-outline" size={14} color={themeColor("#6c7789")} />
-                        </Pressable>
-                      ) : null}
-                      <Pressable
-                        style={styles.imageIconBtn}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          void handleShareAsset(item);
-                        }}
-                      >
-                        <Icon name="share-social-outline" size={14} color={themeColor("#1f6499")} />
-                      </Pressable>
-                    </View>
-                  </View>
-                  <Pressable
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      setViewerImages(displayImages);
-                      setViewerIndex(imageIndex);
-                      setViewerOpen(true);
-                    }}
-                  >
-                    <Image source={{ uri: cover }} style={styles.cardImage as any} resizeMode="cover" />
-                  </Pressable>
-                  {displayImages.length > 1 ? (
-                    <>
-                      <Pressable
-                        style={[styles.cardNavBtn, styles.cardNavLeft]}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          setCardImageIndexMap((prev) => {
-                            const current = prev[item._id] || 0;
-                            const next = current <= 0 ? displayImages.length - 1 : current - 1;
-                            return { ...prev, [item._id]: next };
-                          });
-                        }}
-                      >
-                        <Text style={styles.cardNavText}>{"<"}</Text>
-                      </Pressable>
-                      <Pressable
-                        style={[styles.cardNavBtn, styles.cardNavRight]}
-                        onPress={(event) => {
-                          event.stopPropagation();
-                          setCardImageIndexMap((prev) => {
-                            const current = prev[item._id] || 0;
-                            const next = (current + 1) % displayImages.length;
-                            return { ...prev, [item._id]: next };
-                          });
-                        }}
-                      >
-                        <Text style={styles.cardNavText}>{">"}</Text>
-                      </Pressable>
-                    </>
-                  ) : null}
-                  {remainingPhotos > 0 ? (
-                    <View style={styles.photoCountBadge}>
-                      <Text style={styles.photoCountText}>{imageIndex + 1}/{displayImages.length}</Text>
-                    </View>
-                  ) : null}
-                </View>
+      {loading ? (
+        <View style={vault.centred}>
+          <ActivityIndicator size="large" color={brand.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={filtered}
+          keyExtractor={(item) => item._id}
+          contentContainerStyle={vault.listContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={brand.primary} />
+          }
+          ListHeaderComponent={
+            <View>
+              {error ? (
+                <Pressable style={vault.banner} onPress={() => load()} accessibilityRole="button">
+                  <Text style={vault.bannerText}>{error}</Text>
+                </Pressable>
               ) : null}
-              <Text style={styles.name}>{item.title}</Text>
-              <Text style={styles.meta}>{item.location || "-"} | {item.category || "-"}</Text>
-              <Text style={styles.meta}>Rs {Number(item.price || 0).toLocaleString("en-IN")}</Text>
-              <Text style={styles.meta}>Photos: {displayImages.length}</Text>
-              {(item.status === "Blocked" || item.status === "Reserved") && item.reservationReason ? (
-                <Text style={styles.reasonMeta}>Reserved reason: {item.reservationReason}</Text>
-              ) : null}
-              {(item.status === "Blocked" || item.status === "Reserved")
-              && ((item as any)?.reservationLead?.name || (item as any)?.reservationLeadId?.name) ? (
-                <Text style={styles.meta}>
-                  Blocked For Lead: {String((item as any)?.reservationLead?.name || (item as any)?.reservationLeadId?.name || "-")}
-                  {String((item as any)?.reservationLead?.phone || (item as any)?.reservationLeadId?.phone || "").trim()
-                    ? ` (${String((item as any)?.reservationLead?.phone || (item as any)?.reservationLeadId?.phone || "").trim()})`
-                    : ""}
-                </Text>
+              {success ? (
+                <Pressable
+                  style={[vault.banner, vault.bannerOk]}
+                  onPress={() => setSuccess("")}
+                  accessibilityRole="button"
+                >
+                  <Text style={[vault.bannerText, vault.bannerOkText]}>{success}</Text>
+                </Pressable>
               ) : null}
 
-              {!!item.amenities?.length ? (
-                <View style={styles.amenityWrap}>
-                  {item.amenities.slice(0, 4).map((amenity) => (
-                    <View key={`${item._id}-${amenity}`} style={styles.amenityChip}>
-                      <Text style={styles.amenityText}>{amenity}</Text>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
-
-              <View style={styles.row}>
-                {STATUS_OPTIONS.map((status) => (
-                  <Pressable
-                    key={status}
-                    style={[styles.statusChip, item.status === status && styles.statusActive]}
-                    onPress={() => updateStatus(item._id, status)}
-                  >
-                    <Text style={[styles.chipText, item.status === status && styles.activeText]}>{status}</Text>
-                  </Pressable>
-                ))}
+              <View style={vault.searchBox}>
+                <Glyph name="search" size={18} color={brand.textMuted} />
+                <TextInput
+                  style={vault.searchInput}
+                  placeholder="Search properties, locations or keywords..."
+                  placeholderTextColor={brand.placeholder}
+                  value={search}
+                  onChangeText={setSearch}
+                />
               </View>
-              <Pressable
-                style={styles.openDetailsBtn}
-                onPress={(event) => {
-                  event.stopPropagation();
-                  navigation.navigate("InventoryDetails", { assetId: item._id, asset: item });
-                }}
-              >
-                <Text style={styles.openDetailsText}>Open Details</Text>
-              </Pressable>
 
-            </Pressable>
-          );
-        }}
-      />
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={vault.chipScroll}
+                contentContainerStyle={vault.chipRow}
+              >
+                {STATUS_TABS.map((tab) => {
+                  const active = activeTab === tab.key;
+                  return (
+                    <Pressable
+                      key={tab.key}
+                      style={[vault.chip, active && vault.chipOn]}
+                      onPress={() => selectStatusTab(tab.key)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                    >
+                      <Text style={[vault.chipLabel, active && vault.chipLabelOn]}>{tab.label}</Text>
+                      <View style={[vault.chipCount, active && vault.chipCountOn]}>
+                        <Text style={[vault.chipCountText, active && vault.chipCountTextOn]}>
+                          {statusCounts[tab.key] || 0}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={vault.toolRow}>
+                <Pressable style={vault.toolBtn} onPress={() => setFilterOpen(true)} accessibilityRole="button">
+                  <Glyph name="options-outline" size={18} color={brand.text} />
+                  <Text style={vault.toolLabel}>Filter</Text>
+                </Pressable>
+                <Pressable style={vault.toolBtn} onPress={() => setSortOpen(true)} accessibilityRole="button">
+                  <Glyph name="swap-vertical" size={18} color={brand.text} />
+                  <Text style={vault.toolLabel}>{labelForSort(sortKey)}</Text>
+                  <Glyph name="chevron-down" size={16} color={brand.textSecondary} />
+                </Pressable>
+              </View>
+
+              {canReviewInventoryRequests ? (
+                <PendingInventoryRequests
+                  refreshKey={requestsRefreshKey}
+                  onReviewed={() => void load(true)}
+                  onViewInventory={(inventoryId) => navigation.navigate("InventoryDetails", { assetId: inventoryId })}
+                />
+              ) : (
+                <MyInventoryRequests refreshKey={requestsRefreshKey} />
+              )}
+            </View>
+          }
+          ListEmptyComponent={
+            <View style={vault.empty}>
+              <Glyph name="business-outline" size={34} color={brand.textMuted} />
+              <Text style={vault.emptyText}>No properties match this view</Text>
+            </View>
+          }
+          renderItem={({ item }) => {
+            const cover = resolveFileUrl((item.images || [])[0] || "");
+            const favourite = favourites.includes(item._id);
+            const areaText = areaOf(item);
+            const furnishing = FURNISHING_LABEL[String(item.furnishingStatus || "")] || "";
+            const kind = kindOf(item);
+            const open = () => navigation.navigate("InventoryDetails", { assetId: item._id, asset: item });
+
+            return (
+              <Pressable style={vault.card} onPress={open} accessibilityRole="button">
+                <View style={vault.thumb}>
+                  {cover ? (
+                    <Image source={{ uri: cover }} style={vault.thumbImage} resizeMode="cover" />
+                  ) : (
+                    <View style={vault.thumbEmpty}>
+                      <Glyph name="business" size={30} color={brand.textMuted} />
+                    </View>
+                  )}
+                  <View style={[vault.badge, { backgroundColor: statusTone(item.status) }]}>
+                    <Text style={vault.badgeText}>{item.status || "Available"}</Text>
+                  </View>
+                </View>
+
+                <View style={vault.cardBody}>
+                  <View style={vault.cardTitleRow}>
+                    <Text style={vault.cardTitle} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                    <Pressable
+                      onPress={() => toggleFavourite(item._id)}
+                      hitSlop={10}
+                      accessibilityRole="button"
+                      accessibilityLabel={favourite ? "Remove from saved" : "Save property"}
+                    >
+                      <Glyph
+                        name={favourite ? "heart" : "heart-outline"}
+                        size={22}
+                        color={favourite ? brand.alert : brand.text}
+                      />
+                    </Pressable>
+                  </View>
+
+                  <View style={vault.metaRow}>
+                    <Glyph name="location-outline" size={14} color={brand.textMuted} />
+                    <Text style={vault.location} numberOfLines={1}>
+                      {item.location || "-"}
+                    </Text>
+                  </View>
+
+                  <Text style={vault.price}>{priceLabel(item)}</Text>
+
+                  {areaText ? (
+                    <View style={vault.metaRow}>
+                      <Glyph name="resize-outline" size={15} color={brand.textSecondary} />
+                      <Text style={vault.meta} numberOfLines={1}>
+                        {areaText}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {furnishing ? (
+                    <View style={vault.metaRow}>
+                      <Glyph name="briefcase-outline" size={15} color={brand.textSecondary} />
+                      <Text style={vault.meta} numberOfLines={1}>
+                        {furnishing}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {kind ? (
+                    <View style={vault.metaRow}>
+                      <Glyph
+                        name={
+                          String(item.inventoryType || "").toUpperCase() === "RESIDENTIAL"
+                            ? "layers-outline"
+                            : "business-outline"
+                        }
+                        size={15}
+                        color={brand.textSecondary}
+                      />
+                      <Text style={vault.meta} numberOfLines={1}>
+                        {kind}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <Pressable style={vault.viewBtn} onPress={open} accessibilityRole="button">
+                    <Text style={vault.viewBtnText}>View details</Text>
+                    <Glyph name="arrow-forward" size={16} color={brand.deep} />
+                  </Pressable>
+                </View>
+              </Pressable>
+            );
+          }}
+        />
+      )}
+
+      <AppSheet visible={sortOpen} onClose={() => setSortOpen(false)} title="Sort by">
+        {SORT_OPTIONS.map((option) => (
+          <Pressable
+            key={option.key}
+            style={vault.sheetRow}
+            onPress={() => {
+              setSortKey(option.key);
+              setSortOpen(false);
+            }}
+            accessibilityRole="button"
+          >
+            <Text style={vault.sheetLabel}>{option.label}</Text>
+            {sortKey === option.key ? <Glyph name="checkmark" size={18} color={brand.primary} /> : null}
+          </Pressable>
+        ))}
+      </AppSheet>
+
+      <AppSheet visible={filterOpen} onClose={() => setFilterOpen(false)} title="Filter">
+        <Text style={vault.sheetGroup}>Listing</Text>
+        {LISTING_FILTERS.map((option) => (
+          <Pressable
+            key={option.key}
+            style={vault.sheetRow}
+            onPress={() => setModeType(option.key as "sale" | "rent")}
+            accessibilityRole="button"
+          >
+            <Text style={vault.sheetLabel}>{option.label}</Text>
+            {modeType === option.key ? <Glyph name="checkmark" size={18} color={brand.primary} /> : null}
+          </Pressable>
+        ))}
+
+        <Text style={vault.sheetGroup}>Inventory type</Text>
+        {KIND_FILTERS.map((option) => (
+          <Pressable
+            key={option.key}
+            style={vault.sheetRow}
+            onPress={() => setKindFilter(option.key)}
+            accessibilityRole="button"
+          >
+            <Text style={vault.sheetLabel}>{option.label}</Text>
+            {kindFilter === option.key ? <Glyph name="checkmark" size={18} color={brand.primary} /> : null}
+          </Pressable>
+        ))}
+      </AppSheet>
 
       <Modal visible={formOpen} animationType="slide" transparent onRequestClose={() => setFormOpen(false)}>
         <View style={styles.modalWrap}>
@@ -1787,9 +2048,319 @@ export const AssetVaultScreen = () => {
         </View>
       </Modal>
 
-    </Screen>
+    </SafeAreaView>
   );
 };
+
+/*
+ * The comp's list chrome. It is a second stylesheet rather than an addition to
+ * the one below because that one is written against the web-parity tokens the
+ * modals still use, and these screens are drawn from the mobile comps.
+ */
+const vault = brandStyles((b) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: b.bg,
+    },
+    centred: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+
+    header: {
+      paddingHorizontal: layout.pageGutter,
+      paddingTop: 8,
+      paddingBottom: 10,
+    },
+    pageTitle: {
+      /* Sized so the strapline starts where the comp starts it. */
+      width: "62%",
+      fontSize: type.pageTitle,
+      lineHeight: 30,
+      fontWeight: "700",
+      letterSpacing: -0.8,
+      color: b.text,
+    },
+    pageSubtitle: {
+      marginTop: 2,
+      fontSize: type.cardTitle,
+      lineHeight: 18,
+      color: b.textMuted,
+    },
+    addBtn: {
+      position: "absolute",
+      right: layout.pageGutter,
+      top: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      height: 34,
+      paddingHorizontal: 14,
+      borderRadius: round.button,
+      backgroundColor: b.primary,
+    },
+    addBtnText: {
+      fontSize: type.body,
+      fontWeight: "600",
+      color: b.onPrimary,
+    },
+
+    listContent: {
+      paddingHorizontal: layout.pageGutter,
+      paddingBottom: 24,
+    },
+
+    banner: {
+      marginBottom: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: b.alert,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    bannerText: {
+      fontSize: type.body,
+      lineHeight: 17,
+      color: b.alert,
+    },
+    bannerOk: {
+      borderColor: b.primary,
+    },
+    bannerOkText: {
+      color: b.deep,
+    },
+
+    searchBox: {
+      height: 39,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingHorizontal: 15,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    searchInput: {
+      flex: 1,
+      minWidth: 0,
+      paddingVertical: 0,
+      fontSize: type.body,
+      color: b.text,
+    },
+
+    chipScroll: {
+      marginTop: 14,
+      marginHorizontal: -layout.pageGutter,
+    },
+    chipRow: {
+      flexDirection: "row",
+      gap: 6,
+      paddingHorizontal: layout.pageGutter,
+    },
+    chip: {
+      height: 32,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      paddingHorizontal: 12,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.chip,
+      backgroundColor: b.surface,
+    },
+    chipOn: {
+      borderColor: b.greenBright,
+      backgroundColor: b.chipActiveBg,
+    },
+    chipLabel: {
+      fontSize: type.cardTitle,
+      fontWeight: "500",
+      color: b.text,
+    },
+    chipLabelOn: {
+      fontWeight: "600",
+      color: b.text,
+    },
+    chipCount: {
+      minWidth: 19,
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+      alignItems: "center",
+      borderRadius: round.pill,
+      backgroundColor: b.hairline,
+    },
+    chipCountOn: {
+      backgroundColor: b.chipActiveCount,
+    },
+    chipCountText: {
+      fontSize: type.label,
+      fontWeight: "600",
+      color: b.textSecondary,
+    },
+    chipCountTextOn: {
+      color: b.onPrimary,
+    },
+
+    toolRow: {
+      marginTop: 14,
+      marginBottom: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+    },
+    toolBtn: {
+      height: 35,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    toolLabel: {
+      fontSize: type.rowTitle,
+      fontWeight: "500",
+      color: b.text,
+    },
+
+    empty: {
+      alignItems: "center",
+      gap: 10,
+      paddingVertical: 48,
+    },
+    emptyText: {
+      fontSize: type.field,
+      color: b.textMuted,
+    },
+
+    card: {
+      flexDirection: "row",
+      gap: 16,
+      marginBottom: 10,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+    },
+    thumb: {
+      width: 152,
+      height: 156,
+      borderRadius: round.field,
+      overflow: "hidden",
+      backgroundColor: b.fieldMuted,
+    },
+    thumbImage: {
+      width: "100%",
+      height: "100%",
+    },
+    thumbEmpty: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    badge: {
+      position: "absolute",
+      top: 7,
+      left: 7,
+      paddingHorizontal: 11,
+      paddingVertical: 5,
+      borderRadius: round.button,
+    },
+    badgeText: {
+      fontSize: type.cardTitle,
+      fontWeight: "600",
+      color: "#ffffff",
+    },
+    cardBody: {
+      flex: 1,
+      minWidth: 0,
+    },
+    cardTitleRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+    },
+    cardTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: type.sectionTitle,
+      lineHeight: 20,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
+    metaRow: {
+      marginTop: 5,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    location: {
+      flexShrink: 1,
+      minWidth: 0,
+      fontSize: type.label,
+      color: b.textSecondary,
+    },
+    price: {
+      marginTop: 6,
+      fontSize: type.price,
+      lineHeight: 24,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.primary,
+    },
+    meta: {
+      flexShrink: 1,
+      minWidth: 0,
+      fontSize: type.label,
+      color: b.textSecondary,
+    },
+    viewBtn: {
+      marginTop: 10,
+      height: 33,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderRadius: round.field,
+      backgroundColor: b.tintSoft,
+    },
+    viewBtnText: {
+      fontSize: type.rowTitle,
+      fontWeight: "600",
+      color: b.deep,
+    },
+
+    sheetGroup: {
+      marginTop: 6,
+      marginBottom: 2,
+      fontSize: type.label,
+      fontWeight: "600",
+      textTransform: "uppercase",
+      letterSpacing: 0.6,
+      color: b.textMuted,
+    },
+    sheetRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: b.hairline,
+    },
+    sheetLabel: {
+      fontSize: type.field,
+      color: b.text,
+    },
+  }),
+);
 
 const styles = themedStyles((c) => StyleSheet.create({
   success: {

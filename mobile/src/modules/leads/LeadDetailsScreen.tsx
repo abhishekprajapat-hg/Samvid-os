@@ -16,8 +16,15 @@ import {
   View,
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Icon } from "../../components/ui/Icon";
+import { Glyph } from "../../components/ui/Glyph";
+import { brand, brandStyles, layout, round, type as bt } from "../../theme/brand";
+import { BrokerPhoneHint } from "./components/BrokerPhoneHint";
+import { LeadOverview } from "./components/LeadOverview";
+import { AppSheet } from "../../components/ui/Overlay";
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MailComposer from "expo-mail-composer";
@@ -33,8 +40,10 @@ import {
   getLeadActivity,
   getLeadDiary,
   getLeadStatusRequests,
+  clearLeadFollowUp,
   requestLeadStatusChange,
   removeLeadRelatedProperty,
+  selectLeadRelatedProperty,
   updateLeadBasics,
   updateLeadDiaryEntry,
   updateLeadStatus,
@@ -49,13 +58,28 @@ import {
   type Task,
 } from "../../services/taskService";
 import { uploadChatFile } from "../../services/chatService";
+import api from "../../services/api";
+import { toAbsoluteUrl } from "../../services/uploadService";
+import { sessionStorage } from "../../storage/sessionStorage";
 import { getInventoryAssets } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { useAuth } from "../../context/AuthContext";
 import type { Lead } from "../../types";
+import {
+  buildLeadRequirementsPayloadFromDraft,
+  createDefaultLeadRequirementsDraft,
+  mapLeadRequirementsToDraft,
+  validateLeadRequirementDraft,
+  withSubtypeField,
+  type CoworkingDraft,
+} from "./leadRequirements";
+import { getPropertySubtypeConfig, getPropertySubtypeOptions } from "../../config/propertyRequirementConfig";
+import { SubtypeFieldsEditor } from "../../components/common/SubtypeFieldsEditor";
+import { CoworkingRequirementEditor } from "../../components/common/CoworkingRequirementEditor";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
+import { AppSegmentedTabs } from "../../components/ui";
 import { colors } from "../../theme/tokens";
 import { themedStyles, themeColor } from "../../theme/themedStyles";
 
@@ -187,126 +211,6 @@ const toObjectIdString = (value: unknown) => {
   return String(value || "");
 };
 
-const createDefaultLeadRequirementsDraft = () => ({
-  inventoryType: "",
-  transactionType: "",
-  furnishingStatus: "",
-  budgetMin: "",
-  budgetMax: "",
-  areaMin: "",
-  areaMax: "",
-  areaUnit: "SQ_FT",
-  commercial: {
-    seats: "",
-    cabins: "",
-    conferenceRooms: "",
-    parkingAvailable: false,
-    pantry: false,
-  },
-  residential: {
-    bhkType: "",
-    floor: "",
-    amenities: {
-      lift: false,
-      security: false,
-      gym: false,
-      swimmingPool: false,
-      clubhouse: false,
-      powerBackup: false,
-      parking: false,
-    },
-  },
-});
-
-const toRequirementDraftText = (value: any) => {
-  if (value === null || value === undefined) return "";
-  return String(value).trim();
-};
-
-const mapLeadRequirementsToDraft = (requirements: any = {}) => {
-  const base = createDefaultLeadRequirementsDraft();
-  const commercial = requirements?.commercial || {};
-  const residential = requirements?.residential || {};
-  const amenities = residential?.amenities || {};
-
-  return {
-    inventoryType: toRequirementDraftText(requirements?.inventoryType).toUpperCase(),
-    transactionType: toRequirementDraftText(requirements?.transactionType).toUpperCase(),
-    furnishingStatus: toRequirementDraftText(requirements?.furnishingStatus).toUpperCase(),
-    budgetMin: toRequirementDraftText(requirements?.budgetMin),
-    budgetMax: toRequirementDraftText(requirements?.budgetMax),
-    areaMin: "",
-    areaMax: "",
-    areaUnit: base.areaUnit,
-    commercial: {
-      seats: toRequirementDraftText(commercial?.seats),
-      cabins: toRequirementDraftText(commercial?.cabins),
-      conferenceRooms: toRequirementDraftText(commercial?.conferenceRooms),
-      parkingAvailable: Boolean(commercial?.parkingAvailable),
-      pantry: Boolean(commercial?.pantry),
-    },
-    residential: {
-      bhkType: toRequirementDraftText(residential?.bhkType).toUpperCase(),
-      floor: toRequirementDraftText(residential?.floor),
-      amenities: {
-        lift: Boolean(amenities?.lift),
-        security: Boolean(amenities?.security),
-        gym: Boolean(amenities?.gym),
-        swimmingPool: Boolean(amenities?.swimmingPool),
-        clubhouse: Boolean(amenities?.clubhouse),
-        powerBackup: Boolean(amenities?.powerBackup),
-        parking: Boolean(amenities?.parking),
-      },
-    },
-  };
-};
-
-const toAmountNumber = (value: any) => {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string" && value.trim() === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const toRequirementTransactionType = (value: any) => {
-  const normalized = String(value || "").trim().toUpperCase();
-  if (normalized === "RENT") return "RENT";
-  if (normalized === "LEASE") return "LEASE";
-  if (normalized === "SALE") return "SALE";
-  return "";
-};
-
-const buildLeadRequirementsPayloadFromDraft = (draft: any = {}) => ({
-  inventoryType: String(draft?.inventoryType || "").trim().toUpperCase(),
-  transactionType: toRequirementTransactionType(draft?.transactionType),
-  furnishingStatus: String(draft?.furnishingStatus || "").trim().toUpperCase(),
-  budgetMin: toAmountNumber(draft?.budgetMin),
-  budgetMax: toAmountNumber(draft?.budgetMax),
-  areaMin: null,
-  areaMax: null,
-  areaUnit: null,
-  commercial: {
-    seats: toAmountNumber(draft?.commercial?.seats),
-    cabins: toAmountNumber(draft?.commercial?.cabins),
-    conferenceRooms: toAmountNumber(draft?.commercial?.conferenceRooms),
-    parkingAvailable: Boolean(draft?.commercial?.parkingAvailable),
-    pantry: Boolean(draft?.commercial?.pantry),
-  },
-  residential: {
-    bhkType: String(draft?.residential?.bhkType || "").trim().toUpperCase(),
-    floor: toAmountNumber(draft?.residential?.floor),
-    amenities: {
-      lift: Boolean(draft?.residential?.amenities?.lift),
-      security: Boolean(draft?.residential?.amenities?.security),
-      gym: Boolean(draft?.residential?.amenities?.gym),
-      swimmingPool: Boolean(draft?.residential?.amenities?.swimmingPool),
-      clubhouse: Boolean(draft?.residential?.amenities?.clubhouse),
-      powerBackup: Boolean(draft?.residential?.amenities?.powerBackup),
-      parking: Boolean(draft?.residential?.amenities?.parking),
-    },
-  },
-});
-
 const LEAD_REQUIREMENT_FURNISHING_OPTIONS = [
   { value: "", label: "Any Furnishing" },
   { value: "UNFURNISHED", label: "Unfurnished" },
@@ -412,6 +316,23 @@ const resolveMediaUrl = (rawUrl?: string) => {
   return `${base}${safe.startsWith("/") ? "" : "/"}${safe}`;
 };
 
+/*
+ * The five tabs the comps give this screen. The sections underneath were
+ * already here as one long scroll; the tabs group them rather than replacing
+ * them, which is why the guards wrap existing cards instead of new ones.
+ */
+type DetailTab = "overview" | "requirements" | "notes" | "tasks" | "activity";
+
+const DETAIL_TABS = [
+  /* The comp's summary is the overview now; this tab is the linked properties
+     and the proposal generator that used to sit under that name. */
+  { key: "overview", label: "Properties" },
+  { key: "requirements", label: "Requirements" },
+  { key: "notes", label: "Notes" },
+  { key: "tasks", label: "Tasks" },
+  { key: "activity", label: "Activity" },
+];
+
 export const LeadDetailsScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -439,7 +360,17 @@ export const LeadDetailsScreen = () => {
 
   const [lead, setLead] = useState<Lead | null>(initialRouteLead);
   const [activities, setActivities] = useState<Array<{ _id: string; action: string; createdAt: string; performedBy?: { name?: string } }>>([]);
+  const [tab, setTab] = useState<DetailTab>("overview");
   const [diaryEntries, setDiaryEntries] = useState<LeadDiaryEntry[]>([]);
+  /* The comp's kebab: the contact shortcuts the command-center strip used to hold. */
+  const [overviewSheet, setOverviewSheet] = useState(false);
+  /*
+   * The profile card below predates the comp and holds the editable contact
+   * fields. The comp's summary already shows all of it read-only, so it stays
+   * closed until someone actually wants to edit - otherwise the screen reads
+   * as two different apps stacked on top of each other.
+   */
+  const [editOpen, setEditOpen] = useState(false);
   const [statusRequestHistory, setStatusRequestHistory] = useState<LeadStatusRequest[]>([]);
   const [saleLeadOptions, setSaleLeadOptions] = useState<Array<{ _id: string; name: string; phone?: string }>>([]);
   const [executives, setExecutives] = useState<Array<{ _id?: string; name: string; role?: string; isActive?: boolean }>>([]);
@@ -537,9 +468,39 @@ export const LeadDetailsScreen = () => {
       return {
         ...prev,
         inventoryType: value,
+        propertySubtype: "",
+        subtypeData: {},
         furnishingStatus: nextFurnishingStatus,
       };
     });
+  }, []);
+
+  /* Web's updateRequirementPropertySubtype: a new subtype starts its
+     preferences empty and drops furnishing where the subtype has none. */
+  const updateRequirementPropertySubtype = useCallback((value: string) => {
+    setRequirementsDraft((prev: any) => {
+      const nextConfig = getPropertySubtypeConfig(String(prev?.inventoryType || ""), value);
+      return {
+        ...prev,
+        propertySubtype: value,
+        subtypeData: {},
+        furnishingStatus: (nextConfig as any)?.showFurnishing === false ? "" : prev?.furnishingStatus || "",
+        areaMin: "",
+        areaMax: "",
+        areaUnit: "SQ_FT",
+      };
+    });
+  }, []);
+
+  const updateRequirementSubtypeField = useCallback((field: string, value: unknown) => {
+    setRequirementsDraft((prev: any) => ({
+      ...prev,
+      subtypeData: withSubtypeField(prev?.subtypeData || {}, field, value),
+    }));
+  }, []);
+
+  const updateRequirementCoworking = useCallback((next: CoworkingDraft) => {
+    setRequirementsDraft((prev: any) => ({ ...prev, coworking: next }));
   }, []);
 
   const updateRequirementCommercialField = useCallback((field: string, value: any) => {
@@ -1064,6 +1025,11 @@ export const LeadDetailsScreen = () => {
 
   const saveUpdate = async () => {
     if (!lead) return;
+    const requirementError = validateLeadRequirementDraft(requirementsDraft);
+    if (requirementError) {
+      setError(requirementError);
+      return;
+    }
 
     const payload: any = {
       status: statusDraft,
@@ -1249,6 +1215,25 @@ export const LeadDetailsScreen = () => {
       setNewTaskDueDate(selectedDate.toISOString().split("T")[0]);
     }
     setShowTaskDatePicker(false);
+  };
+
+  /*
+   * "Mark done" on the comp's follow-up card. It clears `nextFollowUp` rather
+   * than moving the status - the stage is the stepper's job, and clearing is
+   * exactly what the endpoint the web app uses for this does.
+   */
+  const markFollowUpDone = async () => {
+    if (!lead?._id) return;
+    try {
+      setSaving(true);
+      const updated = await clearLeadFollowUp(lead._id, lead.status || "NEW");
+      if (updated) setLead(updated);
+      setSuccess("Follow-up marked done");
+    } catch (e) {
+      setError(toErrorMessage(e, "Could not clear the follow-up"));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openDialer = async (phone?: string) => {
@@ -1524,40 +1509,132 @@ export const LeadDetailsScreen = () => {
       return;
     }
     if (!message.trim()) return;
-    const nav = globalThis as any;
-    if (nav?.navigator?.clipboard?.writeText) {
-      await nav.navigator.clipboard.writeText(message).then(() => {
-        setSuccess("Proposal copied");
-      }).catch(() => {
-        setError("Unable to copy proposal text");
-      });
+    try {
+      await Clipboard.setStringAsync(message);
+      setSuccess("Proposal copied");
+    } catch {
+      setError("Unable to copy proposal text");
+    }
+  };
+
+  /*
+   * Web's "Img Links" and "Share Images". Web lists every image of each
+   * selected property and attaches the first four of each, eight at most.
+   */
+  const proposalImageEntries = useMemo(
+    () =>
+      selectedProposalRows
+        .flatMap((row: any, rowIndex: number) => {
+          const label = getInventoryLeadLabel(row) || `Property ${rowIndex + 1}`;
+          const urls: string[] = (Array.isArray(row?.images) ? row.images : [])
+            .map((url: string) => toAbsoluteUrl(String(url || "").trim()))
+            .filter(Boolean);
+          return urls.slice(0, 4).map((url, imageIndex) => ({ url, label, imageIndex: imageIndex + 1 }));
+        })
+        .slice(0, 8),
+    [selectedProposalRows],
+  );
+
+  const proposalImageLinksText = useMemo(() => {
+    const lines: string[] = [];
+    selectedProposalRows.forEach((row: any, rowIndex: number) => {
+      lines.push(`${rowIndex + 1}. ${getInventoryLeadLabel(row) || `Property ${rowIndex + 1}`}`);
+      const urls: string[] = (Array.isArray(row?.images) ? row.images : [])
+        .map((url: string) => toAbsoluteUrl(String(url || "").trim()))
+        .filter(Boolean);
+      if (!urls.length) lines.push("   - No images");
+      urls.forEach((url, imageIndex) => lines.push(`   - ${imageIndex + 1}. ${url}`));
+      lines.push("");
+    });
+    return lines.join("\n").trim();
+  }, [selectedProposalRows]);
+
+  const copyProposalImageLinks = async () => {
+    if (!proposalImageEntries.length) {
+      setError("No property images found");
       return;
     }
-    if (Platform.OS === "web") {
-      try {
-        const doc = (globalThis as any)?.document;
-        if (!doc?.createElement || !doc?.body) {
-          throw new Error("Document unavailable");
+    try {
+      await Clipboard.setStringAsync(proposalImageLinksText);
+      setSuccess("Image links copied");
+    } catch {
+      setError("Unable to copy image links");
+    }
+  };
+
+  const askToContinue = (title: string, message: string) =>
+    new Promise<boolean>((resolve) => {
+      Alert.alert(title, message, [
+        { text: "Stop", style: "cancel", onPress: () => resolve(false) },
+        { text: "Next image", onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+
+  const shareProposalImages = async () => {
+    if (!proposalImageEntries.length) {
+      setError("No property images found");
+      return;
+    }
+    setProposalBusy(true);
+    const files: Array<{ uri: string; mimeType: string }> = [];
+    try {
+      /*
+       * Uploaded files are released only to a signed-in caller, so each image
+       * is fetched with this session's token - but only from this app's own
+       * server; an image hosted elsewhere is fetched without it.
+       */
+      const token = await sessionStorage.getToken();
+      const ownOrigin = String(api.defaults.baseURL || "").replace(/\/api\/?$/, "");
+      for (const entry of proposalImageEntries) {
+        const extension = (/\.(jpe?g|png|webp|gif|heic)(?:\?|$)/i.exec(entry.url)?.[1] || "jpg").toLowerCase();
+        const slug = entry.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "property";
+        const target = `${FileSystem.cacheDirectory}${slug}-image-${entry.imageIndex}.${extension}`;
+        const ownFile = Boolean(ownOrigin) && entry.url.startsWith(ownOrigin);
+        try {
+          const result = await FileSystem.downloadAsync(entry.url, target, {
+            headers: ownFile && token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (result.status >= 200 && result.status < 300) {
+            files.push({ uri: result.uri, mimeType: extension === "jpg" || extension === "jpeg" ? "image/jpeg" : `image/${extension}` });
+          }
+        } catch {
+          /* One image failing should not stop the rest. */
         }
-        const textArea = doc.createElement("textarea");
-        textArea.value = message;
-        textArea.style.position = "absolute";
-        textArea.style.left = "-9999px";
-        doc.body.appendChild(textArea);
-        textArea.select();
-        doc.execCommand?.("copy");
-        doc.body.removeChild(textArea);
-        setSuccess("Proposal copied");
-        return;
+      }
+    } finally {
+      setProposalBusy(false);
+    }
+
+    if (!files.length) {
+      setError("Images could not be prepared for sharing");
+      return;
+    }
+    if (!(await Sharing.isAvailableAsync())) {
+      setError("Sharing is not available on this device");
+      return;
+    }
+
+    /*
+     * The phone's share sheet takes one file at a time, where a browser's
+     * takes a list. Each image gets its own sheet, with a chance to stop
+     * between them.
+     */
+    for (let index = 0; index < files.length; index += 1) {
+      try {
+        await Sharing.shareAsync(files[index].uri, {
+          mimeType: files[index].mimeType,
+          dialogTitle: `Property image ${index + 1} of ${files.length}`,
+        });
       } catch {
-        // fall through
+        setError("Image share failed");
+        return;
+      }
+      if (index < files.length - 1) {
+        const next = await askToContinue(`Shared ${index + 1} of ${files.length}`, "Share the next image?");
+        if (!next) return;
       }
     }
-    if (Platform.OS !== "web") {
-      setError("Copy unavailable on this device. Please use a clipboard-enabled build.");
-      return;
-    }
-    Alert.alert("Copy unavailable", "Clipboard copy is not supported on this device/browser.");
+    setSuccess(`Shared ${files.length} image(s)`);
   };
 
   const generateProposalPdf = async () => {
@@ -1889,6 +1966,27 @@ export const LeadDetailsScreen = () => {
     } finally {
       setPropertyActionInventoryId("");
       setLinkingProperty(false);
+    }
+  };
+
+  /*
+   * Makes one of the linked properties the lead's active one - web's
+   * handleSelectRelatedProperty, which it runs when a property card is
+   * clicked. The active property is what the proposal and the deal close use.
+   */
+  const onSelectRelatedProperty = async (inventoryId: string) => {
+    if (!lead || !inventoryId || inventoryId === selectedLeadActiveInventoryId) return;
+    try {
+      setPropertyActionInventoryId(inventoryId);
+      setError("");
+      const updatedLead = await selectLeadRelatedProperty(lead._id, inventoryId);
+      if (updatedLead?._id) setLead(updatedLead);
+      else await loadData();
+      setSuccess("Property selected");
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to select property"));
+    } finally {
+      setPropertyActionInventoryId("");
     }
   };
 
@@ -2520,28 +2618,75 @@ export const LeadDetailsScreen = () => {
   const roleLabel = String(role || "USER").replace(/_/g, " ");
 
   return (
+    <SafeAreaView style={comp.root} edges={["top", "left", "right"]}>
+      {/*
+       * The comp's bar. The pencil opens Update Lead - the stage, the
+       * interaction and the follow-up all live there - and the kebab keeps the
+       * contact shortcuts the old command-center strip used to carry.
+       */}
+      <View style={comp.bar}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
+          <Glyph name="chevron-back" size={25} color={brand.text} />
+        </Pressable>
+        <Text style={comp.barTitle} numberOfLines={1}>Lead Details</Text>
+        <Pressable
+          onPress={() => navigation.navigate("UpdateLead", { leadId: lead._id, lead })}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Update lead"
+        >
+          <Glyph name="pencil" size={20} color={brand.text} />
+        </Pressable>
+        <Pressable
+          onPress={() => setOverviewSheet(true)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Lead actions"
+        >
+          <Glyph name="ellipsis-horizontal" size={21} color={brand.text} />
+        </Pressable>
+      </View>
+
     <ScrollView style={styles.root} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {success ? <Text style={styles.success}>{success}</Text> : null}
 
-      <View style={styles.commandCenterBar}>
-        <Text style={styles.commandCenterTitle}>Leads Command Center</Text>
-        <View style={styles.commandMetaRow}>
-          <Text style={styles.commandMetaChip}>PIPELINE</Text>
-          <Text style={styles.commandMetaChip}>ROLE: {roleLabel}</Text>
-          <Text style={styles.commandMetaChip}>{commandDateLabel}</Text>
-        </View>
-      </View>
+      <LeadOverview
+        lead={lead}
+        assigneeName={assigneeName}
+        matches={selectedLeadRelatedInventories as any}
+        notes={diaryEntries}
+        activities={activities}
+        onCall={() => openDialer(lead.phone)}
+        onWhatsApp={() => openWhatsApp(lead.phone)}
+        onEmail={() => openMail(lead.email)}
+        onUpdate={() => navigation.navigate("UpdateLead", { leadId: lead._id, lead })}
+        onReschedule={() => navigation.navigate("UpdateLead", { leadId: lead._id, lead })}
+        onMarkDone={markFollowUpDone}
+        onAddNote={() => setTab("notes")}
+        onOpenMatch={(asset: any) =>
+          navigation.navigate("InventoryDetails", { assetId: asset?._id, asset })
+        }
+        onSeeAllMatches={() => setTab("overview")}
+      />
 
+      {editOpen ? (
       <AppCard style={styles.card as object}>
-        <View style={styles.profileHeaderRow}>
-          <Text style={styles.profileLabel}>Lead Profile</Text>
-          <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.backBtnText}>Back</Text>
+        <View style={comp.editHead}>
+          <Text style={comp.editTitle}>Edit lead</Text>
+          <Pressable
+            style={comp.editDone}
+            onPress={() => setEditOpen(false)}
+            accessibilityRole="button"
+          >
+            <Glyph name="close" size={19} color={brand.textSecondary} />
           </Pressable>
         </View>
-        <Text style={styles.name}>{lead.name}</Text>
-        <Text style={styles.meta}>{lead.projectInterested || "Project not tagged yet"}</Text>
         <View style={styles.profileMetaRow}>
           <Text style={styles.statusTag}>{statusDraft || lead.status || "NEW"}</Text>
           <Text style={styles.idTag}>ID: {String(lead._id || "").slice(-6).toUpperCase()}</Text>
@@ -2567,30 +2712,13 @@ export const LeadDetailsScreen = () => {
           </View>
         </View>
 
-        <View style={styles.quickActionRow}>
-          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openDialer(lead.phone)}>
-            <Icon name="call-outline" size={16} color={themeColor("#161c24")} />
-            <Text style={styles.quickActionText}>Call</Text>
-          </Pressable>
-          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openWhatsApp(lead.phone)}>
-            <Icon name="logo-whatsapp" size={16} color={themeColor("#0d8055")} />
-            <Text style={styles.quickActionText}>WhatsApp</Text>
-          </Pressable>
-          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openMail(lead.email)}>
-            <Icon name="mail-outline" size={16} color={themeColor("#2549d6")} />
-            <Text style={styles.quickActionText}>Mail</Text>
-          </Pressable>
-          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={openMaps}>
-            <Icon name="location-outline" size={16} color={themeColor("#2b7fbf")} />
-            <Text style={styles.quickActionText}>Maps</Text>
-          </Pressable>
-        </View>
         <Text style={styles.section}>Name</Text>
         <AppInput style={styles.input as object} value={leadNameDraft} onChangeText={setLeadNameDraft} placeholder="Lead name" />
         {isCompact ? (
           <>
             <Text style={styles.section}>Phone</Text>
             <AppInput style={styles.input as object} value={leadPhoneDraft} onChangeText={setLeadPhoneDraft} placeholder="Phone" keyboardType="phone-pad" />
+            <BrokerPhoneHint phone={leadPhoneDraft} />
             <Text style={styles.section}>Email</Text>
             <AppInput style={styles.input as object} value={leadEmailDraft} onChangeText={setLeadEmailDraft} placeholder="Email" />
             <Text style={styles.section}>City</Text>
@@ -2604,6 +2732,7 @@ export const LeadDetailsScreen = () => {
               <View style={{ flex: 1 }}>
                 <Text style={styles.section}>Phone</Text>
                 <AppInput style={styles.input as object} value={leadPhoneDraft} onChangeText={setLeadPhoneDraft} placeholder="Phone" keyboardType="phone-pad" />
+                <BrokerPhoneHint phone={leadPhoneDraft} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.section}>Email</Text>
@@ -2631,7 +2760,35 @@ export const LeadDetailsScreen = () => {
           style={styles.profileSaveBtn as object}
         />
       </AppCard>
+      ) : null}
 
+      {/*
+       * The section switcher, in the comp's language rather than the web
+       * kit's. The bodies below it are still the ported web screens; this at
+       * least stops the strip reading as a different app from the cards above.
+       */}
+      <View style={comp.tabsWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={comp.tabsRow}>
+          {DETAIL_TABS.map((entry) => {
+            const active = tab === entry.key;
+            return (
+              <Pressable
+                key={entry.key}
+                style={[comp.tabChip, active && comp.tabChipOn]}
+                onPress={() => setTab(entry.key as DetailTab)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[comp.tabLabel, active && comp.tabLabelOn]}>{entry.label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+
+      {tab === "requirements" ? (
+        <>
       <AppCard style={styles.card as object}>
         <Text style={styles.section}>Lead Requirements</Text>
         
@@ -2641,6 +2798,7 @@ export const LeadDetailsScreen = () => {
             { value: "", label: "Any" },
             { value: "COMMERCIAL", label: "Commercial" },
             { value: "RESIDENTIAL", label: "Residential" },
+            { value: "COWORKING", label: "Coworking" },
           ].map((item) => (
             <AppChip
               key={`req-inv-${item.value}`}
@@ -2651,6 +2809,25 @@ export const LeadDetailsScreen = () => {
             />
           ))}
         </View>
+
+        {getPropertySubtypeOptions(requirementsDraft?.inventoryType).length ? (
+          <>
+            <Text style={styles.metricLabel}>
+              {requirementsDraft?.inventoryType === "RESIDENTIAL" ? "Residential Property Type" : "Commercial Property Type"}
+            </Text>
+            <View style={styles.modalChipWrap}>
+              {[{ value: "", label: "Any" }, ...getPropertySubtypeOptions(requirementsDraft?.inventoryType)].map((item) => (
+                <AppChip
+                  key={`req-sub-${item.value}`}
+                  label={item.label}
+                  active={String(requirementsDraft?.propertySubtype || "") === item.value}
+                  onPress={() => updateRequirementPropertySubtype(item.value)}
+                  style={styles.modalChip as object}
+                />
+              ))}
+            </View>
+          </>
+        ) : null}
 
         <Text style={styles.metricLabel}>Deal Type</Text>
         <View style={styles.modalChipWrap}>
@@ -2670,18 +2847,22 @@ export const LeadDetailsScreen = () => {
           ))}
         </View>
 
-        <Text style={styles.metricLabel}>Furnishing Status</Text>
-        <View style={styles.modalChipWrap}>
-          {getRequirementFurnishingOptions(requirementsDraft?.inventoryType).map((item) => (
-            <AppChip
-              key={`req-furn-${item.value}`}
-              label={item.label}
-              active={requirementsDraft?.furnishingStatus === item.value}
-              onPress={() => updateRequirementRootField("furnishingStatus", item.value)}
-              style={styles.modalChip as object}
-            />
-          ))}
-        </View>
+        {(getPropertySubtypeConfig(requirementsDraft?.inventoryType, requirementsDraft?.propertySubtype) as any)?.showFurnishing === false ? null : (
+          <>
+            <Text style={styles.metricLabel}>Furnishing Status</Text>
+            <View style={styles.modalChipWrap}>
+              {getRequirementFurnishingOptions(requirementsDraft?.inventoryType).map((item) => (
+                <AppChip
+                  key={`req-furn-${item.value}`}
+                  label={item.label}
+                  active={requirementsDraft?.furnishingStatus === item.value}
+                  onPress={() => updateRequirementRootField("furnishingStatus", item.value)}
+                  style={styles.modalChip as object}
+                />
+              ))}
+            </View>
+          </>
+        )}
 
         <View style={styles.twoColRow}>
           <View style={{ flex: 1 }}>
@@ -2706,7 +2887,19 @@ export const LeadDetailsScreen = () => {
           </View>
         </View>
 
-        {requirementsDraft?.inventoryType === "COMMERCIAL" ? (
+        {requirementsDraft?.inventoryType === "COWORKING" ? (
+          <CoworkingRequirementEditor value={requirementsDraft?.coworking} onChange={updateRequirementCoworking} />
+        ) : null}
+
+        <SubtypeFieldsEditor
+          config={getPropertySubtypeConfig(requirementsDraft?.inventoryType, requirementsDraft?.propertySubtype)}
+          value={requirementsDraft?.subtypeData || {}}
+          onChange={updateRequirementSubtypeField}
+        />
+
+        {/* The older fixed blocks are what a lead without a subtype carries;
+            with a subtype chosen, its preferences above replace them, as on web. */}
+        {requirementsDraft?.inventoryType === "COMMERCIAL" && !requirementsDraft?.propertySubtype ? (
           <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: themeColor("#c8d0dd"), borderRadius: 10, backgroundColor: themeColor("#f5f7fa") }}>
             <Text style={[styles.section, { fontSize: 13, marginBottom: 6 }]}>Commercial Preferences</Text>
             <View style={styles.twoColRow}>
@@ -2770,7 +2963,7 @@ export const LeadDetailsScreen = () => {
           </View>
         ) : null}
 
-        {requirementsDraft?.inventoryType === "RESIDENTIAL" ? (
+        {requirementsDraft?.inventoryType === "RESIDENTIAL" && !requirementsDraft?.propertySubtype ? (
           <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: themeColor("#c8d0dd"), borderRadius: 10, backgroundColor: themeColor("#f5f7fa") }}>
             <Text style={[styles.section, { fontSize: 13, marginBottom: 6 }]}>Residential Preferences</Text>
             
@@ -2819,7 +3012,11 @@ export const LeadDetailsScreen = () => {
           </View>
         ) : null}
       </AppCard>
+        </>
+      ) : null}
 
+      {tab === "overview" ? (
+        <>
       <AppCard style={styles.card as object}>
         <View style={styles.sectionRow}>
           <Text style={styles.section}>Properties</Text>
@@ -2838,6 +3035,17 @@ export const LeadDetailsScreen = () => {
                 </Text>
                 <Text style={styles.meta}>{String(inventory?.location || "").trim() || "-"}</Text>
                 <View style={styles.propertyActionRow}>
+                  <Pressable
+                    style={[styles.propertyActionBtn, isPrimary && styles.propertyActionBtnActive]}
+                    onPress={() => onSelectRelatedProperty(inventoryId)}
+                    disabled={!inventoryId || isPrimary || propertyActionInventoryId === inventoryId}
+                    accessibilityState={{ selected: Boolean(isPrimary) }}
+                  >
+                    <Icon name={isPrimary ? "checkmark-circle-outline" : "checkmark"} size={13} color={themeColor(isPrimary ? "#0a6544" : "#39424f")} />
+                    <Text style={[styles.propertyActionText, isPrimary && { color: themeColor("#0a6544") }]}>
+                      {isPrimary ? "Active" : "Make active"}
+                    </Text>
+                  </Pressable>
                   <Pressable
                     style={styles.propertyActionBtn}
                     onPress={() => onViewRelatedProperty(inventoryId)}
@@ -3029,6 +3237,18 @@ export const LeadDetailsScreen = () => {
             <Icon name="paper-plane-outline" size={13} color={themeColor("#39424f")} />
             <Text style={styles.proposalBtnText}>Share PDF</Text>
           </Pressable>
+          {proposalImageEntries.length ? (
+            <Pressable style={styles.proposalBtn} onPress={copyProposalImageLinks}>
+              <Glyph name="link-outline" size={13} color={themeColor("#39424f")} />
+              <Text style={styles.proposalBtnText}>Img Links</Text>
+            </Pressable>
+          ) : null}
+          {proposalImageEntries.length && Platform.OS !== "web" ? (
+            <Pressable style={styles.proposalBtn} onPress={shareProposalImages} disabled={proposalBusy}>
+              <Glyph name="images-outline" size={13} color={themeColor("#39424f")} />
+              <Text style={styles.proposalBtnText}>Share Images</Text>
+            </Pressable>
+          ) : null}
         </View>
       </AppCard>
 
@@ -3243,6 +3463,8 @@ export const LeadDetailsScreen = () => {
 
         <AppButton title={saving ? "Saving..." : saveButtonTitle.replace("Save Details", "Save Lead Update")} onPress={saveUpdate} disabled={saving} />
       </AppCard>
+        </>
+      ) : null}
 
       {false ? (
       <AppCard style={styles.card as object}>
@@ -3334,6 +3556,8 @@ export const LeadDetailsScreen = () => {
       </AppCard>
       ) : null}
 
+      {tab === "activity" ? (
+        <>
       <AppCard style={styles.card as object}>
         <Text style={styles.section}>Status Request History ({statusRequestHistory.length})</Text>
         {statusRequestHistory.length === 0 ? (
@@ -3386,7 +3610,63 @@ export const LeadDetailsScreen = () => {
           })
         )}
       </AppCard>
+        </>
+      ) : null}
 
+      {tab === "notes" ? (
+        <AppCard style={styles.card as object}>
+          <View style={styles.sectionRow}>
+            <Text style={styles.section}>Notes</Text>
+            <Text style={styles.meta}>{diaryEntries.length} total</Text>
+          </View>
+
+          <TextInput
+            style={[styles.diaryInput, { height: 96 }]}
+            placeholder="Add conversation notes, visit details, objections, or next steps..."
+            placeholderTextColor={themeColor("#98a3b5")}
+            value={diaryNoteDraft}
+            onChangeText={setDiaryNoteDraft}
+            multiline
+            maxLength={2000}
+          />
+          <View style={styles.sectionRow}>
+            <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
+            <AppButton
+              title={saving ? "Saving..." : "Add Note"}
+              onPress={submitDiary}
+              disabled={saving || !diaryNoteDraft.trim()}
+            />
+          </View>
+
+          {diaryEntries.length === 0 ? (
+            <Text style={styles.meta}>No notes yet. The first one goes above.</Text>
+          ) : (
+            visibleDiaryEntries.map((entry) => (
+              <View key={entry._id} style={styles.diaryEntryCard}>
+                <Text style={styles.diaryLine}>{entry.note || "-"}</Text>
+                <Text style={styles.diaryEntryMetaRow}>
+                  {formatDateTime(entry.createdAt)}
+                  {entry.createdBy?.name ? ` · ${entry.createdBy.name}` : ""}
+                </Text>
+              </View>
+            ))
+          )}
+
+          {diaryEntries.length > 2 ? (
+            <View style={styles.inlineActionRow}>
+              <View />
+              <Pressable onPress={() => setShowAllDiaryEntries((prev) => !prev)}>
+                <Text style={styles.linkTextCompact}>
+                  {showAllDiaryEntries ? "Show less" : "See more"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </AppCard>
+      ) : null}
+
+      {tab === "tasks" ? (
+        <>
       {canManage ? (
         <AppCard style={styles.card as object}>
           <Text style={styles.section}>Assign Executive</Text>
@@ -3658,7 +3938,11 @@ export const LeadDetailsScreen = () => {
           )}
         </View>
       </AppCard>
+        </>
+      ) : null}
 
+      {tab === "activity" ? (
+        <>
       <View style={styles.sectionRow}>
         <Text style={styles.section}>Activity Timeline</Text>
       </View>
@@ -3683,6 +3967,8 @@ export const LeadDetailsScreen = () => {
         ))
       )}
 
+        </>
+      ) : null}
       <Modal visible={statusRequestOpen} animationType="fade" transparent onRequestClose={closeStatusRequestModal}>
         <Pressable style={styles.modalWrap} onPress={closeStatusRequestModal}>
           <KeyboardAvoidingView
@@ -3938,10 +4224,135 @@ export const LeadDetailsScreen = () => {
       </Modal>
 
     </ScrollView>
+
+      <AppSheet
+        visible={overviewSheet}
+        onClose={() => setOverviewSheet(false)}
+        title={lead.name || "Lead"}
+        subtitle={lead.phone || undefined}
+      >
+        {[
+          { id: "call", label: "Call", icon: "call-outline" },
+          { id: "whatsapp", label: "WhatsApp", icon: "logo-whatsapp" },
+          { id: "email", label: "Email", icon: "mail-outline" },
+          { id: "maps", label: "Open in Maps", icon: "navigate-outline" },
+          { id: "edit", label: "Edit contact details", icon: "create-outline" },
+        ].map((entry) => (
+          <Pressable
+            key={entry.id}
+            style={comp.sheetRow}
+            accessibilityRole="button"
+            onPress={() => {
+              setOverviewSheet(false);
+              if (entry.id === "call") openDialer(lead.phone);
+              else if (entry.id === "whatsapp") openWhatsApp(lead.phone);
+              else if (entry.id === "email") openMail(lead.email);
+              else if (entry.id === "maps") openMaps();
+              else setEditOpen(true);
+            }}
+          >
+            <Glyph name={entry.icon as any} size={18} color={brand.textSecondary} />
+            <Text style={comp.sheetLabel}>{entry.label}</Text>
+          </Pressable>
+        ))}
+      </AppSheet>
+    </SafeAreaView>
   );
 };
 
+/* The comp's chrome, kept apart from the web-parity sheet the tabs still use. */
+const comp = brandStyles((b) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: b.bg,
+    },
+    bar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 16,
+      paddingHorizontal: layout.gutter,
+      paddingTop: 6,
+      paddingBottom: 10,
+    },
+    barTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: bt.hero,
+      lineHeight: 25,
+      fontWeight: "700",
+      letterSpacing: -0.5,
+      color: b.text,
+    },
+    tabsWrap: {
+      marginTop: 14,
+      marginBottom: 4,
+      marginHorizontal: -layout.gutter,
+    },
+    tabsRow: {
+      flexDirection: "row",
+      gap: 6,
+      paddingHorizontal: layout.gutter,
+    },
+    tabChip: {
+      height: 34,
+      justifyContent: "center",
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    tabChipOn: {
+      borderColor: b.greenBright,
+      backgroundColor: "#dff2e8",
+    },
+    tabLabel: {
+      fontSize: bt.cardTitle,
+      fontWeight: "500",
+      color: b.textSecondary,
+    },
+    tabLabelOn: {
+      fontWeight: "700",
+      color: b.text,
+    },
+    editHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      marginBottom: 10,
+    },
+    editTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: bt.barTitle,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    editDone: {
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sheetRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: b.hairline,
+    },
+    sheetLabel: {
+      fontSize: bt.field,
+      color: b.text,
+    },
+  }),
+);
+
 const styles = themedStyles((c) => StyleSheet.create({
+  detailTabs: { marginBottom: 12 },
   root: { flex: 1, backgroundColor: c.bg },
   content: { padding: 12, paddingBottom: 24 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: c.bg },
@@ -4370,6 +4781,7 @@ const styles = themedStyles((c) => StyleSheet.create({
   profileSaveBtn: {
     marginTop: 10,
   },
+  propertyActionBtnActive: { borderColor: c.emerald[300], backgroundColor: c.emerald[50] },
   propertyActionBtn: {
     borderWidth: 1,
     borderColor: c.borderStrong,

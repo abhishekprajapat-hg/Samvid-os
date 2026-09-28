@@ -85,14 +85,17 @@ export const AttendanceHistoryScreen = () => {
   const selectedDate = useMemo(() => new Date(`${date}T12:00:00`), [date]);
   const filterLabel = STATUS_FILTERS.find((row) => row.id === statusFilter)?.label || "All Statuses";
 
-  const applyStatus = async (choiceId: string, note: string, effectiveTime: string) => {
+  const applyStatus = async (choiceId: string, note: string, effectiveTime: string, breakType = "UTILITY") => {
     const userId = String(statusRow?.user?._id || "");
     const choice = STATUS_CHOICES.find((option) => option.id === choiceId);
     if (!userId || !choice) return;
     setSaving(true);
     try {
       if (choice.kind === "live") {
-        await manageUserBreak(userId, { action: choiceId === "BREAK" ? "START" : "END" });
+        await manageUserBreak(
+          userId,
+          choiceId === "BREAK" ? { action: "START", breakType } : { action: "END" },
+        );
       } else {
         const composed = [effectiveTime.trim() ? `Effective ${effectiveTime.trim()}` : "", note.trim()]
           .filter(Boolean)

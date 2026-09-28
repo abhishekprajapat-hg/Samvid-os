@@ -1,7 +1,6 @@
 import React from "react";
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import { colors, palette, radii, typography } from "../../theme/tokens";
-import { themedStyles, themePalette } from "../../theme/themedStyles";
+import { Pressable, StyleSheet, Text, type StyleProp, type ViewStyle } from "react-native";
+import { brandStyles, round, type as t } from "../../theme/brand";
 
 /*
  * Compatibility shim.
@@ -47,27 +46,27 @@ export const AppChip = ({
   </Pressable>
 );
 
-const styles = themedStyles((c) => StyleSheet.create({
+const styles = brandStyles((b) => StyleSheet.create({
   chip: {
-    height: 32,
+    minHeight: 34,
     justifyContent: "center",
     alignSelf: "flex-start",
     borderWidth: 1,
-    borderColor: themePalette.slate[300],
-    borderRadius: radii.pill,
-    backgroundColor: c.surface,
+    borderColor: b.fieldBorder,
+    borderRadius: round.pill,
+    backgroundColor: b.surface,
     paddingHorizontal: 12,
   },
   chipActive: {
-    borderColor: themePalette.blue[600],
-    backgroundColor: themePalette.blue[600],
+    borderColor: b.primary,
+    backgroundColor: b.primary,
   },
   chipText: {
-    fontSize: typography.label,
-    fontWeight: "600",
-    color: themePalette.slate[700],
+    fontSize: t.label,
+    fontWeight: "700",
+    color: b.textSecondary,
   },
   chipTextActive: {
-    color: c.surface,
+    color: b.onPrimary,
   },
 }));

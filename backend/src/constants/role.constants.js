@@ -60,6 +60,23 @@ const ROLE_LABELS = Object.freeze({
   [USER_ROLES.COWORKING_ADMIN]: "Coworking admin",
 });
 
+/*
+ * One line saying what a role is for, printed under its name on the roles
+ * screen. Kept beside the labels because it is the same kind of thing - how a
+ * role is presented, not what it may do, which is the permission list.
+ */
+const ROLE_DESCRIPTIONS = Object.freeze({
+  [USER_ROLES.ADMIN]: "Full system access.",
+  [USER_ROLES.MANAGER]: "Manage leads, team and reports.",
+  [USER_ROLES.INSIDE_EXECUTIVE]: "Qualify and route incoming leads.",
+  [USER_ROLES.EXECUTIVE]: "Leads, tasks and inventory view.",
+  [USER_ROLES.FIELD_EXECUTIVE]: "Site visits and field updates.",
+  [USER_ROLES.PRODUCTION_EXECUTIVE]: "Projects and fit-out delivery.",
+  [USER_ROLES.COMMUNITY_MANAGER]: "Members, spaces and day-to-day ops.",
+  [USER_ROLES.CHANNEL_PARTNER]: "Refer clients and track their leads.",
+  [USER_ROLES.COWORKING_ADMIN]: "Bookings, contracts and coworking billing.",
+});
+
 const ROLE_PARENT_RULES = Object.freeze({
   [USER_ROLES.ADMIN]: [],
   [USER_ROLES.MANAGER]: [USER_ROLES.ADMIN],
@@ -104,6 +121,7 @@ module.exports = {
   PRODUCTION_ROLES,
   LEAD_MANAGEMENT_ROLES,
   ROLE_LABELS,
+  ROLE_DESCRIPTIONS,
   ROLE_PARENT_RULES,
   AUTO_PARENT_POOL_BY_ROLE,
   DEFAULT_DESCENDANT_DEPTH,

@@ -49,7 +49,7 @@ const InventoryToolbar = ({
       onStatusFilterChange("all");
       return;
     }
-    onModeChange("sale");
+    onModeChange("all");
     onStatusFilterChange(value);
   };
 

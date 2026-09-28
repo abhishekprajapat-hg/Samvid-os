@@ -8,8 +8,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { colors, palette, radii, typography } from "../../theme/tokens";
-import { themedStyles, themeColor, themePalette } from "../../theme/themedStyles";
+import { brand, brandStyles, round, type as t } from "../../theme/brand";
 
 /*
  * Mirrors frontend/src/components/ui/Button.jsx: the same five variants and
@@ -34,30 +33,30 @@ type Tone = { border: string; background: string; text: string };
  */
 const variantTone = (variant: ButtonVariant): Tone => {
   const table: Record<ButtonVariant, Tone> = {
-    primary: { border: themePalette.blue[600], background: themePalette.blue[600], text: themeColor("#ffffff") },
-    secondary: { border: themePalette.slate[300], background: themePalette.surface, text: themePalette.slate[800] },
-    ghost: { border: "transparent", background: "transparent", text: themePalette.slate[600] },
-    danger: { border: themePalette.rose[600], background: themePalette.rose[600], text: themeColor("#ffffff") },
-    success: { border: themePalette.emerald[600], background: themePalette.emerald[600], text: themeColor("#ffffff") },
+    primary: { border: brand.primary, background: brand.primary, text: brand.onPrimary },
+    secondary: { border: brand.fieldBorder, background: brand.surface, text: brand.text },
+    ghost: { border: "transparent", background: "transparent", text: brand.textSecondary },
+    danger: { border: brand.alertInk, background: brand.alertInk, text: brand.onPrimary },
+    success: { border: brand.primary, background: brand.primary, text: brand.onPrimary },
   };
   return table[variant] || table.primary;
 };
 
 const pressedTone = (variant: ButtonVariant): string => {
   const table: Record<ButtonVariant, string> = {
-    primary: themePalette.blue[700],
-    secondary: themePalette.slate[50],
-    ghost: themePalette.slate[100],
-    danger: themePalette.rose[700],
-    success: themePalette.emerald[700],
+    primary: brand.deep,
+    secondary: brand.fieldMuted,
+    ghost: brand.tintSoft,
+    danger: brand.alert,
+    success: brand.deep,
   };
   return table[variant] || table.primary;
 };
 
 const SIZES: Record<ButtonSize, { height: number; paddingHorizontal: number; fontSize: number }> = {
-  sm: { height: 32, paddingHorizontal: 12, fontSize: 12 },
-  md: { height: 36, paddingHorizontal: 14, fontSize: 13 },
-  lg: { height: 40, paddingHorizontal: 16, fontSize: 14 },
+  sm: { height: 36, paddingHorizontal: 12, fontSize: t.label },
+  md: { height: 44, paddingHorizontal: 16, fontSize: t.field },
+  lg: { height: 48, paddingHorizontal: 18, fontSize: t.rowTitle },
 };
 
 // Lifts the touch target to 44 without changing the drawn height.
@@ -133,14 +132,14 @@ export const AppButton = ({
   );
 };
 
-const styles = themedStyles((c) => StyleSheet.create({
+const styles = brandStyles(() => StyleSheet.create({
   base: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
     borderWidth: 1,
-    borderRadius: radii.md,
+    borderRadius: round.button,
     alignSelf: "flex-start",
   },
   fullWidth: {

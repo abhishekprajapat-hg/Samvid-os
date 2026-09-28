@@ -85,6 +85,20 @@ const USER_SELECTABLE_FIELDS = [
   "canViewInventory",
   "brokerageConfig",
   "isActive",
+  "profileImageUrl",
+  // The team screens read these, so a caller that narrows the selection can
+  // still ask for them by name.
+  "employeeId",
+  "department",
+  "branch",
+  "shiftTiming",
+  "monthlyTarget",
+  "joiningDate",
+  "invitedAt",
+  "inviteAcceptedAt",
+  "leadCapacity",
+  "taskCapacity",
+  "lastLoginAt",
   "lastAssignedAt",
   "liveLocation",
   "createdAt",
@@ -153,6 +167,65 @@ const normalizeRoleType = (value) => {
   const normalized = String(value || "").trim().toUpperCase();
   return ["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"].includes(normalized) ? normalized : "COMMERCIAL";
 };
+/*
+ * The employment details the team screens collect.
+ *
+ * One reader for both create and update so the two cannot drift: each key is
+ * only written when the caller actually sent it, which keeps a partial patch
+ * from blanking a field nobody touched. Returns an error string rather than
+ * throwing, matching how the rest of this controller reports a bad field.
+ */
+const EMPLOYMENT_TEXT_LIMITS = Object.freeze({
+  employeeId: 40,
+  department: 80,
+  branch: 80,
+  shiftTiming: 60,
+});
+
+const readEmploymentFields = (body = {}, patch = {}) => {
+  const sent = (key) => Object.prototype.hasOwnProperty.call(body || {}, key);
+
+  for (const [key, limit] of Object.entries(EMPLOYMENT_TEXT_LIMITS)) {
+    if (sent(key)) patch[key] = String(body[key] || "").trim().slice(0, limit);
+  }
+
+  if (sent("joiningDate")) {
+    const raw = String(body.joiningDate || "").trim();
+    if (!raw) {
+      patch.joiningDate = null;
+    } else {
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return { error: "Joining date is not a valid date" };
+      patch.joiningDate = parsed;
+    }
+  }
+
+  for (const key of ["monthlyTarget", "leadCapacity", "taskCapacity"]) {
+    if (!sent(key)) continue;
+    const parsed = Number(body[key]);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return { error: `${key} must be 0 or more` };
+    }
+    patch[key] = parsed;
+  }
+
+  return { patch };
+};
+
+/*
+ * Two people in one company sharing a payroll number is a typo, not a second
+ * employee. Scoped to the company for the same reason the email check is:
+ * a global lookup would leak that a number exists in another tenant.
+ */
+const assertEmployeeIdFree = async ({ employeeId, companyId, excludeUserId = null }) => {
+  const value = String(employeeId || "").trim();
+  if (!value) return null;
+  const query = { employeeId: value, companyId };
+  if (excludeUserId) query._id = { $ne: excludeUserId };
+  const taken = await User.findOne(query).select("_id").lean();
+  return taken ? "That employee ID is already in use" : null;
+};
+
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -668,6 +741,15 @@ const toProfileView = (user) => ({
   branch: user.branch || "",
   shiftTiming: user.shiftTiming || "",
   monthlyTarget: Number.isFinite(user.monthlyTarget) ? user.monthlyTarget : 10,
+  // The company's own number when it set one, the derived code when it did not,
+  // so the member screen always has something to print.
+  employeeId: user.employeeId || toEmployeeCode(user._id),
+  joiningDate: user.joiningDate || null,
+  invitedAt: user.invitedAt || null,
+  inviteAcceptedAt: user.inviteAcceptedAt || null,
+  mustChangePassword: Boolean(user.mustChangePassword),
+  leadCapacity: Number.isFinite(user.leadCapacity) ? user.leadCapacity : 25,
+  taskCapacity: Number.isFinite(user.taskCapacity) ? user.taskCapacity : 10,
   lastLoginAt: user.lastLoginAt || null,
   lastAssignedAt: user.lastAssignedAt || null,
   liveLocation: user.liveLocation || null,
@@ -1372,6 +1454,19 @@ exports.createUserByRole = async (req, res) => {
       }
     }
 
+    const employment = readEmploymentFields(req.body, {});
+    if (employment.error) {
+      return res.status(400).json({ message: employment.error });
+    }
+
+    const employeeIdConflict = await assertEmployeeIdFree({
+      employeeId: employment.patch.employeeId,
+      companyId: req.user.companyId,
+    });
+    if (employeeIdConflict) {
+      return res.status(409).json({ message: employeeIdConflict });
+    }
+
     /*
      * A company-defined role is a preset, so it is expanded here rather than
      * stored as a role value of its own: the base role is what every hierarchy
@@ -1498,6 +1593,16 @@ exports.createUserByRole = async (req, res) => {
           ? Boolean(req.body?.canViewInventory)
           : false,
       brokerageConfig: parsedBrokerageConfig.value,
+      ...employment.patch,
+      /*
+       * The invitation is a record that the account was handed over, not a
+       * delivery mechanism: there is no mail transport here, so the client
+       * composes the message itself and says so by sending sendInvite. Without
+       * it the account is simply created and the admin passes the credentials
+       * on however they like.
+       */
+      invitedAt: req.body?.sendInvite ? new Date() : null,
+      mustChangePassword: Boolean(req.body?.mustChangePassword),
     });
 
     await writeAuditLog({
@@ -1518,6 +1623,12 @@ exports.createUserByRole = async (req, res) => {
         parentId: newUser.parentId,
         canViewInventory: Boolean(newUser.canViewInventory),
         brokerageConfig: toBrokerageConfigView(newUser.brokerageConfig),
+        employeeId: newUser.employeeId || toEmployeeCode(newUser._id),
+        department: newUser.department || "",
+        branch: newUser.branch || "",
+        joiningDate: newUser.joiningDate || null,
+        invitedAt: newUser.invitedAt || null,
+        mustChangePassword: Boolean(newUser.mustChangePassword),
       },
     });
   } catch (error) {
@@ -1576,6 +1687,11 @@ exports.updateUserByAdmin = async (req, res) => {
       "branch",
       "shiftTiming",
       "monthlyTarget",
+      "employeeId",
+      "joiningDate",
+      "leadCapacity",
+      "taskCapacity",
+      "mustChangePassword",
     ].some((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
 
     if (!hasAnyEditableField) {
@@ -1734,24 +1850,24 @@ exports.updateUserByAdmin = async (req, res) => {
       patch.brokerageConfig = parsedBrokerageConfig.value;
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "department")) {
-      patch.department = String(req.body.department || "").trim().slice(0, 80);
+    const employment = readEmploymentFields(req.body, patch);
+    if (employment.error) {
+      return res.status(400).json({ message: employment.error });
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "branch")) {
-      patch.branch = String(req.body.branch || "").trim().slice(0, 80);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "shiftTiming")) {
-      patch.shiftTiming = String(req.body.shiftTiming || "").trim().slice(0, 60);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "monthlyTarget")) {
-      const monthlyTarget = Number(req.body.monthlyTarget);
-      if (!Number.isFinite(monthlyTarget) || monthlyTarget < 0) {
-        return res.status(400).json({ message: "monthlyTarget must be 0 or more" });
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "employeeId")) {
+      const employeeIdConflict = await assertEmployeeIdFree({
+        employeeId: patch.employeeId,
+        companyId: req.user.companyId,
+        excludeUserId: user._id,
+      });
+      if (employeeIdConflict) {
+        return res.status(409).json({ message: employeeIdConflict });
       }
-      patch.monthlyTarget = monthlyTarget;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "mustChangePassword")) {
+      patch.mustChangePassword = Boolean(req.body.mustChangePassword);
     }
 
     if (EXECUTIVE_ROLES.includes(previousRole) && !EXECUTIVE_ROLES.includes(nextRole)) {

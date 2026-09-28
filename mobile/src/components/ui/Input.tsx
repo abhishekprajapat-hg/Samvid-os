@@ -10,8 +10,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import { colors, palette, radii, spacing, typography } from "../../theme/tokens";
-import { themedStyles, themePalette } from "../../theme/themedStyles";
+import { brand, brandStyles, layout, round, type as t } from "../../theme/brand";
 
 /*
  * Mirrors frontend/src/components/ui/Input.jsx and SearchInput.jsx.
@@ -92,8 +91,8 @@ export const AppInput = ({
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
-          placeholderTextColor={themePalette.slate[500]}
-          selectionColor={themePalette.blue[600]}
+          placeholderTextColor={brand.placeholder}
+          selectionColor={brand.primary}
           secureTextEntry={secureTextEntry}
           keyboardType={keyboardType}
           autoCapitalize={autoCapitalize}
@@ -155,26 +154,27 @@ export const AppSearchInput = ({
   />
 );
 
-const styles = themedStyles((c) => StyleSheet.create({
+const styles = brandStyles((b) => StyleSheet.create({
   wrapper: {
     width: "100%",
   },
   label: {
-    fontSize: typography.label,
+    fontSize: t.fieldLabel,
+    lineHeight: 16,
     fontWeight: "600",
-    color: themePalette.slate[600],
-    marginBottom: 6,
+    color: b.text,
+    marginBottom: 8,
   },
   field: {
     flexDirection: "row",
     alignItems: "center",
-    height: 36,
+    height: layout.fieldHeight,
     borderWidth: 1,
-    borderColor: themePalette.slate[300],
-    borderRadius: radii.md,
-    backgroundColor: c.surface,
-    paddingHorizontal: 12,
-    gap: spacing.md,
+    borderColor: b.fieldBorder,
+    borderRadius: round.field,
+    backgroundColor: b.surface,
+    paddingHorizontal: 11,
+    gap: 8,
   },
   fieldMultiline: {
     height: undefined,
@@ -183,31 +183,31 @@ const styles = themedStyles((c) => StyleSheet.create({
     paddingVertical: 8,
   },
   fieldFocused: {
-    borderColor: themePalette.blue[600],
+    borderColor: b.greenBright,
     // RN has no ring utility; a 2px-equivalent glow reads the same at a glance.
-    shadowColor: themePalette.blue[600],
+    shadowColor: b.greenBright,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 0,
   },
   fieldError: {
-    borderColor: themePalette.rose[600],
+    borderColor: b.alert,
   },
   fieldDisabled: {
-    backgroundColor: themePalette.slate[100],
+    backgroundColor: b.fieldMuted,
   },
   input: {
     flex: 1,
-    fontSize: typography.body,
-    color: themePalette.slate[900],
+    fontSize: t.field,
+    color: b.text,
     padding: 0,
   },
   inputMultiline: {
     textAlignVertical: "top",
   },
   inputDisabled: {
-    color: themePalette.slate[500],
+    color: b.textMuted,
   },
   affix: {
     alignItems: "center",
@@ -215,26 +215,26 @@ const styles = themedStyles((c) => StyleSheet.create({
   },
   error: {
     marginTop: 4,
-    fontSize: typography.label,
-    color: themePalette.rose[600],
+    fontSize: t.label,
+    color: b.alertInk,
   },
   helper: {
     marginTop: 4,
-    fontSize: typography.label,
-    color: themePalette.slate[500],
+    fontSize: t.label,
+    color: b.textMuted,
   },
   clear: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: round.pill,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: themePalette.slate[100],
+    backgroundColor: b.fieldMuted,
   },
   clearGlyph: {
     fontSize: 16,
     lineHeight: 18,
-    color: themePalette.slate[500],
+    color: b.textMuted,
   },
 }));
 

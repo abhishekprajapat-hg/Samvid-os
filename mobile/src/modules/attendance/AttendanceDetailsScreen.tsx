@@ -25,6 +25,7 @@ import {
   statusTone,
   type RosterRow,
 } from "./attendanceShared";
+import { BreakCorrectionSheet } from "./components/BreakCorrectionSheet";
 
 /*
  * Comp 3: one person, one day.
@@ -128,6 +129,7 @@ export const AttendanceDetailsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [breaksOpen, setBreaksOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -173,13 +175,16 @@ export const AttendanceDetailsScreen = () => {
   const lat = (policy as any)?.officeLatitude;
   const lng = (policy as any)?.officeLongitude;
 
-  const applyStatus = async (choiceId: string, note: string, effectiveTime: string) => {
+  const applyStatus = async (choiceId: string, note: string, effectiveTime: string, breakType = "UTILITY") => {
     const choice = STATUS_CHOICES.find((option) => option.id === choiceId);
     if (!choice) return;
     setSaving(true);
     try {
       if (choice.kind === "live") {
-        await manageUserBreak(userId, { action: choiceId === "BREAK" ? "START" : "END" });
+        await manageUserBreak(
+          userId,
+          choiceId === "BREAK" ? { action: "START", breakType } : { action: "END" },
+        );
       } else {
         const composed = [effectiveTime.trim() ? `Effective ${effectiveTime.trim()}` : "", note.trim()]
           .filter(Boolean)
@@ -379,7 +384,26 @@ export const AttendanceDetailsScreen = () => {
             <Text style={styles.setStatusText}>Set Status</Text>
           </Pressable>
         </View>
+        {record?.checkInAt ? (
+          <Pressable style={styles.manageBreaks} onPress={() => setBreaksOpen(true)} accessibilityRole="button">
+            <Icon name="time-outline" size={17} color={themePalette.amber[700]} />
+            <Text style={styles.manageBreaksText}>Manage breaks</Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
+
+      <BreakCorrectionSheet
+        visible={breaksOpen}
+        userId={userId}
+        userName={name}
+        date={date}
+        attendance={record}
+        onClose={() => setBreaksOpen(false)}
+        onSaved={() => {
+          setBreaksOpen(false);
+          void load();
+        }}
+      />
 
       <SetStatusSheet
         visible={sheetOpen}
@@ -498,6 +522,18 @@ const styles = themedStyles((c) => StyleSheet.create({
   empty: { paddingVertical: spacing.xxl, textAlign: "center", fontSize: typography.label, color: c.slate[400] },
 
   footer: { flexDirection: "row", gap: spacing.md },
+  manageBreaks: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    height: 46,
+    borderWidth: 1,
+    borderColor: c.amber[200],
+    borderRadius: radii.md,
+    backgroundColor: c.amber[50],
+  },
+  manageBreaksText: { fontSize: 14, fontWeight: "700", color: c.amber[800] },
   absent: {
     flex: 1,
     flexDirection: "row",

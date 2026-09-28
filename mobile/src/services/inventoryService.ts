@@ -33,6 +33,27 @@ const normalizeInventoryToAsset = (inventory: any): InventoryAsset | null => {
     gstApplicable: Boolean(inventory.gstApplicable),
     createdAt: inventory.createdAt,
     updatedAt: inventory.updatedAt,
+
+    /* Carried through so a list can show an area, a furnishing or a floor
+       without fetching each row again. */
+    propertyId: String(inventory.propertyId || ""),
+    projectName: String(inventory.projectName || ""),
+    towerName: String(inventory.towerName || ""),
+    inventoryType: String(inventory.inventoryType || ""),
+    furnishingStatus: String(inventory.furnishingStatus || ""),
+    buildingName: String(inventory.buildingName || ""),
+    floorNumber: inventory.floorNumber ?? null,
+    totalFloors: inventory.totalFloors ?? null,
+    carpetArea: inventory.carpetArea ?? null,
+    builtUpArea: inventory.builtUpArea ?? null,
+    totalArea: inventory.totalArea ?? null,
+    areaUnit: String(inventory.areaUnit || "SQ_FT"),
+    city: String(inventory.city || ""),
+    area: String(inventory.area || ""),
+    pincode: String(inventory.pincode || ""),
+    rent: inventory.rent ?? null,
+    maintenanceCharges: inventory.maintenanceCharges ?? null,
+    floorPlans: Array.isArray(inventory.floorPlans) ? inventory.floorPlans : [],
   };
 };
 

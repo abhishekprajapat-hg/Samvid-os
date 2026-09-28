@@ -10,8 +10,33 @@ const coworkingPaymentSchema = new mongoose.Schema(
   {
     companyId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "Company", index: true },
     paymentCode: { type: String, required: true, trim: true },
-    invoiceId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "CoworkingInvoice", index: true },
-    clientId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "CoworkingClient", index: true },
+    /*
+     * Both optional since the Finance screens took money in that no invoice was
+     * raised for - a deposit handed over at a site visit, a one-off collection.
+     * An entry with no invoiceId simply never rolls into an invoice's
+     * amountPaid; the ledger is still the ledger.
+     */
+    invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "CoworkingInvoice", default: null, index: true },
+    clientId: { type: mongoose.Schema.Types.ObjectId, ref: "CoworkingClient", default: null, index: true },
+    leadId: { type: mongoose.Schema.Types.ObjectId, ref: "Lead", default: null, index: true },
+    contactId: { type: mongoose.Schema.Types.ObjectId, ref: "CrmContact", default: null, index: true },
+    inventoryId: { type: mongoose.Schema.Types.ObjectId, ref: "Inventory", default: null, index: true },
+    // What the money was for, in the Finance screens' vocabulary.
+    category: { type: String, trim: true, default: "", maxlength: 40 },
+    // The line the Finance list shows - "California Citi Rent".
+    title: { type: String, trim: true, default: "", maxlength: 200 },
+    payerName: { type: String, trim: true, default: "", maxlength: 200 },
+    receipts: {
+      type: [
+        {
+          name: { type: String, trim: true, default: "" },
+          fileUrl: { type: String, trim: true, required: true },
+          fileType: { type: String, trim: true, default: "" },
+          uploadedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     type: { type: String, enum: PAYMENT_TRANSACTION_TYPES, default: "PAYMENT" },
     amount: { type: Number, required: true, min: 0.01 },
     method: { type: String, enum: PAYMENT_METHODS, required: true },

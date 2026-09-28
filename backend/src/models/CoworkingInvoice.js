@@ -24,11 +24,31 @@ const additionalChargeSchema = new mongoose.Schema(
 // directly from a request body. amountPaid is written exclusively by
 // services/coworkingInvoice.service.js#recalculateAmountPaid, which sums the
 // CoworkingPayment ledger; it is never incremented ad hoc.
+
+/*
+ * Widened beyond coworking.
+ *
+ * These three collections - invoice, payment, expense - were written for
+ * coworking clients, contracts and properties, and they are the only complete
+ * money ledger in the product. The mobile Finance comps need the same ledger
+ * for CRM money too: rent invoiced to a lead, brokerage paid out, marketing
+ * spend against an inventory asset. Rather than stand up a second invoicing
+ * system beside this one, the coworking links became optional and the CRM ones
+ * were added next to them.
+ *
+ * Nothing existing changes shape: a coworking row still sets clientId /
+ * propertyId exactly as before, and every coworking query keeps working.
+ */
 const coworkingInvoiceSchema = new mongoose.Schema(
   {
     companyId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "Company", index: true },
     invoiceNumber: { type: String, required: true, trim: true },
-    clientId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "CoworkingClient", index: true },
+    // Exactly one of clientId / leadId / contactId identifies who is billed.
+    clientId: { type: mongoose.Schema.Types.ObjectId, ref: "CoworkingClient", default: null, index: true },
+    leadId: { type: mongoose.Schema.Types.ObjectId, ref: "Lead", default: null, index: true },
+    contactId: { type: mongoose.Schema.Types.ObjectId, ref: "CrmContact", default: null, index: true },
+    // The place it is for: a coworking property, or an inventory asset.
+    inventoryId: { type: mongoose.Schema.Types.ObjectId, ref: "Inventory", default: null, index: true },
     contractId: { type: mongoose.Schema.Types.ObjectId, ref: "CoworkingContract", default: null, index: true },
     billingPeriodStart: { type: Date, default: null },
     billingPeriodEnd: { type: Date, default: null },

@@ -8,6 +8,7 @@ import { addLeadDiaryEntry, getAllLeads } from "../../services/leadService";
 import { uploadChatFile } from "../../services/chatService";
 import { deleteInventoryAsset, getInventoryAssetActivity, getInventoryAssetById, requestInventoryStatusChange, updateInventoryAsset } from "../../services/inventoryService";
 import { createInventoryShareLink } from "../../services/inventoryService";
+import { toAbsoluteUrl } from "../../services/uploadService";
 import { getWebAppOrigin } from "../../services/api";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
@@ -597,6 +598,25 @@ export const InventoryDetailsScreen = () => {
     }
   };
 
+  /*
+   * Web's "Share to chat": the property goes into a conversation as a card
+   * the other person can open, rather than as a pasted description.
+   */
+  const handleShareToChat = () => {
+    if (!asset?._id) return;
+    const images = Array.isArray((asset as any).images) ? (asset as any).images : [];
+    navigation.navigate("Chat", {
+      shareProperty: {
+        inventoryId: String(asset._id),
+        title: String(asset.title || "Inventory Unit"),
+        location: String(asset.location || ""),
+        price: Number(asset.price) || 0,
+        status: String(asset.status || ""),
+        image: images[0] ? toAbsoluteUrl(String(images[0])) : "",
+      },
+    });
+  };
+
   const handleShareAsset = async () => {
     if (!asset) return;
     try {
@@ -624,16 +644,23 @@ export const InventoryDetailsScreen = () => {
     }
   };
 
+  /* Web's full property form; the page reloads when the form hands back. */
+  const reloadOnReturnRef = useRef(false);
+  useEffect(
+    () =>
+      navigation.addListener?.("focus", () => {
+        if (!reloadOnReturnRef.current) return;
+        reloadOnReturnRef.current = false;
+        void loadDetails();
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [navigation, assetId],
+  );
+
   const handleEditAsset = () => {
     if (!asset || !canEditAsset) return;
-    navigation.navigate("MainTabs", {
-      screen: "Inventory",
-      params: {
-        editAssetId: asset._id,
-        editAsset: asset,
-        editAt: Date.now(),
-      },
-    });
+    reloadOnReturnRef.current = true;
+    navigation.navigate("PropertyForm", { assetId: asset._id });
   };
 
   const handleDeleteAsset = async () => {
@@ -700,7 +727,10 @@ export const InventoryDetailsScreen = () => {
                 <Icon name="create-outline" size={15} color={themeColor("#6c7789")} />
               </Pressable>
             ) : null}
-            <Pressable style={styles.detailIconBtn} onPress={() => void handleShareAsset()}>
+            <Pressable style={styles.detailIconBtn} onPress={handleShareToChat} accessibilityLabel="Share to chat">
+              <Icon name="chatbubble" size={15} color={themeColor("#1f6499")} />
+            </Pressable>
+            <Pressable style={styles.detailIconBtn} onPress={() => void handleShareAsset()} accessibilityLabel="Share link">
               <Icon name="share-social-outline" size={15} color={themeColor("#1f6499")} />
             </Pressable>
             {isAdmin ? (

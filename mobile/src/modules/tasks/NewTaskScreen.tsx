@@ -7,165 +7,207 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
+  TextInput,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import DateTimePicker from "@react-native-community/datetimepicker";
-import { Icon } from "../../components/ui/Icon";
-import { AppSheet } from "../../components/ui";
-import { radii, spacing, typography } from "../../theme/tokens";
-import { themedStyles, themePalette } from "../../theme/themedStyles";
+import DateTimePicker, { type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import { Glyph } from "../../components/ui/Glyph";
+import {
+  FieldCol,
+  FieldLabel,
+  FieldRow,
+  FieldShell,
+  SectionCard,
+  SelectField,
+  TextField,
+  Toggle,
+} from "../../components/ui/form";
+import { brand, brandStyles, layout, round, type as t } from "../../theme/brand";
 import { toErrorMessage } from "../../utils/errorMessage";
-import {
-  createTask,
-  getTaskById,
-  updateTask,
-  type Task,
-} from "../../services/taskService";
-import { getUsers } from "../../services/userService";
-import { getAllLeads } from "../../services/leadService";
+import { createTask, getTaskAssignees, getTaskById, updateTask } from "../../services/taskService";
 import { useAuth } from "../../context/AuthContext";
-import {
-  PREDEFINED_TAGS,
-  PRIORITY_IDS,
-  STATUS_IDS,
-  priorityTone,
-  statusTone,
-  toDate,
-  type PriorityId,
-  type StatusId,
-} from "./taskConstants";
+import { getAllLeads } from "../../services/leadService";
+import { scheduleLocalReminder } from "../../services/pushNotifications";
+import { PREDEFINED_TAGS, initialsOf, type PriorityId } from "./taskConstants";
 
 /*
- * The task form, used to raise one and to edit one.
+ * Create Task, drawn to the comp.
  *
- * The comp is the create case; passing a taskId re-labels the page and
- * patches instead of posting. Keeping both in one screen is what stops the
- * edit path quietly losing a field the create path gained - there is only
- * one list of inputs.
+ * Three of the controls the comp draws have nowhere to go: the task model
+ * carries no attachments, no repeat rule and no reminder column. Attachments
+ * and Repeat are therefore not drawn - a file picker that drops the file, or a
+ * repeat that never repeats, is worse than not offering it. The reminder is
+ * drawn, because a reminder can be kept honestly without the server: it
+ * schedules a local notification on this device. That limit is stated on the
+ * control and in docs/mobile/00_MOBILE_PARITY_SPEC.md.
  *
- * Description is capped at 500 to match the counter the comp draws. Nothing
- * on the server enforces that, so the cap is the input's own.
+ * "Task type" is the task's first tag, which is the vocabulary the rest of the
+ * module already filters on, and "Related to" is the lead link - the only
+ * relation the model has.
  */
 
-const DESCRIPTION_LIMIT = 500;
+const REMINDERS = [
+  { label: "10 minutes before", value: "10" },
+  { label: "30 minutes before", value: "30" },
+  { label: "1 hour before", value: "60" },
+  { label: "1 day before", value: "1440" },
+];
 
-const MAX_LABEL = "mm/dd/yyyy";
+const PRIORITIES: PriorityId[] = ["LOW", "MEDIUM", "HIGH"];
 
-const asInputDate = (value: Date | null) =>
+const PRIORITY_TONE: Record<PriorityId, { bg: string; fg: string }> = {
+  LOW: { bg: "#e6f4f0", fg: "#0a6b4a" },
+  MEDIUM: { bg: "#feebc9", fg: "#a06a10" },
+  HIGH: { bg: "#fdedee", fg: "#d64545" },
+};
+
+const dateLabel = (value: Date | null) =>
+  value ? value.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "";
+
+const timeLabel = (value: Date | null) =>
   value
-    ? `${String(value.getMonth() + 1).padStart(2, "0")}/${String(value.getDate()).padStart(2, "0")}/${value.getFullYear()}`
+    ? value.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toUpperCase()
     : "";
 
 export const NewTaskScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
-
-  const taskId = route.params?.taskId ? String(route.params.taskId) : "";
+  const taskId = String(route.params?.taskId || "");
   const isEdit = !!taskId;
-  const seedStatus = (route.params?.status as StatusId) || "TODO";
 
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<PriorityId>("MEDIUM");
-  const [status, setStatus] = useState<StatusId>(seedStatus);
-  const [dueDate, setDueDate] = useState<Date | null>(null);
-  const [assignee, setAssignee] = useState("");
-  const [leadId, setLeadId] = useState("");
-  const [subtasks, setSubtasks] = useState<Array<{ title: string; isCompleted: boolean }>>([]);
-  const [subtaskInput, setSubtaskInput] = useState("");
+  /*
+   * Web's form takes any number of tags - the predefined six plus custom ones.
+   * The comp drew one "Task type" select, which can hold one; saving through it
+   * dropped every other tag on the task. The chips hold them all.
+   */
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
+  const [leadId, setLeadId] = useState("");
+  const [due, setDue] = useState<Date | null>(null);
+  const [reminderOn, setReminderOn] = useState(false);
+  const [reminder, setReminder] = useState("30");
+  const [assignee, setAssignee] = useState("");
+  const { user } = useAuth();
+  const myId = String((user as any)?._id || (user as any)?.id || "");
+  const myName = String(user?.name || "");
+  const [editingAssignee, setEditingAssignee] = useState<{ _id: string; name: string } | null>(null);
+  /* Web's form builds the checklist before the task exists. */
+  const [checklist, setChecklist] = useState<Array<{ title: string; isCompleted?: boolean; description?: string; dueDate?: string | null }>>([]);
+  const [checklistInput, setChecklistInput] = useState("");
+  const [priority, setPriority] = useState<PriorityId>("MEDIUM");
 
   const [people, setPeople] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [sheet, setSheet] = useState<"assignee" | "lead" | null>(null);
-  const [showPicker, setShowPicker] = useState(false);
+  const [picker, setPicker] = useState<"date" | "time" | null>(null);
 
   const load = useCallback(async () => {
     try {
       const [userRows, leadRows, existing] = await Promise.allSettled([
-        getUsers(),
+        getTaskAssignees(),
         getAllLeads(),
         isEdit ? getTaskById(taskId) : Promise.resolve(null),
       ]);
 
-      if (userRows.status === "fulfilled") setPeople(userRows.value?.users || []);
-      if (leadRows.status === "fulfilled") setLeads(leadRows.value || []);
+      if (userRows.status === "fulfilled") {
+        const rows = (userRows.value?.users || []).filter((row: any) => row?.isActive !== false);
+        setPeople(rows);
+      }
+      if (leadRows.status === "fulfilled") setLeads(Array.isArray(leadRows.value) ? leadRows.value : []);
 
       if (existing.status === "fulfilled" && existing.value) {
-        const row = existing.value as Task;
-        setTitle(row.title || "");
-        setDescription(row.description || "");
-        setPriority((String(row.priority || "MEDIUM").toUpperCase() as PriorityId) || "MEDIUM");
-        setStatus((String(row.status || "TODO").toUpperCase() as StatusId) || "TODO");
-        setDueDate(toDate(row.dueDate));
+        const task = existing.value;
+        setTitle(task.title || "");
+        setDescription(task.description || "");
+        setTags(Array.isArray(task.tags) ? task.tags.map(String) : []);
+        setPriority((String(task.priority || "MEDIUM").toUpperCase() as PriorityId) || "MEDIUM");
+        setDue(task.dueDate ? new Date(task.dueDate) : null);
         setAssignee(
-          row.assignedTo && typeof row.assignedTo === "object" ? String(row.assignedTo._id) : "",
+          typeof task.assignedTo === "object" && task.assignedTo ? String(task.assignedTo._id) : "",
         );
-        setLeadId(row.leadId && typeof row.leadId === "object" ? String(row.leadId._id) : "");
-        setSubtasks(
-          (row.subtasks || []).map((sub) => ({
-            title: String(sub.title || ""),
-            isCompleted: !!sub.isCompleted,
-          })),
-        );
-        setTags(Array.isArray(row.tags) ? row.tags : []);
-      } else if (existing.status === "rejected") {
-        setError(toErrorMessage(existing.reason, "Could not load this task"));
+        if (typeof task.assignedTo === "object" && task.assignedTo?._id) {
+          setEditingAssignee({ _id: String(task.assignedTo._id), name: String((task.assignedTo as any).name || "Unknown user") });
+        }
+        setChecklist(Array.isArray(task.subtasks) ? task.subtasks.map((row: any) => ({ ...row })) : []);
+        setLeadId(typeof task.leadId === "object" && task.leadId ? String(task.leadId._id) : "");
+      } else {
+        /* "Assign task" on a member's page opens this form already pointed at
+           them, so the one thing that brought you here is not retyped. */
+        const preset = String(route.params?.assigneeId || "");
+        if (preset) setAssignee(preset);
       }
+    } catch (err) {
+      setError(toErrorMessage(err, "Could not load the form"));
     } finally {
       setLoading(false);
     }
-  }, [isEdit, taskId]);
+  }, [isEdit, taskId, route.params]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  const assigneeLabel = useMemo(() => {
-    if (!assignee) return "Unassigned";
-    const match = people.find((row) => String(row?._id || row?.id) === assignee);
-    return match ? String(match.name || "User") : "Unassigned";
-  }, [assignee, people]);
+  /*
+   * Web's assignableUsers: the assignees route, plus me if it left me out, plus
+   * whoever the task being edited is already with - then me first, the rest by
+   * name - so an edit never silently reassigns a task to "nobody".
+   */
+  const peopleOptions = useMemo(() => {
+    const list: Array<{ _id?: string; name?: string }> = [...people];
+    const has = (id: string) => list.some((row) => String(row?._id) === String(id));
+    if (myId && !has(myId)) list.push({ _id: myId, name: myName || "Me" });
+    if (editingAssignee?._id && !has(editingAssignee._id)) list.push(editingAssignee);
+    return list
+      .sort((a, b) => {
+        const aSelf = String(a._id) === myId ? 0 : 1;
+        const bSelf = String(b._id) === myId ? 0 : 1;
+        if (aSelf !== bSelf) return aSelf - bSelf;
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      })
+      .map((row) => ({ label: String(row?.name || "User"), value: String(row?._id || "") }));
+  }, [people, myId, myName, editingAssignee]);
 
-  const leadLabel = useMemo(() => {
-    if (!leadId) return "No linked lead";
-    const match = leads.find((row) => String(row?._id) === leadId);
-    return match ? String(match.name || match.phone || "Lead") : "No linked lead";
-  }, [leadId, leads]);
+  const leadOptions = useMemo(
+    () => [
+      { label: "Not linked", value: "" },
+      ...leads.map((row) => ({
+        label: `${String(row?.name || "Lead")}${row?.projectInterested ? ` · ${row.projectInterested}` : ""}`,
+        value: String(row?._id || ""),
+      })),
+    ],
+    [leads],
+  );
 
-  const addSubtask = () => {
-    const next = subtaskInput.trim();
-    if (!next) return;
-    setSubtasks((prev) => [...prev, { title: next, isCompleted: false }]);
-    setSubtaskInput("");
+  const assigneeName = peopleOptions.find((row) => row.value === assignee)?.label || "";
+
+  const onPicked = (event: DateTimePickerEvent, picked?: Date) => {
+    const mode = picker;
+    setPicker(null);
+    if (event.type === "dismissed" || !picked) return;
+
+    setDue((prev) => {
+      const base = prev ? new Date(prev) : new Date();
+      if (mode === "time") {
+        base.setHours(picked.getHours(), picked.getMinutes(), 0, 0);
+      } else {
+        base.setFullYear(picked.getFullYear(), picked.getMonth(), picked.getDate());
+        if (!prev) base.setHours(9, 0, 0, 0);
+      }
+      return base;
+    });
   };
 
-  const toggleTag = (tag: string) =>
-    setTags((prev) => (prev.includes(tag) ? prev.filter((row) => row !== tag) : [...prev, tag]));
-
-  const addCustomTag = () => {
-    const next = tagInput.trim();
-    if (!next || tags.includes(next)) {
-      setTagInput("");
-      return;
-    }
-    setTags((prev) => [...prev, next]);
-    setTagInput("");
-  };
-
-  const submit = async () => {
+  const save = async () => {
     const trimmed = title.trim();
     if (!trimmed) {
-      setError("A task needs a title.");
+      setError("A task title is required");
       return;
     }
 
@@ -176,16 +218,24 @@ export const NewTaskScreen = () => {
         title: trimmed,
         description: description.trim(),
         priority,
-        status,
-        dueDate: dueDate ? dueDate.toISOString() : null,
+        dueDate: due ? due.toISOString() : null,
         assignedTo: assignee || null,
         leadId: leadId || null,
-        subtasks,
         tags,
+        subtasks: checklist
+          .filter((row) => String(row.title || "").trim())
+          .map((row) => ({ ...row, title: String(row.title).trim(), isCompleted: Boolean(row.isCompleted) })),
       };
 
       if (isEdit) await updateTask(taskId, payload);
       else await createTask(payload);
+
+      if (reminderOn && due) {
+        const at = new Date(due.getTime() - Number(reminder) * 60000);
+        if (at.getTime() > Date.now()) {
+          await scheduleLocalReminder(at, { title: "Task reminder", body: trimmed });
+        }
+      }
 
       navigation.goBack();
     } catch (err) {
@@ -195,695 +245,494 @@ export const NewTaskScreen = () => {
     }
   };
 
+  const bottomPad = 16 + Math.max(insets.bottom, Platform.OS === "android" ? 16 : 0);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
+        <View style={styles.centred}>
+          <ActivityIndicator size="large" color={brand.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
-      <View style={styles.topRow}>
-        <Pressable
-          style={styles.back}
-          onPress={() => navigation.goBack()}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-        >
-          <Icon name="chevron-back" size={20} color={themePalette.slate[900]} />
+      <View style={styles.bar}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Back">
+          <Glyph name="arrow-back" size={24} color={brand.text} />
         </Pressable>
-        <View style={styles.topText}>
-          <Text style={styles.topTitle}>{isEdit ? "Edit Task" : "New Task"}</Text>
-          <Text style={styles.topSub}>Fill in what matters — the rest can wait</Text>
-        </View>
+        <Text style={styles.barTitle}>{isEdit ? "Edit Task" : "Create Task"}</Text>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={10} accessibilityRole="button">
+          <Text style={styles.barAction}>Save draft</Text>
+        </Pressable>
       </View>
 
-      {loading ? (
-        <View style={styles.centred}>
-          <ActivityIndicator size="large" color={themePalette.blue[600]} />
-        </View>
-      ) : (
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+      <KeyboardAvoidingView
+        style={styles.grow}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          <ScrollView
-            contentContainerStyle={styles.page}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? (
+            <Pressable style={styles.banner} onPress={() => setError("")} accessibilityRole="button">
+              <Text style={styles.bannerText}>{error}</Text>
+            </Pressable>
+          ) : null}
 
-            <Field icon="list" label="Task title" required>
+          <SectionCard title="Task Details">
+            <TextField
+              label="Task title"
+              required
+              value={title}
+              onChangeText={setTitle}
+              placeholder="What needs doing?"
+            />
+            <TextField
+              label="Description"
+              value={description}
+              onChangeText={setDescription}
+              placeholder="Add task details or instructions"
+              multiline
+            />
+            <Text style={styles.tagLabel}>Tags</Text>
+            <View style={styles.tagWrap}>
+              {[...PREDEFINED_TAGS, ...tags.filter((tag) => !PREDEFINED_TAGS.includes(tag))].map((tag) => {
+                const on = tags.includes(tag);
+                return (
+                  <Pressable
+                    key={tag}
+                    style={[styles.tagChip, on && styles.tagChipOn]}
+                    onPress={() => setTags((prev) => (prev.includes(tag) ? prev.filter((row) => row !== tag) : [...prev, tag]))}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                  >
+                    {on ? <Glyph name="checkmark" size={13} color={brand.ink} /> : null}
+                    <Text style={[styles.tagChipText, on && styles.tagChipTextOn]}>{tag}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.inlineAdd}>
               <TextInput
-                value={title}
-                onChangeText={setTitle}
-                placeholder="What needs to be done?"
-                placeholderTextColor={themePalette.slate[400]}
-                style={styles.input}
+                style={styles.inlineInput}
+                value={tagInput}
+                onChangeText={setTagInput}
+                placeholder="Add a custom tag"
+                placeholderTextColor={brand.placeholder}
+                onSubmitEditing={() => {
+                  const clean = tagInput.trim();
+                  if (clean && !tags.includes(clean)) setTags((prev) => [...prev, clean]);
+                  setTagInput("");
+                }}
+                returnKeyType="done"
               />
-            </Field>
+              <Pressable
+                onPress={() => {
+                  const clean = tagInput.trim();
+                  if (clean && !tags.includes(clean)) setTags((prev) => [...prev, clean]);
+                  setTagInput("");
+                }}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Add tag"
+              >
+                <Glyph name="add-circle" size={22} color={brand.primary} />
+              </Pressable>
+            </View>
+            <SelectField
+              label="Related to"
+              icon="business-outline"
+              value={leadId}
+              options={leadOptions}
+              onChange={setLeadId}
+              placeholder="Not linked"
+            />
+          </SectionCard>
 
-            <Field icon="list" label="Description">
-              <View>
-                <TextInput
-                  value={description}
-                  onChangeText={(next) => setDescription(next.slice(0, DESCRIPTION_LIMIT))}
-                  placeholder="Add notes, instructions, or goals..."
-                  placeholderTextColor={themePalette.slate[400]}
-                  style={[styles.input, styles.textarea]}
-                  multiline
-                  textAlignVertical="top"
-                />
-                <Text style={styles.counter}>
-                  {description.length}/{DESCRIPTION_LIMIT}
-                </Text>
-              </View>
-            </Field>
+          <SectionCard title="Schedule" style={styles.cardGap}>
+            <FieldRow>
+              <FieldCol>
+                <View style={styles.group}>
+                  <FieldLabel label="Due date" />
+                  <Pressable onPress={() => setPicker("date")} accessibilityRole="button">
+                    <FieldShell>
+                      <Glyph name="calendar-outline" size={18} color={brand.textSecondary} />
+                      <Text style={[styles.value, !due && styles.valueMuted]}>
+                        {dateLabel(due) || "Pick a date"}
+                      </Text>
+                    </FieldShell>
+                  </Pressable>
+                </View>
+              </FieldCol>
+              <FieldCol>
+                <View style={styles.group}>
+                  <FieldLabel label="Time" />
+                  <Pressable onPress={() => setPicker("time")} accessibilityRole="button">
+                    <FieldShell>
+                      <Glyph name="time-outline" size={18} color={brand.textSecondary} />
+                      <Text style={[styles.value, !due && styles.valueMuted]}>
+                        {timeLabel(due) || "Pick a time"}
+                      </Text>
+                    </FieldShell>
+                  </Pressable>
+                </View>
+              </FieldCol>
+            </FieldRow>
 
-            <Field icon="flag" label="Priority">
-              <View style={styles.segmentRow}>
-                {PRIORITY_IDS.map((id) => {
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>Set reminder</Text>
+              <Toggle value={reminderOn} onValueChange={setReminderOn} />
+            </View>
+
+            <SelectField
+              icon="notifications-outline"
+              value={reminder}
+              options={REMINDERS}
+              onChange={setReminder}
+            />
+            <Text style={styles.hint}>Reminders are scheduled on this device.</Text>
+          </SectionCard>
+
+          <SectionCard title="Assignment" style={styles.cardGap}>
+            <SelectField
+              label="Assign to"
+              value={assignee}
+              options={peopleOptions}
+              onChange={setAssignee}
+              placeholder="Choose a team member"
+              leading={
+                assigneeName ? (
+                  <View style={styles.chipAvatar}>
+                    <Text style={styles.chipAvatarText}>{initialsOf(assigneeName)}</Text>
+                  </View>
+                ) : (
+                  <Glyph name="person-outline" size={18} color={brand.textSecondary} />
+                )
+              }
+            />
+
+            <View style={styles.priorityRow}>
+              <Text style={styles.priorityLabel}>Priority</Text>
+              <View style={styles.segment}>
+                {PRIORITIES.map((id) => {
                   const active = priority === id;
-                  const tone = priorityTone(id);
+                  const tone = PRIORITY_TONE[id];
                   return (
                     <Pressable
                       key={id}
+                      style={[styles.segmentItem, active && { backgroundColor: tone.bg }]}
                       onPress={() => setPriority(id)}
                       accessibilityRole="button"
                       accessibilityState={{ selected: active }}
-                      style={[
-                        styles.segment,
-                        active && { borderColor: tone.border, backgroundColor: tone.bg },
-                      ]}
                     >
-                      <Text style={[styles.segmentText, active && { color: tone.color }]}>
-                        {tone.label}
+                      <Text style={[styles.segmentLabel, active && { color: tone.fg, fontWeight: "700" }]}>
+                        {id === "LOW" ? "Low" : id === "HIGH" ? "High" : "Medium"}
                       </Text>
                     </Pressable>
                   );
                 })}
               </View>
-            </Field>
+            </View>
+          </SectionCard>
 
-            <Field icon="list" label="Status">
-              <View style={styles.segmentRow}>
-                {STATUS_IDS.map((id) => {
-                  const active = status === id;
-                  const tone = statusTone(id);
-                  return (
-                    <Pressable
-                      key={id}
-                      onPress={() => setStatus(id)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: active }}
-                      style={[
-                        styles.segment,
-                        styles.segmentTight,
-                        active && { borderColor: tone.border, backgroundColor: tone.bg },
-                      ]}
-                    >
-                      <Text
-                        numberOfLines={1}
-                        style={[styles.segmentText, styles.segmentTextTight, active && { color: tone.color }]}
-                      >
-                        {tone.label}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </Field>
-
-            <Field icon="calendarDays" label="Due date">
-              <Pressable
-                style={styles.select}
-                onPress={() => setShowPicker(true)}
-                accessibilityRole="button"
-              >
-                <Text style={dueDate ? styles.selectValue : styles.selectPlaceholder}>
-                  {asInputDate(dueDate) || MAX_LABEL}
-                </Text>
-                <View style={styles.selectRight}>
-                  {dueDate ? (
-                    <Pressable onPress={() => setDueDate(null)} hitSlop={8}>
-                      <Icon name="close" size={15} color={themePalette.slate[400]} />
-                    </Pressable>
-                  ) : null}
-                  <Icon name="calendarDays" size={17} color={themePalette.slate[500]} />
-                </View>
-              </Pressable>
-            </Field>
-
-            <Field icon="person-outline" label="Assign to">
-              <View style={styles.rowGap}>
+          {/* Web's form checklist: built before the task exists, saved with it. */}
+          <SectionCard title="Checklist" subtitle={checklist.length ? `${checklist.length} item${checklist.length === 1 ? "" : "s"}` : undefined} style={styles.cardGap}>
+            {checklist.map((row, index) => (
+              <View key={`${index}-${row.title}`} style={styles.checkItem}>
                 <Pressable
-                  style={[styles.select, styles.flex]}
-                  onPress={() => setSheet("assignee")}
-                  accessibilityRole="button"
+                  onPress={() =>
+                    setChecklist((prev) => prev.map((item, i) => (i === index ? { ...item, isCompleted: !item.isCompleted } : item)))}
+                  hitSlop={6}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: Boolean(row.isCompleted) }}
                 >
-                  <Text style={assignee ? styles.selectValue : styles.selectPlaceholder}>
-                    {assigneeLabel}
-                  </Text>
-                  <Icon name="chevron-down" size={17} color={themePalette.slate[500]} />
+                  <Glyph name={row.isCompleted ? "checkbox" : "square-outline"} size={20} color={row.isCompleted ? brand.primary : brand.textMuted} />
                 </Pressable>
-                <Pressable
-                  style={styles.meButton}
-                  onPress={() => setAssignee(String(user?._id || user?.id || ""))}
-                  accessibilityRole="button"
-                >
-                  <Text style={styles.meText}>Me</Text>
-                </Pressable>
-              </View>
-            </Field>
-
-            <Field icon="business" label="Linked lead">
-              <Pressable
-                style={styles.select}
-                onPress={() => setSheet("lead")}
-                accessibilityRole="button"
-              >
-                <Text style={leadId ? styles.selectValue : styles.selectPlaceholder}>
-                  {leadLabel}
-                </Text>
-                <Icon name="chevron-down" size={17} color={themePalette.slate[500]} />
-              </Pressable>
-            </Field>
-
-            <Field icon="subtasks" label="Subtasks / Checklist">
-              <View style={styles.rowGap}>
                 <TextInput
-                  value={subtaskInput}
-                  onChangeText={setSubtaskInput}
-                  placeholder="Add a subtask..."
-                  placeholderTextColor={themePalette.slate[400]}
-                  style={[styles.input, styles.flex]}
-                  onSubmitEditing={addSubtask}
-                  returnKeyType="done"
-                />
-                <Pressable style={styles.addButton} onPress={addSubtask} accessibilityRole="button">
-                  <Text style={styles.addText}>Add</Text>
-                </Pressable>
-              </View>
-
-              {subtasks.map((row, index) => (
-                <View key={`${row.title}-${index}`} style={styles.subtaskRow}>
-                  <Icon name="checkbox" size={15} color={themePalette.slate[400]} />
-                  <Text style={styles.subtaskText} numberOfLines={1}>
-                    {row.title}
-                  </Text>
-                  <Pressable
-                    onPress={() => setSubtasks((prev) => prev.filter((_, i) => i !== index))}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${row.title}`}
-                  >
-                    <Icon name="close" size={15} color={themePalette.slate[400]} />
-                  </Pressable>
-                </View>
-              ))}
-            </Field>
-
-            <Field icon="tag" label="Category Tags">
-              <View style={styles.tagWrap}>
-                {PREDEFINED_TAGS.map((tag) => {
-                  const active = tags.includes(tag);
-                  return (
-                    <Pressable
-                      key={tag}
-                      onPress={() => toggleTag(tag)}
-                      accessibilityRole="button"
-                      accessibilityState={{ selected: active }}
-                      style={[styles.tag, active && styles.tagActive]}
-                    >
-                      <Text style={[styles.tagText, active && styles.tagTextActive]}>{tag}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              {tags.filter((tag) => !PREDEFINED_TAGS.includes(tag)).length ? (
-                <View style={styles.tagWrap}>
-                  {tags
-                    .filter((tag) => !PREDEFINED_TAGS.includes(tag))
-                    .map((tag) => (
-                      <Pressable
-                        key={tag}
-                        onPress={() => toggleTag(tag)}
-                        accessibilityRole="button"
-                        style={[styles.tag, styles.tagActive]}
-                      >
-                        <Text style={[styles.tagText, styles.tagTextActive]}>{tag}</Text>
-                        <Icon name="close" size={12} color={themePalette.blue[600]} />
-                      </Pressable>
-                    ))}
-                </View>
-              ) : null}
-
-              <View style={styles.rowGap}>
-                <TextInput
-                  value={tagInput}
-                  onChangeText={setTagInput}
-                  placeholder="Or type custom tag..."
-                  placeholderTextColor={themePalette.slate[400]}
-                  style={[styles.input, styles.flex]}
-                  onSubmitEditing={addCustomTag}
-                  returnKeyType="done"
+                  style={[styles.checkItemInput, row.isCompleted && styles.checkItemDone]}
+                  value={row.title}
+                  onChangeText={(value) => setChecklist((prev) => prev.map((item, i) => (i === index ? { ...item, title: value } : item)))}
                 />
                 <Pressable
-                  style={styles.addButton}
-                  onPress={addCustomTag}
+                  onPress={() => setChecklist((prev) => prev.filter((_, i) => i !== index))}
+                  hitSlop={6}
                   accessibilityRole="button"
+                  accessibilityLabel="Remove item"
                 >
-                  <Text style={styles.addText}>Add Tag</Text>
+                  <Glyph name="close" size={18} color={brand.textMuted} />
                 </Pressable>
               </View>
-            </Field>
-          </ScrollView>
+            ))}
+            <View style={styles.inlineAdd}>
+              <TextInput
+                style={styles.inlineInput}
+                value={checklistInput}
+                onChangeText={setChecklistInput}
+                placeholder="Add a checklist item"
+                placeholderTextColor={brand.placeholder}
+                onSubmitEditing={() => {
+                  const clean = checklistInput.trim();
+                  if (clean) setChecklist((prev) => [...prev, { title: clean, isCompleted: false }]);
+                  setChecklistInput("");
+                }}
+                returnKeyType="done"
+              />
+              <Pressable
+                onPress={() => {
+                  const clean = checklistInput.trim();
+                  if (clean) setChecklist((prev) => [...prev, { title: clean, isCompleted: false }]);
+                  setChecklistInput("");
+                }}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Add checklist item"
+              >
+                <Glyph name="add-circle" size={22} color={brand.primary} />
+              </Pressable>
+            </View>
+          </SectionCard>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-          <View
-            style={[
-              styles.footer,
-              { paddingBottom: Math.max(insets.bottom, Platform.OS === "android" ? 14 : 10) },
-            ]}
-          >
-            <Pressable
-              style={styles.cancel}
-              onPress={() => navigation.goBack()}
-              accessibilityRole="button"
-            >
-              <Text style={styles.cancelText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.submit, saving && styles.submitBusy]}
-              onPress={submit}
-              disabled={saving}
-              accessibilityRole="button"
-            >
-              <Icon name="checkmark" size={17} color="#ffffff" />
-              <Text style={styles.submitText}>{isEdit ? "Save Task" : "Create Task"}</Text>
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
-      )}
+      <View style={[styles.footer, { paddingBottom: bottomPad }]}>
+        <Pressable
+          style={[styles.primaryBtn, saving && styles.primaryBtnOff]}
+          onPress={save}
+          disabled={saving}
+          accessibilityRole="button"
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color={brand.onPrimary} />
+          ) : (
+            <>
+              <Text style={styles.primaryBtnText}>{isEdit ? "Save task" : "Create task"}</Text>
+              <Glyph name="arrow-forward" size={18} color={brand.onPrimary} />
+            </>
+          )}
+        </Pressable>
+      </View>
 
-      {showPicker ? (
+      {picker ? (
         <DateTimePicker
-          value={dueDate || new Date()}
-          mode="date"
-          display="default"
-          onChange={(_, next) => {
-            setShowPicker(false);
-            if (next) setDueDate(next);
-          }}
+          value={due || new Date()}
+          mode={picker}
+          display={Platform.OS === "ios" ? "spinner" : "default"}
+          onChange={onPicked}
         />
       ) : null}
-
-      <AppSheet
-        visible={sheet === "assignee"}
-        onClose={() => setSheet(null)}
-        title="Assign to"
-      >
-        <PickList
-          options={[
-            { id: "", label: "Unassigned" },
-            ...people.map((row) => ({
-              id: String(row?._id || row?.id || ""),
-              label: String(row?.name || "User"),
-            })),
-          ]}
-          selected={assignee}
-          onSelect={(id) => {
-            setAssignee(id);
-            setSheet(null);
-          }}
-        />
-      </AppSheet>
-
-      <AppSheet visible={sheet === "lead"} onClose={() => setSheet(null)} title="Linked lead">
-        <PickList
-          options={[
-            { id: "", label: "No linked lead" },
-            ...leads.slice(0, 200).map((row: any) => ({
-              id: String(row?._id || ""),
-              label: String(row?.name || row?.phone || "Lead"),
-            })),
-          ]}
-          selected={leadId}
-          onSelect={(id) => {
-            setLeadId(id);
-            setSheet(null);
-          }}
-        />
-      </AppSheet>
     </SafeAreaView>
   );
 };
 
-/* ------------------------------------------------------------ small parts -- */
+const styles = brandStyles((b) =>
+  StyleSheet.create({
+    tagLabel: { marginBottom: 8, fontSize: t.fieldLabel, fontWeight: "500", color: b.text },
+    tagWrap: { flexDirection: "row", flexWrap: "wrap", gap: 7, marginBottom: 10 },
+    tagChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      height: 32,
+      paddingHorizontal: 11,
+      borderRadius: round.chip,
+      borderWidth: 1,
+      borderColor: b.fieldBorder,
+      backgroundColor: b.surface,
+    },
+    tagChipOn: { backgroundColor: b.chipActiveBg, borderColor: b.chipActiveBg },
+    tagChipText: { fontSize: t.label, fontWeight: "500", color: b.textSecondary },
+    tagChipTextOn: { color: b.ink, fontWeight: "600" },
+    inlineAdd: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      height: 44,
+      paddingHorizontal: 11,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: b.fieldBorder,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    inlineInput: { flex: 1, fontSize: t.field, color: b.text, paddingVertical: 0 },
+    checkItem: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
+    checkItemInput: {
+      flex: 1,
+      height: 40,
+      paddingHorizontal: 10,
+      borderWidth: 1,
+      borderColor: b.hairline,
+      borderRadius: round.field,
+      fontSize: t.field,
+      color: b.text,
+    },
+    checkItemDone: { textDecorationLine: "line-through", color: b.textMuted },
+    root: {
+      flex: 1,
+      backgroundColor: b.bg,
+    },
+    grow: {
+      flex: 1,
+    },
+    centred: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
 
-const Field = ({
-  icon,
-  label,
-  required,
-  children,
-}: {
-  icon: string;
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-}) => (
-  <View style={styles.field}>
-    <View style={styles.fieldHead}>
-      <Icon name={icon} size={15} color={themePalette.slate[600]} />
-      <Text style={styles.fieldLabel}>{label}</Text>
-      {required ? <Text style={styles.required}>*</Text> : null}
-    </View>
-    {children}
-  </View>
+    bar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 16,
+      paddingHorizontal: layout.pageGutter,
+      paddingTop: 6,
+      paddingBottom: 14,
+    },
+    barTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: t.barTitle,
+      lineHeight: 23,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
+    barAction: {
+      fontSize: t.field,
+      fontWeight: "600",
+      color: b.primary,
+    },
+
+    body: {
+      paddingHorizontal: layout.pageGutter,
+      paddingBottom: 24,
+    },
+    cardGap: {
+      marginTop: 16,
+    },
+    group: {
+      marginBottom: layout.fieldGap,
+    },
+    banner: {
+      marginBottom: 12,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: b.alert,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    bannerText: {
+      fontSize: t.body,
+      lineHeight: 17,
+      color: b.alert,
+    },
+
+    value: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: t.field,
+      color: b.text,
+    },
+    valueMuted: {
+      color: b.placeholder,
+    },
+
+    toggleRow: {
+      marginBottom: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    toggleLabel: {
+      fontSize: t.fieldLabel,
+      fontWeight: "500",
+      color: b.text,
+    },
+    hint: {
+      marginTop: -8,
+      fontSize: t.label,
+      color: b.textMuted,
+    },
+
+    chipAvatar: {
+      width: 26,
+      height: 26,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: b.tint,
+    },
+    chipAvatarText: {
+      fontSize: t.tagline,
+      fontWeight: "700",
+      color: b.deep,
+    },
+
+    priorityRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+    },
+    priorityLabel: {
+      fontSize: t.fieldLabel,
+      fontWeight: "500",
+      color: b.text,
+    },
+    segment: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      height: 40,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      overflow: "hidden",
+      backgroundColor: b.surface,
+    },
+    segmentItem: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    segmentLabel: {
+      fontSize: t.cardTitle,
+      fontWeight: "500",
+      color: b.textSecondary,
+    },
+
+    footer: {
+      paddingHorizontal: layout.pageGutter,
+      paddingTop: 12,
+      borderTopWidth: 1,
+      borderTopColor: b.hairline,
+      backgroundColor: b.bg,
+    },
+    primaryBtn: {
+      height: 52,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      borderRadius: round.field,
+      backgroundColor: b.primary,
+    },
+    primaryBtnOff: {
+      opacity: 0.7,
+    },
+    primaryBtnText: {
+      fontSize: t.rowTitle,
+      fontWeight: "700",
+      color: b.onPrimary,
+    },
+  }),
 );
-
-const PickList = ({
-  options,
-  selected,
-  onSelect,
-}: {
-  options: Array<{ id: string; label: string }>;
-  selected: string;
-  onSelect: (id: string) => void;
-}) => (
-  // A plain View: AppSheet already puts its children inside a ScrollView, and
-  // nesting a second vertical scroller inside it fights for the same gesture.
-  <View>
-    {options.map((option) => {
-      const active = option.id === selected;
-      return (
-        <Pressable
-          key={option.id || "__none"}
-          style={styles.pickRow}
-          onPress={() => onSelect(option.id)}
-          accessibilityRole="button"
-        >
-          <Text style={[styles.pickText, active && styles.pickTextActive]} numberOfLines={1}>
-            {option.label}
-          </Text>
-          {active ? <Icon name="checkmark" size={16} color={themePalette.blue[600]} /> : null}
-        </Pressable>
-      );
-    })}
-  </View>
-);
-
-const styles = themedStyles((c) => StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: c.bg,
-  },
-  flex: {
-    flex: 1,
-  },
-  topRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.lg,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: c.border,
-  },
-  back: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.pill,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: c.surfaceMuted,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  topText: {
-    flex: 1,
-  },
-  topTitle: {
-    fontSize: typography.displayMd,
-    fontWeight: "700",
-    color: c.slate[900],
-    letterSpacing: -0.3,
-  },
-  topSub: {
-    fontSize: typography.label,
-    color: c.slate[500],
-  },
-  centred: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  page: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.xxl,
-    gap: spacing.xl,
-  },
-  error: {
-    fontSize: typography.label,
-    color: c.rose[600],
-  },
-
-  field: {
-    gap: spacing.md,
-  },
-  fieldHead: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  fieldLabel: {
-    fontSize: typography.section,
-    fontWeight: "700",
-    color: c.slate[900],
-  },
-  required: {
-    fontSize: typography.section,
-    fontWeight: "700",
-    color: c.rose[500],
-  },
-
-  input: {
-    height: 52,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surface,
-    color: c.slate[900],
-    fontSize: typography.body,
-  },
-  textarea: {
-    height: 104,
-    paddingTop: spacing.lg,
-  },
-  counter: {
-    position: "absolute",
-    right: spacing.lg,
-    bottom: spacing.md,
-    fontSize: typography.caption,
-    color: c.slate[400],
-  },
-
-  segmentRow: {
-    flexDirection: "row",
-    gap: spacing.md,
-  },
-  segment: {
-    flex: 1,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surface,
-  },
-  segmentTight: {
-    paddingHorizontal: 2,
-  },
-  segmentText: {
-    fontSize: typography.body,
-    fontWeight: "600",
-    color: c.slate[700],
-  },
-  segmentTextTight: {
-    fontSize: typography.caption,
-  },
-
-  select: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    height: 52,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surface,
-  },
-  selectRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  selectValue: {
-    flex: 1,
-    fontSize: typography.body,
-    fontWeight: "600",
-    color: c.slate[900],
-  },
-  selectPlaceholder: {
-    flex: 1,
-    fontSize: typography.body,
-    color: c.slate[400],
-  },
-
-  rowGap: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-  },
-  meButton: {
-    height: 52,
-    paddingHorizontal: spacing.xl,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  meText: {
-    fontSize: typography.body,
-    fontWeight: "600",
-    color: c.slate[700],
-  },
-  addButton: {
-    height: 52,
-    paddingHorizontal: spacing.xl,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surfaceMuted,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  addText: {
-    fontSize: typography.body,
-    fontWeight: "600",
-    color: c.slate[700],
-  },
-
-  subtaskRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radii.sm,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surfaceMuted,
-  },
-  subtaskText: {
-    flex: 1,
-    fontSize: typography.label,
-    color: c.slate[700],
-  },
-
-  tagWrap: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.md,
-  },
-  tag: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    height: 42,
-    paddingHorizontal: spacing.xl,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderColor: c.border,
-    backgroundColor: c.surface,
-  },
-  tagActive: {
-    borderColor: c.blue[400],
-    backgroundColor: c.blue[50],
-  },
-  tagText: {
-    fontSize: typography.label,
-    fontWeight: "600",
-    color: c.slate[700],
-  },
-  tagTextActive: {
-    color: c.blue[600],
-  },
-
-  pickRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.md,
-    paddingVertical: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: c.border,
-  },
-  pickText: {
-    flex: 1,
-    fontSize: typography.body,
-    color: c.slate[700],
-  },
-  pickTextActive: {
-    fontWeight: "700",
-    color: c.blue[600],
-  },
-
-  footer: {
-    flexDirection: "row",
-    gap: spacing.md,
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: c.border,
-    backgroundColor: c.bg,
-  },
-  cancel: {
-    flex: 1,
-    height: 54,
-    borderRadius: radii.md,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: c.surfaceMuted,
-    borderWidth: 1,
-    borderColor: c.border,
-  },
-  cancelText: {
-    fontSize: typography.title,
-    fontWeight: "600",
-    color: c.slate[700],
-  },
-  submit: {
-    flex: 1.6,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    height: 54,
-    borderRadius: radii.md,
-    backgroundColor: c.blue[600],
-  },
-  submitBusy: {
-    opacity: 0.7,
-  },
-  submitText: {
-    fontSize: typography.title,
-    fontWeight: "700",
-    color: "#ffffff",
-  },
-}));
 
 export default NewTaskScreen;

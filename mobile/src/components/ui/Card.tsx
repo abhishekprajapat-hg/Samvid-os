@@ -1,7 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
-import { colors, elevation, palette, radii, spacing, typography } from "../../theme/tokens";
-import { themedStyles, themePalette } from "../../theme/themedStyles";
+import { brandStyles, layout, round, type as t } from "../../theme/brand";
 
 /*
  * Mirrors frontend/src/components/ui/Card.jsx, including the sub-components.
@@ -64,47 +63,48 @@ export const AppCardFooter = ({
   style?: StyleProp<ViewStyle>;
 }) => <View style={[styles.footer, style]}>{children}</View>;
 
-const styles = themedStyles((c) => StyleSheet.create({
+const styles = brandStyles((b) => StyleSheet.create({
   card: {
     borderWidth: 1,
-    borderColor: c.border,
-    borderRadius: radii.lg,
-    backgroundColor: c.surface,
-    padding: spacing.xl,
-    ...elevation.card,
+    borderColor: b.border,
+    borderRadius: round.panel,
+    backgroundColor: b.surface,
+    padding: layout.cardPadding,
   },
   // Web deliberately has no hover translate - it jitters rows in dense lists.
   interactive: {
-    borderColor: c.borderStrong,
+    borderColor: b.greenBright,
   },
   header: {
-    gap: spacing.sm,
-    paddingBottom: spacing.xl,
-    marginBottom: spacing.xl,
+    gap: 4,
+    paddingBottom: 12,
+    marginBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: c.border,
+    borderBottomColor: b.hairline,
   },
   title: {
-    fontSize: typography.cardTitle,
-    fontWeight: "600",
-    color: themePalette.slate[900],
+    fontSize: t.sectionTitle,
+    lineHeight: 20,
+    fontWeight: "700",
+    letterSpacing: -0.25,
+    color: b.text,
   },
   description: {
-    fontSize: typography.label,
-    lineHeight: 18,
-    color: themePalette.slate[500],
+    fontSize: t.body,
+    lineHeight: 17,
+    color: b.textMuted,
   },
   content: {
-    gap: spacing.lg,
+    gap: 12,
   },
   footer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
-    paddingTop: spacing.xl,
-    marginTop: spacing.xl,
+    gap: 8,
+    paddingTop: 12,
+    marginTop: 14,
     borderTopWidth: 1,
-    borderTopColor: c.border,
+    borderTopColor: b.hairline,
   },
 }));
 

@@ -13,7 +13,7 @@
     "build:apk": "eas build --platform android --profile development",
     "build:apk:preview": "eas build --platform android --profile preview",
     "typecheck": "tsc --noEmit",
-    "pretest": "tsc src/navigation/access.ts src/navigation/navigationCatalogue.ts src/modules/leads/pipelineViews.ts src/modules/leads/leadFilters.ts src/modules/inventory/inventoryAccess.ts src/modules/admin/consoleActions.ts src/theme/themedStyles.ts --outDir .test-build --module commonjs --target es2020 --skipLibCheck --esModuleInterop",
+    "pretest": "tsc src/navigation/access.ts src/navigation/navigationCatalogue.ts src/modules/leads/pipelineViews.ts src/modules/leads/leadFilters.ts src/modules/inventory/inventoryAccess.ts src/modules/admin/consoleActions.ts src/theme/themedStyles.ts src/utils/liveLocationRules.ts src/modules/coworking/boardReducer.ts src/modules/chat/chatReceipts.ts src/modules/leads/followUpReminders.ts src/context/realtimeEvents.ts src/modules/leads/bulkLeadUpload.ts src/modules/inventory/projectForm.ts src/modules/inventory/contactBulkImport.ts src/modules/reports/intelligence.ts src/modules/leads/leadRequirements.ts src/modules/inventory/inventoryForm.ts --outDir .test-build --module commonjs --target es2020 --skipLibCheck --esModuleInterop",
     "test": "node --test \"test/**/*.test.cjs\""
   },
   "dependencies": {
@@ -60,7 +60,8 @@
     "react-native-web": "^0.21.0",
     "react-native-webrtc": "^124.0.7",
     "react-native-webview": "13.15.0",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "~19.1.10",

@@ -9,6 +9,7 @@ import { ThemeProvider, useTheme } from "./src/theme/ThemeContext";
 import { appFonts } from "./src/theme/fonts";
 import { applyGlobalFont } from "./src/theme/applyGlobalFont";
 import { ErrorBoundary } from "./src/components/common/ErrorBoundary";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 // Patches Text/TextInput to default to Inter. Runs once, at module scope, so it
 // is in place before the first render rather than after a flash of system face.
@@ -49,9 +50,11 @@ export default function App() {
      * static tokens rather than the context for exactly that reason.
      */
     <ErrorBoundary label="app">
-      <ThemeProvider>
-        <Shell />
-      </ThemeProvider>
+      <SafeAreaProvider>
+        <ThemeProvider>
+          <Shell />
+        </ThemeProvider>
+      </SafeAreaProvider>
     </ErrorBoundary>
   );
 }

@@ -78,6 +78,14 @@ export const STATUS_CHOICES: Array<{
 
 /* ------------------------------------------------------------- formatting -- */
 
+/* Web's team break types, in web's order. */
+export const BREAK_TYPES = [
+  { id: "UTILITY", label: "Utility" },
+  { id: "LUNCH", label: "Lunch" },
+  { id: "TEA", label: "Tea" },
+  { id: "COFFEE", label: "Coffee" },
+];
+
 export const formatClock = (value?: string | null): string => {
   if (!value) return "-";
   const date = new Date(value);
@@ -284,15 +292,18 @@ export const SetStatusSheet = ({
   row: RosterRow | null;
   saving?: boolean;
   onClose: () => void;
-  onSubmit: (choiceId: string, note: string, effectiveTime: string) => void;
+  onSubmit: (choiceId: string, note: string, effectiveTime: string, breakType?: string) => void;
 }) => {
   const [choice, setChoice] = useState("");
+  /* Web asks which break a manager is starting for someone; Utility by default. */
+  const [breakType, setBreakType] = useState("UTILITY");
   const [note, setNote] = useState("");
   const [time, setTime] = useState("");
 
   useEffect(() => {
     if (!visible || !row) return;
     setChoice(liveStatusOf(row));
+    setBreakType("UTILITY");
     setNote("");
     setTime(row.checkInAt ? formatClock(row.checkInAt).toUpperCase() : "");
   }, [visible, row]);
@@ -332,6 +343,25 @@ export const SetStatusSheet = ({
           );
         })}
       </View>
+
+      {choice === "BREAK" && liveStatusOf(row) !== "BREAK" ? (
+        <>
+          <Text style={styles.sheetLabel}>Break type</Text>
+          <View style={styles.breakTypes}>
+            {BREAK_TYPES.map((option) => (
+              <Pressable
+                key={option.id}
+                onPress={() => setBreakType(option.id)}
+                style={[styles.breakType, breakType === option.id && styles.breakTypeOn]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: breakType === option.id }}
+              >
+                <Text style={[styles.breakTypeText, breakType === option.id && styles.breakTypeTextOn]}>{option.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </>
+      ) : null}
 
       <View style={styles.sheetFieldHead}>
         <Icon name="time-outline" size={14} color={themePalette.slate[600]} />
@@ -376,7 +406,7 @@ export const SetStatusSheet = ({
         </Pressable>
         <Pressable
           style={[styles.submit, saving && styles.submitBusy]}
-          onPress={() => onSubmit(choice, note, time)}
+          onPress={() => onSubmit(choice, note, time, breakType)}
           disabled={saving}
           accessibilityRole="button"
         >
@@ -389,6 +419,11 @@ export const SetStatusSheet = ({
 };
 
 const styles = themedStyles((c) => StyleSheet.create({
+  breakTypes: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 10 },
+  breakType: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: c.border },
+  breakTypeOn: { borderColor: c.amber[400], backgroundColor: c.amber[50] },
+  breakTypeText: { fontSize: 12, fontWeight: "600", color: c.slate[600] },
+  breakTypeTextOn: { color: c.amber[800] },
   avatar: { alignItems: "center", justifyContent: "center" },
   avatarText: { color: "#ffffff", fontWeight: "700" },
 

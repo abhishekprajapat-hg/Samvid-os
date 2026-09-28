@@ -1,6 +1,7 @@
 import BrokerPhoneHint from "./BrokerPhoneHint";
 import CoworkingRequirementFields from "./CoworkingRequirementFields";
 import PlaceAutocompleteInput from "../../../components/common/PlaceAutocompleteInput";
+import GoogleMapPicker from "../../../components/common/GoogleMapPicker";
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import {
@@ -1723,7 +1724,7 @@ export const AddLeadModal = ({
                 onSelect={({ lat, lng }) => {
                   // Coordinates only exist for a picked suggestion; a typed
                   // locality leaves the site fields alone.
-                  if (lat && lng) {
+                  if (Number.isFinite(lat) && Number.isFinite(lng)) {
                     updateField("siteLat", String(lat));
                     updateField("siteLng", String(lng));
                   }
@@ -1742,6 +1743,20 @@ export const AddLeadModal = ({
               <input placeholder="Site Longitude (optional)" value={formData.siteLng} onChange={(event) => updateField("siteLng", event.target.value)} className={inputClass} />
             </AddLeadFieldShell>
           </div>
+
+          <GoogleMapPicker
+            latitude={formData.siteLat}
+            longitude={formData.siteLng}
+            onChange={({ lat, lng }) => {
+              setFormData((prev) => ({
+                ...prev,
+                siteLat: String(lat),
+                siteLng: String(lng),
+              }));
+            }}
+            heightClass="h-52 sm:h-60"
+            isDark={isDark}
+          />
 
           <div className={sectionCardClass}>
             <div className={sectionHeadingClass}>Lead Requirement (Inventory Filters)</div>
@@ -3108,6 +3123,18 @@ export const LeadDetailsDrawer = ({
                   : "Not configured by admin/manager"}
               </div>
             )}
+
+            <GoogleMapPicker
+              latitude={canConfigureSiteLocation ? siteLatDraft : selectedLeadSiteLat}
+              longitude={canConfigureSiteLocation ? siteLngDraft : selectedLeadSiteLng}
+              onChange={canConfigureSiteLocation ? ({ lat, lng }) => {
+                setSiteLatDraft(String(lat));
+                setSiteLngDraft(String(lng));
+              } : undefined}
+              heightClass="mt-3 h-48 sm:h-56"
+              isDark={isDark}
+              readOnly={!canConfigureSiteLocation}
+            />
 
             <div className={`mt-2 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               Site visit status is verified within {siteVisitRadiusMeters} meters.

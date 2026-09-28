@@ -4,7 +4,9 @@ Planning and specification set for bringing `mobile/` (Expo / React Native) to
 parity with `frontend/` (the web app), for release on Google Play, the App
 Store, and as a sideload APK.
 
-Written 2026-09-21 against web reference commit `2ba5fdd`.
+Written 2026-09-21 against web reference commit `2ba5fdd`; parity closure was
+re-audited on 2026-09-25 against the `mobile-web-parity` working tree. The
+current result is [06_WEB_FEATURE_GAP_REGISTER.md](06_WEB_FEATURE_GAP_REGISTER.md).
 
 ## Read in this order
 
@@ -49,7 +51,7 @@ now fixed** — see [PROGRESS.md](PROGRESS.md) for what shipped.
 ```bash
 cd mobile
 npm run typecheck                 # tsc --noEmit
-npm test                          # access-model tests (54)
+npm test                          # mobile unit/invariant tests (220)
 npx expo export --platform web    # bundle check
 ```
 

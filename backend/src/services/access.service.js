@@ -84,6 +84,37 @@ const normalizePageOverride = (entries = [], inherited = new Map()) =>
     };
   });
 
+/*
+ * The page entries a role's own permission list describes.
+ *
+ * RolePermission may hold page.<key>.<action> strings, and until now they
+ * granted the API check but never appeared in the page list the navigation is
+ * built from - so a role could be allowed to POST to finance while Finance
+ * stayed missing from its menu. This reads them back into entries so the two
+ * agree.
+ *
+ * An empty result means the role's list says nothing about pages, which is the
+ * case for every company that has only ever used the older screens; those keep
+ * the defaults in rolePageAccess.constants.js. A role that has been configured
+ * always carries at least the always-accessible pages, because that is what
+ * toPagePermissions writes, so "said nothing" and "granted nothing" stay
+ * distinguishable.
+ */
+const pageEntriesFromPermissions = (permissions = []) => {
+  const byKey = new Map();
+
+  permissions.forEach((permission) => {
+    const parts = String(permission || "").split(".");
+    if (parts.length !== 3 || parts[0] !== "page") return;
+    const [, pageKey, action] = parts;
+    if (!isValidPageKey(pageKey) || !isValidPageAction(pageKey, action)) return;
+    if (!byKey.has(pageKey)) byKey.set(pageKey, { pageKey, actions: [] });
+    byKey.get(pageKey).actions.push(action);
+  });
+
+  return [...byKey.values()];
+};
+
 // Pages every signed-in account keeps no matter what a role says — the spec's
 // "Profile and Logout stay reachable" rule.
 const withAlwaysAccessiblePages = (pages) => {
@@ -117,6 +148,11 @@ const buildAccessProfile = async (user) => {
 
   const legacyPermissions = companyId ? await resolveLegacyPermissions({ companyId, role: baseRole }) : [];
   let pages = withAlwaysAccessiblePages(normalizePageEntries(getDefaultPageAccessForRole(baseRole)));
+
+  const rolePageEntries = pageEntriesFromPermissions(legacyPermissions);
+  if (rolePageEntries.length) {
+    pages = withAlwaysAccessiblePages(normalizePageEntries(rolePageEntries));
+  }
 
   const hasPageOverride = Array.isArray(user?.pageAccessOverride);
   if (hasPageOverride) {
@@ -278,6 +314,7 @@ module.exports = {
   isAdminRole,
   normalizePageEntries,
   normalizePageOverride,
+  pageEntriesFromPermissions,
   withAlwaysAccessiblePages,
   resolveLegacyPermissions,
   resolveAccessProfile,

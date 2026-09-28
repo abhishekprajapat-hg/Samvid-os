@@ -2,6 +2,8 @@ import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { AttendanceScreen } from "../modules/attendance/AttendanceScreen";
 import { AttendanceHistoryScreen } from "../modules/attendance/AttendanceHistoryScreen";
+import { AttendanceLeaveScreen } from "../modules/attendance/AttendanceLeaveScreen";
+import { MyAttendanceScreen } from "../modules/attendance/MyAttendanceScreen";
 import { AttendanceDetailsScreen } from "../modules/attendance/AttendanceDetailsScreen";
 import { AttendanceApprovalsScreen } from "../modules/attendance/AttendanceApprovalsScreen";
 import { AttendancePolicyScreen } from "../modules/attendance/AttendancePolicyScreen";
@@ -26,6 +28,8 @@ export const AttendanceStack = () => (
   <Stack.Navigator screenOptions={{ headerShown: false }}>
     <Stack.Screen name="AttendanceHome" component={AttendanceScreen} />
     <Stack.Screen name="AttendanceHistory" component={AttendanceHistoryScreen} />
+    <Stack.Screen name="AttendanceLeave" component={AttendanceLeaveScreen} />
+    <Stack.Screen name="MyAttendance" component={MyAttendanceScreen} />
     <Stack.Screen name="AttendanceDetails" component={AttendanceDetailsScreen} />
     <Stack.Screen name="AttendanceApprovals" component={AttendanceApprovalsScreen} />
     <Stack.Screen name="AttendancePolicy" component={AttendancePolicyScreen} />

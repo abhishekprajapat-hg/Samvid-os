@@ -111,6 +111,30 @@ Web body is **14px / 1.5**, Inter, with headings at `font-weight: 650` and
 RN has no `letter-spacing: -0.018em`; use `letterSpacing: -0.25` (px at 14px
 base) on heading styles.
 
+### Sizing a redrawn screen off its comp
+
+The comps are far higher in contrast than the table above: a 26–27pt page title
+sitting over 9–11pt row text. Reaching for `type.body` (12) or
+`type.sectionTitle` (15) for the secondary lines of a list row makes every row
+roughly a third taller than the comp and truncates the text the comp fits, so
+guessing from the scale does not work. Measure instead:
+
+1. Normalise the comp to the 430pt frame the app renders at — `S = imageWidth /
+   430`, whatever the mock's own frame was. Everything below is in points at
+   that scale.
+2. Find the ink extent of one string, horizontally: the first and last columns
+   in its band that carry ink.
+3. Fit that width against Inter's real advance widths (the `hmtx` table) across
+   sizes and weights. One string usually pins the size to within half a point;
+   two agreeing strings settle it.
+
+Cap height is the sanity check, not the measurement — `capHeight / 0.7275` gets
+close but a descender or an icon sharing the line throws it, and the width fit
+does not care.
+
+Fitting rather than guessing is what the Team batch (comps 37–40) settled on
+after a first pass built from the token scale had to be redone.
+
 ## 4. Elevation
 
 Web has exactly three levels. Mobile must map each to an RN shadow **and** an

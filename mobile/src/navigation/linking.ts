@@ -58,6 +58,9 @@ export const linking = {
       Notifications: "admin/notifications",
       Settings: "settings",
       Profile: "profile",
+      // Web keeps the open cabin and client in the query string
+      // (?cabin=C12, ?client=nexbridge); React Navigation hands a query
+      // parameter to the screen as a route param of the same name.
       CoworkingBooking: "coworking/booking-board",
       CoworkingClients: "coworking/clients",
       ChatConversation: "chat/:conversationId",

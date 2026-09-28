@@ -20,6 +20,9 @@ export const UPLOAD_CATEGORIES = [
   "chat",
   "lead-documents",
   "profile-images",
+  /* Web uploads project photos under this name. The server has no such
+     category and files them under its default, exactly as it does for web. */
+  "project-images",
 ] as const;
 
 export type UploadCategory = (typeof UPLOAD_CATEGORIES)[number];

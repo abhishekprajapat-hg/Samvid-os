@@ -2,7 +2,7 @@
 
 Living status for the phase plan in [04_MOBILE_IMPLEMENTATION_PHASES.md](04_MOBILE_IMPLEMENTATION_PHASES.md).
 
-**Last updated:** 2026-09-21 · web reference commit `2ba5fdd`
+**Last updated:** 2026-09-25 · web reference: `mobile-web-parity` working tree
 
 | Phase | Scope | Status |
 | --- | --- | :---: |
@@ -13,7 +13,7 @@ Living status for the phase plan in [04_MOBILE_IMPLEMENTATION_PHASES.md](04_MOBI
 | 4 | Leads & inventory depth | ✅ Done (one item deferred) |
 | 5 | Missing sales modules | ✅ Done |
 | 6 | Coworking | ✅ Done |
-| 7 | Admin depth | 🟡 Partial |
+| 7 | Admin depth | ✅ Done |
 | 8 | Gaps, legal & polish | ✅ Done |
 | 9 | Push & native integration | ✅ Done |
 | 10 | Release | ⛔ Needs devices & store accounts |
@@ -473,13 +473,14 @@ Left alone on purpose: the call screen's bespoke dark gradient (no counterpart
 in the scales, and already dark) and `#000` shadows, which stay black in both
 schemes.
 
-### Still open in Phase 8
+### Phase 8 closure
 
-- Crash reporting (a service, e.g. Sentry — the boundary above is the local
-  half), and the remaining partial screens from the gap matrix (tasks, calendar,
-  reports, chat depth, profile).
+- The runtime boundary remains the local crash fallback; external crash
+  reporting is a release-service choice, not a missing web feature.
+- Tasks, calendar, reports, chat and profile parity gaps are closed in the
+  current feature register.
 
-## Phase 7 — Admin depth 🟡
+## Phase 7 — Admin depth ✅
 
 | Delivered | Notes |
 | --- | --- |
@@ -502,14 +503,51 @@ schemes.
   now lists custom roles beside the built-ins, and an admin can add or delete
   them inline.
 
-### Still open in Phase 7
+### Closed on 2026-09-25
 
-- `AdminCommandConsoleScreen` (505 lines) vs web's 3,830: the console's
-  analytics, audit and workflow tooling. The plan calls for splitting it into
-  sub-screens rather than one monolith.
-- `UserDetailsEditorScreen` (381 vs 1,786): missing the attendance, leave, task,
-  project and custom-role panels.
-- Custom-role management UI — the service is in place, nothing calls it yet.
+- `AdminCommandConsoleScreen` now includes finance queries, role performance
+  ranking and drill-down, hot leads, scoped date parsing, search, CSV export,
+  saved workflows, live threshold subscriptions, Hindi intent normalisation,
+  and English/Hindi voice input.
+- `UserDetailsEditorScreen` now includes an attendance calendar, task history,
+  leave balance and type breakdown, and project statistics.
+- Team administration now supports custom-role rename/delete, channel-partner
+  inventory access, and a per-employee page/action access editor.
+- Field Ops now includes quick locate, workload, dispatch and task queues; the
+  app header includes permission-aware global page search.
+- Closure proof: TypeScript passed, all 220 mobile tests passed, and Expo
+  completed a web export.
+
+### Second pass, closed on 2026-09-28
+
+A label-by-label comparison found ten more gaps; the list and the decisions
+are in `06_WEB_FEATURE_GAP_REGISTER.md` (items 3.1-3.10). The one to know about:
+
+- **Lead requirements were being erased from the phone.** Every status save on
+  the lead screen rebuilt `requirements` without the property subtype, its
+  preferences or the coworking terms, and the server replaces requirements
+  whole. `modules/leads/leadRequirements.ts` now round-trips everything web
+  does, and `test/leadRequirements.test.cjs` pins it. Leads saved from a phone
+  before this build may have lost those fields; they can only be re-entered.
+
+| New | What it is |
+| --- | --- |
+| `modules/leads/leadRequirements.ts` | Web's requirement draft and payload helpers, ported |
+| `components/common/SubtypeFieldsEditor.tsx` | A subtype's preference fields from `propertyRequirementConfig`, for leads and properties |
+| `components/common/CoworkingRequirementEditor.tsx` | Cabins, workstations, rent and term months |
+| `modules/inventory/inventoryForm.ts` + `PropertyFormScreen.tsx` | Web's full property form, used for every edit |
+| `services/placeSearch.ts` + `components/common/PlaceSuggestions.tsx` | Address suggestions and coordinates: OpenStreetMap, or Google Places with `EXPO_PUBLIC_GOOGLE_MAPS_API_KEY` and `EXPO_PUBLIC_LOCATION_PROVIDER=google` |
+| `modules/reports/intelligence.ts` + `PipelineIntelligenceScreen.tsx` | Web's Intelligence Reports figures and CSV |
+| `SharedInventoryViewScreen.tsx` (rebuilt) | Web's shared listing: details, files, map, print, share |
+
+Also: chat list unread badges, filter and mark-all-read; task priority, tag
+and lead filters; proposal Copy fixed on phones plus "Img Links" and "Share
+Images"; new leads carry subtype preferences, coworking terms, preferred
+localities and site coordinates, and single-category users see only their own
+category, as on web.
+
+Closure proof: TypeScript passed, all 255 mobile tests passed, and Expo
+completed a web export (3,191 modules).
 
 ## Phase 10 — Release ⛔
 

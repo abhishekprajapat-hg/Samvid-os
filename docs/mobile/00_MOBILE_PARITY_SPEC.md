@@ -1,9 +1,13 @@
 # Mobile Parity Spec — The Office On Rent
 
-**Status:** Draft 1 · 2026-09-21
+**Status:** Historical baseline · audited 2026-09-21
 **Owner:** Abhishek Prajapat
 **Reference implementation:** `frontend/src` (the web app)
 **Target:** `mobile/` (Expo / React Native)
+
+> This document records the starting audit and is intentionally not rewritten
+> as work lands. Current closure status is tracked in
+> [06_WEB_FEATURE_GAP_REGISTER.md](06_WEB_FEATURE_GAP_REGISTER.md).
 
 ---
 
@@ -190,6 +194,319 @@ so the timeline is built from what the record holds: `createdAt` + `createdBy`,
 each `assignmentHistory` entry, and `updatedAt`. It does not show status or
 field-level edits, because nothing records them. `buildActivity()` in
 `TaskDetailsScreen.tsx` is the one place to change if an audit trail lands.
+
+### 2026-09-22 — Pipeline, built to mobile comps
+
+Six comps for the leads module. The list was rebuilt to comp 1; Lead Details
+gained the five tabs from comp 5 by grouping the sections it already had
+rather than rewriting a 4,987-line screen.
+
+**The comps contradicted each other and were resolved by asking:**
+
+| Conflict | Comps said | Resolution |
+| --- | --- | --- |
+| Bottom bar | Slot 4 "Pipeline" (1–2), slot 3 (5–6), "Leads" (2); Attendance absent from all | User chose **Home · Pipeline · Tasks · Attendance · More**. Calendar moves to More |
+| Detail tabs | Overview/Details/Activities/Tasks (2), +Documents (3), Overview/Requirements/Notes/Tasks/Activity (5) | Comp 5's set |
+| Lead ID format | `#LEA204` (2) vs `EEA204` (4–6) | Left as the existing last-6-of-id, which is what the data supports |
+| Header | Hamburger + logo + bell + avatar (1) vs logo + tagline + search + avatar (4, 6) | Neither; the app-wide `AppHeader` stays as built |
+
+**Regression found and fixed:** when Contacts left the tab bar last turn, the
+Owner Database, Broker Database and Contacts screens all became unreachable —
+More excludes Owner/Broker on the assumption Contacts covers them, but no
+`Contacts` entry existed in the navigation catalogue. One has been added, so
+More has a door to the directories again.
+
+**Found while grouping the detail screen:** there are two Lead Diary blocks in
+`LeadDetailsScreen`. One is live inside the controls card; the second is a
+duplicate disabled with `{false ? … : null}`. The disabled copy was left alone
+— it is dead code, not a feature to switch on — and the Notes tab is built from
+the same state (`diaryEntries`, `diaryNoteDraft`, `submitDiary`) rather than by
+relocating either block. The dead copy should be deleted once the concurrent
+sessions settle.
+
+**Not carried over:** the inline Call / WhatsApp buttons the old lead card had.
+The comp replaces them with a kebab, so those two actions moved into its sheet
+rather than being dropped.
+
+### 2026-09-24 — Team, built to comps 37–40
+
+Four comps: Add Team Member, Member Details, Roles & Permissions and the Team
+hub. `TeamManagerScreen` was rebuilt to comp 40;
+`AddTeamMemberScreen`, `MemberDetailsScreen` and `RolesPermissionsScreen` are
+new. `UserDetailsEditorScreen` stays as the edit form the pencil opens.
+
+**Backend, additive.** `User` gained `employeeId`, `joiningDate`, `invitedAt`,
+`inviteAcceptedAt`, `mustChangePassword`, `leadCapacity` and `taskCapacity`;
+`createUserByRole` and `updateUserByAdmin` read them through one shared
+`readEmploymentFields`, so a partial patch cannot blank a field nobody touched.
+Login stamps `inviteAcceptedAt` the first time an invited account signs in,
+which is what clears the list's Invited chip.
+
+**Roles reuse the store that already existed.** `RolePermission` is the
+per-company override of a role's permission list and `access.service` already
+reads it, but it had no home outside the coworking module. `GET`/`PATCH
+/api/access/roles` (admin only) expose `listRolesWithPermissions` and
+`updateRolePermissions` verbatim — same audit entry, same cache invalidation,
+same `assertGrantablePermissions` guard. Nothing new is stored.
+
+One thing that record could hold but nothing honoured: `page.<key>.<action>`
+strings in a role's list granted the API check while the page stayed missing
+from the navigation `access.service` builds. `pageEntriesFromPermissions` now
+reads them back into the page list when the user has no per-user override, so
+the two agree. A role whose list carries no `page.*` entry keeps the defaults
+in `rolePageAccess.constants.js`, which is every company that has only used the
+older screens — so the change is opt-in at the moment an admin first saves a
+matrix.
+
+**Two service bugs surfaced while wiring this up**, both in `accessService.ts`
+and both dead on arrival: `updateUserPageAccess` sent `pages`, a key the route
+does not read, so every call answered 400; and `getUserPageAccess` returned the
+page *catalogue* as though it were the grant, which would have shown every page
+as granted. Nothing else called either function.
+
+| Comp asks for | Reality | Decision |
+| --- | --- | --- |
+| "Send email invitation", with the server posting it | There is no mail transport on this backend | The account is created either way and the invitation is composed on the device, in the admin's own mail app, with the sign-in details in it. `invitedAt` records that it was handed over; the first sign-in clears it. Without a mail app the details go to the clipboard instead |
+| No password field anywhere on the form | An account needs one from the moment it exists | One is generated and handed over with the invitation. "Add without invitation" copies it for the admin to pass on |
+| "Require password reset on first login" | No login flow reads such a flag | Stored as `mustChangePassword` and shown on the member page. **Not enforced at login** — enforcing it would mean changing the web app's login too, which is outside this batch |
+| "Require 2-step verification" | The app has no second factor | Drawn, disabled, and captioned with why. A toggle that reads "on" while every login is still one password is worse than no toggle |
+| "Can manage roles / invite members / view audit logs" | `roles.manage`, `users.create` and `audit_logs.view` already exist as permissions | The three toggles grant exactly those, so switching one on grants the thing it names |
+| A permission matrix over seven pages | The catalogue has twenty | The matrix draws the comp's seven and a save carries the other thirteen through untouched — the roles payload ships each role's whole resolved `pageAccess` for that reason |
+| Editing "Sales Manager" as a role of its own | A company-defined role is a preset over a built-in one; the built-in role is what every scoping rule reads | Selecting a preset edits the built-in role underneath. The card names it and says how many people that reaches, because the blast radius is wider than the row you tapped |
+| "18 leads · 5 tasks" per member, "18 / 25" workloads | Counts are derivable; the caps were not stored | `leadCapacity` / `taskCapacity` on the user, defaulted to the comp's 25 and 10. They are a target to compare against, not a limit anything enforces — a lead router that refused to assign past them would strand leads |
+| "Revenue ₹3.2 L" on a member | No per-deal value exists on a lead | Closed deals priced at the same flat figure the leaderboard uses (`DEAL_VALUE`, matching `gamification.ts`) |
+| "Site Visits — 3 this week" | The profile route counts site visits without a window | Reads "3 open", which is what the number actually is |
+| A handshake glyph for Deals Closed, a crown for Admin | Ionicons has neither | `ribbon` and `shield-checkmark`, the nearest solid glyphs in the set already in use |
+| "On Break" / "On Leave" per member | Only `/attendance/daily` knows, and it needs the attendance grant | Read from today's roster when it is readable; without it everyone active simply reads as active, rather than the app guessing who is absent |
+| A "Teams" card with a Manage teams destination | A team is the `department` string on a user — there is no team record | The card groups that field; tapping a row filters by it. "Manage teams" opens a sheet listing the teams, the roles screen and (for an admin) Rebalance executives, which is where that existing tool moved to |
+
+**Type scale.** These comps run a much higher contrast than the brand scale
+assumed: a 26–27pt page title over 9–11pt row text. The first pass used the
+scale's body sizes (12–15) for member rows, which made every row 19pt taller
+than the comp and truncated names and tile labels. Sizes were then fitted
+string by string against Inter's own advance widths — see the note in
+`01_MOBILE_DESIGN_SYSTEM.md`.
+
+**New token triplet:** `infoTint` / `infoChip` / `infoInk`, the blue counterpart
+to the existing warn and alert triplets. An invitation waiting to be accepted is
+the first state in the app that is neither good nor bad, and the status pills
+had to survive the dark scheme.
+
+### 2026-09-24 — Leaderboard, Performance and Achievements, built to comps 34–36
+
+Three comps for the gamification side of Reports. `RoleLeaderboardScreen` was
+rebuilt; `PerformerScreen` and `AchievementsScreen` are new. `PerformanceScreen`
+was left alone - it is the Targets page and has nothing to do with these.
+
+**No backend change.** The comps state their own scoring rules - the
+Leaderboard prints the table under "How Points Work" - so a score is the sum of
+what somebody did, priced by that table, computed in
+`modules/reports/gamification.ts`. Nothing is stored, which means a score can
+always be explained by pointing at the records behind it, and correcting a lead
+corrects the leaderboard. A badge is a threshold on a count, so it unlocks the
+moment the count is reached and un-unlocks if the record behind it is
+corrected.
+
+| Comp asks for | Reality | Decision |
+| --- | --- | --- |
+| "Unlocked 12 Sep 2024" under each badge | Nothing records when a threshold was crossed, and back-dating it from the records would be a guess | The tile says "Unlocked", and a locked one shows its progress instead |
+| Photographic avatars on the podium | No avatar is stored on a user | The initials avatar the rest of the app uses, with the podium ring in gold / silver / bronze as drawn |
+| A crown over first place | Ionicons has no crown | `ribbon` in the comp's gold, which is the nearest solid glyph in the set already used |
+| "₹5,000 / ₹3,000 / ₹2,000" monthly bonuses | No store, and no comp draws a settings screen for them | `REWARD_TIERS` in gamification.ts, beside the points table. Both are policy rather than arithmetic, so they sit together at the top of one file |
+| "Level 8" at 1,720 points | The comp's own level and its "280 pts to Level 9" do not agree with each other | A level every 250 points, which is the mechanic the comp implies and is internally consistent. It is one constant if the pace needs changing |
+| "Send recognition" | No in-app recognition feed | The share sheet, with the person's month in it - it reaches whichever channel the team actually uses |
+| "7-Day Streak" and "Attendance Hero" | `/attendance/me` only reads your own record | Counted on your own Achievements page and left at zero on somebody else's, rather than showing a number the endpoint cannot support |
+
+### 2026-09-24 — Reports, built to comps 30–33
+
+Four comps: a hub, a sales report, a finance report and a custom builder. The
+screen that was here aggregated leads and inventory client-side under the name
+"Intelligence Reports"; that stays the method, and is now the whole module.
+
+**There is no reporting endpoint, on purpose.** Every figure is counted from
+the records the app already reads - leads, the finance ledger, inventory, task
+stats - by `modules/reports/reportData.ts`. A report therefore cannot disagree
+with the screen it summarises, and a new metric is a function rather than a
+migration.
+
+**One small model was added:** `Report` (`/api/reports`) stores the *question* -
+name, range, sections, metrics, filters, visualization, format - and never the
+numbers. That is what "Recent Reports" lists and what "Save as template" keeps;
+reopening one answers it from today's data instead of showing a stale copy. The
+reports page gained `create` and `delete` for it.
+
+| Comp asks for | Reality | Decision |
+| --- | --- | --- |
+| "Avg Response 18 min" | `lastContactedAt` is the only contact timestamp, and it moves on every touch | Counted as the gap from `createdAt` to `lastContactedAt`, which is an upper bound - the safer way to be wrong about a service level - and the derivation is written down in `reportData.ts` |
+| Funnel captioned "stage conversion from previous stage" | The comp's own numbers are each stage over the *first* stage, not the one above | The numbers follow the comp, and so does the caption, because they are what the comp shows |
+| "Properties +2" on the hub | Nothing records how many properties existed last month | The tile shows the count without a change figure rather than inventing a baseline |
+| "Email report after generation" | No mail transport on the server | Composed in the phone's mail app, ready to send, and the field says so |
+| Excel as an export format | No spreadsheet writer | The format is stored on the report; PDF renders on-device with `expo-print` and CSV through the share sheet. Excel records the preference and exports as CSV, which Excel opens |
+| Charts | No charting dependency | Drawn in plain SVG in `reportCharts.tsx` - donut, combo bars with a trend line, area, multi-line, funnel, bar list - because a library would bring a theming layer to fight for six figures on four screens |
+
+**Half-width cards.** Comps 30 and 33 run their chart cards two to a row. At
+430pt that leaves each about 185pt, so those cards step their type down a size
+and the funnel and legend columns are narrower than they would be full width.
+
+### 2026-09-23 — Finance, built to comps 26–29
+
+Four comps: a dashboard, a transactions list, an invoice and an Add Entry form.
+The screen that was here derived a company's money from lead deal payments and
+a flat commission per closed deal; that was a stand-in for a ledger.
+
+**The coworking finance models were widened, on the user's decision.**
+`CoworkingInvoice`, `CoworkingPayment` and `CoworkingExpense` are the only
+complete money ledger in the product and they match comps 28 and 29 almost
+field for field, but they were scoped to coworking clients, contracts and
+properties. Rather than stand up a second invoicing system beside them:
+
+| Model | Added |
+| --- | --- |
+| `CoworkingInvoice` | `clientId` no longer required; `leadId`, `contactId`, `inventoryId` beside it |
+| `CoworkingPayment` | `invoiceId` and `clientId` optional (money taken in with no invoice raised); `leadId`, `contactId`, `inventoryId`, `category`, `title`, `payerName`, `receipts[]` |
+| `CoworkingExpense` | `inventoryId`, `leadId`, `contactId`, `referenceNumber` |
+
+Nothing existing changes shape - a coworking row still sets `clientId` /
+`propertyId` exactly as before, and every coworking query keeps working.
+`amountPaid` is still written only by `recalculateAmountPaid`, which sums the
+ledger, so the phone can never disagree with the desktop about what is owed.
+
+**A new surface, not a new ledger.** `/api/finance` (overview, transactions,
+invoices, entries) reads those three collections and merges the two that are
+cash movements into one feed. It is mounted outside `/api/coworking` so it is
+reached by the Finance page rather than by the coworking roles, and the finance
+page gained `create` and `edit` actions because Add Entry really does create.
+
+| Comp asks for | Reality | Decision |
+| --- | --- | --- |
+| "Net cash flow", Income and Expenses on one hero | Income is what was billed in the month plus anything taken in with no invoice behind it; Collected is what actually arrived | Both are returned and labelled separately, so Collected ≠ Income when a bill is outstanding - which is what makes Receivables meaningful |
+| A "Overdue" choice on Add Entry's Payment status | Overdue is a state a row falls into once its date passes, not one you pick | The three segments are drawn; Overdue saves as pending and the list shows it as late on its own |
+| "Send payment confirmation" by email | There is no mail transport on the server | Composed in the phone's mail app, ready to send, and the field says so. Same for "Send reminder" on the invoice |
+| "Download PDF" | No report service | Rendered on the device with `expo-print` and handed to the share sheet |
+| "Export Report" | Same | The month's rows as a CSV, through the share sheet |
+| "Create Invoice" in Quick Actions | An invoice is raised from a coworking contract, and no comp draws a composer | The tile opens Add Entry in Income mode. This is the one action not wired literally - a composer needs a comp before it is worth designing |
+
+### 2026-09-23 — Pipeline, redrawn to comps 17–20
+
+Four comps: the pipeline list, Add Lead, Lead Details and Update Lead. They
+supersede the six from 2026-09-22. `LeadsMatrixScreen` was rebuilt; Add Lead and
+Update Lead are new pages; Lead Details keeps its five tabs and gained the
+comp's bar and summary above them.
+
+**A backend field was added, on the user's decision.** Three of the four comps
+show a three-way lead temperature and the model only had `hotClient: Boolean`.
+`Lead.temperature` (`COLD` / `WARM` / `HOT` / `""`) now exists, and
+`applyLeadTemperature()` in `lead.controller.js` keeps the two in step on every
+write - `HOT` sets the flag, anything else clears it, and a client that only
+knows the flag still works. `""` means the lead predates the field; mobile reads
+it through `temperatureOf()` and draws it as the comp's blue **New** badge
+rather than defaulting it to a value nobody chose.
+
+**Six stages over seventeen statuses.** The comps' New / Contacted / Interested
+/ Visit / Requested / Closed are a view, not a replacement: `STAGES` in
+`leadPipeline.ts` gives each one the statuses it owns, and a seventh **Other**
+chip catches `MISSING_IN_ACTION`, `INVALID`, `OWNER` and `BROKER` so no lead
+becomes unreachable by browsing. The filter sheet still offers the full list.
+
+| Comp asks for | Reality | Decision |
+| --- | --- | --- |
+| A "Website" source on the lead card | `sourceChannel` had no Website value | `WEBSITE` added to the enum on the model and in the controller's list, and to the source select |
+| "Discuss shortlisted properties" under the follow-up date | `nextFollowUp` was a bare timestamp | `Lead.followUpPurpose` added. Update Lead's Purpose select now persists it and Lead Details reads it back; without a column it could only have lived in a reminder one phone had scheduled |
+| "Coworking · 12 seats" on the card | The comp counts a coworking enquiry in seats, not square feet | `requirements.commercial.seats`, which already existed, with the area falling back in for every other type |
+| "Within 30 days" in the Requirement card | No possession or move-in column, and no comp has a field that sets one | Omitted. The comp's own Add Lead screen puts "Move-in within 30 days" in the free-text notes, so there is nothing to read it from |
+| "Low / Warm / Hot" on Add Lead, "Cold / Warm / Hot" on Update Lead | One field | Cold / Warm / Hot on both, since that is what the column stores. The comps contradict each other here |
+| Notes on Add Lead | `Lead` has no notes field | The first diary entry, which is where every later note goes anyway |
+| A reminder lead time ("30 minutes before") | The backend schedules nothing | A device-local notification, as the task comps already do. The screen says so rather than implying it follows the user to another device |
+| An interaction channel and outcome on Update Lead | The diary has free text, no channel or outcome column | Written into the line as "Call · Connected — …", the same way the attendance sheet records an effective time |
+| "Next Action" on Update Lead | No column | The diary's `nextStep`, which exists for exactly this |
+| Area and Budget as single selects | The model stores `areaMin/Max` and `budgetMin/Max` | Preset ranges as drawn, plus a "Custom range…" option that swaps in two number fields so the precision is still reachable |
+| Closed as just another step on the stepper | A close records the payment mode, amount and reference, and some roles need an approval | Picking Closed on Update Lead offers to open Lead Details, where that form lives. Writing the status straight through would either be refused or record a close without the money |
+
+**Where the four comps disagree with each other**, each screen follows its own:
+Priority reads "Low / Warm / Hot" on Add Lead and "Cold / Warm / Hot" on Update
+Lead; a range is tight on the lead card (`1,000-1,500 sq ft`) and spaced on Lead
+Details (`1,000 - 1,500 sq ft`); the temperature pill carries a flame on Lead
+Details and not on the card. All of them are one column underneath.
+
+**Phone numbers.** `POST /leads` dedupes on the exact trimmed string, and every
+existing row holds a bare national number, so the comp's country-code block
+stores the ten digits alone for +91 and prefixes the code for anything else.
+Changing the format for +91 would have broken dedupe against existing leads.
+
+**Lead Details does not stack two designs.** The comp's summary sits on top;
+the profile card that predates it - the editable name, phone, email, city and
+project, plus Save - is behind "Edit contact details" in the kebab, because the
+summary already shows all of it read-only and leaving it inline made the screen
+read as two apps in a row. Its duplicated header, status grid and Call /
+WhatsApp / Mail / Maps row were dropped, since the comp's profile card carries
+them. The section switcher under the summary was rebuilt in the comp's language
+for the same reason, and its first tab is now called **Properties**: the comp's
+summary is the overview, and that tab holds the linked properties and the
+proposal generator. The tab bodies themselves are still the ported web screens
+and should be redrawn when comps for them land.
+
+**View tabs dropped, nothing lost.** The old Needs action / All / Team /
+Unassigned / Closed switcher is gone. `matchesView` returned true for both All
+and Team, so Team never filtered anything; the rest are quick filters the
+server-side filter sheet already has.
+
+### 2026-09-22 — Attendance, redrawn to the single-page comp
+
+One comp, replacing the seven the module was built to in September. It puts my
+own day and the team's on one scrolling page, so the hub's "Admin view" toggle
+and its My day / Leave switch are gone. `AttendanceScreen` is presentation only
+— the service calls, the roster row vocabulary in `attendanceShared.tsx` and
+the five pushed pages are unchanged.
+
+| Measured off the comp | Value |
+| --- | --- |
+| Page gutter | 18pt, as Home's comp draws it, not the 16 the inventory comps settled on |
+| Card | 12pt padding, 10pt radius, 8pt between cards |
+| Ring | 132pt across, 8pt stroke, `#039f78` on a `tintSoft` track, clockwise from twelve |
+| Ring text | 22pt bold over a 9pt caption, both inside the ring |
+| Check in / out tiles | 45pt tall, 9pt apart, a 27pt badge and a 10 / 13pt stack |
+| Action buttons | 33pt tall, 6pt apart |
+| Stat tiles | 61pt tall, four across a 5pt gap |
+| Week cells | 57pt tall, five across an 8pt gap, a 5pt bar |
+
+**Two deliberate departures from the measurements:**
+
+- The comp's buttons are 33pt, below the 44pt iOS target. They are kept at 33
+  because they run the full width of the card, where only the height is short
+  of the guideline and the target is not hard to hit.
+- The stat tile's badge is 22pt with 7pt padding, not the comp's 26 and 9. The
+  comp's own face is about 15% narrower than Inter, so at the comp's spacing
+  "Total Hours" truncates; the smaller badge buys the 50pt the label needs.
+
+**Where the comp and the system disagree:**
+
+| Comp asks for | Reality | Decision |
+| --- | --- | --- |
+| "Office · Vijay Nagar" and "Within office radius" on the location strip | `AttendancePolicy` carries `officeLatitude`, `officeLongitude` and `officeRadiusMeters` — no name, and no fix until a check-in is attempted | "Office" plus the rule in force ("Check in within 150 m of the office", or that the check is off). Naming a locality would have been invented |
+| Photographic avatars on the roster | No avatar is populated on the roster response | The initials avatar the rest of the app uses |
+| A single header icon and nothing else | The hub's old tabs were the only door to leave, approvals, violations and the policy page | That icon opens a menu holding all of them, filtered by the manage grant. Its first two entries — My attendance and Leave — are there for everyone |
+
+**Two screens added, because the comp's layout displaced their contents:**
+
+- `MyAttendanceScreen` (`MyAttendance`) — my own recent days with worked, break
+  and late-by per day. `AttendanceHistory` next door reads `/attendance/daily`,
+  which 403s without the manage grant, so it could never have served as
+  everyone's history; the non-manager's "View attendance history" link and the
+  menu's first entry both point here.
+- `AttendanceLeaveScreen` (`AttendanceLeave`) — `LeaveSection` unchanged, given a
+  page now that the hub has no tab to hold it.
+
+**The module now runs two palettes.** The hub, `MyAttendance` and the two new
+headers are drawn in the comp's green (`theme/brand.ts`); history, details,
+approvals, policy, violations and the leave panel itself are still on the
+web-parity tokens, so the leave page's "Request leave" CTA is blue under a green
+header. Nothing was recoloured piecemeal - a single green button in a blue panel
+would read worse than the seam does - and the five pushed pages should be
+redrawn together when comps for them land.
+
+**Superseded but not deleted:** `components/MyDaySection.tsx` joins
+`TeamSection.tsx` and `ViolationsSection.tsx` as unreferenced. Left in place for
+the same reason as the others.
 
 ### 2026-09-21 — Attendance, built to mobile comps
 

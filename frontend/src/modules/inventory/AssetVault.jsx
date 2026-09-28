@@ -30,6 +30,14 @@ import { toErrorMessage } from "../../utils/errorMessage";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { usePermissions } from "../../context/usePermissions";
 import ToastNotice from "../../components/ui/ToastNotice";
+import GoogleMapPicker from "../../components/common/GoogleMapPicker";
+import {
+  createPlacesAutocompleteSession,
+  fetchPlacePredictions,
+  geocodeAddress,
+  loadPlaces,
+  resolvePlaceSuggestion,
+} from "../../utils/googlePlaces";
 import {
   AssetVaultFilters,
   PendingInventoryRequestsPanel,
@@ -211,65 +219,6 @@ const SOLD_PAYMENT_TYPE_OPTIONS = [
   { value: "FULL", label: "Full Payment" },
   { value: "PARTIAL", label: "Partial Payment" },
 ];
-const GEOCODING_SEARCH_ENDPOINT = "https://nominatim.openstreetmap.org/search";
-const LOCATION_SUGGESTION_LIMIT = 6;
-const GOOGLE_MAPS_SCRIPT_ID = "office-on-rent-google-maps-places-script";
-let googleMapsScriptPromise = null;
-
-const loadGoogleMapsPlacesScript = (apiKey) => {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("Google Maps is unavailable"));
-  }
-
-  if (window.google?.maps?.places) {
-    return Promise.resolve(window.google);
-  }
-
-  if (googleMapsScriptPromise) {
-    return googleMapsScriptPromise;
-  }
-
-  googleMapsScriptPromise = new Promise((resolve, reject) => {
-    const rejectWithReset = (message) => {
-      googleMapsScriptPromise = null;
-      reject(new Error(message));
-    };
-
-    const handleLoad = () => {
-      if (window.google?.maps?.places) {
-        resolve(window.google);
-      } else {
-        rejectWithReset("Google Maps Places library failed to load");
-      }
-    };
-
-    const existingScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID);
-    const script = existingScript || document.createElement("script");
-
-    script.addEventListener("load", handleLoad, { once: true });
-    script.addEventListener("error", () => rejectWithReset("Google Maps script failed to load"), {
-      once: true,
-    });
-
-    if (!existingScript) {
-      const params = new URLSearchParams({
-        key: apiKey,
-        libraries: "places",
-        v: "weekly",
-      });
-
-      script.id = GOOGLE_MAPS_SCRIPT_ID;
-      script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
-      script.async = true;
-      script.defer = true;
-      document.head.appendChild(script);
-    } else if (window.google?.maps) {
-      handleLoad();
-    }
-  });
-
-  return googleMapsScriptPromise;
-};
 
 const toApiStatus = (status) => {
   if (status === "Reserved") return "Blocked";
@@ -750,14 +699,11 @@ const formatRequestValue = (key, value) => {
 
 const AssetVault = () => {
   const navigate = useNavigate();
-  const locationProvider = String(import.meta.env.VITE_LOCATION_PROVIDER || "osm")
-    .trim()
-    .toLowerCase();
   const googleMapsApiKey = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "").trim();
   const googlePlacesCountry = String(import.meta.env.VITE_GOOGLE_MAPS_PLACES_COUNTRY || "in")
     .trim()
     .toLowerCase();
-  const useGooglePlaces = locationProvider === "google" && Boolean(googleMapsApiKey);
+  const useGooglePlaces = Boolean(googleMapsApiKey);
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMoreAssets, setLoadingMoreAssets] = useState(false);
@@ -765,7 +711,7 @@ const AssetVault = () => {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingAssetId, setEditingAssetId] = useState("");
-  const [modeType, setModeType] = useState("sale");
+  const [modeType, setModeType] = useState("all");
   const [viewMode, setViewMode] = useState("cards");
   const [sortOrder, setSortOrder] = useState("latest");
   const [uploading, setUploading] = useState(false);
@@ -848,7 +794,6 @@ const AssetVault = () => {
   });
   const locationSuggestionFetchIdRef = useRef(0);
   const googleAutocompleteServiceRef = useRef(null);
-  const googleGeocoderRef = useRef(null);
 
   const role = getStoredUserRole();
   const { canPageAction, enforcePageAccess } = usePermissions();
@@ -925,14 +870,17 @@ const AssetVault = () => {
     [assets, reserveAssetId],
   );
   const statusCounts = useMemo(() => {
-    const counts = { all: assets.length, Available: 0, Blocked: 0, Sold: 0, Rented: 0 };
-    assets.forEach((asset) => {
+    const visibleTypeAssets = assets.filter((asset) =>
+      !inventoryTypeFilter || inventoryTypeFilter === "all"
+        || String(asset.inventoryType || "").toUpperCase() === inventoryTypeFilter);
+    const counts = { all: visibleTypeAssets.length, Available: 0, Blocked: 0, Sold: 0, Rented: 0 };
+    visibleTypeAssets.forEach((asset) => {
       const status = toApiStatus(asset?.status);
       if (counts[status] !== undefined) counts[status] += 1;
       if (["RENT", "BOTH"].includes(String(asset?.type || "").trim().toUpperCase())) counts.Rented += 1;
     });
     return counts;
-  }, [assets]);
+  }, [assets, inventoryTypeFilter]);
 
   const sortedLeadOptions = useMemo(
     () =>
@@ -1212,18 +1160,16 @@ const AssetVault = () => {
   useEffect(() => {
     if (!useGooglePlaces || !(isAddModalOpen || isEditModalOpen)) {
       googleAutocompleteServiceRef.current = null;
-      googleGeocoderRef.current = null;
       setGooglePlacesReady(false);
       return undefined;
     }
 
     let cancelled = false;
 
-    loadGoogleMapsPlacesScript(googleMapsApiKey)
-      .then((google) => {
+    loadPlaces(googleMapsApiKey)
+      .then(() => {
         if (cancelled) return;
-        googleAutocompleteServiceRef.current = new google.maps.places.AutocompleteService();
-        googleGeocoderRef.current = new google.maps.Geocoder();
+        googleAutocompleteServiceRef.current = createPlacesAutocompleteSession();
         setGooglePlacesReady(true);
       })
       .catch((loadError) => {
@@ -1251,9 +1197,8 @@ const AssetVault = () => {
       .filter(Boolean);
 
     return assets.filter((asset) => {
-      const typeMatch = modeType === "sale"
-        ? asset.type === "Sale" || asset.type === "Both"
-        : asset.type === "Rent" || asset.type === "Both";
+      const typeMatch = modeType !== "rent"
+        || asset.type === "Rent" || asset.type === "Both";
       const statusMatch =
         statusFilter === "all"
           ? true
@@ -1522,94 +1467,8 @@ const AssetVault = () => {
   const lookupCoordinatesByLocation = useCallback(async (rawLocation) => {
     const query = String(rawLocation || "").trim();
     if (!query) return null;
-
-    const searchUrl = new URL(GEOCODING_SEARCH_ENDPOINT);
-    searchUrl.search = new URLSearchParams({
-      format: "jsonv2",
-      q: query,
-      limit: "1",
-      addressdetails: "0",
-      countrycodes: "in",
-    }).toString();
-
-    const response = await fetch(searchUrl.toString(), {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Location lookup failed");
-    }
-
-    const rows = await response.json();
-    const first = Array.isArray(rows) ? rows[0] : null;
-    const lat = toCoordinateNumber(first?.lat);
-    const lng = toCoordinateNumber(first?.lon);
-
-    if (lat === null || lng === null) {
-      return null;
-    }
-
-    return {
-      query,
-      lat,
-      lng,
-    };
-  }, []);
-
-  const lookupLocationSuggestions = useCallback(async (rawLocation) => {
-    const query = String(rawLocation || "").trim();
-    if (!query) return [];
-
-    const searchUrl = new URL(GEOCODING_SEARCH_ENDPOINT);
-    searchUrl.search = new URLSearchParams({
-      format: "jsonv2",
-      q: query,
-      limit: String(LOCATION_SUGGESTION_LIMIT),
-      addressdetails: "1",
-      countrycodes: "in",
-    }).toString();
-
-    const response = await fetch(searchUrl.toString(), {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Location suggestions lookup failed");
-    }
-
-    const rows = await response.json();
-    if (!Array.isArray(rows)) return [];
-
-    const seen = new Set();
-    return rows
-      .map((row) => {
-        const label = String(row?.display_name || row?.name || "").trim();
-        const lat = toCoordinateNumber(row?.lat);
-        const lng = toCoordinateNumber(row?.lon);
-
-        if (!label || lat === null || lng === null) {
-          return null;
-        }
-
-        const dedupeKey = `${label}:${lat}:${lng}`;
-        if (seen.has(dedupeKey)) {
-          return null;
-        }
-
-        seen.add(dedupeKey);
-        return {
-          id: String(row?.place_id || dedupeKey),
-          label,
-          lat,
-          lng,
-        };
-      })
-      .filter(Boolean);
-  }, []);
+    return geocodeAddress(query, googlePlacesCountry);
+  }, [googlePlacesCountry]);
 
   const lookupGoogleLocationSuggestions = useCallback((rawLocation) => {
     if (!useGooglePlaces) return Promise.resolve([]);
@@ -1617,92 +1476,25 @@ const AssetVault = () => {
     const query = String(rawLocation || "").trim();
     if (!query) return Promise.resolve([]);
 
-    const service = googleAutocompleteServiceRef.current;
-    const placesStatus = window.google?.maps?.places?.PlacesServiceStatus;
-
-    if (!service || !placesStatus) {
-      return Promise.resolve([]);
-    }
-
-    return new Promise((resolve, reject) => {
-      const request = {
-        input: query,
-        types: ["geocode"],
-      };
-
-      if (googlePlacesCountry) {
-        request.componentRestrictions = { country: googlePlacesCountry };
-      }
-
-      service.getPlacePredictions(request, (predictions, status) => {
-        if (status === placesStatus.ZERO_RESULTS) {
-          resolve([]);
-          return;
-        }
-
-        if (status !== placesStatus.OK || !Array.isArray(predictions)) {
-          reject(new Error("Google location suggestions lookup failed"));
-          return;
-        }
-
-        const rows = predictions
-          .map((prediction) => {
-            const label = String(prediction?.description || "").trim();
-            const placeId = String(prediction?.place_id || "").trim();
-            if (!label || !placeId) return null;
-
-            return {
-              id: placeId,
-              label,
-              placeId,
-            };
-          })
-          .filter(Boolean);
-
-        resolve(rows);
-      });
-    });
+    return fetchPlacePredictions(
+      googleAutocompleteServiceRef.current,
+      query,
+      googlePlacesCountry,
+    );
   }, [googlePlacesCountry, useGooglePlaces]);
 
   const resolveGooglePlaceSuggestion = useCallback((suggestion) => {
     if (!useGooglePlaces) return Promise.resolve(null);
 
-    const placeId = String(suggestion?.placeId || "").trim();
-    const geocoder = googleGeocoderRef.current;
-    const geocoderStatus = window.google?.maps?.GeocoderStatus;
-
-    if (!placeId || !geocoder || !geocoderStatus) {
-      return Promise.resolve(null);
-    }
-
-    return new Promise((resolve, reject) => {
-      geocoder.geocode({ placeId }, (results, status) => {
-        if (status === geocoderStatus.ZERO_RESULTS) {
-          resolve(null);
-          return;
+    return resolvePlaceSuggestion(suggestion).then((resolved) => {
+      googleAutocompleteServiceRef.current = createPlacesAutocompleteSession();
+      return resolved
+        ? {
+          ...resolved,
+          id: suggestion?.placeId || suggestion?.id || resolved.label,
+          placeId: suggestion?.placeId || "",
         }
-
-        if (status !== geocoderStatus.OK || !Array.isArray(results) || !results[0]) {
-          reject(new Error("Google place details lookup failed"));
-          return;
-        }
-
-        const first = results[0];
-        const lat = toCoordinateNumber(first?.geometry?.location?.lat?.());
-        const lng = toCoordinateNumber(first?.geometry?.location?.lng?.());
-        if (lat === null || lng === null) {
-          resolve(null);
-          return;
-        }
-
-        resolve({
-          id: placeId,
-          placeId,
-          label: String(first.formatted_address || suggestion?.label || "").trim(),
-          lat,
-          lng,
-        });
-      });
+        : null;
     });
   }, [useGooglePlaces]);
 
@@ -1713,28 +1505,9 @@ const AssetVault = () => {
       setResolvingLocation(true);
       setError("");
 
-      let resolvedSuggestion =
-        suggestion.placeId
-          ? await resolveGooglePlaceSuggestion(suggestion)
-          : suggestion;
-      let lat = toCoordinateNumber(resolvedSuggestion?.lat);
-      let lng = toCoordinateNumber(resolvedSuggestion?.lng);
-
-      // If Google place details are unavailable, fall back to OpenStreetMap geocoding.
-      if (!resolvedSuggestion || lat === null || lng === null) {
-        const fallbackQuery = String(suggestion?.label || suggestion?.id || "").trim();
-        const fallback = await lookupCoordinatesByLocation(fallbackQuery);
-        if (fallback) {
-          resolvedSuggestion = {
-            id: suggestion.id || fallback.query,
-            label: suggestion.label || fallback.query,
-            lat: fallback.lat,
-            lng: fallback.lng,
-          };
-          lat = toCoordinateNumber(fallback.lat);
-          lng = toCoordinateNumber(fallback.lng);
-        }
-      }
+      const resolvedSuggestion = await resolveGooglePlaceSuggestion(suggestion);
+      const lat = toCoordinateNumber(resolvedSuggestion?.lat);
+      const lng = toCoordinateNumber(resolvedSuggestion?.lng);
 
       if (!resolvedSuggestion || lat === null || lng === null) {
         setError("Unable to resolve selected location coordinates");
@@ -1755,7 +1528,7 @@ const AssetVault = () => {
     } finally {
       setResolvingLocation(false);
     }
-  }, [lookupCoordinatesByLocation, resolveGooglePlaceSuggestion]);
+  }, [resolveGooglePlaceSuggestion]);
 
   const resolveCoordinatesFromLocation = async (rawLocation) => {
     const query = String(rawLocation || "").trim();
@@ -1819,16 +1592,9 @@ const AssetVault = () => {
     const timer = setTimeout(async () => {
       try {
         setLoadingLocationSuggestions(true);
-        let rows = [];
-        if (useGooglePlaces && googlePlacesReady && googleAutocompleteServiceRef.current) {
-          try {
-            rows = await lookupGoogleLocationSuggestions(query);
-          } catch {
-            rows = await lookupLocationSuggestions(query);
-          }
-        } else {
-          rows = await lookupLocationSuggestions(query);
-        }
+        const rows = useGooglePlaces && googlePlacesReady && googleAutocompleteServiceRef.current
+          ? await lookupGoogleLocationSuggestions(query)
+          : [];
 
         if (locationSuggestionFetchIdRef.current !== fetchId) return;
         setLocationSuggestions(rows);
@@ -1850,7 +1616,6 @@ const AssetVault = () => {
     useGooglePlaces,
     googlePlacesReady,
     lookupGoogleLocationSuggestions,
-    lookupLocationSuggestions,
     showLocationSuggestions,
   ]);
 
@@ -3300,9 +3065,7 @@ const AssetVault = () => {
                           {loadingLocationSuggestions ? (
                             <div className="px-3 py-2 text-xs text-slate-500 flex items-center gap-2">
                               <Loader size={12} className="animate-spin" />
-                              {useGooglePlaces && googlePlacesReady
-                                ? "Searching Google locations..."
-                                : "Searching locations..."}
+                              Searching Google locations...
                             </div>
                           ) : locationSuggestions.length > 0 ? (
                             locationSuggestions.map((suggestion) => (
@@ -3318,8 +3081,10 @@ const AssetVault = () => {
                                 {suggestion.label}
                               </button>
                             ))
+                          ) : !useGooglePlaces ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">Configure Google Maps to search addresses.</p>
                           ) : String(formData.location || "").trim().length >= 3 ? (
-                            <p className="px-3 py-2 text-xs text-slate-500">No suggestions found</p>
+                            <p className="px-3 py-2 text-xs text-slate-500">No Google locations found</p>
                           ) : (
                             <p className="px-3 py-2 text-xs text-slate-500">
                               Type at least 3 characters
@@ -3331,7 +3096,7 @@ const AssetVault = () => {
                     <button
                       type="button"
                       onClick={() => resolveCoordinatesFromLocation(formData.location)}
-                      disabled={resolvingLocation || !formData.location.trim()}
+                      disabled={!useGooglePlaces || resolvingLocation || !formData.location.trim()}
                       className="mt-2 h-[42px] min-w-[124px] rounded-xl border border-slate-200 bg-white px-3 text-[10px] font-bold uppercase tracking-widest text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                     >
                       {resolvingLocation ? (
@@ -3348,8 +3113,8 @@ const AssetVault = () => {
                     </button>
                     <p className="mt-1 text-[10px] text-slate-400">
                       {useGooglePlaces
-                        ? "Type address for Google-style suggestions. Press Enter to auto-fill coordinates."
-                        : "Type address for free OpenStreetMap suggestions. Press Enter to auto-fill coordinates."}
+                        ? "Search a Google location or click the map to set its coordinates."
+                        : "Configure Google Maps to search addresses, or enter coordinates manually."}
                     </p>
                   </div>
 
@@ -3380,6 +3145,21 @@ const AssetVault = () => {
                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
                       />
                     </div>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <GoogleMapPicker
+                      latitude={formData.locationLat}
+                      longitude={formData.locationLng}
+                      onChange={({ lat, lng }) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          locationLat: String(lat),
+                          locationLng: String(lng),
+                        }));
+                      }}
+                      heightClass="h-52 sm:h-60"
+                    />
                   </div>
 
                   <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3 sm:gap-4">

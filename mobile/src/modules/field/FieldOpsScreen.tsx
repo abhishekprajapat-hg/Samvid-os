@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { WebView } from "react-native-webview";
 import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -22,7 +22,9 @@ type FieldExecutive = {
   role?: string;
   name?: string;
   email?: string;
+  phone?: string;
   isActive?: boolean;
+  lastAssignedAt?: string;
   isLocationFresh?: boolean;
   liveLocation?: { lat?: number; lng?: number; updatedAt?: string } | null;
 };
@@ -212,6 +214,7 @@ export const FieldOpsScreen = () => {
   const [siteVisitsVisible, setSiteVisitsVisible] = useState(false);
   const [allPropertiesVisible, setAllPropertiesVisible] = useState(false);
   const [leadQueueFilter, setLeadQueueFilter] = useState<"ALL" | "VISIT" | "OVERDUE">("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const load = async (silent = false) => {
     try {
@@ -260,12 +263,17 @@ export const FieldOpsScreen = () => {
     const executiveStats = fieldExec.map((executive) => {
       const assignedRows = byExec.get(String(executive._id || "")) || [];
       const visits = assignedRows.filter((lead) => String(lead.status || "") === "SITE_VISIT").length;
+      const todaysVisits = assignedRows.filter((lead) => {
+        if (String(lead.status || "").toUpperCase() !== "SITE_VISIT" || !lead.nextFollowUp) return false;
+        const d = new Date(lead.nextFollowUp);
+        return !Number.isNaN(d.getTime()) && d.toDateString() === now.toDateString();
+      }).length;
       const overdue = assignedRows.filter((lead) => {
         if (!lead.nextFollowUp) return false;
         const d = new Date(lead.nextFollowUp);
         return !Number.isNaN(d.getTime()) && d < now;
       }).length;
-      return { executive, assignedRows, activeAssigned: assignedRows.length, visits, overdue };
+      return { executive, assignedRows, activeAssigned: assignedRows.length, visits, todaysVisits, overdue };
     });
     const siteVisits = active.filter((lead) => String(lead.status || "") === "SITE_VISIT").length;
     const overdue = active.filter((lead) => {
@@ -273,7 +281,8 @@ export const FieldOpsScreen = () => {
       const d = new Date(lead.nextFollowUp);
       return !Number.isNaN(d.getTime()) && d < now;
     }).length;
-    return { fieldExec, active, executiveStats, siteVisits, overdue };
+    const unassignedQueue = active.filter((lead) => !(lead.assignedTo as any)?._id);
+    return { fieldExec, active, executiveStats, siteVisits, overdue, unassignedQueue };
   }, [leads, users]);
 
   const mapExecutives = useMemo(
@@ -321,6 +330,46 @@ export const FieldOpsScreen = () => {
         .filter(Boolean) as PropertyMarker[],
     [assets],
   );
+
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+  const visibleExecutiveStats = useMemo(() => {
+    if (!normalizedSearch) return dashboard.executiveStats;
+    return dashboard.executiveStats.filter((row) => {
+      const executiveText = [row.executive.name, row.executive.email, row.executive.phone]
+        .join(" ")
+        .toLowerCase();
+      if (executiveText.includes(normalizedSearch)) return true;
+      return row.assignedRows.some((lead) =>
+        [lead.name, lead.phone, lead.city, lead.projectInterested, lead.status]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedSearch),
+      );
+    });
+  }, [dashboard.executiveStats, normalizedSearch]);
+  const visibleMapExecutives = useMemo(() => {
+    if (!normalizedSearch) return mapExecutives;
+    const visibleIds = new Set(visibleExecutiveStats.map((row) => String(row.executive._id || "")));
+    return mapExecutives.filter((row) => visibleIds.has(String(row.id || "")));
+  }, [mapExecutives, normalizedSearch, visibleExecutiveStats]);
+  const visibleMapProperties = useMemo(() => {
+    if (!normalizedSearch) return mapProperties;
+    return mapProperties.filter((row) =>
+      [row.title, row.location, row.projectName, row.towerName, row.unitNumber, row.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedSearch),
+    );
+  }, [mapProperties, normalizedSearch]);
+  const visibleDispatchQueue = useMemo(() => {
+    if (!normalizedSearch) return dashboard.unassignedQueue;
+    return dashboard.unassignedQueue.filter((lead) =>
+      [lead.name, lead.phone, lead.city, lead.projectInterested, lead.status]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalizedSearch),
+    );
+  }, [dashboard.unassignedQueue, normalizedSearch]);
 
   useEffect(() => {
     if (!dashboard.executiveStats.length) return setSelectedExecutiveId("");
@@ -386,8 +435,8 @@ export const FieldOpsScreen = () => {
   );
 
   const mapHtml = useMemo(
-    () => buildMapHtml({ executives: mapExecutives, properties: mapProperties, selectedExecutiveId, selectedPropertyId }),
-    [mapExecutives, mapProperties, selectedExecutiveId, selectedPropertyId],
+    () => buildMapHtml({ executives: visibleMapExecutives, properties: visibleMapProperties, selectedExecutiveId, selectedPropertyId }),
+    [selectedExecutiveId, selectedPropertyId, visibleMapExecutives, visibleMapProperties],
   );
 
   const openDirections = async (lat?: number, lng?: number) => {
@@ -419,6 +468,22 @@ export const FieldOpsScreen = () => {
   return (
     <Screen title="Field Operations" subtitle="Live Map + Dispatch" loading={loading} error={error}>
       <ScrollView refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />} showsVerticalScrollIndicator={false}>
+        <View style={styles.searchBox}>
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search executive, lead, project, city, or property..."
+            placeholderTextColor={themeColor("#8792a5")}
+            style={styles.searchInput}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {searchQuery ? (
+            <Pressable style={styles.clearSearch} onPress={() => setSearchQuery("")} accessibilityRole="button">
+              <Text style={styles.smallBtnText}>Clear</Text>
+            </Pressable>
+          ) : null}
+        </View>
         <View style={styles.kpis}>
           <Kpi
             label="Field Executives"
@@ -450,6 +515,7 @@ export const FieldOpsScreen = () => {
             }}
           />
           <Kpi label="Overdue" value={dashboard.overdue} active={activeKpi === "OVERDUE"} onPress={() => setLeadQueueFilter("OVERDUE")} />
+          <Kpi label="Dispatch Queue" value={dashboard.unassignedQueue.length} />
           <Kpi
             label="Properties on Map"
             value={mapProperties.length}
@@ -463,7 +529,7 @@ export const FieldOpsScreen = () => {
         <View style={styles.sectionCard}>
           <View style={styles.sectionRow}>
             <Text style={styles.section}>Executive Coverage Map</Text>
-            <Text style={styles.sectionMeta}>{mapExecutives.length} executives | {mapProperties.length} properties</Text>
+            <Text style={styles.sectionMeta}>{visibleMapExecutives.length} executives | {visibleMapProperties.length} properties</Text>
           </View>
           <View style={styles.mapContainer}>
             <WebMapCanvas html={mapHtml} onMessage={onMapMessage} />
@@ -471,11 +537,11 @@ export const FieldOpsScreen = () => {
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.section}>Executive Task Queue</Text>
-          {dashboard.executiveStats.length === 0 ? (
+          <Text style={styles.section}>Field Executive Workload</Text>
+          {visibleExecutiveStats.length === 0 ? (
             <Text style={styles.meta}>No field executives found.</Text>
           ) : (
-            dashboard.executiveStats.map((row) => {
+            visibleExecutiveStats.map((row) => {
               const active = String(row.executive._id || "") === String(selectedExecutiveId);
               const lat = toFinite(row.executive.liveLocation?.lat);
               const lng = toFinite(row.executive.liveLocation?.lng);
@@ -487,10 +553,14 @@ export const FieldOpsScreen = () => {
                   onPress={() => setSelectedExecutiveId(String(row.executive._id || ""))}
                 >
                   <Text style={styles.title}>{row.executive.name || "Executive"}</Text>
-                  <Text style={styles.meta}>{row.activeAssigned} active | {row.visits} visits | {row.overdue} overdue</Text>
+                  <Text style={styles.meta}>{row.activeAssigned} active | {row.visits} visits | {row.todaysVisits} today | {row.overdue} overdue</Text>
+                  <View style={styles.loadTrack}>
+                    <View style={[styles.loadFill, { width: `${Math.min(100, row.activeAssigned * 20)}%` }]} />
+                  </View>
                   <Text style={styles.meta}>
                     {hasLive ? `Live: ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` : "Live location unavailable"}
                   </Text>
+                  <Text style={styles.meta}>Last assigned: {formatDate(row.executive.lastAssignedAt)}</Text>
                   {hasLive ? (
                     <View style={styles.actionRow}>
                       <Pressable style={styles.smallBtn} onPress={() => openMap(Number(lat), Number(lng))}>
@@ -508,8 +578,28 @@ export const FieldOpsScreen = () => {
         </View>
 
         <View style={styles.sectionCard}>
-          <Text style={styles.section}>Properties</Text>
-          {mapProperties.slice(0, 60).map((property) => {
+          <View style={styles.sectionRow}>
+            <Text style={styles.section}>Dispatch Queue (Unassigned)</Text>
+            <Text style={styles.sectionMeta}>{visibleDispatchQueue.length} waiting</Text>
+          </View>
+          {visibleDispatchQueue.length === 0 ? (
+            <Text style={styles.meta}>No unassigned active leads in queue.</Text>
+          ) : visibleDispatchQueue.slice(0, 12).map((lead) => (
+            <Pressable key={lead._id} style={styles.card} onPress={() => navigation.navigate("LeadDetails", { leadId: lead._id })}>
+              <View style={styles.row}>
+                <Text style={styles.title}>{lead.name || "-"}</Text>
+                <Text style={[styles.badge, getStatusStyle(lead.status)]}>{getLeadStatusLabel(lead.status)}</Text>
+              </View>
+              <Text style={styles.meta}>{lead.phone || "-"} | {lead.city || "-"}</Text>
+              <Text style={styles.meta}>{lead.projectInterested || "Project not set"}</Text>
+              <Text style={styles.meta}>Follow-up: {formatDate(lead.nextFollowUp)}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.section}>Quick Locate Properties</Text>
+          {visibleMapProperties.slice(0, 60).map((property) => {
             return (
               <Pressable key={property.id} style={styles.card} onPress={() => { setSelectedPropertyId(property.id); setPropertyDetailVisible(true); }}>
                 <Text style={styles.title}>{property.title}</Text>
@@ -681,16 +771,20 @@ export const FieldOpsScreen = () => {
   );
 };
 
-const Kpi = ({ label, value, onPress }: { label: string; value: number; onPress?: () => void; active?: boolean }) => (
-  <Pressable style={styles.kpiCard} onPress={onPress}>
+const Kpi = ({ label, value, onPress, active = false }: { label: string; value: number; onPress?: () => void; active?: boolean }) => (
+  <Pressable style={[styles.kpiCard, active && styles.kpiCardActive]} onPress={onPress}>
     <Text style={styles.meta}>{label}</Text>
     <Text style={styles.value}>{value}</Text>
   </Pressable>
 );
 
 const styles = themedStyles((c) => StyleSheet.create({
+  searchBox: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, backgroundColor: c.surface, paddingHorizontal: 10, marginBottom: 10 },
+  searchInput: { flex: 1, minHeight: 44, color: c.text, fontSize: 12 },
+  clearSearch: { paddingHorizontal: 6, paddingVertical: 8 },
   kpis: { gap: 8, marginBottom: 10 },
   kpiCard: { borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.surface, padding: 10 },
+  kpiCardActive: { borderColor: c.primary, backgroundColor: c.blue[50] },
   value: { fontSize: 22, fontWeight: "700", color: c.text },
   sectionCard: { borderWidth: 1, borderColor: c.border, borderRadius: 12, backgroundColor: c.surface, padding: 10, marginBottom: 10 },
   section: { marginBottom: 8, textTransform: "uppercase", fontSize: 12, letterSpacing: 1, fontWeight: "700", color: c.slate[700] },
@@ -702,6 +796,8 @@ const styles = themedStyles((c) => StyleSheet.create({
   row: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   title: { fontWeight: "700", color: c.text, flex: 1 },
   meta: { marginTop: 2, color: c.textMuted, fontSize: 12 },
+  loadTrack: { height: 5, marginTop: 7, borderRadius: 999, overflow: "hidden", backgroundColor: c.surfaceMuted },
+  loadFill: { height: "100%", borderRadius: 999, backgroundColor: c.primary },
   badge: { fontSize: 10, textTransform: "uppercase", fontWeight: "700", borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, overflow: "hidden" },
   badgeDefault: { backgroundColor: c.surfaceMuted, color: c.slate[700] },
   badgeVisit: { backgroundColor: c.violet[100], color: c.violet[700] },

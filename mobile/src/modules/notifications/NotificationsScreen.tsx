@@ -1,4 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
+import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
+import {
+  adminRequestContext,
+  adminRequestTarget,
+  adminRequestTitle,
+  type AdminRequestEvent,
+} from "../../context/realtimeEvents";
 import { Alert, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Icon } from "../../components/ui/Icon";
 import { Screen } from "../../components/common/Screen";
@@ -53,8 +62,55 @@ type NotificationItem =
 
 type NotificationFilter = "ALL" | NotificationItem["kind"];
 
-const FILTERS: Array<{ value: NotificationFilter; label: string }> = [
+/*
+ * Web's inbox keeps a read / unread state per item, remembered in the browser,
+ * with "Mark all read" and an Unread tab; and it lists the approval events heard
+ * live as alerts that open their record. The phone keeps the same state on the
+ * device, under web's storage key.
+ */
+const READ_STORAGE_KEY = "adminNotificationsReadIds";
+
+const DATE_FILTERS = [
+  { value: "ALL", label: "All Dates" },
+  { value: "TODAY", label: "Today" },
+  { value: "WEEK", label: "Last 7 days" },
+  { value: "MONTH", label: "Last 30 days" },
+] as const;
+type DateFilter = (typeof DATE_FILTERS)[number]["value"];
+
+const withinDateFilter = (value: string | undefined, filter: DateFilter) => {
+  if (filter === "ALL") return true;
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const now = new Date();
+  if (filter === "TODAY") return date.toDateString() === now.toDateString();
+  const days = filter === "WEEK" ? 7 : 30;
+  return now.getTime() - date.getTime() <= days * 24 * 60 * 60 * 1000;
+};
+
+const alertSearchText = (alert: AdminRequestEvent) => {
+  const payload = alert.payload || {};
+  return [
+    alert.preview,
+    alert.source,
+    alert.requestType,
+    payload?.lead?.name,
+    payload?.lead?.phone,
+    payload?.requestId,
+    payload?.inventoryRequestType,
+    payload?.type,
+    payload?.inventory?.projectName,
+    payload?.inventory?.unitNumber,
+  ]
+    .join(" ")
+    .toLowerCase();
+};
+
+const FILTERS: Array<{ value: NotificationFilter | "UNREAD" | "ALERT"; label: string }> = [
   { value: "ALL", label: "All" },
+  { value: "UNREAD", label: "Unread" },
+  { value: "ALERT", label: "Alerts" },
   { value: "LEAD", label: "Lead" },
   { value: "PAYMENT", label: "Payment" },
   { value: "INVENTORY", label: "Inventory" },
@@ -166,6 +222,39 @@ const buildSearchText = (item: NotificationItem) => {
 export const NotificationsScreen = () => {
   const { role } = useAuth();
   const isAdmin = role === "ADMIN";
+  const navigation = useNavigation<any>();
+  const { recentAdminRequests, markNotificationsRead } = useRealtimeAlerts();
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [dateFilter, setDateFilter] = useState<DateFilter>("ALL");
+
+  React.useEffect(() => {
+    AsyncStorage.getItem(READ_STORAGE_KEY)
+      .then((raw) => {
+        const parsed = raw ? JSON.parse(raw) : [];
+        setReadIds(new Set(Array.isArray(parsed) ? parsed : []));
+      })
+      .catch(() => {});
+    // Opening the inbox is reading it, as far as the bell badge goes.
+    markNotificationsRead();
+  }, [markNotificationsRead]);
+
+  const persistReadIds = useCallback((next: Set<string>) => {
+    setReadIds(next);
+    AsyncStorage.setItem(READ_STORAGE_KEY, JSON.stringify([...next].slice(-1000))).catch(() => {});
+  }, []);
+
+  const markRead = useCallback((key: string) => {
+    setReadIds((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      AsyncStorage.setItem(READ_STORAGE_KEY, JSON.stringify([...next].slice(-1000))).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const itemKey = (item: { kind: string; id: string }) => `${item.kind}:${item.id}`;
+  const alertKey = (alert: AdminRequestEvent) => `ALERT:${alert.eventId}`;
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -173,7 +262,7 @@ export const NotificationsScreen = () => {
   const [success, setSuccess] = useState("");
   const [actionLoadingId, setActionLoadingId] = useState("");
   const [query, setQuery] = useState("");
-  const [kindFilter, setKindFilter] = useState<NotificationFilter>("ALL");
+  const [kindFilter, setKindFilter] = useState<NotificationFilter | "UNREAD" | "ALERT">("ALL");
 
   const [userDeleteRequests, setUserDeleteRequests] = useState<UserDeleteRequest[]>([]);
   const [leadRequests, setLeadRequests] = useState<LeadStatusRequest[]>([]);
@@ -339,12 +428,45 @@ export const NotificationsScreen = () => {
 
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
+    if (kindFilter === "ALERT") return [];
     return items.filter((item) => {
-      if (kindFilter !== "ALL" && item.kind !== kindFilter) return false;
+      if (!withinDateFilter(item.createdAt, dateFilter)) return false;
+      if (kindFilter === "UNREAD" && readIds.has(itemKey(item))) return false;
+      if (kindFilter !== "ALL" && kindFilter !== "UNREAD" && item.kind !== kindFilter) return false;
       if (!q) return true;
       return buildSearchText(item).toLowerCase().includes(q);
     });
-  }, [items, kindFilter, query]);
+  }, [dateFilter, items, kindFilter, query, readIds]);
+
+  const filteredAlerts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!["ALL", "UNREAD", "ALERT"].includes(kindFilter)) return [];
+    return recentAdminRequests.filter((alert) => {
+      if (!withinDateFilter(alert.createdAt, dateFilter)) return false;
+      if (kindFilter === "UNREAD" && readIds.has(alertKey(alert))) return false;
+      return !q || alertSearchText(alert).includes(q);
+    });
+  }, [dateFilter, kindFilter, query, readIds, recentAdminRequests]);
+
+  const unreadCount = useMemo(
+    () =>
+      items.filter((item) => !readIds.has(itemKey(item))).length
+      + recentAdminRequests.filter((alert) => !readIds.has(alertKey(alert))).length,
+    [items, readIds, recentAdminRequests],
+  );
+
+  const markAllRead = () => {
+    persistReadIds(new Set([...readIds, ...items.map(itemKey), ...recentAdminRequests.map(alertKey)]));
+    markNotificationsRead();
+    setSuccess("All notifications marked as read");
+  };
+
+  const openAlert = (alert: AdminRequestEvent) => {
+    markRead(alertKey(alert));
+    const target = adminRequestTarget(alert);
+    if (target.screen === "Notifications") return;
+    navigation.navigate(target.screen, target.params);
+  };
 
   const urgentCount = useMemo(
     () => items.filter((item) => getAgeHours(item.createdAt) >= 24).length,
@@ -484,12 +606,26 @@ export const NotificationsScreen = () => {
           {FILTERS.map((filter) => (
             <AppChip
               key={filter.value}
-              label={filter.label}
+              label={filter.value === "UNREAD" ? `Unread (${unreadCount})` : filter.label}
               active={kindFilter === filter.value}
               onPress={() => setKindFilter(filter.value)}
             />
           ))}
         </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+          {DATE_FILTERS.map((filter) => (
+            <AppChip
+              key={filter.value}
+              label={filter.label}
+              active={dateFilter === filter.value}
+              onPress={() => setDateFilter(filter.value)}
+            />
+          ))}
+        </ScrollView>
+        <View style={styles.markAllRow}>
+          <Text style={styles.meta}>{unreadCount} unread</Text>
+          <AppButton title="Mark all read" variant="ghost" onPress={markAllRead} disabled={!unreadCount} />
+        </View>
       </AppCard>
 
       {!isAdmin ? (
@@ -502,7 +638,33 @@ export const NotificationsScreen = () => {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
       >
-        {filteredItems.length === 0 ? (
+        {filteredAlerts.map((alert) => {
+          const unread = !readIds.has(alertKey(alert));
+          return (
+            <AppCard key={alertKey(alert)} style={styles.requestCard as object}>
+              <View style={styles.rowBetween}>
+                <View style={styles.requestHeading}>
+                  <View style={[styles.kindIcon, styles.kindIconBlue]}>
+                    <Icon name="notifications" size={15} color={themeColor("#ffffff")} />
+                  </View>
+                  <View style={styles.requestTitleWrap}>
+                    <Text style={styles.requestType}>{alert.preview || "Realtime alert"}</Text>
+                    <Text style={styles.requestSubtitle}>{adminRequestTitle(alert)}</Text>
+                  </View>
+                </View>
+                {unread ? <View style={styles.unreadDot} /> : null}
+              </View>
+              <Text style={styles.meta}>{adminRequestContext(alert)} | {formatDate(alert.createdAt)}</Text>
+              <View style={styles.actionRow}>
+                <AppButton title="Open" variant="ghost" onPress={() => openAlert(alert)} style={styles.actionBtn as object} />
+                {unread ? (
+                  <AppButton title="Mark read" variant="ghost" onPress={() => markRead(alertKey(alert))} style={styles.actionBtn as object} />
+                ) : null}
+              </View>
+            </AppCard>
+          );
+        })}
+        {filteredItems.length === 0 && filteredAlerts.length > 0 ? null : filteredItems.length === 0 ? (
           <AppCard style={styles.emptyCard as object}>
             <View style={styles.emptyIcon}>
               <Icon name="checkmark-done" size={22} color={themeColor("#0a6544")} />
@@ -533,7 +695,10 @@ export const NotificationsScreen = () => {
                     <Text style={styles.requestSubtitle}>{getRequestTypeLabel(item.kind)}</Text>
                   </View>
                 </View>
-                <Text style={[styles.badge, isAged && styles.badgeAged]}>{isAged ? "Needs Review" : "Pending"}</Text>
+                <View style={styles.badgeWrap}>
+                  {!readIds.has(itemKey(item)) ? <View style={styles.unreadDot} /> : null}
+                  <Text style={[styles.badge, isAged && styles.badgeAged]}>{isAged ? "Needs Review" : "Pending"}</Text>
+                </View>
               </View>
               <View style={styles.metaGrid}>
                 <Text style={styles.meta}>By: {requestedBy.name} ({requestedBy.role})</Text>
@@ -569,12 +734,23 @@ export const NotificationsScreen = () => {
               )}
 
               <View style={styles.actionRow}>
-                <AppButton title="Preview" variant="ghost" onPress={() => setPreviewItem(item)} style={styles.actionBtn as object} />
+                <AppButton
+                  title="Preview"
+                  variant="ghost"
+                  onPress={() => {
+                    markRead(itemKey(item));
+                    setPreviewItem(item);
+                  }}
+                  style={styles.actionBtn as object}
+                />
                 {isAdmin ? (
                   <>
                     <AppButton
                       title={actionLoadingId === item.id ? "Approving..." : "Approve"}
-                      onPress={() => doApprove(item)}
+                      onPress={() => {
+                        markRead(itemKey(item));
+                        doApprove(item);
+                      }}
                       disabled={actionLoadingId === item.id}
                       style={styles.actionBtn as object}
                     />
@@ -828,6 +1004,9 @@ export const NotificationsScreen = () => {
 };
 
 const styles = themedStyles((c) => StyleSheet.create({
+  markAllRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.blue[500] },
+  badgeWrap: { flexDirection: "row", alignItems: "center", gap: 6 },
   error: {
     marginBottom: 10,
     padding: 10,
