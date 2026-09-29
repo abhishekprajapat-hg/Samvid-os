@@ -709,7 +709,10 @@ export const directoryFrom = (cabins) => {
   const byIdentity = new Map(active.map((client) => [client.id, { ...client, kind: "active", stays: [], totalMonths: 0, lastLeft: null }]));
 
   cabins.forEach((cabin) => {
-    cabin.previousClients.forEach((stay) => {
+    // Older board snapshots predate client history. Keep those booked/current
+    // customers visible in the directory even when the history field is absent.
+    const previousClients = Array.isArray(cabin.previousClients) ? cabin.previousClients : [];
+    previousClients.forEach((stay) => {
       const snapshot = stay.client || {};
       const identity = stay.clientId || snapshot.id || slug(stay.name);
       const record = byIdentity.get(identity) || {

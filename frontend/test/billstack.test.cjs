@@ -89,6 +89,17 @@ test('client directory no longer merges different customers with equal names', (
   assert.equal(directoryFrom(cabins).length, 2);
 });
 
+test('legacy coworking cabins without a previousClients array do not crash the client directory', () => {
+  const { directoryFrom } = board();
+  const cabins = [
+    { code: 'A1', status: 'BOOKED', seats: 2, client: { id: 'legacy-client', name: 'Legacy Customer' }, contract: { endDate: '2027-01-01', monthlyRent: 100 } },
+    { code: 'A2', status: 'RESERVED', seats: 1, client: { id: 'legacy-prospect', name: 'Legacy Prospect' }, contract: { endDate: '2027-01-01', monthlyRent: 50 }, previousClients: null },
+  ];
+  const directory = directoryFrom(cabins);
+  assert.equal(directory.map(client => client.name).sort().join('|'), 'Legacy Customer|Legacy Prospect');
+  assert.equal(directory.map(client => client.stays.length).join(','), '0,0');
+});
+
 test('server Billing metadata is consumed without replacing newer local edits or triggering a business save', () => {
   const { boardWithHistory } = board();
   const submitted = { cabins: [{ code: 'A1', client: { id: 'legacy', name: 'Old', phone: '123' } }] };
