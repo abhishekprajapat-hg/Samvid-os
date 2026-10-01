@@ -43,4 +43,155 @@ function customerPayload(companyId, type, entity) {
   return payload;
 }
 const fingerprint = (payload) => crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');
-module.exports = { externalId, modelFor, validBookedCabin, loadEligible, customerPayload, fingerprint };
+async function buildBillingContext(companyId, type, entity) {
+  if (!entity) return null;
+  if (type === 'lead') {
+    let inventory = null;
+    if (entity.inventoryId) {
+      const Inventory = require('../models/Inventory');
+      inventory = await Inventory.findOne({ _id: entity.inventoryId, companyId }).lean();
+    }
+
+    const reqType = String(entity.requirements?.inventoryType || '').toUpperCase();
+    const invType = String(inventory?.inventoryType || '').toUpperCase();
+    const isResidential = reqType === 'RESIDENTIAL' || (!reqType && invType === 'RESIDENTIAL');
+
+    const billingType = isResidential ? 'RESIDENTIAL' : 'COMMERCIAL';
+    const billingEntityCode = isResidential ? 'GOLDHAWK' : '';
+
+    const brokerage = typeof entity.brokerageReceived === 'number' && entity.brokerageReceived > 0 
+      ? entity.brokerageReceived 
+      : 0;
+
+    let propDesc = '';
+    if (inventory) {
+      propDesc = [inventory.projectName, inventory.towerName, inventory.unitNumber ? `Unit ${inventory.unitNumber}` : '']
+        .filter(Boolean).join(', ');
+    } else if (entity.projectInterested) {
+      propDesc = entity.projectInterested;
+    }
+
+    return {
+      billingType,
+      billingEntityCode,
+      sourceRef: {
+        source: 'THE_OFFICE_ON_RENT_CRM',
+        sourceType: 'lead',
+        sourceId: String(entity._id),
+        billingPurpose: 'BROKERAGE',
+        billingPeriod: '',
+      },
+      prefill: {
+        notes: propDesc ? `Property: ${propDesc}` : '',
+        reference: entity.dealPayment?.paymentReference || (inventory?.propertyId ? `PropID: ${inventory.propertyId}` : ''),
+        lineItems: [
+          {
+            productName: `Brokerage Services - ${isResidential ? 'Residential' : 'Commercial'}`,
+            quantity: 1,
+            rate: brokerage,
+            rateReliable: brokerage > 0,
+          },
+        ],
+      },
+    };
+  }
+
+  if (['coworking-client', 'board'].includes(type)) {
+    const contract = await Contract.findOne({
+      companyId,
+      clientId: entity._id,
+      status: { $in: ['ACTIVE', 'EXPIRING', 'EXPIRED'] },
+    }).sort({ createdAt: -1 }).lean();
+
+    const booking = !contract ? await Booking.findOne({
+      companyId,
+      clientId: entity._id,
+      status: { $in: ['ACTIVE', 'COMPLETED', 'CONFIRMED'] },
+    }).sort({ createdAt: -1 }).lean() : null;
+
+    const now = new Date();
+    const currentPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+    if (contract) {
+      const rent = typeof contract.rent === 'number' && contract.rent > 0 ? contract.rent : 0;
+      return {
+        billingType: 'COWORKING',
+        billingEntityCode: '',
+        sourceRef: {
+          source: 'THE_OFFICE_ON_RENT_CRM',
+          sourceType: 'coworking-contract',
+          sourceId: String(contract._id),
+          billingPurpose: 'RENT',
+          billingPeriod: currentPeriod,
+        },
+        prefill: {
+          notes: `Contract: ${contract.contractCode || contract._id}`,
+          reference: contract.contractCode || '',
+          lineItems: [
+            {
+              productName: `Coworking Space Rental (${currentPeriod})`,
+              quantity: 1,
+              rate: rent,
+              rateReliable: rent > 0,
+            },
+          ],
+        },
+      };
+    }
+
+    if (booking) {
+      const price = typeof booking.price === 'number' && booking.price > 0 ? booking.price : 0;
+      return {
+        billingType: 'COWORKING',
+        billingEntityCode: '',
+        sourceRef: {
+          source: 'THE_OFFICE_ON_RENT_CRM',
+          sourceType: 'coworking-booking',
+          sourceId: String(booking._id),
+          billingPurpose: 'BOOKING',
+          billingPeriod: '',
+        },
+        prefill: {
+          notes: `Booking: ${booking.bookingCode || booking._id}`,
+          reference: booking.bookingCode || '',
+          lineItems: [
+            {
+              productName: `Coworking Booking - ${booking.bookingCode || ''}`,
+              quantity: 1,
+              rate: price,
+              rateReliable: price > 0,
+            },
+          ],
+        },
+      };
+    }
+
+    return {
+      billingType: 'COWORKING',
+      billingEntityCode: '',
+      sourceRef: {
+        source: 'THE_OFFICE_ON_RENT_CRM',
+        sourceType: 'coworking-client',
+        sourceId: String(entity._id),
+        billingPurpose: 'COWORKING_SERVICE',
+        billingPeriod: '',
+      },
+      prefill: {
+        notes: `Client: ${entity.companyName || entity.name}`,
+        reference: '',
+        lineItems: [
+          {
+            productName: 'Coworking Services',
+            quantity: 1,
+            rate: 0,
+            rateReliable: false,
+          },
+        ],
+      },
+    };
+  }
+
+  return null;
+}
+
+module.exports = { externalId, modelFor, validBookedCabin, loadEligible, customerPayload, fingerprint, buildBillingContext };

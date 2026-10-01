@@ -39,8 +39,10 @@ async function post(companyId, path, payload) {
 async function upsertCustomer(companyId, payload) {
   return parseCustomerResponse(await post(companyId, '/api/integrations/customers/upsert', payload));
 }
-async function createInvoiceHandoff(companyId, customerId) {
-  const body = await post(companyId, '/api/integrations/handoffs/invoice', { customerId });
+async function createInvoiceHandoff(companyId, customerId, billingContext = null) {
+  const payload = { customerId };
+  if (billingContext) payload.billingContext = billingContext;
+  const body = await post(companyId, '/api/integrations/handoffs/invoice', payload);
   const handoffUrl = (body?.data || body)?.handoffUrl;
   let url;
   try { url = new URL(handoffUrl); } catch { throw createHttpError(502, 'BillStack returned an invalid handoff'); }

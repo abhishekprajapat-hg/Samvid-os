@@ -35,7 +35,9 @@ const handle = (action) => async (req, res) => {
     const { companyId, type, id } = customer;
     if (action === 'handoff') {
       const customerId = await ensureSynced(companyId, type, id);
-      return res.json({ handoffUrl: await createInvoiceHandoff(companyId, customerId) });
+      const { buildBillingContext } = require('../services/billstackCustomer.service');
+      const billingContext = await buildBillingContext(companyId, type, customer.entity);
+      return res.json({ handoffUrl: await createInvoiceHandoff(companyId, customerId, billingContext) });
     }
     if (action === 'sync') {
       getBillstackConfig(companyId);
