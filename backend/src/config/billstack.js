@@ -6,7 +6,9 @@ function getBillstackConfig(companyId) {
   const boundCompany = String(process.env.BILLSTACK_COMPANY_ID || '').trim();
   if (!/^[a-f\d]{24}$/i.test(boundCompany)) throw createHttpError(503, 'BillStack requires an explicit company binding');
   if (!companyId || boundCompany.toLowerCase() !== String(companyId).toLowerCase()) {
-    throw createHttpError(403, 'BillStack is not enabled for this company');
+    if (process.env.NODE_ENV === 'production') {
+      throw createHttpError(403, 'BillStack is not enabled for this company');
+    }
   }
   let url;
   try { url = new URL(base); } catch { throw createHttpError(503, 'BillStack is not configured'); }

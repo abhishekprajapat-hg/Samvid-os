@@ -158,9 +158,17 @@ const patch = (cabins, codes, update) =>
  * the parts always add back up to the agreed total.
  */
 const shareOf = (cabin, selected, total) => {
-  const list = selected.reduce((sum, item) => sum + item.monthlyRent, 0);
-  if (!list) return 0;
-  return Math.round((cabin.monthlyRent / list) * total);
+  const numericTotal = Number(total) || 0;
+  if (!numericTotal) return 0;
+  const list = selected.reduce((sum, item) => sum + (Number(item.monthlyRent) || 0), 0);
+  if (list > 0) {
+    return Math.round(((Number(cabin.monthlyRent) || 0) / list) * numericTotal);
+  }
+  const totalSeats = selected.reduce((sum, item) => sum + (Number(item.seats) || 0), 0);
+  if (totalSeats > 0) {
+    return Math.round(((Number(cabin.seats) || 0) / totalSeats) * numericTotal);
+  }
+  return Math.round(numericTotal / (selected.length || 1));
 };
 
 export const boardReducer = (state, action) => {

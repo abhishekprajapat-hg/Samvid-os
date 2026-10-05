@@ -20,10 +20,18 @@ async function resolveCustomer(req) {
       const board = await Board.findOne({ companyId }).lean();
       const cabin = board?.state?.cabins?.find(c => c.code === id);
       if (!validBookedCabin(cabin)) throw createHttpError(409, 'Only booked customers are eligible');
-      if (cabin.client.billingIdentityError) throw createHttpError(409, 'Customer identity needs review or complete contact details before billing');
-      if (cabin.client.billingIdentityVerified !== true) throw createHttpError(409, 'Customer identity verification is pending; retry shortly');
+      if (cabin.client.billingIdentityError) throw createHttpError(409, cabin.client.billingIdentityError);
       id = cabin.client.canonicalClientId;
-      if (!id) throw createHttpError(409, cabin.client.billingIdentityError || 'Customer identity is pending; save complete customer details and retry');
+      if (!id) {
+        const Client = require('../models/CoworkingClient');
+        const phone = String(cabin.client?.phone || '').replace(/\D/g, '');
+        const found = await Client.findOne({ companyId, $or: [
+          ...(phone ? [{ phone }] : []),
+          ...(cabin.client?.email ? [{ email: cabin.client.email.trim().toLowerCase() }] : []),
+        ] });
+        if (found) id = String(found._id);
+      }
+      if (!id) throw createHttpError(409, 'Customer identity is pending; save complete customer details and retry');
       type = 'coworking-client';
     }
   } else throw createHttpError(400, 'Invalid customer type');

@@ -23,7 +23,7 @@ async function loadEligible(companyId, type, id) {
     if (entity.status !== 'CLOSED') throw createHttpError(409, 'Only closed customers are eligible');
   } else {
     const board = await Board.findOne({ companyId }).lean();
-    const booked = board?.state?.cabins?.some(c => validBookedCabin(c) && c.client.billingIdentityVerified === true && !c.client.billingIdentityError && String(c.client.canonicalClientId) === String(id));
+    const booked = board?.state?.cabins?.some(c => validBookedCabin(c) && !c.client.billingIdentityError && (String(c.client.canonicalClientId) === String(id) || String(c.client.id) === String(id)));
     const operational = booked || await Booking.exists({ companyId, clientId: id, status: { $in: ['ACTIVE', 'COMPLETED'] } })
       || await Contract.exists({ companyId, clientId: id, status: { $in: ['ACTIVE', 'EXPIRING', 'EXPIRED', 'TERMINATED'] } });
     if (!operational) throw createHttpError(409, 'Customer has no eligible booking or contract');
@@ -90,6 +90,7 @@ async function buildBillingContext(companyId, type, entity) {
             quantity: 1,
             rate: brokerage,
             rateReliable: brokerage > 0,
+            hsnSac: '997222',
           },
         ],
       },
@@ -133,6 +134,7 @@ async function buildBillingContext(companyId, type, entity) {
               quantity: 1,
               rate: rent,
               rateReliable: rent > 0,
+              hsnSac: '997212',
             },
           ],
         },
@@ -160,6 +162,47 @@ async function buildBillingContext(companyId, type, entity) {
               quantity: 1,
               rate: price,
               rateReliable: price > 0,
+              hsnSac: '997212',
+            },
+          ],
+        },
+      };
+    }
+
+    const board = await Board.findOne({ companyId }).lean();
+    const entityIdStr = String(entity._id || entity);
+    const cabin = board?.state?.cabins?.find(c =>
+      c.status === 'BOOKED' && (
+        String(c.client?.canonicalClientId) === entityIdStr
+        || String(c.client?.id) === entityIdStr
+        || (entity.companyName && c.client?.companyName?.toLowerCase() === entity.companyName.toLowerCase())
+        || (entity.name && c.client?.name?.toLowerCase() === entity.name.toLowerCase())
+      )
+    );
+
+    if (cabin) {
+      const rent = Number(cabin.contract?.monthlyRent ?? cabin.monthlyRent ?? 0);
+      const cabinLabel = cabin.label || cabin.code;
+      const agreementId = cabin.contract?.id || '';
+      return {
+        billingType: 'COWORKING',
+        billingEntityCode: '',
+        sourceRef: {
+          source: 'THE_OFFICE_ON_RENT_CRM',
+          sourceType: 'board',
+          sourceId: `${cabin.code}:${agreementId || currentPeriod}`,
+          billingPurpose: 'RENT',
+          billingPeriod: currentPeriod,
+        },
+        prefill: {
+          notes: `Cabin: ${cabinLabel} (${cabin.seats} Seater) | Agreement: ${agreementId} | Client: ${entity.companyName || entity.name}`,
+          reference: agreementId || cabin.code,
+          lineItems: [
+            {
+              productName: `Coworking Space Rental - Cabin ${cabinLabel} (${cabin.seats} Seats) - ${currentPeriod}`,
+              quantity: 1,
+              rate: rent,
+              rateReliable: rent > 0,
             },
           ],
         },
