@@ -22,6 +22,7 @@ import {
   temperatureTone,
   transactionLabel,
 } from "../leadPipeline";
+import { PhotoOverlay, profilePhotoOf } from "../../../components/common/PhotoOverlay";
 
 /*
  * The comp's Lead Details summary: who they are, where they are in the
@@ -165,6 +166,7 @@ export const LeadOverview = ({
             <View style={styles.assignedRow}>
               <View style={styles.assignedAvatar}>
                 <Text style={styles.assignedAvatarText}>{initialsOf(assigneeName)}</Text>
+                <PhotoOverlay uri={profilePhotoOf(lead.assignedTo)} />
               </View>
               <Text style={styles.assignedName} numberOfLines={1}>
                 {assigneeName || "Unassigned"}
@@ -377,6 +379,7 @@ export const LeadOverview = ({
             <View key={entry._id || index} style={[styles.noteRow, index > 0 && styles.noteRowGap]}>
               <View style={styles.noteAvatar}>
                 <Text style={styles.noteAvatarText}>{initialsOf(entry.createdBy?.name)}</Text>
+                <PhotoOverlay uri={profilePhotoOf(entry.createdBy)} />
               </View>
               <View style={styles.grow}>
                 <View style={styles.noteHead}>

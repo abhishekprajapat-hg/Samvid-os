@@ -34,7 +34,7 @@ const listAuditLogs = async ({ companyId, query = {} }) => {
 
   const [rows, totalCount] = await Promise.all([
     AuditLog.find(filter)
-      .populate("actorId", "name email role")
+      .populate("actorId", "name email role profileImageUrl")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)

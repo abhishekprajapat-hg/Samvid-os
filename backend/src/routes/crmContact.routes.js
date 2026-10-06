@@ -3,6 +3,7 @@ const Contact = require("../models/CrmContact");
 const { normalizePhone, upsertContact, bulkUpsertContacts, MAX_BULK_CONTACT_ROWS } = require("../services/crmContact.service");
 const { requirePageAccess, requirePageActionForMethod, checkRoleOrPageAccess } = require("../middleware/pageAccess.middleware");
 const { writeAuditLog } = require("../services/auditLog.service");
+const { requireAdminApprovalForDelete } = require("../services/deleteApproval.service");
 
 // The owner/broker directory is the most sensitive list in the CRM. Roles
 // outside sales reach it only on an explicit Inventory page grant.
@@ -68,12 +69,10 @@ router.post("/bulk", require("../middleware/rateLimit.middleware").writeLimiter,
 /*
  * Deleting an owner or broker is irreversible and leaves no copy behind, so it
  * needs a stronger gate than the rest of the directory: management only, plus
- * an audit entry naming who removed which record.
+ * an audit entry naming who removed which record. A Manager's delete becomes a
+ * request that an Admin approves (BUG-34).
  */
-router.delete("/:contactId",
- require("../middleware/rateLimit.middleware").writeLimiter,
- require("../middleware/auth.middleware").checkRole(["ADMIN", "MANAGER"]),
- async (req, res) => {
+const deleteContact = async (req, res) => {
  try {
   if (!/^[a-f0-9]{24}$/i.test(req.params.contactId)) return res.status(400).json({ message: "Invalid contact" });
   const deleted = await Contact.findOneAndDelete({ _id: req.params.contactId, companyId: req.user.companyId });
@@ -89,6 +88,23 @@ router.delete("/:contactId",
   });
   res.json({ message: "Contact removed", contactId: deleted._id });
  } catch (error) { req.log?.error(error); res.status(500).json({ message: "Failed to remove contact" }); }
-});
+};
+
+router.delete("/:contactId",
+ require("../middleware/rateLimit.middleware").writeLimiter,
+ require("../middleware/auth.middleware").checkRole(["ADMIN", "MANAGER"]),
+ requireAdminApprovalForDelete("crm_contact", {
+  label: "Owner / broker contact",
+  pageKey: "inventory",
+  idParam: "contactId",
+  handler: deleteContact,
+  describe: async ({ id, companyId }) => {
+   const contact = await Contact.findOne({ _id: id, companyId }).select("name phone kind").lean();
+   if (!contact) return null;
+   const kind = contact.kind === "BROKER" ? "Broker" : "Owner";
+   return [`${kind}: ${contact.name || ""}`.trim(), contact.phone].filter(Boolean).join(" · ");
+  },
+ }),
+ deleteContact);
 
 module.exports = router;

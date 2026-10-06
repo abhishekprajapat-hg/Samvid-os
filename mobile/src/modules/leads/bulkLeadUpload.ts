@@ -114,7 +114,8 @@ export const resolveLeadCsvHeaderKey = (rawHeader: unknown) => {
   if (["requirement", "requirment", "requiremnt", "requiremewnt"].includes(normalized)) return "requirement";
   if (["projectname"].includes(normalized)) return "projectName";
   if (["comment", "comments", "remark", "remarks", "feedback"].includes(normalized)) return "comment";
-  if (["company", "companyname", "working", "business", "workprofile"].includes(normalized)) return "company";
+  if (["workprofile", "profession", "occupation", "clientprofession"].includes(normalized)) return "workProfile";
+  if (["company", "companyname", "working", "business"].includes(normalized)) return "company";
   if (["status", "leadstatus", "leadstutas", "leadstutus"].includes(normalized)) return "status";
   if (["date", "leaddate"].includes(normalized)) return "date";
   if (["followup", "followup2", "followupdate", "followupdate2"].includes(normalized)) return "followUp";
@@ -194,7 +195,7 @@ const buildBulkLeadProjectSummary = (row: Row) => {
     transactionType ? `Transaction: ${transactionType}` : "",
     row.city ? `Location: ${row.city}` : "",
     row.budget ? `Budget: ${row.budget}` : "",
-    row.company ? `Work Profile: ${row.company}` : "",
+    row.company ? `Company: ${row.company}` : "",
     row.callUpdate ? `Call Update: ${row.callUpdate}` : "",
     row.comment ? `Comment: ${row.comment}` : "",
     row.visit ? `Visit: ${row.visit}` : "",
@@ -326,6 +327,7 @@ export type BulkLeadRow = {
   email: string;
   city: string;
   projectInterested: string;
+  clientProfession?: string;
   requirements?: Record<string, any>;
   source: "META" | "MANUAL";
   status: string;
@@ -366,6 +368,7 @@ const normalizeBulkLeadRow = ({
     phone,
     email: row.email || "",
     city: row.city || "",
+    clientProfession: normalizeBulkCellText(row.workProfile).slice(0, 120),
     projectInterested: buildBulkLeadProjectSummary(row),
     requirements: buildBulkLeadRequirements(row, sheetType),
     source: sourceText.includes("META") ? "META" : "MANUAL",

@@ -154,6 +154,7 @@ app.use("/api/chat", require("./routes/chat.routes"));
 app.use("/api/assistant", require("./routes/officeAssistant.routes"));
 app.use("/api/contacts", require("./routes/crmContact.routes"));
 app.use("/api/roles", require("./routes/customRole.routes"));
+app.use("/api/delete-requests", require("./routes/deleteRequest.routes"));
 app.use("/api/push", require("./routes/push.routes"));
 app.use("/api/tasks", require("./routes/task.routes"));
 app.use("/api/coworking", require("./routes/coworkingAccess.routes"));

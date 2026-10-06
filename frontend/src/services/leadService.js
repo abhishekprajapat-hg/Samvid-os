@@ -44,6 +44,19 @@ export const getAllLeads = async (params = {}) => {
   return rows;
 };
 
+/*
+ * Exact dashboard counts, computed by the server over the same scope and
+ * filters as the lead list (so a dashboard number always matches the Leads
+ * page, however many leads there are). Accepts the same filters as GET /leads,
+ * e.g. { assignedTo }.
+ */
+export const getLeadSummary = async (params = {}) => {
+  const res = await api.get("/leads/summary", {
+    params: { tzOffsetMinutes: new Date().getTimezoneOffset(), ...params },
+  });
+  return res.data?.summary || null;
+};
+
 export const getLeadById = async (leadId) => {
   const res = await api.get(`/leads/${leadId}`);
   return res.data?.lead || null;
@@ -69,6 +82,11 @@ export const updateLeadStatus = async (leadId, payload) => {
   return res.data?.lead;
 };
 
+export const completeLeadFollowUp = async (leadId) => {
+  const res = await api.patch(`/leads/${leadId}/follow-up/complete`);
+  return res.data?.lead || null;
+};
+
 export const assignLead = async (leadId, payloadOrUserId) => {
   const payload =
     typeof payloadOrUserId === "object" && payloadOrUserId !== null
@@ -86,6 +104,12 @@ export const addLeadRelatedProperty = async (leadId, inventoryId) => {
 export const selectLeadRelatedProperty = async (leadId, inventoryId) => {
   const res = await api.patch(`/leads/${leadId}/properties/${inventoryId}/select`);
   return res.data?.lead || null;
+};
+
+// Admin: deletes. Manager: answers 202 { approvalRequired } and waits for an Admin.
+export const deleteLead = async (leadId) => {
+  const res = await api.delete(`/leads/${leadId}`);
+  return res.data || null;
 };
 
 export const removeLeadRelatedProperty = async (leadId, inventoryId) => {

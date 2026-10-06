@@ -53,6 +53,7 @@ import {
   temperatureTone,
   type StageKey,
 } from "./leadPipeline";
+import { PhotoOverlay } from "../../components/common/PhotoOverlay";
 
 /*
  * The pipeline, drawn to the comp.
@@ -504,6 +505,7 @@ export const LeadsMatrixScreen = () => {
                     <Text style={[styles.ownerAvatarText, { color: avatarTone(owner.name).fg }]}>
                       {initialsOf(owner.name)}
                     </Text>
+                    <PhotoOverlay uri={owner.photo} />
                   </View>
                 </View>
               ) : (

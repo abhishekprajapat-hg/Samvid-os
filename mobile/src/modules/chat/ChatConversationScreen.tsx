@@ -59,6 +59,7 @@ import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import type { ChatCallLog, ChatContact, ChatConversation, ChatMessage } from "../../types";
 import { themedStyles, themeColor } from "../../theme/themedStyles";
+import { toAbsoluteUrl } from "../../services/uploadService";
 
 const mergeMessages = (prev: ChatMessage[], incoming: ChatMessage[]) => {
   const map = new Map<string, ChatMessage>();
@@ -127,7 +128,7 @@ const formatDayLabel = (dateInput: string | Date) => {
 
 const renderAvatar = (name: string, avatarUrl: string, size = 32) => {
   if (avatarUrl) {
-    return <Image source={{ uri: avatarUrl }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+    return <Image source={{ uri: toAbsoluteUrl(avatarUrl) }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
   }
 
   return (

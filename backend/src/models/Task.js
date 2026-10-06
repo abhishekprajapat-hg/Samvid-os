@@ -29,7 +29,7 @@ const taskSchema = new mongoose.Schema(
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      default: null,
+      required: true,
       index: true,
     },
     companyId: {
@@ -55,7 +55,23 @@ const taskSchema = new mongoose.Schema(
         title: { type: String, required: true, trim: true },
         isCompleted: { type: Boolean, default: false },
         description: { type: String, default: "", maxlength: 5000 },
-        dueDate: { type: Date, default: null }
+        assignedTo: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          default: null,
+          index: true,
+        },
+        dueDate: { type: Date, default: null },
+        status: {
+          type: String,
+          enum: ["TODO", "IN_PROGRESS", "COMPLETED", "BACKLOG"],
+          default: "TODO",
+        },
+        priority: {
+          type: String,
+          enum: ["LOW", "MEDIUM", "HIGH"],
+          default: "MEDIUM",
+        },
       }
     ],
     assignmentHistory: [{
@@ -78,6 +94,7 @@ taskSchema.index({ companyId: 1, status: 1 });
 taskSchema.index({ companyId: 1, assignedTo: 1 });
 taskSchema.index({ companyId: 1, createdBy: 1 });
 taskSchema.index({ companyId: 1, assignedTo: 1, status: 1, dueDate: 1 });
+taskSchema.index({ companyId: 1, "subtasks.assignedTo": 1, "subtasks.status": 1, "subtasks.dueDate": 1 });
 taskSchema.index({ companyId: 1, status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("Task", taskSchema);

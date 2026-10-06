@@ -56,7 +56,7 @@ const ServiceTermsNotice = lazy(() => import("./modules/legal/ServiceTermsNotice
 const Performance = lazy(() => import("./modules/reports/Performance"));
 const UserProfile = lazy(() => import("./modules/profile/UserProfile"));
 const SharedInventoryView = lazy(() => import("./modules/inventory/SharedInventoryView"));
-const TaskManager = lazy(() => import("./modules/tasks/TaskManager"));
+const TaskManager = lazy(() => import("./modules/tasks/TaskWorkspace"));
 
 // TEMPORARY: Phase 4 component review surface. Removed in Phase 14.
 const KitchenSink = lazy(() => import("./modules/dev/KitchenSink"));
@@ -221,9 +221,9 @@ const resolvePageHeader = (pathname, userRole) => {
 
   if (pathname.startsWith("/calendar")) {
     return {
-      title: "Schedule Command Center",
-      subtitle: "Meetings, reminders and execution timeline visibility",
-      scopeLabel: "Schedule",
+      title: "Calendar",
+      subtitle: "Follow-ups, tasks and meetings in one place",
+      scopeLabel: "Calendar",
     };
   }
 
@@ -773,7 +773,7 @@ export default function App() {
           withPageAccess(
             "tasks",
             <TaskManager theme={theme} />,
-            ["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", ...PRODUCTION_ROLES],
+            ["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", ...PRODUCTION_ROLES, "CHANNEL_PARTNER", "COWORKING_ADMIN"],
           )
         }
       />

@@ -167,8 +167,7 @@ export const SharedInventoryViewScreen = () => {
   }, [asset?.amenities, layout, amenities, residential, building]);
 
   const summaryRows: Row[] = [
-    ["Project", asset?.projectName], ["Tower / Block", asset?.towerName], ["Unit", asset?.unitNumber],
-    ["Property ID", asset?.propertyId], ["Building", asset?.buildingName], ["Floor", asset?.floorNumber],
+    ["Project", asset?.projectName], ["Property ID", asset?.propertyId],
     ["Property Type", label(asset?.inventoryType)],
     [isCommercial ? "Commercial Type" : "Residential Type", label(isCommercial ? commercial.officeType : residential.propertyType)],
     ["Furnishing", label(asset?.furnishingStatus)], ["Built-up Area", area(asset?.builtUpArea, asset?.areaUnit)],
@@ -176,9 +175,9 @@ export const SharedInventoryViewScreen = () => {
     ["Maintenance", shown(asset?.maintenanceCharges) ? price(asset.maintenanceCharges) : null],
   ];
   const infoRows: Row[] = [
-    ["Project", asset?.projectName], ["Tower / Block", asset?.towerName], ["Unit", asset?.unitNumber],
-    ["Property ID", asset?.propertyId], ["Category", label(asset?.category)], ["Furnishing", label(asset?.furnishingStatus)],
-    ["Floor", asset?.floorNumber], ["Total Floors", asset?.totalFloors],
+    ["Project", asset?.projectName], ["Property ID", asset?.propertyId],
+    ["Category", label(asset?.category)], ["Furnishing", label(asset?.furnishingStatus)],
+    ["Total Floors", asset?.totalFloors],
   ];
   const detailRows: Row[] = isCommercial
     ? [

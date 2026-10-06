@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
 import { Button } from "../../../components/ui";
 import api from "../../../services/api";
+import { deleteOutcomeMessage, isDeleteApprovalPending } from "../../../services/deleteRequestService";
 import { usePermissions } from "../../../context/usePermissions";
 import { parseContactFile, downloadContactTemplate, EMPTY_CONTACT } from "../contactBulkImport";
 import ContactFormDialog from "./ContactFormDialog";
@@ -74,11 +75,16 @@ const ContactDatabasePage = ({ kind, title, blurb }) => {
   };
 
   const handleDelete = async (contact) => {
-    if (!window.confirm(`Remove ${contact.name} from the ${title}? Any leads already linked to them stay as they are.`)) return;
+    // A Manager's delete is a request an Admin approves.
+    const needsApproval = String(localStorage.getItem("role") || "").trim().toUpperCase() === "MANAGER";
+    const question = needsApproval
+      ? `Ask Admin to remove ${contact.name} from the ${title}? It stays until they approve.`
+      : `Remove ${contact.name} from the ${title}? Any leads already linked to them stay as they are.`;
+    if (!window.confirm(question)) return;
     try {
-      await api.delete(`/contacts/${contact._id}`);
-      setNotice(`${contact.name} removed`);
-      refresh();
+      const { data } = await api.delete(`/contacts/${contact._id}`);
+      setNotice(deleteOutcomeMessage(data, `${contact.name} removed`));
+      if (!isDeleteApprovalPending(data)) refresh();
     } catch (deleteError) {
       setError(deleteError.response?.data?.message || "Unable to remove contact");
     }

@@ -9,7 +9,10 @@ const {
   requirePageAction,
   requirePageActionForMethod,
   checkRoleOrPageAccess,
+  checkRoleOrPageAction,
 } = require("../middleware/pageAccess.middleware");
+const { requireAdminApprovalForDelete, describeByModel } = require("../services/deleteApproval.service");
+const Lead = require("../models/Lead");
 
 /*
  * The built-in lead hierarchy. Anyone outside it (Production Executive,
@@ -70,6 +73,15 @@ router.get(
   "/",
   authMiddleware.protect,
   leadController.getAllLeads
+);
+
+// ======================================
+// DASHBOARD SUMMARY (same scope + filters as GET /) ⚠️ above :leadId
+// ======================================
+router.get(
+  "/summary",
+  authMiddleware.protect,
+  leadController.getLeadSummary
 );
 
 // ======================================
@@ -177,6 +189,24 @@ router.patch(
 );
 
 // ======================================
+// DELETE LEAD - Admin deletes; a Manager's delete waits for Admin approval.
+// ======================================
+router.delete(
+  "/:leadId",
+  writeLimiter,
+  authMiddleware.protect,
+  checkRoleOrPageAction(["ADMIN", "MANAGER"], "delete", "leads", "my_leads"),
+  requireAdminApprovalForDelete("lead", {
+    label: "Lead",
+    pageKey: "leads",
+    idParam: "leadId",
+    handler: leadController.deleteLead,
+    describe: describeByModel(Lead, ["name", "phone"]),
+  }),
+  leadController.deleteLead
+);
+
+// ======================================
 // UPDATE STATUS
 // ======================================
 router.patch(
@@ -185,6 +215,14 @@ router.patch(
   authMiddleware.protect,
   requirePageAction("edit", "leads", "my_leads"),
   leadController.updateLeadStatus
+);
+
+router.patch(
+  "/:leadId/follow-up/complete",
+  writeLimiter,
+  authMiddleware.protect,
+  requirePageAction("follow_up", "leads", "my_leads"),
+  leadController.completeLeadFollowUp
 );
 
 router.post(

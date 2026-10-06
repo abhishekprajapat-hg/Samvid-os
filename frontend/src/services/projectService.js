@@ -23,6 +23,9 @@ export const updateProject = async (projectId, payload) => {
   return res.data?.project;
 };
 
+// For a Manager this only sends a delete request: the result then has
+// approvalRequired: true (see deleteRequestService.js).
 export const deleteProject = async (projectId) => {
-  await api.delete(`/projects/${projectId}`);
+  const res = await api.delete(`/projects/${projectId}`);
+  return res.data || null;
 };

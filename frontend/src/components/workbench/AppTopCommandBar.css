@@ -14,7 +14,7 @@
 .app-header-logout { gap: 7px; padding: 0 10px; font-size: 12px; }
 .app-header-icon:hover, .app-header-logout:hover { background: #eef3ff; }
 .app-header-date { display: flex; align-items: center; gap: 9px; height: 40px; padding: 0 12px; border: 1px solid #e0e5ed; border-radius: 12px; font-size: 12px; white-space: nowrap; }
-.app-header-avatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: #2549d6; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; }
+.app-header-avatar { display: grid; place-items: center; overflow: hidden; padding: 0; width: 40px; height: 40px; border-radius: 50%; background: #2549d6; color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; }
 .app-header-unread { position: absolute; top: -5px; right: -5px; min-width: 16px; padding: 1px 3px; border-radius: 20px; background: #d64545; color: #fff; font-size: 9px; }
 .app-header-menu { display: none; }
 .app-context-header button:focus-visible, .app-context-header input:focus-visible { outline: 2px solid #3a63f0; outline-offset: 2px; }

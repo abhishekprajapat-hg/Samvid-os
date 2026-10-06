@@ -224,15 +224,20 @@ export const DocumentChecklist = ({
         </View>
       </View>
 
-      {set.map((spec) => (
-        <DocumentRow
-          key={`${spec.key}:${byKey.get(spec.key)?.id || "missing"}`}
-          spec={spec}
-          uploaded={byKey.get(spec.key)}
-          readOnly={readOnly || busy || !onChange}
-          onUpload={upload}
-          onRemove={remove}
-        />
+      {set.map((spec, index) => (
+        <React.Fragment key={`${spec.key}:${byKey.get(spec.key)?.id || "missing"}`}>
+          {/* Person 1 / Person 2 (or Signing authority 1 / 2) as separate blocks. */}
+          {spec.group && spec.group !== set[index - 1]?.group ? (
+            <Text style={styles.groupTitle}>{spec.group}</Text>
+          ) : null}
+          <DocumentRow
+            spec={spec}
+            uploaded={byKey.get(spec.key)}
+            readOnly={readOnly || busy || !onChange}
+            onUpload={upload}
+            onRemove={remove}
+          />
+        </React.Fragment>
       ))}
     </View>
   );
@@ -241,6 +246,7 @@ export const DocumentChecklist = ({
 const styles = brandStyles((b) =>
   StyleSheet.create({
     root: { gap: 8 },
+    groupTitle: { marginTop: 6, fontSize: t.label, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase", color: b.textSecondary },
     message: { fontSize: t.label, lineHeight: 16, color: b.infoInk },
     summary: { flexDirection: "row", gap: 9, padding: 10, borderRadius: round.field },
     summaryDone: { backgroundColor: b.tint },

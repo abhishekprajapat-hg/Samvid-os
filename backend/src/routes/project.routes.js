@@ -11,6 +11,8 @@ const {
   requirePageActionForMethod,
   checkRoleOrPageAction,
 } = require("../middleware/pageAccess.middleware");
+const Project = require("../models/Project");
+const { requireAdminApprovalForDelete, describeByModel } = require("../services/deleteApproval.service");
 
 const PROJECT_VIEW_ROLES = [
   "ADMIN",
@@ -22,6 +24,7 @@ const PROJECT_VIEW_ROLES = [
 const PROJECT_MANAGE_ROLES = ["ADMIN", "MANAGER"];
 
 router.use(authMiddleware.protect);
+router.use(require("../middleware/partnerInventoryAccess.middleware").requirePartnerInventoryAccess);
 router.use(checkRoleOrPageAccess(PROJECT_VIEW_ROLES, "projects"));
 router.use(companyMiddleware.requireCompanyContext);
 router.use(requirePageAccess("projects"));
@@ -44,10 +47,18 @@ router.patch(
   projectController.updateProject,
 );
 
+// Managers may ask; the delete itself runs only when an Admin approves.
 router.delete(
   "/:id",
   writeLimiter,
-  checkRoleOrPageAction(["ADMIN"], "delete", "projects"),
+  checkRoleOrPageAction(PROJECT_MANAGE_ROLES, "delete", "projects"),
+  requireAdminApprovalForDelete("project", {
+    label: "Project",
+    pageKey: "projects",
+    idParam: "id",
+    handler: projectController.deleteProject,
+    describe: describeByModel(Project, ["projectName"], { deletedAt: null }),
+  }),
   projectController.deleteProject,
 );
 

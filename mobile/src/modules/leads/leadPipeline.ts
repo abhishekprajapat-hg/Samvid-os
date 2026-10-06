@@ -310,10 +310,11 @@ export const avatarTone = (name?: string) => {
   return AVATAR_TONES[hash % AVATAR_TONES.length];
 };
 
-export const assigneeOf = (lead: Lead): { id: string; name: string } => {
+export const assigneeOf = (lead: Lead): { id: string; name: string; photo: string } => {
   const value = lead.assignedTo;
   if (value && typeof value === "object") {
-    return { id: String(value._id || ""), name: String(value.name || "") };
+    const row = value as { _id?: unknown; name?: unknown; profileImageUrl?: unknown };
+    return { id: String(row._id || ""), name: String(row.name || ""), photo: String(row.profileImageUrl || "") };
   }
-  return { id: "", name: "" };
+  return { id: "", name: "", photo: "" };
 };

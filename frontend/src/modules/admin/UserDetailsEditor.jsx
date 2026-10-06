@@ -48,6 +48,7 @@ import { getTasks } from "../../services/taskService";
 import { getProjectsWithMeta } from "../../services/projectService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const REPORTING_PARENT_ROLES = {
   MANAGER: ["ADMIN"],
@@ -56,7 +57,8 @@ const REPORTING_PARENT_ROLES = {
   PRODUCTION_EXECUTIVE: ["MANAGER"],
   COMMUNITY_MANAGER: ["MANAGER"],
   CHANNEL_PARTNER: ["MANAGER"],
-  COWORKING_ADMIN: ["ADMIN"],
+  // Every role except Admin reports to a Manager.
+  COWORKING_ADMIN: ["MANAGER"],
 };
 
 const ROLE_LABELS = {
@@ -609,6 +611,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
     return [
       { label: "Present / Working", value: Number(summary.presentDays || 0), tone: "emerald" },
       { label: "Late", value: Number(summary.lateDays || 0), tone: "rose" },
+      { label: "On time", value: `${Number(summary.punctualityPercent || 0)}%`, tone: "emerald" },
       { label: "Half Day", value: Number(summary.halfDays || 0), tone: "blue" },
       { label: "Absent", value: Number(summary.absentDays || 0), tone: "rose" },
       { label: "Leave", value: Number(summary.leaveDays || 0), tone: "teal" },
@@ -624,11 +627,17 @@ const UserDetailsEditor = ({ theme = "light" }) => {
     const absentDays = Number(summary.absentDays || 0);
     const lateDays = Number(summary.lateDays || 0);
     const totalWorkedHours = Number(summary.totalWorkedHours || 0);
-    const workingDaysInMonth = calendarDays.filter((day) => day.dateKey && !day.isSunday).length;
+    // The server counts working days elapsed (weekly offs, future days and
+    // days before joining excluded) and the percentage from the records.
+    const workingDaysInMonth = Number.isFinite(Number(summary.workingDays))
+      ? Number(summary.workingDays)
+      : calendarDays.filter((day) => day.dateKey && !day.isSunday).length;
     const attendedDays = presentDays + halfDays * 0.5;
-    const attendancePercent = workingDaysInMonth
-      ? Math.min(100, Math.round((attendedDays / workingDaysInMonth) * 100))
-      : 0;
+    const attendancePercent = Number.isFinite(Number(summary.attendancePercent))
+      ? Number(summary.attendancePercent)
+      : workingDaysInMonth
+        ? Math.min(100, Math.round((attendedDays / workingDaysInMonth) * 100))
+        : 0;
 
     const donutData = [
       { name: "Present", value: presentDays, color: CHART_COLORS.emerald },
@@ -1059,7 +1068,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
         <section className={`lg:col-span-4 rounded-xl border p-4 ${isDarkTheme ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
           <div className="flex items-center gap-3">
             <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-lg font-bold ${isDarkTheme ? "bg-cyan-500/10 text-cyan-300" : "bg-cyan-50 text-cyan-700"}`}>
-              {initials || <UserCircle2 size={26} />}
+              <AvatarFace user={profile} initials={initials} fallback={<UserCircle2 size={26} />} />
             </div>
             <div className="min-w-0">
               <h2 className={`truncate text-base font-bold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>
@@ -1715,7 +1724,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
               </button>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-6">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
               {attendanceSummaryCards.map((card) => (
                 <StatTile key={card.label} label={card.label} value={card.value} isDarkTheme={isDarkTheme} />
               ))}

@@ -1,88 +1,38 @@
 import React, { useState } from "react";
 import { X } from "lucide-react";
+import TaskAssigneePicker from "./TaskAssigneePicker";
 
-/*
- * A subtask is more than a tick box.
- *
- * The checklist answers "is it done"; this panel answers "what is it" - the
- * note the person picking it up needs, and the date it is wanted by. It opens
- * beside the row rather than under it so the list it belongs to stays on
- * screen: a subtask read without its siblings has lost the context that made
- * it a subtask rather than a task.
- *
- * Description commits on blur and the date on change, which is what each input
- * can honestly report. Holding the text in a draft keeps typing local instead
- * of firing a save - and a round trip - on every keystroke.
- *
- * The draft is seeded once per mount, so callers must key this by the subtask
- * they are opening. Selecting a different row is a different document, and a
- * remount is how that gets a fresh draft - syncing it back through an effect
- * would only trade a clear rule for cascading renders.
- */
-const SubtaskDetailPanel = ({
-  subtask,
-  onChange,
-  onClose,
-  readOnly = false,
-  styles,
-  isDark,
-}) => {
-  const [draft, setDraft] = useState(subtask?.description || "");
+const SUBTASK_STATUSES = [
+  ["BACKLOG", "Backlog"],
+  ["TODO", "To Do"],
+  ["IN_PROGRESS", "In Progress"],
+  ["COMPLETED", "Completed"],
+];
+const SUBTASK_PRIORITIES = [["LOW", "Low"], ["MEDIUM", "Medium"], ["HIGH", "High"]];
 
+const SubtaskDetailPanel = ({ subtask, users = [], onChange, onClose, readOnly = false, statusOnly = false }) => {
+  const [title, setTitle] = useState(subtask?.title || "");
+  const [description, setDescription] = useState(subtask?.description || "");
   if (!subtask) return null;
-
-  const commitDescription = () => {
-    if (draft === (subtask.description || "")) return;
-    onChange({ description: draft });
-  };
+  const locked = readOnly || statusOnly;
+  const status = subtask.status || (subtask.isCompleted ? "COMPLETED" : "TODO");
 
   return (
-    <aside
-      aria-label={`Details for subtask ${subtask.title}`}
-      className={`flex min-w-0 flex-col gap-2 rounded-xl border p-2.5 ${
-        isDark ? "border-slate-800 bg-slate-950/60" : "border-slate-200 bg-white"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <span className={`min-w-0 break-words text-[11px] font-bold uppercase tracking-wider ${styles.label}`}>
-          {subtask.title}
-        </span>
-        <button
-          type="button"
-          onClick={onClose}
-          title="Close subtask details"
-          aria-label="Close subtask details"
-          className={`shrink-0 rounded p-1 ${styles.label} hover:bg-slate-500/10`}
-        >
-          <X size={13} />
-        </button>
+    <section className="task-subtask-editor" aria-label={`Details for subtask ${subtask.title}`}>
+      <header>
+        <div><strong>Subtask details</strong><span>Each subtask has its own owner and deadline.</span></div>
+        <button type="button" onClick={onClose} aria-label="Close subtask details"><X size={15} /></button>
+      </header>
+      <label className="task-form-field"><span>Title *</span><input value={title} maxLength={180} disabled={locked} onChange={(event) => setTitle(event.target.value)} onBlur={() => { const clean = title.trim(); if (clean && clean !== (subtask.title || "")) onChange({ title: clean }); }} /></label>
+      <label className="task-form-field"><span>Description</span><textarea value={description} rows={4} maxLength={5000} disabled={locked} placeholder="Full instructions and context" onChange={(event) => setDescription(event.target.value)} onBlur={() => { if (description !== (subtask.description || "")) onChange({ description }); }} /></label>
+      <div className="task-subtask-editor-grid">
+        <label className="task-form-field"><span>Status</span><select value={status} disabled={readOnly} onChange={(event) => onChange({ status: event.target.value, isCompleted: event.target.value === "COMPLETED" })}>{SUBTASK_STATUSES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label className="task-form-field"><span>Priority</span><select value={subtask.priority || "MEDIUM"} disabled={locked} onChange={(event) => onChange({ priority: event.target.value })}>{SUBTASK_PRIORITIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label className="task-form-field"><span>Due date *</span><input type="date" required value={String(subtask.dueDate || "").slice(0, 10)} disabled={locked} onChange={(event) => onChange({ dueDate: event.target.value })} /></label>
+        <div className="task-form-field"><span>Assign to *</span><TaskAssigneePicker compact users={users} value={subtask.assignedTo?._id || subtask.assignedTo || ""} onChange={(assignedTo) => onChange({ assignedTo })} disabled={locked} /></div>
       </div>
-
-      <label className="block">
-        <span className={`mb-1 block text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Details</span>
-        <textarea
-          value={draft}
-          rows={4}
-          maxLength={5000}
-          disabled={readOnly}
-          placeholder="What this subtask involves"
-          onChange={(event) => setDraft(event.target.value)}
-          onBlur={commitDescription}
-          className={`w-full resize-y rounded-lg border px-2 py-1.5 text-xs disabled:opacity-60 ${styles.input}`}
-        />
-      </label>
-
-      <label className="block">
-        <span className={`mb-1 block text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Due date</span>
-        <input
-          type="date"
-          disabled={readOnly}
-          value={String(subtask.dueDate || "").slice(0, 10)}
-          onChange={(event) => onChange({ dueDate: event.target.value || null })}
-          className={`h-8 w-full rounded-lg border px-2 text-xs disabled:opacity-60 ${styles.input}`}
-        />
-      </label>
-    </aside>
+      {statusOnly ? <p className="task-subtask-permission-note">You can update this subtask’s status. Its creator manages the remaining fields.</p> : null}
+    </section>
   );
 };
 

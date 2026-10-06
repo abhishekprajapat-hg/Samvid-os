@@ -1336,7 +1336,7 @@ export const AssetVaultScreen = () => {
               <Pressable style={vault.card} onPress={open} accessibilityRole="button">
                 <View style={vault.thumb}>
                   {cover ? (
-                    <Image source={{ uri: cover }} style={vault.thumbImage} resizeMode="cover" />
+                    <Image source={{ uri: cover }} style={vault.thumbImage} resizeMode="contain" />
                   ) : (
                     <View style={vault.thumbEmpty}>
                       <Glyph name="business" size={30} color={brand.textMuted} />
@@ -2257,6 +2257,7 @@ const vault = brandStyles((b) =>
       backgroundColor: b.fieldMuted,
     },
     thumbImage: {
+      backgroundColor: "#eef1f5",
       width: "100%",
       height: "100%",
     },

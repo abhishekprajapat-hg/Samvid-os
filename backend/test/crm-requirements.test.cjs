@@ -66,15 +66,21 @@ test("assigned-to-me excludes personally created tasks and retains tenant access
   await controller.getTasks({ query: { scope: "assigned" }, user: { _id: employeeId, companyId, role: "EXECUTIVE" } }, res);
   assert.equal(res.code, 200);
   assert.equal(filter.companyId, companyId);
-  assert.equal(filter.$and[0].assignedTo, employeeId);
-  assert.equal(filter.$and[1].createdBy.$ne, employeeId);
-  assert.equal(filter.$or.length, 2);
+  assert.equal(filter.$and[0].$or[0].assignedTo, employeeId);
+  assert.equal(filter.$and[0].$or[1].createdBy, employeeId);
+  assert.equal(filter.$and[0].$or[2]["subtasks.assignedTo"], employeeId);
+  assert.equal(filter.$and[1].$or[0].assignedTo, employeeId);
+  assert.equal(filter.$and[1].$or[1]["subtasks.assignedTo"], employeeId);
+  assert.equal(filter.$and[2].createdBy.$ne, employeeId);
 });
 test("status-only updates notify the assignee of an update, not a reassignment", async () => {
   const task = { _id: taskId, companyId, assignedTo: employeeId, createdBy: managerId, title: "Follow up", status: "TODO", save: async function () { return this; } };
   const events = [];
   const io = { to: (room) => ({ emit: (event, payload) => events.push({ room, event, payload }) }) };
-  const controller = load("controllers/task.controller.js", { "../models/Task": { findById: () => query(task) } });
+  const controller = load("controllers/task.controller.js", {
+    "../models/Task": { findById: () => query(task) },
+    "../models/User": { findOne: () => query({ _id: employeeId, companyId, isActive: true }) },
+  });
   const res = response();
   await controller.updateTask({ params: { taskId }, body: { status: "COMPLETED" }, user: { _id: employeeId, companyId, role: "EXECUTIVE", name: "Employee" }, app: { get: () => io } }, res);
   assert.equal(res.code, 200);
@@ -221,9 +227,13 @@ for (const role of ["EXECUTIVE", "MANAGER", "ADMIN"]) {
 }
 test("task creator retains editing access", async () => {
   const task = { _id: taskId, companyId, assignedTo: employeeId, createdBy: managerId, title: "Before", save: async function () { return this; } };
-  const controller = load("controllers/task.controller.js", { "../models/Task": { findById: () => query(task) } });
+  const controller = load("controllers/task.controller.js", {
+    "../models/Task": { findById: () => query(task) },
+    "../models/User": { findOne: () => query({ _id: employeeId, companyId, isActive: true }) },
+    "../services/push.service": { notify: () => {} },
+  });
   const res = response();
-  await controller.updateTask({ params: { taskId }, body: { title: "After", subtasks: [{ title: "Checklist", isCompleted: false }] }, user: { _id: managerId, companyId, role: "EXECUTIVE" }, app: { get: () => null } }, res);
+  await controller.updateTask({ params: { taskId }, body: { title: "After", subtasks: [{ title: "Checklist", description: "Review the file", assignedTo: employeeId, dueDate: "2026-10-01", status: "TODO", priority: "MEDIUM" }] }, user: { _id: managerId, companyId, role: "EXECUTIVE" }, app: { get: () => null } }, res);
   assert.equal(res.code, 200);
   assert.equal(task.title, "After");
   assert.equal(task.subtasks.length, 1);
@@ -410,45 +420,64 @@ test("a completed working day, a weekly off and a future date never count as vio
   assert.equal(classifyAbsence({ ...base, joined: "2026-09-05" }), null, "days before joining are not the employee's absences");
 });
 
-// ---- Detailed subtasks (requirement 6): a subtask carries its own note and
-// due date, on the way in and on every later edit.
-test("creating a task keeps each subtask's detail and date", async () => {
+// ---- Detailed subtasks: every subtask carries its own note and due date but
+// always inherits the parent task's assignee.
+test("any authenticated role can create an assigned task whose subtasks inherit its owner", async () => {
   let created = null;
+  let saved = null;
+  function TaskStub(doc) {
+    created = doc;
+    Object.assign(this, doc);
+    this.save = async () => { saved = { ...doc, _id: taskId }; return saved; };
+  }
+  TaskStub.findById = () => query(saved);
   const controller = load("controllers/task.controller.js", {
-    "../models/User": { findOne: () => query({ _id: employeeId, companyId }) },
-    "../models/Task": function Task(doc) {
-      created = doc;
-      this.save = async () => ({ ...doc, _id: taskId });
-      Object.assign(this, doc);
-    },
+    "../models/User": { findOne: () => query({ _id: employeeId, companyId, isActive: true }) },
+    "../models/Task": TaskStub,
+    "../services/push.service": { notify: () => {} },
   });
   const res = response();
   await controller.createTask({
-    user: { _id: managerId, companyId, role: "MANAGER" },
+    user: { _id: managerId, companyId, role: "CHANNEL_PARTNER", name: "Partner" },
     app: { get: () => ({ to: () => ({ emit: () => {} }) }) },
     body: {
       title: "Onboard the new client",
+      assignedTo: employeeId,
+      dueDate: "2026-10-01",
       subtasks: [
-        { title: "Collect police verification", description: "  Chase the signed copy  ", dueDate: "2026-10-01" },
-        { title: "Countersign agreement" },
-        { title: "   ", description: "dropped because it has no title" },
+        { title: "Collect police verification", description: "  Chase the signed copy  ", assignedTo: employeeId, dueDate: "2026-10-01", status: "TODO", priority: "HIGH" },
+        { title: "Countersign agreement", assignedTo: managerId, dueDate: "2026-10-02", status: "IN_PROGRESS", priority: "MEDIUM" },
       ],
     },
   }, res);
 
-  assert.equal(created.subtasks.length, 2, "a subtask with no title is not a subtask");
+  assert.equal(res.code, 201, JSON.stringify(res.body));
+  assert.equal(created.subtasks.length, 2);
   assert.equal(created.subtasks[0].description, "Chase the signed copy");
   assert.equal(created.subtasks[0].dueDate, "2026-10-01");
   assert.equal(created.subtasks[1].description, "");
-  assert.equal(created.subtasks[1].dueDate, null);
+  assert.equal(created.subtasks[1].dueDate, "2026-10-02");
+  assert.equal(created.subtasks[0].assignedTo, employeeId);
+  assert.equal(created.subtasks[1].assignedTo, employeeId);
+});
+
+test("task creation refuses a missing assignee", async () => {
+  const controller = load("controllers/task.controller.js", {});
+  const res = response();
+  await controller.createTask({
+    user: { _id: managerId, companyId, role: "MANAGER", name: "Manager" },
+    body: { title: "Owner is required", dueDate: "2026-10-01" },
+  }, res);
+  assert.equal(res.code, 400);
+  assert.equal(res.body.message, "Task assignee is required");
 });
 
 test("editing a subtask's note leaves its siblings and completion intact", async () => {
   const task = {
     _id: taskId, companyId, createdBy: managerId, assignedTo: employeeId, status: "TODO",
     subtasks: [
-      { title: "Collect police verification", isCompleted: true, description: "old note", dueDate: null },
-      { title: "Countersign agreement", isCompleted: false, description: "", dueDate: null },
+      { title: "Collect police verification", isCompleted: true, status: "COMPLETED", priority: "HIGH", assignedTo: employeeId, description: "old note", dueDate: "2026-10-01" },
+      { title: "Countersign agreement", isCompleted: false, status: "TODO", priority: "MEDIUM", assignedTo: employeeId, description: "", dueDate: "2026-10-02" },
     ],
     save: async function () { return this; },
   };
@@ -464,8 +493,8 @@ test("editing a subtask's note leaves its siblings and completion intact", async
     params: { taskId },
     body: {
       subtasks: [
-        { title: "Collect police verification", isCompleted: true, description: "Received, filed under KYC", dueDate: "2026-10-05" },
-        { title: "Countersign agreement", isCompleted: false },
+        { title: "Collect police verification", isCompleted: true, status: "COMPLETED", priority: "HIGH", assignedTo: employeeId, description: "Received, filed under KYC", dueDate: "2026-10-05" },
+        { title: "Countersign agreement", isCompleted: false, status: "TODO", priority: "MEDIUM", assignedTo: employeeId, description: "", dueDate: "2026-10-02" },
       ],
     },
   }, res);
@@ -476,6 +505,66 @@ test("editing a subtask's note leaves its siblings and completion intact", async
   assert.equal(task.subtasks[0].isCompleted, true, "editing the note must not reopen a finished subtask");
   assert.equal(task.subtasks[1].title, "Countersign agreement");
   assert.equal(task.subtasks[1].description, "");
+});
+
+test("reassigning a parent task moves every subtask to the new owner", async () => {
+  const task = {
+    _id: taskId, companyId, createdBy: managerId, assignedTo: employeeId, status: "TODO", priority: "MEDIUM", dueDate: "2026-10-01",
+    subtasks: [{ title: "Prepare context", assignedTo: employeeId, dueDate: "2026-10-01", status: "TODO", priority: "MEDIUM" }],
+    save: async function () { return this; },
+  };
+  const controller = load("controllers/task.controller.js", {
+    "../models/Task": { findById: () => query(task) },
+    "../models/User": { findOne: () => query({ _id: otherId, companyId, isActive: true }) },
+    "../services/push.service": { notify: () => {} },
+  });
+  const res = response();
+  await controller.updateTask({
+    user: { _id: managerId, companyId, role: "MANAGER", name: "Manager" },
+    app: { get: () => null },
+    params: { taskId },
+    body: { assignedTo: otherId },
+  }, res);
+  assert.equal(res.code, 200, JSON.stringify(res.body));
+  assert.equal(String(task.assignedTo), otherId);
+  assert.equal(String(task.subtasks[0].assignedTo), otherId);
+});
+
+test("a parent task cannot complete while a subtask remains open", async () => {
+  let saved = false;
+  const task = {
+    _id: taskId, companyId, createdBy: managerId, assignedTo: employeeId, status: "IN_PROGRESS",
+    subtasks: [{ _id: otherId, title: "Send proposal", assignedTo: employeeId, dueDate: "2026-10-02", status: "TODO", priority: "HIGH", isCompleted: false }],
+    save: async function () { saved = true; return this; },
+  };
+  const controller = load("controllers/task.controller.js", { "../models/Task": { findById: () => query(task) } });
+  const res = response();
+  await controller.updateTask({ params: { taskId }, body: { status: "COMPLETED" }, user: { _id: managerId, companyId, role: "MANAGER" } }, res);
+  assert.equal(res.code, 409);
+  assert.equal(saved, false);
+  assert.equal(task.status, "IN_PROGRESS");
+});
+
+test("the parent assignee can change subtask status but cannot reassign the subtask", async () => {
+  const subtask = { _id: otherId, title: "Send proposal", assignedTo: employeeId, dueDate: "2026-10-02", status: "TODO", priority: "HIGH", isCompleted: false };
+  const task = {
+    _id: taskId, companyId, createdBy: managerId, assignedTo: employeeId, title: "Client proposal", status: "IN_PROGRESS",
+    subtasks: [subtask], save: async function () { return this; },
+  };
+  const controller = load("controllers/task.controller.js", {
+    "../models/Task": { findById: () => query(task) },
+    "../models/User": { findOne: () => query({ _id: employeeId, companyId, isActive: true }) },
+    "../services/push.service": { notify: () => {} },
+  });
+  const forbidden = response();
+  await controller.updateSubtask({ params: { taskId, subtaskId: otherId }, body: { assignedTo: managerId }, user: { _id: employeeId, companyId, role: "EXECUTIVE" } }, forbidden);
+  assert.equal(forbidden.code, 403);
+
+  const updated = response();
+  await controller.updateSubtask({ params: { taskId, subtaskId: otherId }, body: { status: "COMPLETED" }, user: { _id: employeeId, companyId, role: "EXECUTIVE" }, app: { get: () => null } }, updated);
+  assert.equal(updated.code, 200, JSON.stringify(updated.body));
+  assert.equal(task.subtasks[0].status, "COMPLETED");
+  assert.equal(task.subtasks[0].isCompleted, true);
 });
 
 // ---- The broker gate: a number in the Broker Database never becomes a lead.

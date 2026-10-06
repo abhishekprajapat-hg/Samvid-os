@@ -17,7 +17,7 @@ import TeamChat from "../chat/TeamChat";
 import MasterSchedule from "../calendar/MasterSchedule";
 import Performance from "../reports/Performance";
 import LeadPerformancePanel from "../../components/dashboard/LeadPerformancePanel";
-import api from "../../services/api";
+import { getAllLeads, getLeadSummary } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 
 const getStoredUserId = () => {
@@ -29,87 +29,67 @@ const getStoredUserId = () => {
   }
 };
 
-const normalizeStatus = (value) => String(value || "").trim().toUpperCase();
+// Fields the overview needs for its lists and charts; counts come from the summary.
+const DASHBOARD_LEAD_FIELDS = [
+  "_id", "name", "phone", "status", "nextFollowUp", "lastContactedAt", "createdAt", "updatedAt",
+].join(",");
 
-const parseDate = (value) => {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+// "Qualified" is the Interested stage; anything past it counts toward conversion.
+const QUALIFIED_STATUSES = ["INTERESTED"];
+const CONVERTED_STATUSES = [
+  "INTERESTED", "SITE_VISIT_SCHEDULED", "SITE_VISIT", "SITE_VISIT_OVERDUE", "REQUESTED", "CLOSED",
+];
+
+const EMPTY_STATS = {
+  totalLeadsAssigned: 0,
+  pendingFirstCalls: 0,
+  followUpsDue: 0,
+  qualifiedLeads: 0,
+  leadsTransferred: 0,
+  conversionRatio: 0,
 };
 
-const isDueOnOrBeforeNow = (value) => {
-  const parsed = parseDate(value);
-  return Boolean(parsed && parsed.getTime() <= Date.now());
-};
+const sumStatuses = (byStatus = {}, statuses = []) =>
+  statuses.reduce((sum, status) => sum + Number(byStatus?.[status] || 0), 0);
 
-const hasManualTransferOut = (lead, currentUserId) => {
-  const ownerId = String(currentUserId || "");
-  if (!ownerId || !Array.isArray(lead?.assignmentHistory)) return false;
-  return lead.assignmentHistory.some((event) => {
-    const action = normalizeStatus(event?.action);
-    const fromId = String(event?.fromUser?._id || event?.fromUser || "");
-    const toId = String(event?.toUser?._id || event?.toUser || "");
-    return ["MANUAL_TRANSFER", "REASSIGNED"].includes(action)
-      && fromId === ownerId
-      && toId
-      && toId !== ownerId;
-  });
-};
-
-const buildInsideExecutiveMetrics = (leads = [], currentUserId = "") => {
-  const totalLeadsAssigned = leads.length;
-  const pendingFirstCalls = leads.filter((lead) =>
-    ["NEW", ""].includes(normalizeStatus(lead?.status))
-    && !lead?.lastContactedAt
-  ).length;
-  const followUpsDue = leads.filter((lead) => isDueOnOrBeforeNow(lead?.nextFollowUp)).length;
-  const qualifiedLeads = leads.filter((lead) => normalizeStatus(lead?.status) === "QUALIFIED_LEAD").length;
-  const leadsTransferred = leads.filter((lead) => hasManualTransferOut(lead, currentUserId)).length;
-  const convertedLeads = leads.filter((lead) =>
-    ["QUALIFIED_LEAD", "SITE_VISIT_REQUIRED", "SITE_VISIT", "REQUESTED", "CLOSED"].includes(
-      normalizeStatus(lead?.status),
-    )
-  ).length;
-  const conversionRatio = totalLeadsAssigned
-    ? Math.round((convertedLeads / totalLeadsAssigned) * 100)
-    : 0;
-
+const buildInsideExecutiveMetrics = (summary) => {
+  if (!summary) return EMPTY_STATS;
+  const total = Number(summary.total || 0);
+  const converted = sumStatuses(summary.byStatus, CONVERTED_STATUSES);
   return {
-    totalLeadsAssigned,
-    pendingFirstCalls,
-    followUpsDue,
-    qualifiedLeads,
-    leadsTransferred,
-    conversionRatio,
+    totalLeadsAssigned: total,
+    pendingFirstCalls: Number(summary.pendingFirstCalls || 0),
+    followUpsDue: Number(summary.followUpsDue || 0),
+    qualifiedLeads: sumStatuses(summary.byStatus, QUALIFIED_STATUSES),
+    leadsTransferred: Number(summary.transferredOut || 0),
+    conversionRatio: total ? Math.round((converted / total) * 100) : 0,
   };
 };
 
 const ExecutiveDashboard = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [stats, setStats] = useState({
-    totalLeadsAssigned: 0,
-    pendingFirstCalls: 0,
-    followUpsDue: 0,
-    qualifiedLeads: 0,
-    leadsTransferred: 0,
-    conversionRatio: 0,
-  });
+  const [stats, setStats] = useState(EMPTY_STATS);
+  const [summary, setSummary] = useState(null);
   const [leadRows, setLeadRows] = useState([]);
 
   useEffect(() => {
     const fetchStats = async () => {
       try {
         const currentUserId = getStoredUserId();
-        const leadRes = await api.get("/leads", {
-          params: currentUserId ? { assignedTo: currentUserId } : {},
-        });
-
-        const leads = leadRes.data?.leads || [];
+        const scope = currentUserId ? { assignedTo: currentUserId } : {};
+        // Counts come from the server over every lead; the list (all pages)
+        // only feeds the follow-up list, recent activity and the chart.
+        const [leadSummary, leads] = await Promise.all([
+          getLeadSummary(scope),
+          getAllLeads({ ...scope, fields: DASHBOARD_LEAD_FIELDS }),
+        ]);
+        setSummary(leadSummary);
         setLeadRows(Array.isArray(leads) ? leads : []);
-        setStats(buildInsideExecutiveMetrics(Array.isArray(leads) ? leads : [], currentUserId));
+        setStats(buildInsideExecutiveMetrics(leadSummary));
       } catch (error) {
+        setSummary(null);
         setLeadRows([]);
-        setStats(buildInsideExecutiveMetrics([]));
+        setStats(EMPTY_STATS);
         console.error("Executive stats error:", toErrorMessage(error, "Unknown error"));
       }
     };
@@ -119,7 +99,7 @@ const ExecutiveDashboard = () => {
 
   const renderContent = () => {
     if (activeTab === "dashboard") {
-      return <ExecutiveOverview stats={stats} leads={leadRows} onOpen={setActiveTab} />;
+      return <ExecutiveOverview stats={stats} summary={summary} leads={leadRows} onOpen={setActiveTab} />;
     }
     if (activeTab === "leads") {
       return <LeadsMatrix />;
@@ -137,7 +117,7 @@ const ExecutiveDashboard = () => {
       return <Performance />;
     }
 
-    return <ExecutiveOverview stats={stats} leads={leadRows} onOpen={setActiveTab} />;
+    return <ExecutiveOverview stats={stats} summary={summary} leads={leadRows} onOpen={setActiveTab} />;
   };
 
   return (
@@ -149,7 +129,7 @@ const ExecutiveDashboard = () => {
   );
 };
 
-const ExecutiveOverview = ({ stats, leads, onOpen }) => (
+const ExecutiveOverview = ({ stats, summary, leads, onOpen }) => (
   <div className="dashboard-doc-screen h-full overflow-y-auto custom-scrollbar px-4 py-6 sm:px-6 lg:px-8">
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
       <StatCard
@@ -176,7 +156,7 @@ const ExecutiveOverview = ({ stats, leads, onOpen }) => (
       <StatCard
         title="Qualified Leads"
         value={stats.qualifiedLeads}
-        hint="Ready for handoff"
+        hint="Marked Interested"
         icon={CheckCircle}
         onClick={() => onOpen("leads")}
       />
@@ -196,7 +176,7 @@ const ExecutiveOverview = ({ stats, leads, onOpen }) => (
       />
     </div>
 
-    <ExecutiveCommandSnapshot leads={leads} onOpen={onOpen} />
+    <ExecutiveCommandSnapshot leads={leads} summary={summary} onOpen={onOpen} />
 
     <div className="ui-soft-panel mt-6 p-3 sm:p-4">
       <LeadPerformancePanel
@@ -243,7 +223,7 @@ const ExecutiveOverview = ({ stats, leads, onOpen }) => (
   </div>
 );
 
-const ExecutiveCommandSnapshot = ({ leads, onOpen }) => {
+const ExecutiveCommandSnapshot = ({ leads, summary, onOpen }) => {
   const snapshot = useMemo(() => {
     const now = new Date();
     const todayStart = new Date(now);
@@ -273,8 +253,11 @@ const ExecutiveCommandSnapshot = ({ leads, onOpen }) => {
     ];
     const funnel = stages.map((stage) => ({
       stage,
-      count: leads.filter((lead) => String(lead.status || "") === stage).length,
+      count: summary?.byStatus
+        ? Number(summary.byStatus[stage] || 0)
+        : leads.filter((lead) => String(lead.status || "") === stage).length,
     }));
+    const funnelTotal = summary ? Number(summary.total || 0) : leads.length;
 
     const recent = [...leads]
       .sort((left, right) => {
@@ -284,15 +267,15 @@ const ExecutiveCommandSnapshot = ({ leads, onOpen }) => {
       })
       .slice(0, 4);
 
-    return { dueToday, funnel, recent };
-  }, [leads]);
+    return { dueToday, funnel, funnelTotal, recent, followUpsToday: summary ? Number(summary.followUpsToday || 0) : dueToday.length };
+  }, [leads, summary]);
 
   return (
     <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-3">
       <section className="ui-soft-panel rounded-2xl border border-slate-200 bg-white p-4">
         <h3 className="text-sm font-bold text-slate-900">Today's Follow-ups</h3>
         <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-slate-500">
-          {snapshot.dueToday.length} scheduled
+          {snapshot.followUpsToday} scheduled
         </p>
         <div className="mt-3 space-y-2">
           {snapshot.dueToday.length ? snapshot.dueToday.map((lead) => (
@@ -325,13 +308,13 @@ const ExecutiveCommandSnapshot = ({ leads, onOpen }) => {
           {snapshot.funnel.map((row) => (
             <div key={row.stage}>
               <div className="mb-1 flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-600">{row.stage.replace("_", " ")}</span>
+                <span className="font-semibold text-slate-600">{row.stage.replace(/_/g, " ")}</span>
                 <span className="text-slate-500">{row.count}</span>
               </div>
               <div className="h-2 rounded-full bg-slate-100">
                 <div
                   className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500"
-                  style={{ width: `${leads.length ? Math.min((row.count / leads.length) * 100, 100) : 0}%` }}
+                  style={{ width: `${snapshot.funnelTotal ? Math.min((row.count / snapshot.funnelTotal) * 100, 100) : 0}%` }}
                 />
               </div>
             </div>

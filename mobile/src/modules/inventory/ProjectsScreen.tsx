@@ -184,7 +184,7 @@ export const ProjectsScreen = () => {
               <View key={String(project._id)} style={styles.card}>
                 <Pressable onPress={open} accessibilityRole="button" accessibilityLabel={`View ${project.projectName}`}>
                   {image ? (
-                    <Image source={{ uri: toAbsoluteUrl(String(image)) }} style={styles.image} resizeMode="cover" />
+                    <Image source={{ uri: toAbsoluteUrl(String(image)) }} style={styles.image} resizeMode="contain" />
                   ) : (
                     <View style={[styles.image, styles.noImage]}>
                       <Glyph name="image-outline" size={30} color={brand.placeholder} />

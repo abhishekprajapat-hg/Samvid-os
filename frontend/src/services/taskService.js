@@ -20,6 +20,21 @@ export const updateTask = async (taskId, payload) => {
   return res.data || null;
 };
 
+export const addTaskSubtask = async (taskId, payload) => {
+  const res = await api.post(`/tasks/${taskId}/subtasks`, payload);
+  return res.data || null;
+};
+
+export const updateTaskSubtask = async (taskId, subtaskId, payload) => {
+  const res = await api.patch(`/tasks/${taskId}/subtasks/${subtaskId}`, payload);
+  return res.data || null;
+};
+
+export const deleteTaskSubtask = async (taskId, subtaskId) => {
+  const res = await api.delete(`/tasks/${taskId}/subtasks/${subtaskId}`);
+  return res.data || null;
+};
+
 export const deleteTask = async (taskId) => {
   const res = await api.delete(`/tasks/${taskId}`);
   return res.data || null;

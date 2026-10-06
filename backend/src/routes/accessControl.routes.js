@@ -21,12 +21,19 @@ router.get("/me", async (req, res) => {
   }
 });
 /*
- * Roles, company-wide. Admin only, like the per-user screen below it: what a
- * role may reach decides it for everybody holding it, which is a wider change
- * than editing one person's access.
+ * Roles and per-person page access, company-wide.
+ *
+ * A Manager can do everything an Admin can except delete (business rule,
+ * 29 Sep 2026), so both screens are open to Managers too. What a Manager may
+ * change is narrower, and enforced where the change is made:
+ *   - never an Admin, never a Manager (themselves included), never the
+ *     Manager role - only an Admin sets what Managers reach;
+ *   - never a grant they do not hold themselves, an admin-protected
+ *     permission, or a delete (see assertGrantablePermissions).
  */
-router.get("/roles", checkRole(["ADMIN"]), rolePermission.listRoles);
-router.patch("/roles/:role", writeLimiter, checkRole(["ADMIN"]), rolePermission.updateRole);
-router.get("/users/:userId/pages", checkRole(["ADMIN"]), userPageAccess.handle());
-router.patch("/users/:userId/pages", writeLimiter, checkRole(["ADMIN"]), userPageAccess.handle(true));
+const ACCESS_EDITOR_ROLES = ["ADMIN", "MANAGER"];
+router.get("/roles", checkRole(ACCESS_EDITOR_ROLES), rolePermission.listRoles);
+router.patch("/roles/:role", writeLimiter, checkRole(ACCESS_EDITOR_ROLES), rolePermission.updateRole);
+router.get("/users/:userId/pages", checkRole(ACCESS_EDITOR_ROLES), userPageAccess.handle());
+router.patch("/users/:userId/pages", writeLimiter, checkRole(ACCESS_EDITOR_ROLES), userPageAccess.handle(true));
 module.exports = router;

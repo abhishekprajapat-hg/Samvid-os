@@ -11,8 +11,12 @@ const {
   checkRoleOrPageAccess,
   checkRoleOrPageAction,
 } = require("../middleware/pageAccess.middleware");
+const Inventory = require("../models/Inventory");
+const { requireAdminApprovalForDelete } = require("../services/deleteApproval.service");
+const { requirePartnerInventoryAccess } = require("../middleware/partnerInventoryAccess.middleware");
 
 router.use(authMiddleware.protect);
+router.use(requirePartnerInventoryAccess);
 router.use(
   checkRoleOrPageAccess(
     ["ADMIN", "MANAGER", "EXECUTIVE", "FIELD_EXECUTIVE", "CHANNEL_PARTNER"],
@@ -64,10 +68,28 @@ router.patch(
   inventoryController.updateInventory,
 );
 
+/*
+ * Managers normally ask through POST /inventory-request/delete/:id. A Manager
+ * whose page access explicitly grants inventory delete can reach this route
+ * too, and then it becomes a request an Admin approves, never a direct delete.
+ */
 router.delete(
   "/:id",
   writeLimiter,
   checkRoleOrPageAction(["ADMIN"], "delete", "inventory"),
+  requireAdminApprovalForDelete("inventory", {
+    label: "Inventory unit",
+    pageKey: "inventory",
+    idParam: "id",
+    handler: inventoryController.deleteInventory,
+    describe: async ({ id, companyId }) => {
+      const unit = await Inventory.findOne({ _id: id, companyId })
+        .select("projectName towerName unitNumber")
+        .lean();
+      if (!unit) return null;
+      return [unit.projectName, unit.towerName, unit.unitNumber].filter(Boolean).join(" / ");
+    },
+  }),
   inventoryController.deleteInventory,
 );
 

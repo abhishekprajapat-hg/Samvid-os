@@ -31,6 +31,7 @@ import {
   type AttendanceRecord,
 } from "../../services/attendanceService";
 import { dayKeyOf, initialsOf, liveStatusOf, type RosterRow } from "./attendanceShared";
+import { PhotoOverlay, profilePhotoOf } from "../../components/common/PhotoOverlay";
 
 /*
  * Attendance, drawn to the comp.
@@ -430,6 +431,7 @@ export const AttendanceScreen = () => {
           </Pressable>
           <View style={styles.headerAvatar}>
             <Text style={styles.headerAvatarText}>{initialsOf(user?.name)}</Text>
+            <PhotoOverlay uri={profilePhotoOf(user)} />
           </View>
         </View>
       </View>
@@ -610,6 +612,7 @@ export const AttendanceScreen = () => {
                 >
                   <View style={styles.teamAvatar}>
                     <Text style={styles.teamAvatarText}>{initialsOf(row.user?.name)}</Text>
+                    <PhotoOverlay uri={profilePhotoOf(row.user)} />
                   </View>
                   <Text style={styles.teamName} numberOfLines={1}>
                     {row.user?.name}

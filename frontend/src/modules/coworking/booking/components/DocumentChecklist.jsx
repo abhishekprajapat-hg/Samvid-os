@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Eye, Paperclip, Upload, X } from "lucide-react";
 import { readDocumentBirthDate } from "../../../../utils/documentBirthDate";
+import { uploadFile } from "../../../../services/uploadService";
 import { cn } from "../../../../components/ui";
 import {
   ACCEPTED_TYPES,
@@ -28,14 +29,16 @@ import {
 const DocumentRow = ({ doc, uploaded, onUpload, onRemove, readOnly }) => {
   const inputRef = useRef(null);
   const [error, setError] = useState("");
-  const [url, setUrl] = useState(() => uploaded ? fileUrl(uploaded.id) : null);
+  // A server copy (url) is what every desk can open; the browser copy is only a
+  // fallback for documents attached before uploads went to the server.
+  const [url, setUrl] = useState(() => (uploaded ? uploaded.url || fileUrl(uploaded.id) : null));
   const isImage = Boolean(uploaded && (
     String(uploaded.type || "").startsWith("image/")
     || /\.(png|jpe?g)$/i.test(String(uploaded.fileName || ""))
   ));
 
   useEffect(() => {
-    if (!uploaded?.id || url) return undefined;
+    if (!uploaded?.id || url || uploaded?.url) return undefined;
     let active = true;
     loadFileUrl(uploaded.id).then((storedUrl) => {
       if (active && storedUrl) setUrl(storedUrl);
@@ -43,7 +46,7 @@ const DocumentRow = ({ doc, uploaded, onUpload, onRemove, readOnly }) => {
     return () => {
       active = false;
     };
-  }, [uploaded?.id, url]);
+  }, [uploaded?.id, uploaded?.url, url]);
 
   const handleFile = (event) => {
     const file = event.target.files?.[0];
@@ -113,6 +116,11 @@ const DocumentRow = ({ doc, uploaded, onUpload, onRemove, readOnly }) => {
                 ) : (
                   <span className="text-slate-400 dark:text-slate-500">Loading preview...</span>
                 )}
+                {!uploaded.url ? (
+                  <span className="text-amber-600 dark:text-amber-400" title="This file is stored in this browser only. Upload it again to share it with other devices.">
+                    On this device only
+                  </span>
+                ) : null}
               </p>
               {url ? (
                 <a
@@ -174,6 +182,20 @@ const DocumentRow = ({ doc, uploaded, onUpload, onRemove, readOnly }) => {
   );
 };
 
+const groupsOf = (docs) => {
+  const groups = [];
+  docs.forEach((doc) => {
+    const name = doc.group || "";
+    let entry = groups.find((item) => item.group === name);
+    if (!entry) {
+      entry = { group: name, docs: [] };
+      groups.push(entry);
+    }
+    entry.docs.push(doc);
+  });
+  return groups;
+};
+
 const DocumentChecklist = ({ kind, documents = [], onChange, onDateOfBirth, readOnly = false, className }) => {
   const [extracting, setExtracting] = useState(false);
   const [extractionMessage, setExtractionMessage] = useState("");
@@ -186,10 +208,18 @@ const DocumentChecklist = ({ kind, documents = [], onChange, onDateOfBirth, read
     setExtracting(true);
     setExtractionMessage("Reading document for date of birth...");
     const attached = attachFile(doc, file);
+    // Keep the file on the server so every desk and device can open it.
+    try {
+      const saved = await uploadFile(file, "coworking-documents");
+      if (saved?.url) attached.url = saved.url;
+    } catch {
+      attached.url = null;
+    }
     try {
       const date = await readDocumentBirthDate(file);
       if (date) { attached.extractedDateOfBirth = date; onDateOfBirth?.(date); }
-      setExtractionMessage(date ? `Date of birth found: ${date}. Please verify it against the document.` : "No unambiguous date of birth found. You can enter it manually.");
+      const stored = attached.url ? "" : " Could not reach the server, so this file is saved on this device only - upload it again later.";
+      setExtractionMessage((date ? `Date of birth found: ${date}. Please verify it against the document.` : "No unambiguous date of birth found. You can enter it manually.") + stored);
     } catch { setExtractionMessage("Document attached; automatic date extraction was unavailable. Enter the date of birth manually."); }
     const existing = byKey.get(doc.key);
     if (existing) forgetFile(existing.id);
@@ -243,18 +273,28 @@ const DocumentChecklist = ({ kind, documents = [], onChange, onDateOfBirth, read
         ) : null}
       </div>
 
-      <ul className="space-y-1.5">
-        {set.map((doc) => (
-          <DocumentRow
-            key={`${doc.key}:${byKey.get(doc.key)?.id || "missing"}`}
-            doc={doc}
-            uploaded={byKey.get(doc.key)}
-            onUpload={upload}
-            onRemove={remove}
-            readOnly={readOnly || extracting}
-          />
+      {/* Grouped so Person 1 / Person 2 (or Signing authority 1 / 2) read as separate people. */}
+      <div className="space-y-3">
+        {groupsOf(set).map(({ group, docs }) => (
+          <section key={group || "documents"} aria-label={group || "Documents"}>
+            {group ? (
+              <h4 className="mb-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">{group}</h4>
+            ) : null}
+            <ul className="space-y-1.5">
+              {docs.map((doc) => (
+                <DocumentRow
+                  key={`${doc.key}:${byKey.get(doc.key)?.id || "missing"}`}
+                  doc={doc}
+                  uploaded={byKey.get(doc.key)}
+                  onUpload={upload}
+                  onRemove={remove}
+                  readOnly={readOnly || extracting}
+                />
+              ))}
+            </ul>
+          </section>
         ))}
-      </ul>
+      </div>
     </div>
   );
 };

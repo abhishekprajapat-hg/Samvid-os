@@ -587,7 +587,7 @@ export const AddPropertyScreen = () => {
 
           <View style={styles.doneCard}>
             {photos[0] ? (
-              <Image source={{ uri: photos[0].uri }} style={styles.doneThumb} resizeMode="cover" />
+              <Image source={{ uri: photos[0].uri }} style={styles.doneThumb} resizeMode="contain" />
             ) : (
               <View style={[styles.doneThumb, styles.doneThumbEmpty]}>
                 <Glyph name="business" size={30} color={brand.textMuted} />
@@ -1047,7 +1047,7 @@ export const AddPropertyScreen = () => {
                 <View style={styles.grid}>
                   {photos.map((photo, index) => (
                     <View key={photo.uri} style={styles.gridCell}>
-                      <Image source={{ uri: photo.uri }} style={styles.gridImage} resizeMode="cover" />
+                      <Image source={{ uri: photo.uri }} style={styles.gridImage} resizeMode="contain" />
                       {index === 0 ? (
                         <View style={styles.coverBadge}>
                           <Text style={styles.coverBadgeText}>Cover</Text>
@@ -1103,7 +1103,7 @@ export const AddPropertyScreen = () => {
             <View style={styles.summary}>
               <View style={styles.summaryThumbWrap}>
                 {photos[0] ? (
-                  <Image source={{ uri: photos[0].uri }} style={styles.summaryThumb} resizeMode="cover" />
+                  <Image source={{ uri: photos[0].uri }} style={styles.summaryThumb} resizeMode="contain" />
                 ) : (
                   <View style={[styles.summaryThumb, styles.doneThumbEmpty]}>
                     <Glyph name="business" size={28} color={brand.textMuted} />
@@ -1181,7 +1181,7 @@ export const AddPropertyScreen = () => {
               {photos.length ? (
                 <View style={styles.strip}>
                   {photos.slice(0, 4).map((photo) => (
-                    <Image key={photo.uri} source={{ uri: photo.uri }} style={styles.stripImage} resizeMode="cover" />
+                    <Image key={photo.uri} source={{ uri: photo.uri }} style={styles.stripImage} resizeMode="contain" />
                   ))}
                 </View>
               ) : null}
@@ -1470,6 +1470,7 @@ const styles = brandStyles((b) =>
       backgroundColor: b.fieldMuted,
     },
     gridImage: {
+      backgroundColor: "#eef1f5",
       width: "100%",
       height: "100%",
     },

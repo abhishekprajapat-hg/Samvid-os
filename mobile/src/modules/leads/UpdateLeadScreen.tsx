@@ -45,6 +45,7 @@ import {
   type StageKey,
   type Temperature,
 } from "./leadPipeline";
+import { PhotoOverlay, profilePhotoOf } from "../../components/common/PhotoOverlay";
 
 /*
  * Update Lead, drawn to the comp.
@@ -483,6 +484,7 @@ export const UpdateLeadScreen = () => {
                     assignee ? (
                       <View style={styles.assigneeAvatar}>
                         <Text style={styles.assigneeAvatarText}>{initialsOf(assignee.name)}</Text>
+                        <PhotoOverlay uri={profilePhotoOf(assignee)} />
                       </View>
                     ) : undefined
                   }

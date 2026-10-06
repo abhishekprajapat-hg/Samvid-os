@@ -273,6 +273,15 @@ const getInventoryLeadLabel = (inventory: any) =>
     .filter(Boolean)
     .join(" - ");
 
+// Client-facing name for a property in proposals: its ID and listing name only.
+// Building, tower (filled from the building name) and unit/office number stay internal.
+const getInventoryClientLabel = (inventory: any) =>
+  [inventory?.propertyId, inventory?.projectName]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value, index, all) => all.indexOf(value) === index)
+    .join(" - ");
+
 const getLeadRelatedInventories = (lead: any) => {
   if (!lead) return [];
   const merged: any[] = [];
@@ -1458,7 +1467,7 @@ export const LeadDetailsScreen = () => {
     ];
 
     selectedRows.forEach((inventory: any, index) => {
-      const label = getInventoryLeadLabel(inventory) || `Property ${index + 1}`;
+      const label = getInventoryClientLabel(inventory) || `Property ${index + 1}`;
       lines.push(`Property ${index + 1}: ${label}`);
       lines.push(`Project: ${String(inventory?.projectName || (lead as any)?.projectInterested || "-")}`);
       lines.push(`Location: ${String(inventory?.location || (lead as any)?.city || "-")}`);
@@ -1525,7 +1534,7 @@ export const LeadDetailsScreen = () => {
     () =>
       selectedProposalRows
         .flatMap((row: any, rowIndex: number) => {
-          const label = getInventoryLeadLabel(row) || `Property ${rowIndex + 1}`;
+          const label = getInventoryClientLabel(row) || `Property ${rowIndex + 1}`;
           const urls: string[] = (Array.isArray(row?.images) ? row.images : [])
             .map((url: string) => toAbsoluteUrl(String(url || "").trim()))
             .filter(Boolean);
@@ -1538,7 +1547,7 @@ export const LeadDetailsScreen = () => {
   const proposalImageLinksText = useMemo(() => {
     const lines: string[] = [];
     selectedProposalRows.forEach((row: any, rowIndex: number) => {
-      lines.push(`${rowIndex + 1}. ${getInventoryLeadLabel(row) || `Property ${rowIndex + 1}`}`);
+      lines.push(`${rowIndex + 1}. ${getInventoryClientLabel(row) || `Property ${rowIndex + 1}`}`);
       const urls: string[] = (Array.isArray(row?.images) ? row.images : [])
         .map((url: string) => toAbsoluteUrl(String(url || "").trim()))
         .filter(Boolean);

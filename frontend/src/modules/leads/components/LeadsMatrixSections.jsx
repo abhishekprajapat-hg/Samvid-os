@@ -1420,12 +1420,22 @@ export const AddLeadModal = ({
   const propertySubtypeConfig = getPropertySubtypeConfig(requirementInventoryType, requirementPropertySubtype);
   const showFurnishing = !propertySubtypeConfig || propertySubtypeConfig.showFurnishing !== false;
   const isPlotRequirement = requirementPropertySubtype === "PLOT";
-  const isFlatRequirement = requirementPropertySubtype === "APARTMENT";
+  const isCoworkingRequirement = requirementInventoryType === "COWORKING";
+  // Homes (not plots) are rented; shops and offices are leased; coworking is never bought.
+  const canRentRequirement = requirementInventoryType === "RESIDENTIAL" && !isPlotRequirement;
+  const canPurchaseRequirement = !isCoworkingRequirement;
+  const rawTransactionType = String(formData.requirementsTransactionType || "").trim().toUpperCase();
+  let transactionTypeValue = rawTransactionType;
+  if (rawTransactionType === "RENT" && !canRentRequirement) transactionTypeValue = "LEASE";
+  if (rawTransactionType === "SALE" && !canPurchaseRequirement) transactionTypeValue = "";
   const furnishingOptions = showFurnishing ? FURNISHING_OPTIONS : [];
   const furnishingValue = furnishingOptions.some((option) => option.value === formData.requirementsFurnishingStatus)
     ? formData.requirementsFurnishingStatus
     : "";
-  const budgetRangeOptions = getBudgetRangeOptions(formData.requirementsTransactionType);
+  // Coworking is always a monthly cost, whatever the deal type.
+  const budgetRangeOptions = isCoworkingRequirement
+    ? RENT_LEASE_BUDGET_RANGE_OPTIONS
+    : getBudgetRangeOptions(transactionTypeValue);
   const budgetRangeValue = getBudgetRangeOptionValue(
     formData.requirementsBudgetMin,
     formData.requirementsBudgetMax,
@@ -1446,6 +1456,11 @@ export const AddLeadModal = ({
   );
   const normalizedInventorySearchText = inventorySearchText.trim().toLowerCase();
   const filteredInventoryOptions = inventoryOptions.filter((inventory) => {
+    // Sold or blocked properties cannot be offered to a new lead; keep any the
+    // lead is already linked to so they can still be unticked.
+    const isSelected = selectedInventoryIds.has(String(inventory?._id || "").trim());
+    const status = String(inventory?.status || "Available").trim().toLowerCase();
+    if (!isSelected && status !== "available") return false;
     if (!normalizedInventorySearchText) return true;
     const inventoryLabel = getInventoryLeadLabel(inventory) || "Inventory Unit";
     const inventoryLocation = getInventoryLocationLabel(inventory);
@@ -1702,6 +1717,16 @@ export const AddLeadModal = ({
             <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="City">
               <input placeholder="City" value={formData.city} onChange={(event) => updateField("city", event.target.value)} className={inputClass} />
             </AddLeadFieldShell>
+            {/* Free text on purpose: any profession or business (Marketing, Lawyer, DSA...). */}
+            <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Work Profile">
+              <input
+                placeholder="e.g. Marketing, Lawyer, DSA"
+                value={formData.clientProfession || ""}
+                onChange={(event) => updateField("clientProfession", event.target.value)}
+                maxLength={120}
+                className={inputClass}
+              />
+            </AddLeadFieldShell>
             {/* A coworking enquiry is often one person, so the firm is optional
                 and only asked for where it means something. */}
             {requirementInventoryType === "COWORKING" ? (
@@ -1780,10 +1805,10 @@ export const AddLeadModal = ({
                 </AddLeadFieldShell>
               ) : null}
               <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Deal Type">
-                <AddLeadSelectControl inputClass={inputClass} isDark={isDark} value={formData.requirementsTransactionType} onChange={(event) => updateTransactionType(event.target.value)}>
+                <AddLeadSelectControl inputClass={inputClass} isDark={isDark} value={transactionTypeValue} onChange={(event) => updateTransactionType(event.target.value)}>
                   <option value="">Deal Type (Any)</option>
-                  <option value="SALE">Purchase</option>
-                  {isFlatRequirement ? <option value="RENT">Rent</option> : null}
+                  {canPurchaseRequirement ? <option value="SALE">Purchase</option> : null}
+                  {canRentRequirement ? <option value="RENT">Rent</option> : null}
                   <option value="LEASE">Lease</option>
                 </AddLeadSelectControl>
               </AddLeadFieldShell>
@@ -1816,14 +1841,6 @@ export const AddLeadModal = ({
                     placeholder="Project Interested"
                     value={formData.projectInterested}
                     onChange={(event) => updateField("projectInterested", event.target.value)}
-                    className={inputClass}
-                  />
-                </AddLeadFieldShell>
-                <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Client's Profession">
-                  <input
-                    placeholder="Client's Profession"
-                    value={formData.clientProfession}
-                    onChange={(event) => updateField("clientProfession", event.target.value)}
                     className={inputClass}
                   />
                 </AddLeadFieldShell>
@@ -1865,7 +1882,7 @@ export const AddLeadModal = ({
                     </AddLeadFieldShell>
                   </>
                 ) : null}
-                <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Location">
+                <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Plot Location">
                   <AddLeadSelectControl
                     inputClass={inputClass}
                     isDark={isDark}

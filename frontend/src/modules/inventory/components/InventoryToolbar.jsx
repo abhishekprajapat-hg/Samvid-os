@@ -29,6 +29,43 @@ const StatusTab = ({ icon: Icon, label, count, active, tone = "slate", onClick }
   );
 };
 
+const CATEGORY_TABS = [
+  { value: "all", label: "All" },
+  { value: "COMMERCIAL", label: "Commercial" },
+  { value: "RESIDENTIAL", label: "Residential" },
+];
+
+/*
+ * R13 (30 Sep 2026): the category is the first decision - a client wants an
+ * office or a flat - so Commercial / Residential sits on its own row above
+ * status, instead of being one dropdown among nine filters.
+ */
+export const InventoryCategoryTabs = ({ value, onChange, counts = {} }) => (
+  <div role="tablist" aria-label="Inventory category" className="inline-flex w-fit max-w-full self-start overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
+    {CATEGORY_TABS.map((tab) => {
+      const active = (value || "all") === tab.value;
+      return (
+        <button
+          key={tab.value}
+          type="button"
+          role="tab"
+          aria-selected={active}
+          onClick={() => onChange(tab.value)}
+          className={cn(
+            "inline-flex h-10 items-center gap-2 rounded-lg px-4 text-[14px] font-semibold transition",
+            active ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+          )}
+        >
+          {tab.label}
+          {counts[tab.value] !== undefined ? (
+            <span className={cn("rounded-md px-1.5 py-0.5 text-[12px]", active ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-600")}>{counts[tab.value]}</span>
+          ) : null}
+        </button>
+      );
+    })}
+  </div>
+);
+
 const InventoryToolbar = ({
   modeType,
   onModeChange,
@@ -60,7 +97,7 @@ const InventoryToolbar = ({
         <StatusTab icon={CheckCircle2} label="Available" count={statusCounts.Available} active={activeTab === "Available"} tone="green" onClick={() => selectTab("Available")} />
         <StatusTab icon={Ban} label="Blocked" count={statusCounts.Blocked} active={activeTab === "Blocked"} tone="orange" onClick={() => selectTab("Blocked")} />
         <StatusTab icon={XCircle} label="Sold" count={statusCounts.Sold} active={activeTab === "Sold"} tone="red" onClick={() => selectTab("Sold")} />
-        <StatusTab icon={KeyRound} label="Rented" count={statusCounts.Rented || 0} active={activeTab === "Rented"} tone="purple" onClick={() => selectTab("Rented")} />
+        <StatusTab icon={KeyRound} label="For Rent" count={statusCounts.Rented || 0} active={activeTab === "Rented"} tone="purple" onClick={() => selectTab("Rented")} />
 
         <div className="ml-auto flex items-center gap-3">
           <span className="hidden text-[13px] font-medium text-slate-500 lg:inline">View</span>

@@ -101,6 +101,7 @@ export interface Lead {
    */
   sourceChannel?: string;
   company?: string;
+  clientProfession?: string;
   preferredLocations?: string[];
   /* Where a site visit is verified, radius in metres. */
   siteLocation?: { lat?: number | null; lng?: number | null; radiusMeters?: number | null } | null;

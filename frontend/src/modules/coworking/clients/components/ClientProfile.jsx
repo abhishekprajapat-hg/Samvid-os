@@ -179,7 +179,10 @@ const ClientProfile = ({ client, onOpenCabin, onRecordPayment, onDocumentsChange
 
       <Section title="Contact">
         <dl>
-          <Row label="Contact" value={client.contactPerson} />
+          <Row label={(client.entityKind || "company") === "company" ? "Signing authority 1" : "Contact"} value={client.contactPerson} />
+          {client.signingAuthority2 ? <Row label="Signing authority 2" value={client.signingAuthority2} /> : null}
+          {client.secondPersonName ? <Row label="Person 2" value={client.secondPersonName} /> : null}
+          <Row label="Work profile" value={client.industry} />
           <Row label="Phone" value={client.phone} icon={Phone} mono />
           <Row label="Email" value={client.email} icon={Mail} />
           <Row label="GSTIN" value={client.gstin} mono />

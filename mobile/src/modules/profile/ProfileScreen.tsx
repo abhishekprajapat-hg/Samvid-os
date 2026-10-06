@@ -4,7 +4,7 @@ import * as ImagePicker from "expo-image-picker";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppInput } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
-import { uploadFile } from "../../services/uploadService";
+import { uploadFile, toAbsoluteUrl } from "../../services/uploadService";
 import { getMyProfile, updateMyProfile } from "../../services/userService";
 import { PushNotificationCard } from "../../components/common/PushNotificationCard";
 import { ProfileAttendanceSection } from "./ProfileAttendanceSection";
@@ -267,7 +267,7 @@ export const ProfileScreen = () => {
               disabled={!profile?.profileImageUrl}
             >
               {profile?.profileImageUrl ? (
-                <Image source={{ uri: String(profile.profileImageUrl) }} style={styles.avatar} />
+                <Image source={{ uri: toAbsoluteUrl(String(profile.profileImageUrl)) }} style={styles.avatar} />
               ) : (
                 <View style={styles.avatarFallback}>
                   <Text style={styles.avatarFallbackText}>{initials(name || profile?.name || "User")}</Text>
@@ -374,7 +374,7 @@ export const ProfileScreen = () => {
         <Pressable style={styles.previewBackdrop} onPress={() => setImagePreviewOpen(false)}>
           <View style={styles.previewCard}>
             {profile?.profileImageUrl ? (
-              <Image source={{ uri: String(profile.profileImageUrl) }} style={styles.previewImage} resizeMode="contain" />
+              <Image source={{ uri: toAbsoluteUrl(String(profile.profileImageUrl)) }} style={styles.previewImage} resizeMode="contain" />
             ) : null}
           </View>
         </Pressable>

@@ -7,6 +7,8 @@ const companyMiddleware = require("../middleware/company.middleware");
 const { writeLimiter } = require("../middleware/rateLimit.middleware");
 const { USER_ROLES } = require("../constants/role.constants");
 const { checkRoleOrPageAccess, requirePageActionForMethod } = require("../middleware/pageAccess.middleware");
+const Report = require("../models/Report");
+const { requireAdminApprovalForDelete, describeByModel } = require("../services/deleteApproval.service");
 
 /*
  * The report history and the saved templates.
@@ -23,6 +25,18 @@ router.use(companyMiddleware.requireCompanyContext);
 
 router.get("/", reportController.listReports);
 router.post("/", writeLimiter, reportController.createReport);
-router.delete("/:reportId", writeLimiter, reportController.deleteReport);
+// A Manager's delete becomes a request an Admin approves.
+router.delete(
+  "/:reportId",
+  writeLimiter,
+  requireAdminApprovalForDelete("report", {
+    label: "Report",
+    pageKey: "reports",
+    idParam: "reportId",
+    handler: reportController.deleteReport,
+    describe: describeByModel(Report, ["name"]),
+  }),
+  reportController.deleteReport,
+);
 
 module.exports = router;

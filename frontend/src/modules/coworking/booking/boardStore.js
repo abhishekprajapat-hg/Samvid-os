@@ -156,9 +156,26 @@ const patch = (cabins, codes, update) =>
  * the parts always add back up to the agreed total.
  */
 const shareOf = (cabin, selected, total) => {
-  const list = selected.reduce((sum, item) => sum + item.monthlyRent, 0);
-  if (!list) return 0;
-  return Math.round((cabin.monthlyRent / list) * total);
+  const amount = Number(total) || 0;
+  if (!amount || !selected.length) return 0;
+  const list = selected.reduce((sum, item) => sum + (Number(item.monthlyRent) || 0), 0);
+  // Cabins without a list rate (all ₹0) still carry what was typed in:
+  // split it evenly instead of losing it.
+  if (!list) return Math.round(amount / selected.length);
+  return Math.round(((Number(cabin.monthlyRent) || 0) / list) * amount);
+};
+
+/*
+ * Deposit for one cabin of a booking. A custom deposit (an amount typed in,
+ * not a number of months) is split across the cabins in proportion to rent,
+ * the same way rent and token are.
+ */
+export const depositFor = (cabin, cabins, terms, rent) => {
+  if (terms?.depositMode === "custom") {
+    const total = Number(terms.depositAmount);
+    return Number.isFinite(total) && total >= 0 ? shareOf(cabin, cabins, total) : 0;
+  }
+  return Math.round(rent * (Number(terms?.depositMonths) || 2));
 };
 
 export const boardReducer = (state, action) => {
@@ -185,7 +202,9 @@ export const boardReducer = (state, action) => {
             startDate,
             endDate,
             monthlyRent: rent,
-            deposit: Math.round(rent * (terms.depositMonths ?? 2)),
+            deposit: depositFor(cabin, selected, terms, rent),
+            depositMode: terms.depositMode === "custom" ? "custom" : "months",
+            depositMonths: terms.depositMode === "custom" ? null : Number(terms.depositMonths) || 2,
             lockInMonths: terms.lockInMonths ?? 0,
             noticePeriodDays: Number(terms.noticePeriodDays ?? 30),
             tokenAmount: shareOf(cabin, selected, Number(terms.tokenAmount || 0)),
@@ -434,9 +453,13 @@ export const boardReducer = (state, action) => {
                   startDate,
                   endDate,
                   monthlyRent: Number.isFinite(totalRent) ? shareOf(cabin, held, totalRent) : cabin.contract.monthlyRent,
-                  deposit: Number.isFinite(totalRent)
-                    ? Math.round(shareOf(cabin, held, totalRent) * (Number(terms.depositMonths) || 2))
-                    : cabin.contract.deposit,
+                  deposit: terms.depositMode === "custom"
+                    ? depositFor(cabin, held, terms, 0)
+                    : Number.isFinite(totalRent)
+                      ? Math.round(shareOf(cabin, held, totalRent) * (Number(terms.depositMonths) || 2))
+                      : cabin.contract.deposit,
+                  depositMode: terms.depositMode === "custom" ? "custom" : "months",
+                  depositMonths: terms.depositMode === "custom" ? null : Number(terms.depositMonths) || 2,
                   lockInMonths: Number(terms.lockInMonths) || 0,
                   noticePeriodDays: Number(terms.noticePeriodDays ?? 30),
                   tokenAmount: shareOf(cabin, held, Number(terms.tokenAmount || 0)),

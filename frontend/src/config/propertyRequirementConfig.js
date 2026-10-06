@@ -64,19 +64,16 @@ export const PLOT_PURPOSE_OPTIONS = [
   "Investment",
 ];
 
+// Leads and inventory share one list so a lead's plot status can match a property.
 export const PLOT_PROJECT_STATUS_OPTIONS = [
   "Pre-launching",
   "T&C",
   "Pre-approved",
-  "Resale",
-];
-
-export const INVENTORY_PLOT_PROJECT_STATUS_OPTIONS = [
-  "Pre-launching",
-  "T&C",
   "RERA-Approved",
   "Resale",
 ];
+
+export const INVENTORY_PLOT_PROJECT_STATUS_OPTIONS = PLOT_PROJECT_STATUS_OPTIONS;
 
 export const PLOT_TYPE_OPTIONS = [
   "Commercial Plots",
@@ -245,7 +242,7 @@ const COMMERCIAL_SUBTYPES = {
       { key: "ceilingHeight", label: "Ceiling Height", type: "select", options: ["8-10 ft", "10-12 ft", "12-15 ft", "15-20 ft", "20+ ft"] },
       { key: "mainRoadVisibility", label: "Main Road Visibility", type: "checkbox" },
       { key: "displayArea", label: "Display Area", type: "number", min: 0 },
-      { key: "mezzanineFloor", label: "Maxxnine Floor", type: "checkbox" },
+      { key: "mezzanineFloor", label: "Mezzanine Floor", type: "checkbox" },
       { key: "washroom", label: "Washroom", type: "checkbox" },
       { key: "moveInDate", label: "Move In Date", type: "select", options: ["Within 1 Week", "Within 2 Weeks", "Within 1 Month", "Within 2 Months", "Within 3 Months", "After 3 Months", "Flexible"] },
     ],
@@ -331,7 +328,7 @@ const RESIDENTIAL_COMMON_SUBTYPES = {
     showFurnishing: true,
     fields: [
       { key: "bhkType", label: "BHK Type", type: "select", options: ["1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK", "Other"] },
-      { key: "area", label: "Area", type: "number", min: 0 },
+      { key: "area", label: "Area (sq ft)", type: "number", min: 0 },
       { key: "superBuiltUpArea", label: "Super Built-up Area", type: "number", min: 0 },
       { key: "carpetArea", label: "Carpet Area", type: "number", min: 0 },
       { key: "purpose", label: "Purpose", type: "select", options: ["Self", "Investment"] },
@@ -355,7 +352,7 @@ const RESIDENTIAL_COMMON_SUBTYPES = {
   },
   INDEPENDENT_HOUSE: { label: "House", showFurnishing: true, fields: [
     { key: "bhkType", label: "BHK Type", type: "select", options: ["1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK", "Other"] },
-    { key: "area", label: "Area", type: "number", min: 0 },
+    { key: "area", label: "Area (sq ft)", type: "number", min: 0 },
     { key: "superBuiltUpArea", label: "Super Built-up Area", type: "number", min: 0 },
     { key: "carpetArea", label: "Carpet Area", type: "number", min: 0 },
     { key: "purpose", label: "Purpose", type: "select", options: ["Self", "Investment"] },
@@ -379,6 +376,61 @@ const RESIDENTIAL_COMMON_SUBTYPES = {
 };
 
 // Lead Requirements: unchanged, original Plot / PG-Hostel behavior.
+// Shared by the lead form and the inventory form, so a Bungalow or Farm House
+// lead can be matched with a Bungalow or Farm House property.
+const BUNGALOW_SUBTYPE = { label: "Bungalow", showFurnishing: true, fields: [
+    { key: "bhkType", label: "BHK Type", type: "select", options: ["1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK", "Other"] },
+    { key: "area", label: "Area (sq ft)", type: "number", min: 0 },
+    { key: "superBuiltUpArea", label: "Super Built-up Area", type: "number", min: 0 },
+    { key: "carpetArea", label: "Carpet Area", type: "number", min: 0 },
+    { key: "purpose", label: "Purpose", type: "select", options: ["Self", "Investment"] },
+    { key: "bathrooms", label: "Bathrooms", type: "select", options: BATHROOM_OPTIONS },
+    { key: "numberOfFloors", label: "Number of Floors", type: "select", options: HOUSE_FLOOR_OPTIONS },
+    { key: "balconies", label: "Balconies", type: "number", min: 0 },
+    { key: "facing", label: "Facing", type: "text" },
+    { key: "cornerProperty", label: "Corner Property", type: "checkbox" },
+    { key: "privateParking", label: "Private Parking", type: "checkbox" },
+    { key: "garden", label: "Garden", type: "checkbox" },
+    { key: "terrace", label: "Terrace", type: "checkbox" },
+    { key: "servantRoom", label: "Servant Room", type: "checkbox" },
+    { key: "storageRoom", label: "Storage Room", type: "checkbox" },
+    { key: "powerBackup", label: "Power Backup", type: "checkbox" },
+    { key: "gasPipeline", label: "Gas Pipeline", type: "checkbox" },
+    { key: "separateEntry", label: "Separate Entry", type: "checkbox" },
+  ] };
+
+const FARM_HOUSE_SUBTYPE = { label: "Farm House", showFurnishing: true, fields: [
+    { key: "landArea", label: "Land Area", type: "number", min: 0 },
+    { key: "builtUpArea", label: "Built-up Area", type: "number", min: 0 },
+    { key: "purpose", label: "Purpose", type: "select", options: ["Self", "Investment"] },
+    { key: "bathrooms", label: "Bathrooms", type: "select", options: BATHROOM_OPTIONS },
+    { key: "facing", label: "Facing", type: "text" },
+    { key: "privateParking", label: "Private Parking", type: "checkbox" },
+    { key: "garden", label: "Garden", type: "checkbox" },
+    { key: "swimmingPool", label: "Swimming Pool", type: "checkbox" },
+    { key: "servantRoom", label: "Servant Room", type: "checkbox" },
+    { key: "powerBackup", label: "Power Backup", type: "checkbox" },
+    { key: "waterConnection", label: "Water Connection", type: "checkbox" },
+    { key: "boundaryWall", label: "Boundary Wall", type: "checkbox" },
+    { key: "moveInDate", label: "Move-in Date", type: "date" },
+  ] };
+
+// Inventory version of PG / Hostel: same keys as the lead requirement, worded for a property.
+const INVENTORY_PG_HOSTEL_SUBTYPE = { label: "PG / Hostel", showFurnishing: true, fields: [
+  { key: "occupancyType", label: "For", type: "select", options: ["Male", "Female", "Co-living"] },
+  { key: "sharingType", label: "Sharing Type", type: "select", options: ["Single", "Double", "Triple"] },
+  { key: "numberOfBeds", label: "Total Beds", type: "number", min: 0 },
+  { key: "perBedBudget", label: "Rent per Bed", type: "number", min: 0 },
+  { key: "foodIncluded", label: "Food Included", type: "checkbox" },
+  { key: "attachedWashroom", label: "Attached Washroom", type: "checkbox" },
+  { key: "acRequired", label: "AC Rooms", type: "checkbox" },
+  { key: "wifi", label: "Wi-Fi", type: "checkbox" },
+  { key: "laundry", label: "Laundry", type: "checkbox" },
+  { key: "powerBackup", label: "Power Backup", type: "checkbox" },
+  { key: "security", label: "Security", type: "checkbox" },
+  { key: "parking", label: "Reserved Parking", type: "checkbox" },
+] };
+
 export const PROPERTY_REQUIREMENT_CONFIG = {
   COMMERCIAL: {
     label: "Commercial",
@@ -389,9 +441,12 @@ export const PROPERTY_REQUIREMENT_CONFIG = {
     label: "Residential",
     subtypeLabel: "Residential Property Type",
     subtypes: {
-      ...RESIDENTIAL_COMMON_SUBTYPES,
+      APARTMENT: RESIDENTIAL_COMMON_SUBTYPES.APARTMENT,
+      INDEPENDENT_HOUSE: RESIDENTIAL_COMMON_SUBTYPES.INDEPENDENT_HOUSE,
+      BUNGALOW: BUNGALOW_SUBTYPE,
+      FARM_HOUSE: FARM_HOUSE_SUBTYPE,
       PLOT: { label: "Plot", showFurnishing: false, fields: [
-        { key: "plotLocation", label: "Location", type: "select", options: PLOT_LOCATION_OPTIONS },
+        { key: "plotLocation", label: "Plot Location", type: "select", options: PLOT_LOCATION_OPTIONS },
         { key: "plotOccupancy", label: "Occupancy", type: "select", options: PLOT_OCCUPANCY_OPTIONS },
         { key: "plotPurpose", label: "Purpose", type: "select", options: PLOT_PURPOSE_OPTIONS },
         { key: "projectStatus", label: "Project Status", type: "select", options: PLOT_PROJECT_STATUS_OPTIONS },
@@ -423,11 +478,12 @@ export const PROPERTY_REQUIREMENT_CONFIG = {
         { key: "parking", label: "Reserved Parking", type: "checkbox" },
         { key: "moveInDate", label: "Move-in Date", type: "date" },
       ] },
+      OTHER: RESIDENTIAL_COMMON_SUBTYPES.OTHER,
     },
   },
 };
 
-// Inventory (Asset Vault): Plot No./Dimension + Bungalow/Farm House, no PG-Hostel or Plot Occupancy/Purpose.
+// Inventory (Asset Vault): Plot No./Dimension, Bungalow / Farm House and PG / Hostel; no Plot Occupancy/Purpose.
 export const INVENTORY_PROPERTY_REQUIREMENT_CONFIG = {
   COMMERCIAL: {
     label: "Commercial",
@@ -456,9 +512,10 @@ export const INVENTORY_PROPERTY_REQUIREMENT_CONFIG = {
     label: "Residential",
     subtypeLabel: "Residential Property Type",
     subtypes: {
-      ...RESIDENTIAL_COMMON_SUBTYPES,
+      APARTMENT: RESIDENTIAL_COMMON_SUBTYPES.APARTMENT,
+      INDEPENDENT_HOUSE: RESIDENTIAL_COMMON_SUBTYPES.INDEPENDENT_HOUSE,
       PLOT: { label: "Plot", showFurnishing: false, fields: [
-        { key: "plotLocation", label: "Location", type: "select", options: PLOT_LOCATION_OPTIONS },
+        { key: "plotLocation", label: "Plot Location", type: "select", options: PLOT_LOCATION_OPTIONS },
         { key: "projectStatus", label: "Project Status", type: "select", options: INVENTORY_PLOT_PROJECT_STATUS_OPTIONS },
         { key: "plotType", label: "Plot Type", type: "select", options: PLOT_TYPE_OPTIONS },
         { key: "plotNumber", label: "Plot No.", type: "text" },
@@ -474,41 +531,9 @@ export const INVENTORY_PROPERTY_REQUIREMENT_CONFIG = {
         { key: "gatedColony", label: "Gated Colony", type: "checkbox" },
         { key: "approvedColony", label: "Approved Colony", type: "checkbox" },
       ] },
-      BUNGALOW: { label: "Bungalow", showFurnishing: true, fields: [
-        { key: "bhkType", label: "BHK Type", type: "select", options: ["1 BHK", "2 BHK", "3 BHK", "4 BHK", "5 BHK", "Other"] },
-        { key: "area", label: "Area", type: "number", min: 0 },
-        { key: "superBuiltUpArea", label: "Super Built-up Area", type: "number", min: 0 },
-        { key: "carpetArea", label: "Carpet Area", type: "number", min: 0 },
-        { key: "purpose", label: "Purpose", type: "select", options: ["Self", "Investment"] },
-        { key: "bathrooms", label: "Bathrooms", type: "select", options: BATHROOM_OPTIONS },
-        { key: "numberOfFloors", label: "Number of Floors", type: "select", options: HOUSE_FLOOR_OPTIONS },
-        { key: "balconies", label: "Balconies", type: "number", min: 0 },
-        { key: "facing", label: "Facing", type: "text" },
-        { key: "cornerProperty", label: "Corner Property", type: "checkbox" },
-        { key: "privateParking", label: "Private Parking", type: "checkbox" },
-        { key: "garden", label: "Garden", type: "checkbox" },
-        { key: "terrace", label: "Terrace", type: "checkbox" },
-        { key: "servantRoom", label: "Servant Room", type: "checkbox" },
-        { key: "storageRoom", label: "Storage Room", type: "checkbox" },
-        { key: "powerBackup", label: "Power Backup", type: "checkbox" },
-        { key: "gasPipeline", label: "Gas Pipeline", type: "checkbox" },
-        { key: "separateEntry", label: "Separate Entry", type: "checkbox" },
-      ] },
-      FARM_HOUSE: { label: "Farm House", showFurnishing: true, fields: [
-        { key: "landArea", label: "Land Area", type: "number", min: 0 },
-        { key: "builtUpArea", label: "Built-up Area", type: "number", min: 0 },
-        { key: "purpose", label: "Purpose", type: "select", options: ["Self", "Investment"] },
-        { key: "bathrooms", label: "Bathrooms", type: "select", options: BATHROOM_OPTIONS },
-        { key: "facing", label: "Facing", type: "text" },
-        { key: "privateParking", label: "Private Parking", type: "checkbox" },
-        { key: "garden", label: "Garden", type: "checkbox" },
-        { key: "swimmingPool", label: "Swimming Pool", type: "checkbox" },
-        { key: "servantRoom", label: "Servant Room", type: "checkbox" },
-        { key: "powerBackup", label: "Power Backup", type: "checkbox" },
-        { key: "waterConnection", label: "Water Connection", type: "checkbox" },
-        { key: "boundaryWall", label: "Boundary Wall", type: "checkbox" },
-        { key: "moveInDate", label: "Move-in Date", type: "date" },
-      ] },
+      BUNGALOW: BUNGALOW_SUBTYPE,
+      FARM_HOUSE: FARM_HOUSE_SUBTYPE,
+      PG_HOSTEL: INVENTORY_PG_HOSTEL_SUBTYPE,
       OTHER: RESIDENTIAL_COMMON_SUBTYPES.OTHER,
     },
   },

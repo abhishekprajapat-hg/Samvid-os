@@ -47,7 +47,24 @@ const addMonths = (iso: string, months: number) => {
   return date;
 };
 
-type Cheque = { number: string; bank: string; amount: string; date: string; notes: string };
+type Cheque = {
+  number: string;
+  bank: string;
+  amount: string;
+  date: string;
+  notes: string;
+  // Cheque copy uploaded from web; carried through so an edit here keeps it.
+  file?: { url?: string; fileName?: string; size?: number; type?: string; uploadedAt?: string } | null;
+};
+
+// "Other" opens a free-text box; what is typed is the saved work profile (as on web).
+const splitIndustry = (value: unknown) => {
+  const text = String(value || "").trim();
+  if (!text) return { industryChoice: INDUSTRIES[0], industryCustom: "" };
+  if (INDUSTRIES.includes(text) && text !== "Other") return { industryChoice: text, industryCustom: "" };
+  return { industryChoice: "Other", industryCustom: text === "Other" ? "" : text };
+};
+const resolveIndustry = (choice: string, custom: string) => (choice === "Other" ? custom.trim() || "Other" : choice);
 
 export const OnboardClientScreen = () => {
   const navigation = useNavigation<any>();
@@ -79,7 +96,9 @@ export const OnboardClientScreen = () => {
     dateOfBirth: String(initialClient?.dateOfBirth || "").slice(0, 10),
     phone: String(initialClient?.phone || ""),
     email: String(initialClient?.email || ""),
-    industry: String(initialClient?.industry || INDUSTRIES[0]),
+    ...splitIndustry(initialClient?.industry),
+    signingAuthority2: String(initialClient?.signingAuthority2 || ""),
+    secondPersonName: String(initialClient?.secondPersonName || ""),
     gstin: String(initialClient?.gstin || ""),
     pan: String(initialClient?.pan || ""),
     documents: (Array.isArray(initialClient?.documents) ? initialClient?.documents : []) as ClientDocument[],
@@ -103,9 +122,14 @@ export const OnboardClientScreen = () => {
       lockInMonths: initialContract?.lockInMonths ?? 6,
       rentOverride: editMode ? String(editRent) : "",
       depositMonths:
-        initialContract && initialContract.monthlyRent
+        initialContract?.depositMonths
+        || (initialContract && initialContract.monthlyRent
           ? Math.max(1, Math.round(initialContract.deposit / initialContract.monthlyRent))
-          : 2,
+          : 2),
+      depositMode: (initialContract?.depositMode === "custom" ? "custom" : "months") as "months" | "custom",
+      depositAmount: initialContract?.depositMode === "custom"
+        ? String(cabins.reduce((sum, cabin) => sum + Number(cabin.contract?.deposit || 0), 0))
+        : "",
       noticePeriodDays: String(initialContract?.noticePeriodDays ?? 30),
       tokenAmount: String(
         editMode ? cabins.reduce((sum, cabin) => sum + Number(cabin.contract?.tokenAmount || 0), 0) : 0,
@@ -116,6 +140,7 @@ export const OnboardClientScreen = () => {
         amount: String(cheque.amount ?? 0),
         date: String(cheque.date || ""),
         notes: String(cheque.notes || ""),
+        file: cheque.file || null,
       } as Cheque,
       notes: String(initialContract?.notes || ""),
     };
@@ -133,23 +158,32 @@ export const OnboardClientScreen = () => {
 
   const listRent = cabins.reduce((sum, cabin) => sum + cabin.monthlyRent, 0);
   const rent = terms.rentOverride === "" ? listRent : Number(terms.rentOverride) || 0;
-  const deposit = rent * terms.depositMonths;
+  const isCustomDeposit = terms.depositMode === "custom";
+  const customDeposit = Number(terms.depositAmount);
+  const deposit = isCustomDeposit ? (Number.isFinite(customDeposit) ? customDeposit : 0) : rent * terms.depositMonths;
   const capacity = cabins.reduce((sum, cabin) => sum + cabin.seats, 0);
   const discount = listRent - rent;
 
   const isCompany = form.kind === "company";
   const kyc = kycStatusOf({ kind: mode === "existing" ? selectedClient?.entityKind : form.kind, documents: mode === "existing" ? selectedClient?.documents : form.documents });
   const clientName = mode === "new" ? form.companyName.trim() : selectedClient?.name || "";
-  const validTerms = [terms.noticePeriodDays, terms.tokenAmount, terms.securityCheque.amount].every(
+  const validDeposit = !isCustomDeposit || (terms.depositAmount.trim() !== "" && Number.isFinite(customDeposit) && customDeposit >= 0);
+  const validTerms = validDeposit && [terms.noticePeriodDays, terms.tokenAmount, terms.securityCheque.amount].every(
     (value) => Number.isFinite(Number(value)) && Number(value) >= 0,
   );
   const today = toDateKey();
   const validBirthDate =
     !form.dateOfBirth || (/^\d{4}-\d{2}-\d{2}$/.test(form.dateOfBirth) && form.dateOfBirth >= "1900-01-01" && form.dateOfBirth <= today);
   const validStart = /^\d{4}-\d{2}-\d{2}$/.test(terms.startDate) && !Number.isNaN(new Date(terms.startDate).getTime());
-  const canAdvance = step === 0 ? Boolean(clientName) : validTerms && validBirthDate && validStart;
+  const validWorkProfile = form.industryChoice !== "Other" || Boolean(form.industryCustom.trim());
+  const canAdvance = step === 0 ? Boolean(clientName) && validWorkProfile : validTerms && validBirthDate && validStart;
 
   const set = (key: keyof typeof form) => (value: string) => setForm((current) => ({ ...current, [key]: value }));
+
+  const clientPayload = (() => {
+    const { industryChoice, industryCustom, ...rest } = form;
+    return { ...rest, industry: resolveIndustry(industryChoice, industryCustom), name: clientName };
+  })();
 
   const confirm = () => {
     const termsPayload: OnboardTerms = {
@@ -158,6 +192,8 @@ export const OnboardClientScreen = () => {
       lockInMonths: terms.lockInMonths,
       rent,
       depositMonths: terms.depositMonths,
+      depositMode: terms.depositMode,
+      depositAmount: isCustomDeposit ? customDeposit : null,
       noticePeriodDays: terms.noticePeriodDays,
       tokenAmount: terms.tokenAmount,
       securityCheque: { ...terms.securityCheque },
@@ -167,7 +203,7 @@ export const OnboardClientScreen = () => {
       dispatch({
         type: "UPDATE_CLIENT",
         clientId: editClientId,
-        client: { ...form, name: clientName } as Partial<BoardClient>,
+        client: clientPayload as Partial<BoardClient>,
         terms: termsPayload,
       });
     } else {
@@ -187,7 +223,7 @@ export const OnboardClientScreen = () => {
               dateOfBirth: selectedClient.dateOfBirth,
               documents: selectedClient.documents,
             } as BoardClient)
-          : ({ ...form, name: clientName } as unknown as BoardClient);
+          : (clientPayload as unknown as BoardClient);
       dispatch({ type: "ONBOARD", cabinCodes: cabins.map((cabin) => cabin.code), client, terms: termsPayload });
     }
     navigation.navigate("CoworkingBooking", {
@@ -293,18 +329,23 @@ export const OnboardClientScreen = () => {
                     options={ENTITY_TYPES.map((type) => ({ label: type, value: type }))}
                     onChange={set("entityType")}
                   />
-                  <TextField label="Authorised signatory" value={form.contactPerson} onChangeText={set("contactPerson")} placeholder="Rohit Ambekar" />
+                  <TextField label="Signing authority 1" value={form.contactPerson} onChangeText={set("contactPerson")} placeholder="Rohit Ambekar" />
+                  <TextField label="Signing authority 2 (optional)" value={form.signingAuthority2} onChangeText={set("signingAuthority2")} placeholder="Second signatory name" />
                 </>
               ) : (
                 <>
                   <TextField label="Full name" value={form.companyName} onChangeText={set("companyName")} placeholder="Rohit Ambekar" required />
                   <TextField label="PAN" value={form.pan} onChangeText={set("pan")} placeholder="ABCDE1234F" autoCapitalize="characters" />
                   <SelectField
-                    label="Occupation"
-                    value={form.industry}
+                    label="Work profile"
+                    value={form.industryChoice}
                     options={INDUSTRIES.map((item) => ({ label: item, value: item }))}
-                    onChange={set("industry")}
+                    onChange={set("industryChoice")}
                   />
+                  {form.industryChoice === "Other" ? (
+                    <TextField label="Specify work profile" value={form.industryCustom} onChangeText={set("industryCustom")} placeholder="e.g. Cybersecurity" required />
+                  ) : null}
+                  <TextField label="Person 2 name (optional)" value={form.secondPersonName} onChangeText={set("secondPersonName")} placeholder="Second person's full name" />
                 </>
               )}
               <FieldRow>
@@ -318,11 +359,14 @@ export const OnboardClientScreen = () => {
               {isCompany ? (
                 <>
                   <SelectField
-                    label="Industry"
-                    value={form.industry}
+                    label="Work profile / industry"
+                    value={form.industryChoice}
                     options={INDUSTRIES.map((item) => ({ label: item, value: item }))}
-                    onChange={set("industry")}
+                    onChange={set("industryChoice")}
                   />
+                  {form.industryChoice === "Other" ? (
+                    <TextField label="Specify work profile" value={form.industryCustom} onChangeText={set("industryCustom")} placeholder="e.g. Cybersecurity" required />
+                  ) : null}
                   <TextField label="GSTIN" value={form.gstin} onChangeText={set("gstin")} placeholder="27ABCDE1234K1Z5" autoCapitalize="characters" />
                   <Text style={styles.hintTight}>Optional. Needed before the first invoice.</Text>
                 </>
@@ -438,13 +482,28 @@ export const OnboardClientScreen = () => {
             <FieldCol>
               <SelectField
                 label={`Deposit · ${formatCurrency(deposit)}`}
-                value={String(terms.depositMonths)}
-                options={[1, 2, 3, 6].map((months) => ({
-                  label: `${months} ${months === 1 ? "month" : "months"} of rent`,
-                  value: String(months),
-                }))}
-                onChange={(value) => setTerms((current) => ({ ...current, depositMonths: Number(value) }))}
+                value={isCustomDeposit ? "custom" : String(terms.depositMonths)}
+                options={[
+                  ...[1, 2, 3, 6].map((months) => ({
+                    label: `${months} ${months === 1 ? "month" : "months"} of rent`,
+                    value: String(months),
+                  })),
+                  { label: "Custom amount", value: "custom" },
+                ]}
+                onChange={(value) => setTerms((current) => (value === "custom"
+                  ? { ...current, depositMode: "custom" as const, depositAmount: current.depositAmount || String(deposit || "") }
+                  : { ...current, depositMode: "months" as const, depositMonths: Number(value) }))}
               />
+              {isCustomDeposit ? (
+                <TextField
+                  label="Deposit amount (₹)"
+                  value={terms.depositAmount}
+                  onChangeText={(value) => setTerms((current) => ({ ...current, depositAmount: value.replace(/[^\d.]/g, "") }))}
+                  keyboardType="number-pad"
+                  placeholder="e.g. 75000"
+                  required
+                />
+              ) : null}
             </FieldCol>
             <FieldCol>
               <SelectField
@@ -540,7 +599,7 @@ export const OnboardClientScreen = () => {
             <Text style={styles.reviewName}>{clientName || "Not named yet"}</Text>
             <Text style={styles.body}>
               {mode === "new"
-                ? [form.contactPerson, form.phone, form.industry].filter(Boolean).join(" · ") || "New client record"
+                ? [form.contactPerson, form.signingAuthority2 || form.secondPersonName, form.phone, clientPayload.industry].filter(Boolean).join(" · ") || "New client record"
                 : [selectedClient?.contactPerson, selectedClient?.phone, "existing client"].filter(Boolean).join(" · ")}
             </Text>
           </SectionCard>

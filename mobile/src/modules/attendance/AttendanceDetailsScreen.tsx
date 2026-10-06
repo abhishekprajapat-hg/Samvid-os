@@ -224,7 +224,7 @@ export const AttendanceDetailsScreen = () => {
       <ScrollView contentContainerStyle={styles.page} showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <View style={styles.personRow}>
-            <SolidAvatar name={name} size={52} />
+            <SolidAvatar name={name} size={52} photo={String((person as { profileImageUrl?: string } | null | undefined)?.profileImageUrl || "")} />
             <View style={styles.personCopy}>
               <Text style={styles.personName} numberOfLines={1}>{name}</Text>
               <Text style={styles.personRole} numberOfLines={1}>{prettyRole(person?.role)}</Text>

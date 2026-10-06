@@ -12,6 +12,7 @@ import {
 } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
 import { getCustomRoles, createCustomRole, updateCustomRole, deleteCustomRole } from "../../services/roleService";
+import { deleteOutcomeMessage, isDeleteApprovalPending } from "../../services/deleteRequestService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
 import EmployeePageAccess from "./components/EmployeePageAccess";
@@ -19,6 +20,7 @@ import {
   NEW_ROLE_OPTION,
   UserFormPanel,
 } from "./components/TeamManagerPanels";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const MANAGEMENT_ROLES = ["MANAGER"];
 const EXECUTIVE_ROLES = ["EXECUTIVE", "FIELD_EXECUTIVE"];
@@ -29,7 +31,8 @@ const REPORTING_PARENT_ROLES = {
   PRODUCTION_EXECUTIVE: ["MANAGER"],
   COMMUNITY_MANAGER: ["MANAGER"],
   CHANNEL_PARTNER: ["MANAGER"],
-  COWORKING_ADMIN: ["ADMIN"],
+  // Every role except Admin reports to a Manager.
+  COWORKING_ADMIN: ["MANAGER"],
 };
 const ROLE_LABELS = {
   ADMIN: "Admin",
@@ -63,7 +66,7 @@ const ROLE_HIERARCHY = [
   { role: "PRODUCTION_EXECUTIVE", reportsTo: "Manager", scope: "Production tasks" },
   { role: "COMMUNITY_MANAGER", reportsTo: "Manager", scope: "Production tasks" },
   { role: "CHANNEL_PARTNER", reportsTo: "Manager", scope: "Partner-created leads" },
-  { role: "COWORKING_ADMIN", reportsTo: "Admin", scope: "Coworking workspace controls" },
+  { role: "COWORKING_ADMIN", reportsTo: "Manager", scope: "Coworking workspace controls" },
 ];
 
 const normalizeBrokerageMode = (value) =>
@@ -159,6 +162,15 @@ const TeamManager = ({ theme = "light" }) => {
   const currentRole = localStorage.getItem("role");
   const isAdmin = currentRole === "ADMIN";
   const canUseAdminTools = isAdmin || currentRole === "MANAGER";
+  // Admin sets anyone's page access but an Admin's; a Manager sets it for
+  // staff below Manager level (not their own, not another Manager's), and
+  // cannot give Delete. The server enforces the same rules.
+  const canEditPageAccess = (user) => {
+    if (!user || user.role === "ADMIN") return false;
+    if (isAdmin) return true;
+    if (currentRole !== "MANAGER") return false;
+    return user.role !== "MANAGER" && String(user._id) !== String(currentUserId);
+  };
   const canViewTeamAccess = canUseAdminTools || MANAGEMENT_ROLES.includes(currentRole);
   const isDarkTheme = theme === "dark";
   // Guarded like every other read of this key in the app: a corrupt "user"
@@ -227,9 +239,17 @@ const TeamManager = ({ theme = "light" }) => {
   };
 
   const handleDeleteRole = async (role) => {
-    if (!window.confirm(`Delete the role "${role.name}"?`)) return;
+    const question = isAdmin
+      ? `Delete the role "${role.name}"?`
+      : `Ask Admin to delete the role "${role.name}"? It stays until they approve.`;
+    if (!window.confirm(question)) return;
     try {
-      await deleteCustomRole(role._id);
+      const result = await deleteCustomRole(role._id);
+      // A Manager's delete is a request an Admin approves; the role stays.
+      if (isDeleteApprovalPending(result)) {
+        setFormError(deleteOutcomeMessage(result));
+        return;
+      }
       setCustomRoles((current) => current.filter((row) => row._id !== role._id));
       // Only the role that just stopped existing needs replacing. Resetting
       // unconditionally moved the half-filled user onto Executive whenever a
@@ -614,7 +634,7 @@ const TeamManager = ({ theme = "light" }) => {
        * next thing wanted - not a list to find them in again. Admin only,
        * because page access is an admin screen.
        */
-      if (isAdmin && created?.user?._id) setAccessEmployee(created.user);
+      if (created?.user?._id && canEditPageAccess(created.user)) setAccessEmployee(created.user);
     } catch (err) {
       setFormError(toErrorMessage(err, "Failed to create user"));
     } finally {
@@ -876,7 +896,7 @@ const TeamManager = ({ theme = "light" }) => {
                     >
                       <td>
                         <div className="team-cellname">
-                          <div className="team-avatar">{getUserInitials(user.name)}</div>
+                          <div className="team-avatar"><AvatarFace user={user} initials={getUserInitials(user.name)} /></div>
                           <div>
                             <b>{user.name || "-"}</b>
                             <small>{user.email || "-"}</small>
@@ -903,7 +923,7 @@ const TeamManager = ({ theme = "light" }) => {
                       </td>
                       <td>
                         <div className="team-rowacts">
-                          {isAdmin && user.role !== "ADMIN" && <button type="button" className="team-mini-toggle" onClick={(event) => { event.stopPropagation(); setAccessEmployee(user); }} title={`Manage page access for ${user.name}`}>Page access</button>}
+                          {canEditPageAccess(user) && <button type="button" className="team-mini-toggle" onClick={(event) => { event.stopPropagation(); setAccessEmployee(user); }} title={`Manage page access for ${user.name}`}>Page access</button>}
                           {canUseAdminTools ? (
                             <button
                               type="button"

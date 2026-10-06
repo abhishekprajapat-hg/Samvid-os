@@ -50,6 +50,8 @@ export type SecurityCheque = {
   amount?: number | string;
   date?: string;
   notes?: string;
+  /* Copy of the cheque, uploaded to the server from the web onboarding form. */
+  file?: { url?: string; fileName?: string; size?: number; type?: string; uploadedAt?: string } | null;
 };
 
 export type BoardContract = {
@@ -58,6 +60,9 @@ export type BoardContract = {
   endDate: string;
   monthlyRent: number;
   deposit: number;
+  /* "custom" = an amount typed in; otherwise a multiple of rent. */
+  depositMode?: "months" | "custom";
+  depositMonths?: number | null;
   lockInMonths: number;
   noticePeriodDays?: number;
   tokenAmount?: number;
@@ -118,6 +123,8 @@ export type OnboardTerms = {
   lockInMonths?: number;
   rent: number;
   depositMonths?: number;
+  depositMode?: "months" | "custom";
+  depositAmount?: number | string | null;
   noticePeriodDays?: number | string;
   tokenAmount?: number | string;
   securityCheque?: SecurityCheque;
@@ -233,10 +240,27 @@ const patch = (cabins: Cabin[], codes: string[], update: (cabin: Cabin) => Parti
 
 /* Rent for a multi-cabin agreement is apportioned by each cabin's list rent. */
 const shareOf = (cabin: Cabin, selected: Cabin[], total: number) => {
-  const list = selected.reduce((sum, item) => sum + item.monthlyRent, 0);
-  if (!list) return 0;
-  return Math.round((cabin.monthlyRent / list) * total);
+  const amount = Number(total) || 0;
+  if (!amount || !selected.length) return 0;
+  const list = selected.reduce((sum, item) => sum + (Number(item.monthlyRent) || 0), 0);
+  // Cabins without a list rate still carry what was typed in: split evenly.
+  if (!list) return Math.round(amount / selected.length);
+  return Math.round(((Number(cabin.monthlyRent) || 0) / list) * amount);
 };
+
+/* Deposit for one cabin; a custom amount is split across cabins by rent, as on web. */
+export const depositFor = (cabin: Cabin, cabins: Cabin[], terms: Partial<OnboardTerms>, rent: number) => {
+  if (terms?.depositMode === "custom") {
+    const total = Number(terms.depositAmount);
+    return Number.isFinite(total) && total >= 0 ? shareOf(cabin, cabins, total) : 0;
+  }
+  return Math.round(rent * (Number(terms?.depositMonths) || 2));
+};
+
+const depositFields = (terms: Partial<OnboardTerms>) => ({
+  depositMode: (terms.depositMode === "custom" ? "custom" : "months") as "months" | "custom",
+  depositMonths: terms.depositMode === "custom" ? null : Number(terms.depositMonths) || 2,
+});
 
 const stayClientId = (stay: PreviousStay) => String(stay.clientId || stay.client?.id || slug(stay.name));
 
@@ -264,7 +288,8 @@ export const boardReducer = (state: BoardState, action: BoardAction): BoardState
             startDate,
             endDate,
             monthlyRent: rent,
-            deposit: Math.round(rent * (terms.depositMonths ?? 2)),
+            deposit: depositFor(cabin, selected, terms, rent),
+            ...depositFields(terms),
             lockInMonths: terms.lockInMonths ?? 0,
             noticePeriodDays: Number(terms.noticePeriodDays ?? 30),
             tokenAmount: shareOf(cabin, selected, Number(terms.tokenAmount || 0)),
@@ -515,9 +540,12 @@ export const boardReducer = (state: BoardState, action: BoardAction): BoardState
                   startDate,
                   endDate,
                   monthlyRent: Number.isFinite(totalRent) ? shareOf(cabin, held, totalRent) : cabin.contract.monthlyRent,
-                  deposit: Number.isFinite(totalRent)
-                    ? Math.round(shareOf(cabin, held, totalRent) * (Number(terms.depositMonths) || 2))
-                    : cabin.contract.deposit,
+                  deposit: terms.depositMode === "custom"
+                    ? depositFor(cabin, held, terms, 0)
+                    : Number.isFinite(totalRent)
+                      ? Math.round(shareOf(cabin, held, totalRent) * (Number(terms.depositMonths) || 2))
+                      : cabin.contract.deposit,
+                  ...depositFields(terms),
                   lockInMonths: Number(terms.lockInMonths) || 0,
                   noticePeriodDays: Number(terms.noticePeriodDays ?? 30),
                   tokenAmount: shareOf(cabin, held, Number(terms.tokenAmount || 0)),

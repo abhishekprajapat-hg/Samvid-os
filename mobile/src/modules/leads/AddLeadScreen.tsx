@@ -51,6 +51,7 @@ import { CoworkingRequirementEditor } from "../../components/common/CoworkingReq
 import { PlaceSuggestionList, usePlaceSuggestions, withPickedPlace } from "../../components/common/PlaceSuggestions";
 import { resolvePlace, type PlaceSuggestion } from "../../services/placeSearch";
 import { TEMPERATURE_CHOICES, initialsOf, temperatureTone, type Temperature } from "./leadPipeline";
+import { PhotoOverlay, profilePhotoOf } from "../../components/common/PhotoOverlay";
 
 /*
  * Add Lead, drawn to the comp.
@@ -310,6 +311,7 @@ export const AddLeadScreen = () => {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [company, setCompany] = useState("");
+  const [workProfile, setWorkProfile] = useState("");
 
   const [property, setProperty] = useState("");
   const [transaction, setTransaction] = useState("RENT");
@@ -522,6 +524,7 @@ export const AddLeadScreen = () => {
         email: email.trim(),
         city: location.trim(),
         company: company.trim(),
+        clientProfession: workProfile.trim(),
         sourceChannel,
         temperature: temperature || "WARM",
         requirements: {
@@ -643,6 +646,14 @@ export const AddLeadScreen = () => {
               value={company}
               onChangeText={setCompany}
               placeholder="Enter company name"
+              autoCapitalize="words"
+            />
+            <TextField
+              label="Work profile"
+              icon="briefcase-outline"
+              value={workProfile}
+              onChangeText={setWorkProfile}
+              placeholder="e.g. Marketing, Lawyer, DSA"
               autoCapitalize="words"
             />
           </SectionCard>
@@ -869,6 +880,7 @@ export const AddLeadScreen = () => {
                     assignee ? (
                       <View style={styles.assigneeAvatar}>
                         <Text style={styles.assigneeAvatarText}>{initialsOf(assignee.name)}</Text>
+                        <PhotoOverlay uri={profilePhotoOf(assignee)} />
                       </View>
                     ) : undefined
                   }

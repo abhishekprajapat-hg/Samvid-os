@@ -6,6 +6,7 @@ const { requireCompanyContext } = require("../middleware/company.middleware");
 const checkRole = require("../middleware/role.middleware");
 const { writeLimiter } = require("../middleware/rateLimit.middleware");
 const { USER_ROLES } = require("../constants/role.constants");
+const { requireAdminApprovalForDelete, describeByModel } = require("../services/deleteApproval.service");
 
 const BUSINESS_CATEGORIES = ["COMMERCIAL", "RESIDENTIAL", "COWORKING", "BOTH"];
 const ASSIGNABLE_BASE_ROLES = Object.values(USER_ROLES).filter((role) => role !== USER_ROLES.ADMIN);
@@ -41,7 +42,8 @@ router.use(requireCompanyContext);
  * That hands out no privilege on its own: a role here is a name plus the
  * built-in role it behaves as, and a manager could already pick that built-in
  * role directly. What the person actually reaches is set afterwards on the page
- * access screen, which stays admin only.
+ * access screen, where a Manager can edit staff below Manager level but never
+ * grant delete (see controllers/userPageAccess.controller.js).
  */
 router.use(checkRole([USER_ROLES.ADMIN, USER_ROLES.MANAGER]));
 
@@ -173,7 +175,7 @@ router.patch("/:roleId", writeLimiter, async (req, res) => {
   }
 });
 
-router.delete("/:roleId", writeLimiter, async (req, res) => {
+const deleteRole = async (req, res) => {
   try {
     if (!/^[a-f0-9]{24}$/i.test(req.params.roleId)) return res.status(400).json({ message: "Invalid role" });
 
@@ -194,6 +196,20 @@ router.delete("/:roleId", writeLimiter, async (req, res) => {
     req.log?.error(error);
     res.status(500).json({ message: "Could not delete the role" });
   }
-});
+};
+
+// A Manager's delete becomes a request an Admin approves (BUG-35).
+router.delete(
+  "/:roleId",
+  writeLimiter,
+  requireAdminApprovalForDelete("custom_role", {
+    label: "Custom role",
+    pageKey: "admin_team",
+    idParam: "roleId",
+    handler: deleteRole,
+    describe: describeByModel(CustomRole, ["name"]),
+  }),
+  deleteRole,
+);
 
 module.exports = router;

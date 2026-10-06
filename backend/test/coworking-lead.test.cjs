@@ -104,6 +104,8 @@ const createLeadStubs = (saved) => ({
   "../services/crmContact.service": {
     findBrokerByPhone: async () => null,
     recordBlockedLead: async () => null,
+    // createLead now stores phones in one canonical form using the real helper.
+    normalizePhone: require("../src/services/crmContact.service").normalizePhone,
   },
   "../services/leadAssignment.service": { buildCreatorLeadAssignment: async () => ({}) },
 });
@@ -148,6 +150,43 @@ test("an unrecognised lead source is stored blank rather than written through", 
   }, res);
   assert.equal(res.code, 201, `createLead answered ${res.code}: ${JSON.stringify(res.body)}`);
   assert.equal(saved[0].sourceChannel, "");
+});
+
+test("a lead phone is stored in one form and formatted duplicates are refused", async () => {
+  const saved = [];
+  let duplicateFilter = null;
+  const stubs = createLeadStubs(saved);
+  const controller = load("controllers/lead.controller.js", stubs);
+  const res = response();
+  await controller.createLead({
+    user: { _id: userId, companyId, role: "ADMIN", roleType: "BOTH" },
+    body: { name: "Formatted", phone: "+91 98123 45670" },
+  }, res);
+  assert.equal(res.code, 201, `createLead answered ${res.code}: ${JSON.stringify(res.body)}`);
+  assert.equal(saved[0].phone, "9812345670");
+
+  // The same number typed differently must hit the existing lead.
+  const dupStubs = createLeadStubs([]);
+  dupStubs["../models/Lead"].findOne = (filter) => {
+    duplicateFilter = filter;
+    // The controller runs in its own vm realm, so check the RegExp by shape.
+    const matches = typeof filter.phone?.test === "function" && filter.phone.test("9812345670");
+    return query(matches ? { _id: "dddddddddddddddddddddddd" } : null);
+  };
+  const dupRes = response();
+  await load("controllers/lead.controller.js", dupStubs).createLead({
+    user: { _id: userId, companyId, role: "ADMIN", roleType: "BOTH" },
+    body: { name: "Again", phone: "098123-45670" },
+  }, dupRes);
+  assert.equal(dupRes.code, 400);
+  assert.equal(Object.prototype.toString.call(duplicateFilter.phone), "[object RegExp]");
+
+  const shortRes = response();
+  await load("controllers/lead.controller.js", createLeadStubs([])).createLead({
+    user: { _id: userId, companyId, role: "ADMIN", roleType: "BOTH" },
+    body: { name: "Too short", phone: "1234567" },
+  }, shortRes);
+  assert.equal(shortRes.code, 400);
 });
 
 test("a commercial user cannot file a coworking lead", async () => {

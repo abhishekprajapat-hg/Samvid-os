@@ -133,3 +133,30 @@ describe("directory", () => {
 test("CSV escapes quotes the way spreadsheets expect", () => {
   assert.equal(toCsv([["a", 'say "hi"']]), '"a","say ""hi"""');
 });
+
+// 30 Sep 2026 requirements update (R7): a custom deposit amount, split by rent.
+describe("custom deposit", () => {
+  test("a custom deposit is stored as typed and split across cabins by rent", () => {
+    let board = withRent();
+    const [a, b] = board.cabins.filter((item) => item.status === "VACANT").slice(0, 2);
+    board = boardWithHistory(board, {
+      type: "ONBOARD",
+      cabinCodes: [a.code, b.code],
+      client: { name: "Custom Co", kind: "company", documents: [] },
+      terms: { startDate: "2026-09-01", termMonths: 12, rent: a.monthlyRent + b.monthlyRent, depositMode: "custom", depositAmount: 75000, lockInMonths: 0 },
+    });
+    const total = cabin(board, a.code).contract.deposit + cabin(board, b.code).contract.deposit;
+    assert.ok(Math.abs(total - 75000) <= 1, `deposits add up to the custom amount (${total})`);
+    assert.equal(cabin(board, a.code).contract.depositMode, "custom");
+    assert.equal(cabin(board, a.code).contract.depositMonths, null);
+  });
+
+  test("a month-based deposit still records how many months", () => {
+    let board = withRent();
+    const target = board.cabins.find((item) => item.status === "VACANT");
+    board = onboard(board, [target.code], "Months Co", 40000);
+    assert.equal(cabin(board, target.code).contract.deposit, 80000);
+    assert.equal(cabin(board, target.code).contract.depositMode, "months");
+    assert.equal(cabin(board, target.code).contract.depositMonths, 2);
+  });
+});

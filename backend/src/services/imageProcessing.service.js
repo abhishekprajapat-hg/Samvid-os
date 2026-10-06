@@ -21,6 +21,8 @@ const MAX_EDGE_BY_CATEGORY = {
   "inventory-images": 2000,
   "inventory-floorplans": 2400,
   "lead-documents": 2400,
+  // ID scans and cheques must stay legible.
+  "coworking-documents": 2400,
   chat: 1600,
 };
 const DEFAULT_MAX_EDGE = 1800;

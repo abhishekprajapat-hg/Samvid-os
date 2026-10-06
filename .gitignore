@@ -15,6 +15,7 @@ backend/.env
 frontend/.env
 backend/.mongo-data/
 backend/.mongo-log/
+backend/.local-db-backups/
 backend/uploads/*
 !backend/uploads/.gitkeep
 

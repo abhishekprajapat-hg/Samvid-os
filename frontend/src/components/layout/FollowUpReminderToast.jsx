@@ -199,7 +199,7 @@ const FollowUpReminderToast = ({ enabled = true }) => {
   const isOverdue = activeReminder._reminderDiffMs < -60 * 1000;
 
   return (
-    <div className="pointer-events-none fixed bottom-4 left-4 z-[113] w-[min(92vw,25rem)]">
+    <div className="follow-up-reminder-toast pointer-events-none fixed bottom-4 left-4 z-[113] w-[min(92vw,25rem)]">
       <div
         className={`pointer-events-auto rounded-2xl border p-3 shadow-2xl ${
           isDark

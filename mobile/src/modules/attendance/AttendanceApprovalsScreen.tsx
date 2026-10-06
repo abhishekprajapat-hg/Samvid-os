@@ -153,7 +153,7 @@ export const AttendanceApprovalsScreen = () => {
             return (
               <View key={String(request._id)} style={styles.card}>
                 <View style={styles.cardHead}>
-                  <SolidAvatar name={name} />
+                  <SolidAvatar name={name} photo={String((request.user as { profileImageUrl?: string } | undefined)?.profileImageUrl || "")} />
                   <View style={styles.cardHeadCopy}>
                     <Text style={styles.name} numberOfLines={1}>{name}</Text>
                     <Text style={styles.role} numberOfLines={1}>{prettyRole(request.user?.role)}</Text>

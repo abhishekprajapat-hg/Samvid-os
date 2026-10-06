@@ -275,12 +275,20 @@ const canAccessPage = (profile, pageKey) =>
  * promoting themselves.
  * ------------------------------------------------------------------ */
 
+// "page.tasks.delete", "clients.delete", "bookings.cancel" is not a delete.
+const isDeletePermission = (permission) => String(permission || "").endsWith(".delete");
+
 const getActorPermissionSet = async (actor) => {
   const profile = await resolveAccessProfile(actor);
   return { profile, permissionSet: new Set(profile.permissions) };
 };
 
-const assertGrantablePermissions = async ({ actor, permissions = [] }) => {
+/*
+ * `existing` is what the target already holds. Keeping those is not a grant,
+ * so they are not checked again - otherwise a Manager could not re-save a role
+ * that an Admin had given a protected permission.
+ */
+const assertGrantablePermissions = async ({ actor, permissions = [], existing = [] }) => {
   const unknown = permissions.filter((permission) => !isValidPermission(permission));
   if (unknown.length) {
     throw createHttpError(400, `Unknown permission: ${unknown[0]}`);
@@ -288,7 +296,22 @@ const assertGrantablePermissions = async ({ actor, permissions = [] }) => {
 
   if (isAdminRole(actor?.role)) return;
 
-  const protectedGrants = permissions.filter((permission) =>
+  const alreadyHeld = new Set(existing);
+  const newGrants = permissions.filter((permission) => !alreadyHeld.has(permission));
+
+  /*
+   * Delete stays with the Admin: a Manager deletes only through an Admin's
+   * approval, so they cannot hand a direct delete to anyone else either.
+   */
+  const deleteGrants = newGrants.filter((permission) => isDeletePermission(permission));
+  if (deleteGrants.length) {
+    throw createHttpError(
+      403,
+      `Only an Admin can give delete access (${deleteGrants.join(", ")})`,
+    );
+  }
+
+  const protectedGrants = newGrants.filter((permission) =>
     isAdminProtectedPermission(permission));
   if (protectedGrants.length) {
     throw createHttpError(
@@ -298,7 +321,7 @@ const assertGrantablePermissions = async ({ actor, permissions = [] }) => {
   }
 
   const { permissionSet } = await getActorPermissionSet(actor);
-  const beyondActor = permissions.filter((permission) => !permissionSet.has(permission));
+  const beyondActor = newGrants.filter((permission) => !permissionSet.has(permission));
   if (beyondActor.length) {
     throw createHttpError(
       403,
@@ -323,4 +346,5 @@ module.exports = {
   canAccessPage,
   getActorPermissionSet,
   assertGrantablePermissions,
+  isDeletePermission,
 };

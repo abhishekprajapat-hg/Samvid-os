@@ -7,6 +7,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
 import { brand, brandStyles, layout, round, type } from "../../theme/brand";
 import { GlobalPageSearch } from "./GlobalPageSearch";
+import { toAbsoluteUrl } from "../../services/uploadService";
 
 /*
  * The app bar every tab sits under, drawn to the comp: the mark and wordmark
@@ -83,7 +84,7 @@ export const AppHeader = () => {
             hitSlop={8}
           >
             {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
+              <Image source={{ uri: toAbsoluteUrl(String(avatarUrl)) }} style={styles.avatarImage} />
             ) : (
               <Text style={styles.avatarText}>{initialsOf(user?.name)}</Text>
             )}

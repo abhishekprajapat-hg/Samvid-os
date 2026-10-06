@@ -263,7 +263,7 @@ const COMMERCIAL_SUBTYPES = {
       { key: "ceilingHeight", label: "Ceiling Height", type: "select", options: ["8-10 ft", "10-12 ft", "12-15 ft", "15-20 ft", "20+ ft"] },
       { key: "mainRoadVisibility", label: "Main Road Visibility", type: "checkbox" },
       { key: "displayArea", label: "Display Area", type: "number", min: 0 },
-      { key: "mezzanineFloor", label: "Maxxnine Floor", type: "checkbox" },
+      { key: "mezzanineFloor", label: "Mezzanine Floor", type: "checkbox" },
       { key: "washroom", label: "Washroom", type: "checkbox" },
       { key: "moveInDate", label: "Move In Date", type: "select", options: ["Within 1 Week", "Within 2 Weeks", "Within 1 Month", "Within 2 Months", "Within 3 Months", "After 3 Months", "Flexible"] },
     ],

@@ -23,6 +23,8 @@ const {
   getAutoParentRoles,
   isManagementRole,
 } = require("../constants/role.constants");
+const { buildProfileLeadScope } = require("../utils/profileLeadScope");
+const { isAllowedProfileImageUrl } = require("../utils/profileImageUrl");
 const {
   getDescendantUsers,
   getDescendantExecutiveIds,
@@ -63,11 +65,13 @@ const LEAD_STATUSES = [
   "CLOSED",
   "LOST",
 ];
+// Every role except Admin reports to a Manager; Managers report to an Admin.
 const TEAM_HIERARCHY_CHILD_ROLES = {
   [USER_ROLES.MANAGER]: [
     ...EXECUTIVE_ROLES,
     ...PRODUCTION_ROLES,
     USER_ROLES.CHANNEL_PARTNER,
+    USER_ROLES.COWORKING_ADMIN,
   ],
   [USER_ROLES.ADMIN]: [USER_ROLES.MANAGER],
 };
@@ -358,6 +362,9 @@ const buildLeadStatusMap = (rows) => {
 
 const buildProfilePerformanceSummary = async (userDoc) => {
   const leadQuery = await buildLeadScopeQuery(userDoc);
+  // aggregate() does not cast ids the way find() does, so a team scope built
+  // from string ids would silently match nothing; cast it first.
+  const leadMatch = Lead.find(leadQuery).cast(Lead);
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -367,7 +374,7 @@ const buildProfilePerformanceSummary = async (userDoc) => {
 
   const [leadSummaryRows, recentLeads, activitiesPerformed, diaryEntriesCreated, directReports, achievedTarget] = await Promise.all([
     Lead.aggregate([
-      { $match: leadQuery },
+      { $match: leadMatch },
       {
         $facet: {
           statusRows: [
@@ -401,7 +408,10 @@ const buildProfilePerformanceSummary = async (userDoc) => {
                   $sum: {
                     $cond: [
                       {
+                        // A lead with no follow-up date is not overdue; without the
+                        // type check null sorts below any date and every such lead counted.
                         $and: [
+                          { $eq: [{ $type: "$nextFollowUp" }, "date"] },
                           { $lt: ["$nextFollowUp", todayStart] },
                           { $not: [{ $in: ["$status", ["CLOSED", "LOST"]] }] },
                         ],
@@ -426,8 +436,8 @@ const buildProfilePerformanceSummary = async (userDoc) => {
       .select(
         "_id name phone city projectInterested status nextFollowUp updatedAt assignedTo createdBy",
       )
-      .populate("assignedTo", "name role")
-      .populate("createdBy", "name role")
+      .populate("assignedTo", "name role profileImageUrl")
+      .populate("createdBy", "name role profileImageUrl")
       .sort({ updatedAt: -1 })
       .limit(6)
       .lean(),
@@ -855,11 +865,11 @@ const buildProfileSummary = async (userDoc) => {
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
+    const leadScope = buildProfileLeadScope({ companyId, userId, role });
     const [assignedLeads, openLeads, closedLeads, dueFollowUpsToday] = await Promise.all([
-      Lead.countDocuments({ companyId, assignedTo: userId }),
+      Lead.countDocuments(leadScope),
       Lead.countDocuments({
-        companyId,
-        assignedTo: userId,
+        ...leadScope,
         status: {
           $in: [
             "NEW",
@@ -876,10 +886,9 @@ const buildProfileSummary = async (userDoc) => {
           ],
         },
       }),
-      Lead.countDocuments({ companyId, assignedTo: userId, status: "CLOSED" }),
+      Lead.countDocuments({ ...leadScope, status: "CLOSED" }),
       Lead.countDocuments({
-        companyId,
-        assignedTo: userId,
+        ...leadScope,
         nextFollowUp: { $gte: todayStart, $lte: todayEnd },
       }),
     ]);
@@ -984,7 +993,7 @@ exports.getUsers = async (req, res) => {
     );
 
     const usersQuery = User.find(query)
-      .populate("parentId", "name role")
+      .populate("parentId", "name role profileImageUrl")
       .populate("customRoleId", "name businessCategory baseRole")
       .sort({ createdAt: -1 });
 
@@ -1061,7 +1070,7 @@ exports.getRoleLeaderboard = async (req, res) => {
       role: selectedRole,
       isActive: true,
     })
-      .select("_id name role")
+      .select("_id name role profileImageUrl")
       .sort({ name: 1 })
       .lean();
 
@@ -1171,6 +1180,7 @@ exports.getRoleLeaderboard = async (req, res) => {
         userId: peer._id,
         name: peer.name || "Unknown User",
         role: peer.role || selectedRole,
+        profileImageUrl: peer.profileImageUrl || "",
         totalLeads,
         closedLeads,
         siteVisits,
@@ -1205,7 +1215,7 @@ exports.getMyProfile = async (req, res) => {
       _id: req.user._id,
       companyId: req.user.companyId,
     })
-      .populate("parentId", "name email phone role")
+      .populate("parentId", "name email phone role profileImageUrl")
       .lean();
 
     if (!profileDoc) {
@@ -1248,7 +1258,7 @@ exports.getUserProfileForAdmin = async (req, res) => {
       _id: userId,
       companyId: req.user.companyId,
     })
-      .populate("parentId", "name email phone role")
+      .populate("parentId", "name email phone role profileImageUrl")
       .populate("customRoleId", "name businessCategory baseRole")
       .lean();
 
@@ -1315,10 +1325,10 @@ exports.updateMyProfile = async (req, res) => {
       }
       if (
         profileImageUrl
-        && !/^https?:\/\//i.test(profileImageUrl)
+        && !isAllowedProfileImageUrl(profileImageUrl)
       ) {
         return res.status(400).json({
-          message: "Profile image URL must be a valid http/https URL",
+          message: "Profile image URL must be an uploaded profile image or a valid http/https URL",
         });
       }
       patch.profileImageUrl = profileImageUrl;
@@ -1337,7 +1347,7 @@ exports.updateMyProfile = async (req, res) => {
         returnDocument: "after",
       },
     )
-      .populate("parentId", "name email phone role")
+      .populate("parentId", "name email phone role profileImageUrl")
       .lean();
 
     if (!updated) {
@@ -2041,7 +2051,7 @@ exports.updateUserByAdmin = async (req, res) => {
       _id: user._id,
       companyId: req.user.companyId,
     })
-      .populate("parentId", "name email phone role")
+      .populate("parentId", "name email phone role profileImageUrl")
       .lean();
 
     return res.json({
@@ -2235,7 +2245,7 @@ exports.updateUserDesignation = async (req, res) => {
       },
       { returnDocument: "after" },
     )
-      .populate("parentId", "name role")
+      .populate("parentId", "name role profileImageUrl")
       .lean();
 
     if (!updatedUser) {
@@ -2312,7 +2322,7 @@ exports.updateChannelPartnerInventoryAccess = async (req, res) => {
         returnDocument: "after",
       },
     )
-      .populate("parentId", "name role")
+      .populate("parentId", "name role profileImageUrl")
       .lean();
 
     if (!updatedUser) {
@@ -2365,7 +2375,7 @@ exports.rebalanceExecutives = async (req, res) => {
       isActive: true,
       companyId: req.user.companyId,
     })
-      .select("_id name role parentId createdAt")
+      .select("_id name role parentId createdAt profileImageUrl")
       .sort({ createdAt: 1 })
       .lean();
 
@@ -2508,8 +2518,8 @@ exports.createUserDeleteRequest = async (req, res) => {
       _id: userId,
       companyId: req.user.companyId,
     })
-      .populate("parentId", "name role")
-      .select("_id name email phone role parentId isActive")
+      .populate("parentId", "name role profileImageUrl")
+      .select("_id name email phone role parentId isActive profileImageUrl")
       .lean();
 
     if (!targetUser) {
@@ -2536,8 +2546,8 @@ exports.createUserDeleteRequest = async (req, res) => {
       targetUser: userId,
       status: "PENDING",
     })
-      .populate("requestedBy", "name email phone role")
-      .populate("targetUser", "name email phone role parentId isActive")
+      .populate("requestedBy", "name email phone role profileImageUrl")
+      .populate("targetUser", "name email phone role parentId isActive profileImageUrl")
       .lean();
 
     if (existingRequest) {
@@ -2557,6 +2567,7 @@ exports.createUserDeleteRequest = async (req, res) => {
         email: targetUser.email || "",
         phone: targetUser.phone || "",
         role: targetUser.role || "",
+        profileImageUrl: targetUser.profileImageUrl || "",
         parentName: targetUser.parentId?.name || "",
         parentRole: targetUser.parentId?.role || "",
         isActive: Boolean(targetUser.isActive),
@@ -2564,9 +2575,9 @@ exports.createUserDeleteRequest = async (req, res) => {
     });
 
     const populated = await UserDeleteRequest.findById(request._id)
-      .populate("requestedBy", "name email phone role")
-      .populate("targetUser", "name email phone role parentId isActive")
-      .populate("reviewedBy", "name email role")
+      .populate("requestedBy", "name email phone role profileImageUrl")
+      .populate("targetUser", "name email phone role parentId isActive profileImageUrl")
+      .populate("reviewedBy", "name email role profileImageUrl")
       .lean();
 
     emitUserDeleteRequestCreated({ req, request: populated || request });
@@ -2598,9 +2609,9 @@ exports.getAdminUserDeleteRequests = async (req, res) => {
     }
 
     const requests = await UserDeleteRequest.find(query)
-      .populate("requestedBy", "name email phone role")
-      .populate("targetUser", "name email phone role parentId isActive")
-      .populate("reviewedBy", "name email role")
+      .populate("requestedBy", "name email phone role profileImageUrl")
+      .populate("targetUser", "name email phone role parentId isActive profileImageUrl")
+      .populate("reviewedBy", "name email role profileImageUrl")
       .sort({ createdAt: -1 })
       .limit(200)
       .lean();
@@ -2665,9 +2676,9 @@ exports.reviewUserDeleteRequest = async (req, res) => {
     await request.save();
 
     const populated = await UserDeleteRequest.findById(request._id)
-      .populate("requestedBy", "name email phone role")
-      .populate("targetUser", "name email phone role parentId isActive")
-      .populate("reviewedBy", "name email role")
+      .populate("requestedBy", "name email phone role profileImageUrl")
+      .populate("targetUser", "name email phone role parentId isActive profileImageUrl")
+      .populate("reviewedBy", "name email role profileImageUrl")
       .lean();
 
     return res.json({
@@ -2776,10 +2787,10 @@ exports.updateUserByRole = async (req, res) => {
       }
       if (
         profileImageUrl
-        && !/^https?:\/\//i.test(profileImageUrl)
+        && !isAllowedProfileImageUrl(profileImageUrl)
       ) {
         return res.status(400).json({
-          message: "Profile image URL must be a valid http/https URL",
+          message: "Profile image URL must be an uploaded profile image or a valid http/https URL",
         });
       }
       patch.profileImageUrl = profileImageUrl;
@@ -2849,7 +2860,7 @@ exports.updateUserByRole = async (req, res) => {
       { $set: patch },
       { returnDocument: "after" },
     )
-      .populate("parentId", "name role")
+      .populate("parentId", "name role profileImageUrl")
       .select("-password")
       .lean();
 
@@ -2934,7 +2945,7 @@ exports.updateMyLocation = async (req, res) => {
       },
       {
         returnDocument: "after",
-        select: "_id name role liveLocation",
+        select: "_id name role liveLocation profileImageUrl",
         lean: true,
       },
     );
@@ -3003,7 +3014,7 @@ exports.getFieldExecutiveLocations = async (req, res) => {
     );
 
     const usersQuery = User.find(query)
-      .select("name email phone role parentId isActive lastAssignedAt liveLocation")
+      .select("name email phone role parentId isActive lastAssignedAt liveLocation profileImageUrl")
       .sort({ name: 1 });
 
     if (selectedFields) {
@@ -3028,6 +3039,7 @@ exports.getFieldExecutiveLocations = async (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        profileImageUrl: user.profileImageUrl || "",
         parentId: user.parentId,
         isActive: user.isActive,
         lastAssignedAt: user.lastAssignedAt || null,

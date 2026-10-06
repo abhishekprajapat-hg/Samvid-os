@@ -16,6 +16,15 @@ import {
   RefreshCw,
   ArrowRight,
   Camera,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Edit3,
+  Eye,
+  LockKeyhole,
+  Trash2,
+  X,
 } from "lucide-react";
 import {
   getMyProfile,
@@ -29,7 +38,11 @@ import {
   getMyLeaveRequests,
 } from "../../services/attendanceService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { usePermissions } from "../../context/usePermissions";
+import Modal from "../../components/ui/Modal";
 import ToastNotice from "../../components/ui/ToastNotice";
+import "./UserProfile.css";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const ROLE_LABELS = {
   ADMIN: "Admin",
@@ -43,16 +56,6 @@ const ROLE_LABELS = {
 };
 const MANAGEMENT_ROLES = ["MANAGER"];
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const ATTENDANCE_STATUS_STYLES = {
-  PRESENT: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  WORKING: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  BREAK: "border-indigo-200 bg-indigo-50 text-indigo-800",
-  HALF_DAY: "border-blue-200 bg-blue-50 text-blue-800",
-  ABSENT: "border-rose-200 bg-rose-50 text-rose-800",
-  LEAVE: "border-teal-200 bg-teal-50 text-teal-800",
-  PENDING: "border-amber-200 bg-amber-50 text-amber-800",
-};
-
 const formatDate = (value) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -85,6 +88,31 @@ const formatDuration = (minutes) => {
   return `${hours}h ${mins}m`;
 };
 
+const formatTime = (value) => {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+};
+
+const formatStatus = (value, fallback = "-") => {
+  const normalized = String(value || "").trim();
+  return normalized ? normalized.replaceAll("_", " ") : fallback;
+};
+
+const persistCachedProfileImage = (profileImageUrl) => {
+  const storedUserRaw = localStorage.getItem("user");
+  if (!storedUserRaw) return;
+  try {
+    const storedUser = JSON.parse(storedUserRaw);
+    storedUser.profileImageUrl = profileImageUrl;
+    localStorage.setItem("user", JSON.stringify(storedUser));
+    window.dispatchEvent(new CustomEvent("crm:profile-image-changed", { detail: { profileImageUrl } }));
+  } catch {
+    // Ignore an invalid local cache; the API remains the source of truth.
+  }
+};
+
 const formatAttendanceStatus = (status) => {
   const normalized = String(status || "").trim().toUpperCase();
   if (normalized === "PRESENT") return "Present";
@@ -93,10 +121,6 @@ const formatAttendanceStatus = (status) => {
   if (!normalized) return "";
   return normalized.replaceAll("_", " ");
 };
-
-const attendanceStatusClass = (status) =>
-  ATTENDANCE_STATUS_STYLES[String(status || "").trim().toUpperCase()]
-  || "border-slate-200 bg-white text-slate-600";
 
 const attendanceSummaryToneClass = (tone) => {
   if (tone === "emerald") return "border-emerald-200 bg-emerald-50 text-emerald-800";
@@ -127,6 +151,11 @@ const buildMonthCalendarDays = (monthKey) => {
       dateKey: `${monthKey}-${String(day).padStart(2, "0")}`,
       day,
     });
+  }
+
+  const cellCount = days.length <= 35 ? 35 : 42;
+  while (days.length < cellCount) {
+    days.push({ key: `empty-trailing-${days.length}`, dateKey: "", day: "" });
   }
 
   return days;
@@ -223,7 +252,14 @@ const UserProfile = () => {
   const [summary, setSummary] = useState({});
   const [nameDraft, setNameDraft] = useState("");
   const [phoneDraft, setPhoneDraft] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [accountDetailsOpen, setAccountDetailsOpen] = useState(false);
+  const [photoMenuOpen, setPhotoMenuOpen] = useState(false);
+  const [photoViewOpen, setPhotoViewOpen] = useState(false);
+  const [photoRemoveOpen, setPhotoRemoveOpen] = useState(false);
+  const [removingPhoto, setRemovingPhoto] = useState(false);
   const [attendanceMonth, setAttendanceMonth] = useState(toMonthInputValue(new Date()));
+  const [selectedAttendanceDate, setSelectedAttendanceDate] = useState(toLocalDateInputValue(new Date()));
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceData, setAttendanceData] = useState({
     timezone: "",
@@ -238,6 +274,8 @@ const UserProfile = () => {
   const [leaveType, setLeaveType] = useState("CASUAL");
   const [leaveReason, setLeaveReason] = useState("");
   const [leaveSubmitting, setLeaveSubmitting] = useState(false);
+  const { canPageAction } = usePermissions();
+  const canEditProfile = canPageAction("profile", "edit");
 
   const fetchProfile = useCallback(async () => {
     try {
@@ -369,6 +407,35 @@ const UserProfile = () => {
     if (!leaveRange.fromDate || !leaveRange.toDate) return new Set();
     return new Set(buildDateKeysInRange(leaveRange.fromDate, leaveRange.toDate));
   }, [leaveRange.fromDate, leaveRange.toDate]);
+  const selectedAttendance = useMemo(
+    () => attendanceByDate.get(selectedAttendanceDate) || null,
+    [attendanceByDate, selectedAttendanceDate],
+  );
+  const selectedPendingLeave = useMemo(
+    () => pendingLeaveByDate.get(selectedAttendanceDate) || null,
+    [pendingLeaveByDate, selectedAttendanceDate],
+  );
+  const attendanceMonthLabel = useMemo(() => {
+    const [year, month] = attendanceMonth.split("-").map(Number);
+    return new Date(year, month - 1, 1).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  }, [attendanceMonth]);
+  const profileMetricCards = useMemo(() => {
+    const cards = [...summaryCards];
+    if (profile?.role !== "ADMIN") {
+      cards.push({
+        key: "leaveBalance",
+        label: "Leave Balance",
+        value: leaveBalanceLoading ? "..." : Number(leaveBalance?.available || 0),
+        icon: CalendarDays,
+      });
+    }
+    return cards;
+  }, [leaveBalance?.available, leaveBalanceLoading, profile?.role, summaryCards]);
+
+  useEffect(() => {
+    const todayKey = toLocalDateInputValue(new Date());
+    setSelectedAttendanceDate(todayKey.startsWith(`${attendanceMonth}-`) ? todayKey : `${attendanceMonth}-01`);
+  }, [attendanceMonth]);
 
   const handleRefreshAttendanceSection = useCallback(async () => {
     await Promise.all([
@@ -379,17 +446,19 @@ const UserProfile = () => {
   }, [loadAttendanceCalendar, loadLeaveBalance, loadLeaveRequests]);
 
   const handleCalendarDateClick = (dateKey) => {
-    if (!dateKey || profile?.role === "ADMIN") return;
+    if (!dateKey) return;
+    setSelectedAttendanceDate(dateKey);
+  };
 
-    setLeaveRange((prev) => {
-      if (!leaveModalOpen || !prev.fromDate) {
-        return { fromDate: dateKey, toDate: dateKey };
-      }
-      return dateKey < prev.fromDate
-        ? { fromDate: dateKey, toDate: prev.fromDate }
-        : { fromDate: prev.fromDate, toDate: dateKey };
-    });
+  const openLeaveForSelectedDate = () => {
+    if (!selectedAttendanceDate || profile?.role === "ADMIN") return;
+    setLeaveRange({ fromDate: selectedAttendanceDate, toDate: selectedAttendanceDate });
     setLeaveModalOpen(true);
+  };
+
+  const moveAttendanceMonth = (step) => {
+    const [year, month] = attendanceMonth.split("-").map(Number);
+    setAttendanceMonth(toMonthInputValue(new Date(year, month - 1 + step, 1)));
   };
 
   const closeLeaveModal = () => {
@@ -441,8 +510,16 @@ const UserProfile = () => {
 
     const nextName = String(nameDraft || "").trim();
     const nextPhone = String(phoneDraft || "").trim();
-    if (!nextName) {
-      setError("Name is required");
+    if (nextName.length < 2 || nextName.length > 80) {
+      setError("Name must be between 2 and 80 characters");
+      return;
+    }
+    if (nextPhone.length > 25 || (nextPhone && !/^[+\d()\-\s]+$/.test(nextPhone))) {
+      setError("Enter a valid phone number up to 25 characters");
+      return;
+    }
+    if (nextName === String(profile.name || "") && nextPhone === String(profile.phone || "")) {
+      setEditing(false);
       return;
     }
 
@@ -471,6 +548,7 @@ const UserProfile = () => {
       }
 
       setSuccess("Profile updated");
+      setEditing(false);
     } catch (saveError) {
       const message = toErrorMessage(saveError, "Failed to update profile");
       console.error(`Update profile failed: ${message}`);
@@ -480,10 +558,19 @@ const UserProfile = () => {
     }
   };
 
+  const cancelEditing = () => {
+    setNameDraft(String(profile?.name || ""));
+    setPhoneDraft(String(profile?.phone || ""));
+    setError("");
+    setEditing(false);
+  };
+
   const handlePhotoChange = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
+    setPhotoMenuOpen(false);
     if (!file) return;
+    setPhotoViewOpen(false);
 
     if (!file.type.startsWith("image/")) {
       setError("Please choose an image file");
@@ -497,17 +584,7 @@ const UserProfile = () => {
       const response = await updateMyProfile({ profileImageUrl: uploaded.url });
       setProfile(response.profile || profile);
       setSummary(response.summary || summary);
-
-      const storedUserRaw = localStorage.getItem("user");
-      if (storedUserRaw) {
-        try {
-          const storedUser = JSON.parse(storedUserRaw);
-          storedUser.profileImageUrl = response.profile?.profileImageUrl || uploaded.url;
-          localStorage.setItem("user", JSON.stringify(storedUser));
-        } catch {
-          // ignore invalid local cache
-        }
-      }
+      persistCachedProfileImage(response.profile?.profileImageUrl || uploaded.url);
 
       setSuccess("Profile photo updated");
     } catch (uploadError) {
@@ -519,413 +596,268 @@ const UserProfile = () => {
     }
   };
 
+  const handleRemovePhoto = async () => {
+    if (!profile?.profileImageUrl || !canEditProfile) return;
+
+    try {
+      setRemovingPhoto(true);
+      setError("");
+      const response = await updateMyProfile({ profileImageUrl: "" });
+      setProfile(response.profile || { ...profile, profileImageUrl: "" });
+      setSummary(response.summary || summary);
+      persistCachedProfileImage("");
+      setPhotoRemoveOpen(false);
+      setPhotoViewOpen(false);
+      setPhotoMenuOpen(false);
+      setSuccess("Profile photo removed");
+    } catch (removeError) {
+      const message = toErrorMessage(removeError, "Failed to remove profile photo");
+      console.error(`Remove profile photo failed: ${message}`);
+      setError(message);
+    } finally {
+      setRemovingPhoto(false);
+    }
+  };
+
   return (
-    <div className="ui-page-shell custom-scrollbar space-y-6">
+    <div className="profile-page ui-page-shell custom-scrollbar">
       <ToastNotice message={error} type="error" />
       <ToastNotice message={success} type="success" />
 
       {loading ? (
-        <div className="ui-soft-panel h-56 rounded-2xl border bg-white flex items-center justify-center text-slate-400 gap-2">
-          <Loader size={18} className="animate-spin" /> Loading profile...
-        </div>
+        <div className="profile-state"><Loader size={18} className="animate-spin" /> Loading your profile...</div>
       ) : !profile ? (
-        <div className="ui-soft-panel h-56 rounded-2xl border bg-white flex items-center justify-center text-slate-500">
-          Profile data not available
+        <div className="profile-state profile-state-error">
+          <UserCircle2 size={22} />
+          <span>Profile data is not available.</span>
+          <button type="button" onClick={fetchProfile}>Try again</button>
         </div>
       ) : (
         <>
-          <div className="ui-soft-panel rounded-2xl border bg-white p-5 sm:p-6">
-            <div className="flex flex-col sm:flex-row sm:items-start gap-4">
-              <div className="relative shrink-0 w-fit">
-                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center overflow-hidden ring-1 ring-slate-200 shadow-sm">
-                  {profile.profileImageUrl ? (
-                    <img
-                      src={profile.profileImageUrl}
-                      alt={profile.name || "Profile"}
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <UserCircle2 size={40} />
-                  )}
+          <section className="profile-identity-card">
+            <div className="profile-avatar-wrap">
+              {profile.profileImageUrl ? (
+                <button type="button" className="profile-avatar" onClick={() => setPhotoViewOpen(true)} aria-label="View profile photo">
+                  <img src={profile.profileImageUrl} alt={profile.name || "Profile"} />
+                </button>
+              ) : <div className="profile-avatar"><UserCircle2 size={34} /></div>}
+              {canEditProfile ? (
+                <button type="button" className={`profile-avatar-edit ${uploadingPhoto ? "is-busy" : ""}`} title="Profile photo options" aria-label="Profile photo options" aria-expanded={photoMenuOpen} onClick={() => setPhotoMenuOpen((open) => !open)} disabled={uploadingPhoto || removingPhoto}>
+                  {uploadingPhoto ? <Loader size={12} className="animate-spin" /> : <Camera size={12} />}
+                </button>
+              ) : null}
+              {photoMenuOpen && canEditProfile ? (
+                <div className="profile-photo-menu" role="menu">
+                  {profile.profileImageUrl ? <button type="button" role="menuitem" onClick={() => { setPhotoViewOpen(true); setPhotoMenuOpen(false); }}><Eye size={14} /> View photo</button> : null}
+                  <label role="menuitem"><Edit3 size={14} /> {profile.profileImageUrl ? "Change photo" : "Add photo"}<input type="file" aria-label={profile.profileImageUrl ? "Change profile photo" : "Add profile photo"} accept="image/*" onChange={handlePhotoChange} disabled={uploadingPhoto} /></label>
+                  {profile.profileImageUrl ? <button type="button" role="menuitem" className="is-danger" onClick={() => { setPhotoRemoveOpen(true); setPhotoMenuOpen(false); }}><Trash2 size={14} /> Remove photo</button> : null}
                 </div>
-                <label
-                  title="Change profile photo"
-                  className={`absolute -bottom-1.5 -right-1.5 flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-900 text-white shadow-md transition-colors hover:bg-slate-700 ${
-                    uploadingPhoto ? "cursor-not-allowed opacity-70" : "cursor-pointer"
-                  }`}
-                >
-                  {uploadingPhoto ? <Loader size={13} className="animate-spin" /> : <Camera size={13} />}
-                  <input
-                    type="file"
-                    aria-label="Upload a profile photo"
-                    accept="image/*"
-                    onChange={handlePhotoChange}
-                    disabled={uploadingPhoto}
-                    className="hidden"
-                  />
-                </label>
+              ) : null}
+            </div>
+            <div className="profile-identity-copy">
+              <div className="profile-name-row">
+                <h2>{profile.name || "Unnamed user"}</h2>
+                <span>{ROLE_LABELS[profile.role] || formatStatus(profile.role)}</span>
               </div>
-
-              <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Name
-                  </label>
-                  <input
-                    type="text"
-                    value={nameDraft}
-                    onChange={(e) => setNameDraft(e.target.value)}
-                    className="mt-1 w-full h-10 rounded-lg border border-slate-300 px-3 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Phone
-                  </label>
-                  <input
-                    type="text"
-                    value={phoneDraft}
-                    onChange={(e) => setPhoneDraft(e.target.value)}
-                    className="mt-1 w-full h-10 rounded-lg border border-slate-300 px-3 text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Email
-                  </label>
-                  <div className="mt-1 h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 flex items-center gap-2">
-                    <Mail size={13} /> {profile.email || "-"}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    Role
-                  </label>
-                  <div className="mt-1 h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 flex items-center gap-2">
-                    <Briefcase size={13} /> {ROLE_LABELS[profile.role] || profile.role || "-"}
-                  </div>
-                </div>
+              <div className="profile-contact-row">
+                <span><Mail size={13} /> {profile.email || "No email"}</span>
+                <span><Phone size={13} /> {profile.phone || "No phone number"}</span>
               </div>
             </div>
-
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => navigate("/attendance")}
-                className="h-10 px-4 rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-700 text-sm font-semibold inline-flex items-center gap-2 hover:border-cyan-300 hover:bg-cyan-100"
-              >
-                <CalendarDays size={14} />
-                Attendance Page
-                <ArrowRight size={14} />
+            {canEditProfile ? (
+              <button type="button" className="profile-edit-button" onClick={() => setEditing(true)} disabled={editing}>
+                <Edit3 size={14} /> Edit profile
               </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving}
-                className="h-10 px-4 rounded-lg bg-cyan-600 text-white text-sm font-semibold inline-flex items-center gap-2 hover:bg-cyan-500 disabled:opacity-60"
-              >
-                {saving ? <Loader size={14} className="animate-spin" /> : <Save size={14} />}
-                Save Profile
-              </button>
-            </div>
-          </div>
+            ) : null}
+          </section>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="ui-soft-panel rounded-2xl border bg-white p-5">
-              <div className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-3">
-                Reporting
-              </div>
-              {profile.manager ? (
-                <div className="space-y-2 text-sm text-slate-700">
-                  <div className="font-semibold text-slate-900">{profile.manager.name || "-"}</div>
-                  <div className="flex items-center gap-2">
-                    <Mail size={13} />
-                    {profile.manager.email || "-"}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Phone size={13} />
-                    {profile.manager.phone || "-"}
+          {profileMetricCards.length ? (
+            <section className="profile-metric-grid" aria-label="Profile metrics">
+              {profileMetricCards.map((card) => (
+                <div key={card.key} className="profile-metric-card">
+                  <span className="profile-metric-icon"><card.icon size={16} /></span>
+                  <div><p>{card.label}</p><strong>{card.value}</strong></div>
+                </div>
+              ))}
+            </section>
+          ) : null}
+
+          <div className="profile-details-grid">
+            <section className="profile-card profile-personal-card">
+              <ProfileCardHeader icon={UserCircle2} title="Personal details" subtitle="Your contact and account identity" />
+              {editing ? (
+                <div className="profile-edit-form">
+                  <label>Full name<input value={nameDraft} maxLength={80} onChange={(event) => setNameDraft(event.target.value)} /></label>
+                  <label>Phone<input value={phoneDraft} maxLength={25} inputMode="tel" onChange={(event) => setPhoneDraft(event.target.value)} /></label>
+                  <ReadOnlyField icon={Mail} label="Email" value={profile.email || "-"} />
+                  <ReadOnlyField icon={Briefcase} label="Role" value={ROLE_LABELS[profile.role] || formatStatus(profile.role)} />
+                  <div className="profile-edit-actions">
+                    <button type="button" className="profile-button-secondary" onClick={cancelEditing} disabled={saving}><X size={14} /> Cancel</button>
+                    <button type="button" className="profile-button-primary" onClick={handleSave} disabled={saving}>
+                      {saving ? <Loader size={14} className="animate-spin" /> : <Save size={14} />}{saving ? "Saving..." : "Save changes"}
+                    </button>
                   </div>
                 </div>
               ) : (
-                <div className="text-sm text-slate-500">
-                  No reporting manager mapped
-                </div>
+                <dl className="profile-detail-list">
+                  <ProfileDetail label="Full name" value={profile.name || "-"} />
+                  <ProfileDetail label="Phone" value={profile.phone || "Not added"} />
+                  <ProfileDetail label="Email" value={profile.email || "-"} readOnly />
+                  <ProfileDetail label="Role" value={ROLE_LABELS[profile.role] || formatStatus(profile.role)} readOnly />
+                  <ProfileDetail label="Department" value={profile.department || "Not assigned"} />
+                  <ProfileDetail label="Branch" value={profile.branch || "Not assigned"} />
+                </dl>
               )}
-            </div>
+            </section>
 
-            <div className="ui-soft-panel rounded-2xl border bg-white p-5">
-              <div className="text-xs uppercase tracking-widest text-slate-400 font-bold mb-3">
-                Account Metadata
-              </div>
-              <div className="space-y-2 text-sm text-slate-700">
-                <div className="flex items-center gap-2">
-                  <Building2 size={13} />
-                  Company Id: {String(profile.companyId || "-")}
+            <section className="profile-card profile-manager-card">
+              <ProfileCardHeader icon={Users} title="Reporting manager" subtitle="Your primary reporting contact" />
+              {profile.manager ? (
+                <div className="profile-manager-body">
+                  <div className="profile-manager-avatar"><AvatarFace user={profile.manager} initials={String(profile.manager.name || "M").trim().charAt(0).toUpperCase()} /></div>
+                  <div><strong>{profile.manager.name || "-"}</strong><span>{ROLE_LABELS[profile.manager.role] || formatStatus(profile.manager.role, "Manager")}</span></div>
+                  <a href={profile.manager.email ? `mailto:${profile.manager.email}` : undefined}><Mail size={13} /> {profile.manager.email || "No email"}</a>
+                  <a href={profile.manager.phone ? `tel:${profile.manager.phone}` : undefined}><Phone size={13} /> {profile.manager.phone || "No phone"}</a>
                 </div>
-                <div>Created: {formatDate(profile.createdAt)}</div>
-                <div>Updated: {formatDate(profile.updatedAt)}</div>
-                <div>Last Assigned: {formatDate(profile.lastAssignedAt)}</div>
-              </div>
-            </div>
+              ) : <div className="profile-empty-inline"><Users size={18} /> No reporting manager mapped</div>}
+            </section>
           </div>
 
-          <PushNotificationCard />
+          <div className="profile-settings-grid">
+            <PushNotificationCard />
+            <section className="profile-card profile-account-card">
+              <ProfileCardHeader icon={Shield} title="Account & security" subtitle="Status, employment and access information" />
+              <p className="profile-account-copy">Account metadata stays private until you choose to view it.</p>
+              <button type="button" className="profile-account-details-button" onClick={() => setAccountDetailsOpen(true)}><Eye size={14} /> View account details <ArrowRight size={14} /></button>
+            </section>
+          </div>
 
-          <section className="ui-soft-panel rounded-2xl border bg-white p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-2">
-                <CalendarDays size={17} className="text-cyan-600" />
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900">Attendance Calendar</h3>
-                  <p className="text-[11px] uppercase tracking-widest text-slate-400">
-                    Month: {attendanceMonth}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="month"
-                  value={attendanceMonth}
-                  onChange={(event) => setAttendanceMonth(event.target.value)}
-                  className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-800 outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-100"
-                />
-                <button
-                  type="button"
-                  onClick={handleRefreshAttendanceSection}
-                  disabled={attendanceLoading || leaveBalanceLoading}
-                  className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {attendanceLoading || leaveBalanceLoading ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  Refresh
+          <section className="profile-card profile-attendance-card">
+            <div className="profile-attendance-header">
+              <ProfileCardHeader icon={CalendarDays} title="Attendance" subtitle={attendanceData.timezone ? `Times shown in ${attendanceData.timezone}` : "Monthly attendance overview"} />
+              <div className="profile-month-controls">
+                <button type="button" onClick={() => moveAttendanceMonth(-1)} aria-label="Previous month"><ChevronLeft size={15} /></button>
+                <strong>{attendanceMonthLabel}</strong>
+                <button type="button" onClick={() => moveAttendanceMonth(1)} aria-label="Next month"><ChevronRight size={15} /></button>
+                <button type="button" className="profile-attendance-refresh" onClick={handleRefreshAttendanceSection} disabled={attendanceLoading || leaveBalanceLoading}>
+                  {attendanceLoading || leaveBalanceLoading ? <Loader size={14} className="animate-spin" /> : <RefreshCw size={14} />}<span>Refresh</span>
                 </button>
               </div>
             </div>
 
-            {profile.role !== "ADMIN" ? (
-              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,360px)_1fr]">
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-emerald-800">
-                  <p className="text-[10px] font-bold uppercase tracking-widest">Leave Balance</p>
-                  <p className="mt-2 text-3xl font-semibold">{Number(leaveBalance?.available || 0)}</p>
-                  <p className="mt-1 text-xs text-emerald-700">
-                    Total leaves available
-                  </p>
+            <div className="profile-attendance-layout">
+              <div className="profile-calendar-column">
+                <div className="profile-attendance-summary">
+                  {attendanceSummaryCards.map((card) => <div key={card.key} className={attendanceSummaryToneClass(card.tone)}><span>{card.label}</span><strong>{Number(card.value || 0)}</strong></div>)}
                 </div>
-                <div className="rounded-2xl border border-cyan-100 bg-cyan-50/45 px-4 py-4">
-                  <div>
-                    <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-700">
-                      Monthly Leave Rule
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Every month on 1st date, 1 leave is added. Unused leave carries forward.
-                    </p>
+                <div className="profile-calendar">
+                  <div className="profile-calendar-weekdays">{WEEKDAY_LABELS.map((label) => <span key={label}>{label}</span>)}</div>
+                  <div className="profile-calendar-grid">
+                    {calendarDays.map((day) => {
+                      const attendanceRow = day.dateKey ? attendanceByDate.get(day.dateKey) : null;
+                      const pendingLeave = day.dateKey ? pendingLeaveByDate.get(day.dateKey) : null;
+                      const status = pendingLeave ? "PENDING" : attendanceRow?.status;
+                      const statusLabel = pendingLeave ? "Leave pending" : formatAttendanceStatus(status);
+                      const selected = day.dateKey === selectedAttendanceDate;
+                      const inLeaveRange = day.dateKey ? selectedLeaveDates.has(day.dateKey) : false;
+                      return (
+                        <button type="button" key={day.key} disabled={!day.dateKey} aria-label={day.dateKey ? `${day.dateKey}${statusLabel ? `, ${statusLabel}` : ", no attendance record"}` : undefined} aria-pressed={day.dateKey ? selected : undefined} onClick={() => handleCalendarDateClick(day.dateKey)} className={`${selected ? "is-selected" : ""} ${inLeaveRange ? "is-leave-range" : ""}`}>
+                          {day.dateKey ? <><span className="profile-calendar-day-number">{day.day}</span>{statusLabel ? <span className={`profile-calendar-status ${String(status || "").toLowerCase()}`}>{statusLabel}</span> : <span className="profile-calendar-no-record">No record</span>}</> : null}
+                        </button>
+                      );
+                    })}
                   </div>
-                  <p className="mt-3 text-xs font-semibold text-slate-600">
-                    Since {leaveBalance?.accrualStartMonth || "-"} | {Number(leaveBalance?.monthlyAccrual || 1)} leave/month
-                  </p>
                 </div>
               </div>
-            ) : null}
 
-            <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              {attendanceSummaryCards.map((card) => (
-                <div
-                  key={card.key}
-                  className={`rounded-xl border px-3 py-3 ${attendanceSummaryToneClass(card.tone)}`}
-                >
-                  <p className="text-[10px] font-bold uppercase tracking-widest opacity-75">{card.label}</p>
-                  <p className="mt-1 text-xl font-semibold">{Number(card.value || 0)}</p>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200">
-              <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
-                {WEEKDAY_LABELS.map((label) => (
-                  <div
-                    key={label}
-                    className="px-2 py-2 text-center text-[10px] font-bold uppercase tracking-widest text-slate-500"
-                  >
-                    {label}
+              <aside className="profile-attendance-sidebar">
+                <div className="profile-selected-day-card">
+                  <div className="profile-selected-day-heading"><div><span>Selected day</span><strong>{new Date(`${selectedAttendanceDate}T12:00:00`).toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" })}</strong></div>{selectedPendingLeave ? <span className="profile-day-status pending">Leave pending</span> : selectedAttendance ? <span className={`profile-day-status ${String(selectedAttendance.status || "").toLowerCase()}`}>{formatAttendanceStatus(selectedAttendance.status)}</span> : <span className="profile-day-status">No record</span>}</div>
+                  <div className="profile-day-details">
+                    <div><span>Check in</span><strong>{formatTime(selectedAttendance?.checkInAt)}</strong></div>
+                    <div><span>Check out</span><strong>{formatTime(selectedAttendance?.checkOutAt)}</strong></div>
+                    <div><span>Worked</span><strong>{formatDuration(selectedAttendance?.workedMinutes)}</strong></div>
+                    <div><span>Break</span><strong>{formatDuration(selectedAttendance?.totalBreakMinutes)}</strong></div>
                   </div>
-                ))}
-              </div>
+                  {selectedAttendance?.isLateCheckIn ? <p className="profile-late-note"><Clock3 size={13} /> Late check-in recorded</p> : null}
+                  {profile.role !== "ADMIN" ? <button type="button" className="profile-apply-leave" onClick={openLeaveForSelectedDate}><CalendarDays size={14} /> Apply leave for this date</button> : null}
+                </div>
 
-              <div className="grid grid-cols-7 bg-white">
-                {calendarDays.map((day) => {
-                  const attendanceRow = day.dateKey ? attendanceByDate.get(day.dateKey) : null;
-                  const pendingLeave = day.dateKey ? pendingLeaveByDate.get(day.dateKey) : null;
-                  const isSelectedLeaveDate = day.dateKey ? selectedLeaveDates.has(day.dateKey) : false;
-                  const statusLabel = pendingLeave ? "Leave Pending" : attendanceRow ? formatAttendanceStatus(attendanceRow.status) : "";
-                  const isLate = Boolean(attendanceRow?.isLateCheckIn);
-
-                  return (
-                    <button
-                      type="button"
-                      key={day.key}
-                      onClick={() => handleCalendarDateClick(day.dateKey)}
-                      disabled={!day.dateKey || profile.role === "ADMIN"}
-                      className={`min-h-[96px] border-b border-r border-slate-100 p-2 text-left transition ${
-                        day.dateKey ? "bg-white hover:bg-cyan-50" : "bg-slate-50/60"
-                      } ${
-                        isSelectedLeaveDate ? "ring-2 ring-inset ring-cyan-400" : ""
-                      }`}
-                    >
-                      {day.dateKey ? (
-                        <div className="flex h-full flex-col gap-1.5">
-                          <span className="text-xs font-semibold text-slate-900">{day.day}</span>
-                          {pendingLeave ? (
-                            <>
-                              <span className="inline-flex w-fit rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                                {statusLabel}
-                              </span>
-                              <span className="text-[10px] text-slate-500">
-                                Awaiting approval
-                              </span>
-                            </>
-                          ) : attendanceRow ? (
-                            <>
-                              <span className={`inline-flex w-fit rounded-full border px-2 py-0.5 text-[10px] font-bold ${attendanceStatusClass(attendanceRow.status)}`}>
-                                {statusLabel}
-                              </span>
-                              <span className={`text-[10px] ${isLate ? "font-bold text-rose-700" : "text-slate-500"}`}>
-                                In: {formatDate(attendanceRow.checkInAt)}
-                              </span>
-                              <span className="text-[10px] text-slate-500">
-                                Work: {formatDuration(attendanceRow.workedMinutes)}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="mt-auto text-[10px] text-slate-400">No record</span>
-                          )}
-                        </div>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
+                {profile.role !== "ADMIN" ? (
+                  <div className="profile-leave-card">
+                    <div className="profile-leave-balance"><span>Leave balance</span><strong>{leaveBalanceLoading ? "..." : Number(leaveBalance?.available || 0)}</strong><small>days available</small></div>
+                    <div className="profile-leave-breakdown"><span>Accrued <b>{Number(leaveBalance?.accrued || 0)}</b></span><span>Used <b>{Number(leaveBalance?.used || 0)}</b></span><span>Pending <b>{Number(leaveBalance?.pending || 0)}</b></span></div>
+                    <p><CheckCircle2 size={13} /> {Number(leaveBalance?.monthlyAccrual || 1)} leave is added monthly; unused leave carries forward.</p>
+                  </div>
+                ) : null}
+                <button type="button" className="profile-open-attendance" onClick={() => navigate("/attendance")}><CalendarDays size={14} /> Open full attendance <ArrowRight size={14} /></button>
+              </aside>
             </div>
           </section>
 
-          {leaveModalOpen && profile.role !== "ADMIN" ? (
-            <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-end p-4">
-              <form
-                onSubmit={handleSubmitLeaveFromProfile}
-                className="pointer-events-auto w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-base font-semibold text-slate-900">Apply Leave</h3>
-                    <p className="text-xs text-slate-500">
-                      Select another calendar date to extend the range.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={closeLeaveModal}
-                    className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                  >
-                    Close
-                  </button>
+          <Modal open={leaveModalOpen && profile.role !== "ADMIN"} onClose={closeLeaveModal} title="Apply for leave" description="Your request will follow the existing approval and leave-balance rules." size="sm">
+            <form onSubmit={handleSubmitLeaveFromProfile} className="profile-leave-form">
+              <div className="profile-leave-date-grid">
+                <label>From<input type="date" value={leaveRange.fromDate} onChange={(event) => { const value = event.target.value; setLeaveRange((previous) => ({ fromDate: value, toDate: previous.toDate && previous.toDate >= value ? previous.toDate : value })); }} /></label>
+                <label>To<input type="date" value={leaveRange.toDate} onChange={(event) => { const value = event.target.value; setLeaveRange((previous) => ({ fromDate: previous.fromDate && previous.fromDate <= value ? previous.fromDate : value, toDate: value })); }} /></label>
+              </div>
+              <label>Leave type<select value={leaveType} onChange={(event) => setLeaveType(event.target.value)}><option value="CASUAL">Casual</option><option value="SICK">Sick</option><option value="EMERGENCY">Emergency</option><option value="UNPAID">Unpaid</option><option value="OTHER">Other</option></select></label>
+              <label>Reason<textarea value={leaveReason} onChange={(event) => setLeaveReason(event.target.value)} rows={3} maxLength={500} placeholder="Reason for leave" /></label>
+              <div className="profile-modal-actions"><button type="button" className="profile-button-secondary" onClick={closeLeaveModal}>Cancel</button><button type="submit" className="profile-button-primary" disabled={leaveSubmitting}>{leaveSubmitting ? <Loader size={14} className="animate-spin" /> : <CalendarDays size={14} />}{leaveSubmitting ? "Submitting..." : "Submit request"}</button></div>
+            </form>
+          </Modal>
+
+          <Modal open={accountDetailsOpen} onClose={() => setAccountDetailsOpen(false)} title="Account details" description="Employment and account metadata visible to you." size="md">
+            <dl className="profile-account-detail-list">
+              <ProfileDetail label="Employee ID" value={profile.employeeId || profile.employeeCode || "-"} />
+              <ProfileDetail label="Account status" value={profile.isActive ? "Active" : "Inactive"} />
+              <ProfileDetail label="Department" value={profile.department || "Not assigned"} />
+              <ProfileDetail label="Branch" value={profile.branch || "Not assigned"} />
+              <ProfileDetail label="Shift" value={profile.shiftTiming || "Not assigned"} />
+              <ProfileDetail label="Joining date" value={formatDate(profile.joiningDate)} />
+              <ProfileDetail label="Last login" value={formatDate(profile.lastLoginAt)} />
+              <ProfileDetail label="Account created" value={formatDate(profile.createdAt)} />
+              <ProfileDetail label="Last updated" value={formatDate(profile.updatedAt)} />
+            </dl>
+          </Modal>
+
+          <Modal open={photoViewOpen && Boolean(profile.profileImageUrl)} onClose={() => setPhotoViewOpen(false)} title="Profile photo" description="Your current profile picture." size="sm">
+            <div className="profile-photo-preview">
+              <img src={profile.profileImageUrl} alt={profile.name || "Profile"} />
+              {canEditProfile ? (
+                <div className="profile-modal-actions">
+                  <label className="profile-button-secondary profile-photo-change-button"><Edit3 size={14} /> Change photo<input type="file" aria-label="Change profile photo" accept="image/*" onChange={handlePhotoChange} disabled={uploadingPhoto || removingPhoto} /></label>
+                  <button type="button" className="profile-button-danger" onClick={() => { setPhotoViewOpen(false); setPhotoRemoveOpen(true); }} disabled={uploadingPhoto || removingPhoto}><Trash2 size={14} /> Remove</button>
                 </div>
-
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <label className="text-xs font-semibold text-slate-600">
-                    From
-                    <input
-                      type="date"
-                      value={leaveRange.fromDate}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setLeaveRange((prev) => ({
-                          fromDate: value,
-                          toDate: prev.toDate && prev.toDate >= value ? prev.toDate : value,
-                        }));
-                      }}
-                      className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
-                    />
-                  </label>
-                  <label className="text-xs font-semibold text-slate-600">
-                    To
-                    <input
-                      type="date"
-                      value={leaveRange.toDate}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        setLeaveRange((prev) => ({
-                          fromDate: prev.fromDate && prev.fromDate <= value ? prev.fromDate : value,
-                          toDate: value,
-                        }));
-                      }}
-                      className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm"
-                    />
-                  </label>
-                </div>
-
-                <label className="mt-3 block text-xs font-semibold text-slate-600">
-                  Leave Type
-                  <select
-                    value={leaveType}
-                    onChange={(event) => setLeaveType(event.target.value)}
-                    className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
-                  >
-                    <option value="CASUAL">Casual</option>
-                    <option value="SICK">Sick</option>
-                    <option value="EMERGENCY">Emergency</option>
-                    <option value="UNPAID">Unpaid</option>
-                    <option value="OTHER">Other</option>
-                  </select>
-                </label>
-
-                <label className="mt-3 block text-xs font-semibold text-slate-600">
-                  Reason
-                  <textarea
-                    value={leaveReason}
-                    onChange={(event) => setLeaveReason(event.target.value)}
-                    rows={3}
-                    maxLength={500}
-                    placeholder="Reason for leave"
-                    className="mt-1 w-full resize-none rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  />
-                </label>
-
-                <button
-                  type="submit"
-                  disabled={leaveSubmitting}
-                  className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-cyan-600 px-4 text-sm font-semibold text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {leaveSubmitting ? <Loader size={14} className="animate-spin" /> : <CalendarDays size={14} />}
-                  Submit Leave Request
-                </button>
-              </form>
+              ) : null}
             </div>
-          ) : null}
+          </Modal>
 
-          {summaryCards.length > 0 && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              {summaryCards.map((card) => (
-                <div key={card.key} className="ui-soft-panel rounded-2xl border bg-white p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">
-                      {card.label}
-                    </div>
-                    <card.icon size={14} className="text-slate-500" />
-                  </div>
-                  <div className="mt-2 text-2xl font-display text-slate-900">
-                    {card.value}
-                  </div>
-                </div>
-              ))}
+          <Modal open={photoRemoveOpen && Boolean(profile.profileImageUrl)} onClose={() => { if (!removingPhoto) setPhotoRemoveOpen(false); }} title="Remove profile photo?" description="Your account will return to the default avatar." size="sm">
+            <div className="profile-remove-photo-confirmation">
+              <p>This removes the photo from your CRM profile.</p>
+              <div className="profile-modal-actions">
+                <button type="button" className="profile-button-secondary" onClick={() => setPhotoRemoveOpen(false)} disabled={removingPhoto}>Cancel</button>
+                <button type="button" className="profile-button-danger" onClick={handleRemovePhoto} disabled={removingPhoto}>{removingPhoto ? <Loader size={14} className="animate-spin" /> : <Trash2 size={14} />}{removingPhoto ? "Removing..." : "Remove photo"}</button>
+              </div>
             </div>
-          )}
+          </Modal>
         </>
       )}
     </div>
   );
 };
+
+const ProfileCardHeader = ({ icon, title, subtitle }) => (
+  <div className="profile-card-header"><span>{React.createElement(icon, { size: 16 })}</span><div><h3>{title}</h3><p>{subtitle}</p></div></div>
+);
+
+const ProfileDetail = ({ label, value, readOnly = false }) => (
+  <div><dt>{label}{readOnly ? <LockKeyhole size={10} /> : null}</dt><dd>{value}</dd></div>
+);
+
+const ReadOnlyField = ({ icon, label, value }) => (
+  <div className="profile-readonly-field"><span>{label}<LockKeyhole size={10} /></span><div>{React.createElement(icon, { size: 13 })} {value}</div></div>
+);
 
 export default UserProfile;

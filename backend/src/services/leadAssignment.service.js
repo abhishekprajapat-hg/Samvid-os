@@ -339,7 +339,7 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
   }
 
   const activeExecutives = await User.find(executiveQuery)
-    .select("_id name role roleType parentId companyId isActive createdAt lastAssignedAt")
+    .select("_id name role roleType parentId companyId isActive createdAt lastAssignedAt profileImageUrl")
     .sort({ createdAt: 1 })
     .lean();
 
@@ -405,7 +405,7 @@ const autoAssignLead = async ({ lead, requester = null, performedBy = null }) =>
       ...(resolvedCompanyId ? { companyId: resolvedCompanyId } : {}),
       roleType: { $in: [leadRoleType, "BOTH"] },
     })
-      .select("_id name role roleType createdAt lastAssignedAt")
+      .select("_id name role roleType createdAt lastAssignedAt profileImageUrl")
       .sort({ createdAt: 1 })
       .lean()
     : [];

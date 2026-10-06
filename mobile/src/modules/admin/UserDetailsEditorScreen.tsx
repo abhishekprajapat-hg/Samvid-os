@@ -32,7 +32,8 @@ const REPORTING_PARENT_ROLES: Record<string, string[]> = {
   PRODUCTION_EXECUTIVE: ["MANAGER"],
   COMMUNITY_MANAGER: ["MANAGER"],
   CHANNEL_PARTNER: ["MANAGER"],
-  COWORKING_ADMIN: ["ADMIN"],
+  // Every role except Admin reports to a Manager.
+  COWORKING_ADMIN: ["MANAGER"],
 };
 
 const ROLE_LABELS: Record<string, string> = {

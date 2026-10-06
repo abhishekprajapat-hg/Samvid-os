@@ -12,6 +12,7 @@ import {
   Users,
   Users2,
 } from "lucide-react";
+import AvatarFace from "../../../components/ui/AvatarFace";
 
 const DEFAULT_BROKERAGE_VALUE = 50000;
 const DEFAULT_BROKERAGE_PERCENTAGE = 2;
@@ -348,7 +349,7 @@ const TeamUserCard = ({
               ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-100"
               : "border-cyan-200 bg-cyan-50 text-cyan-700"
           }`}>
-            {initials}
+            <AvatarFace user={user} initials={initials} />
           </div>
           <div className="min-w-0">
             <div className={`truncate text-base font-semibold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>

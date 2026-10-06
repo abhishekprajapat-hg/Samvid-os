@@ -226,10 +226,10 @@ const listConversationCallHistory = async ({ user, roomId, limit = 30 }) => {
   const rows = await ChatCallHistory.find(query)
     .sort({ startedAt: -1, createdAt: -1 })
     .limit(toPositiveInt(limit, 30, 200))
-    .populate("caller", "name role")
-    .populate("answeredBy", "name role")
-    .populate("endedBy", "name role")
-    .populate("participants", "name role")
+    .populate("caller", "name role profileImageUrl")
+    .populate("answeredBy", "name role profileImageUrl")
+    .populate("endedBy", "name role profileImageUrl")
+    .populate("participants", "name role profileImageUrl")
     .lean();
 
   return rows.map(toCallHistoryDto);

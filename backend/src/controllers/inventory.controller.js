@@ -6,6 +6,7 @@ const {
   deleteInventoryDirect,
   bulkCreateInventoryDirect,
   getInventoryActivities,
+  createInventoryCreateRequest,
 } = require("../services/inventoryWorkflow.service");
 const InventoryShareLink = require("../models/InventoryShareLink");
 const logger = require("../config/logger");
@@ -16,6 +17,18 @@ const {
 } = require("../utils/queryOptions");
 
 const FE_ROLE = "FIELD_EXECUTIVE";
+const CHANNEL_PARTNER_ROLE = "CHANNEL_PARTNER";
+// Owner and key-manager contacts are internal: a Channel Partner (outside
+// broker) must not be able to go to the owner directly.
+const PARTNER_HIDDEN_FIELDS = [
+  "ownerName",
+  "ownerNumber",
+  "ownerWhatsappNumber",
+  "ownerType",
+  "ownerContactId",
+  "keyManagerName",
+  "keyManagerNumber",
+];
 const INVENTORY_SELECTABLE_FIELDS = [
   "_id",
   "companyId",
@@ -88,6 +101,11 @@ const toLegacyType = (type) => {
   const cleanType = String(type || "").trim().toLowerCase();
   if (["rent", "rental", "for rent", "lease", "leasing"].includes(cleanType)) {
     return "Rent";
+  }
+  // "For Sale & Rent" listings were reported as "Sale", so the edit form
+  // re-saved them as sale-only and dropped their rent terms.
+  if (["both", "sale & rent", "sale and rent", "sale_rent"].includes(cleanType)) {
+    return "Both";
   }
   return "Sale";
 };
@@ -246,9 +264,19 @@ const toFieldExecutiveInventoryView = (inventory) => ({
   updatedAt: inventory.updatedAt,
 });
 
+const toPartnerInventoryView = (inventory) => {
+  if (!inventory) return inventory;
+  const row = typeof inventory.toObject === "function" ? inventory.toObject() : { ...inventory };
+  PARTNER_HIDDEN_FIELDS.forEach((field) => { delete row[field]; });
+  return row;
+};
+
 const toRoleBasedInventory = (inventory, role) => {
   if (role === FE_ROLE) {
     return toFieldExecutiveInventoryView(inventory);
+  }
+  if (role === CHANNEL_PARTNER_ROLE) {
+    return toPartnerInventoryView(inventory);
   }
   return inventory;
 };
@@ -379,6 +407,21 @@ exports.getInventoryById = async (req, res) => {
 
 exports.createInventory = async (req, res) => {
   try {
+    // A Channel Partner's new property becomes a create request for an Admin or
+    // Manager to approve, whichever client sent it.
+    if (req.user?.role === CHANNEL_PARTNER_ROLE) {
+      const request = await createInventoryCreateRequest({
+        user: req.user,
+        payload: req.body,
+        io: req.app?.get?.("io"),
+      });
+      return res.status(202).json({
+        message: "Property sent to Admin / Manager for approval",
+        approvalRequired: true,
+        request,
+      });
+    }
+
     const inventory = await createInventoryDirect({
       user: req.user,
       payload: req.body,

@@ -246,6 +246,7 @@ const toUserDto = (user) => ({
   _id: user?._id || null,
   name: user?.name || "",
   role: user?.role || "",
+  profileImageUrl: user?.profileImageUrl || "",
   roleLabel: toRoleLabel(user?.role || ""),
 });
 
@@ -367,12 +368,12 @@ const sortByName = (left, right) =>
 
 const applyRoomPopulates = (query) =>
   query
-    .populate("participants", "name role parentId isActive")
-    .populate("createdBy", "name role parentId isActive")
-    .populate("lastMessageSender", "name role parentId isActive");
+    .populate("participants", "name role parentId isActive profileImageUrl")
+    .populate("createdBy", "name role parentId isActive profileImageUrl")
+    .populate("lastMessageSender", "name role parentId isActive profileImageUrl");
 
 const applyMessagePopulates = (query) =>
-  query.populate("sender", "name role parentId isActive");
+  query.populate("sender", "name role parentId isActive profileImageUrl");
 
 const buildDefaultUnreadCounts = (participantIds) =>
   participantIds.map((participantId) => ({
@@ -647,7 +648,7 @@ const ensureLeadRoomAccess = async ({ user, room }) => {
 const getContactUsers = async (user) => {
   const criteria = buildContactQueryForUser(user);
   const users = await User.find(criteria)
-    .select("_id name role parentId companyId")
+    .select("_id name role parentId companyId profileImageUrl")
     .lean();
 
   return users.map(toUserDto).sort(sortByName);
@@ -708,7 +709,7 @@ const createOrGetDirectRoom = async ({ initiator, recipientId }) => {
   }
 
   const recipient = await User.findOne(recipientCriteria)
-    .select("_id name role parentId companyId isActive")
+    .select("_id name role parentId companyId isActive profileImageUrl")
     .lean();
 
   if (!recipient) {
@@ -1505,9 +1506,9 @@ const listEscalationLogs = async ({ user, roomId = null, limit = 80 }) => {
   const rows = await ChatEscalationLog.find(query)
     .sort({ createdAt: -1 })
     .limit(toPositiveInt(limit, 80, 300))
-    .populate("initiatedBy", "name role")
-    .populate("managerId", "name role")
-    .populate("adminId", "name role")
+    .populate("initiatedBy", "name role profileImageUrl")
+    .populate("managerId", "name role profileImageUrl")
+    .populate("adminId", "name role profileImageUrl")
     .lean();
 
   return rows;

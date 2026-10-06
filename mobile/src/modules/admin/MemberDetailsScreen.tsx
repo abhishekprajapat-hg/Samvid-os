@@ -35,6 +35,7 @@ import {
   tileMoney,
   type MemberStatus,
 } from "./teamVocab";
+import { toAbsoluteUrl } from "../../services/uploadService";
 
 /*
  * Member Details, drawn to the comp.
@@ -430,7 +431,7 @@ export const MemberDetailsScreen = () => {
         <View style={styles.profileCard}>
           <View style={styles.profileHead}>
             {photo ? (
-              <Image source={{ uri: photo }} style={styles.portrait} />
+              <Image source={{ uri: toAbsoluteUrl(photo) }} style={styles.portrait} />
             ) : (
               <View style={[styles.portrait, { backgroundColor: tone.bg }]}>
                 <Text style={[styles.portraitText, { color: tone.fg }]}>{initialsOf(profile.name)}</Text>

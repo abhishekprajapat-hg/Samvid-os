@@ -43,6 +43,7 @@ import {
   type MemberStatus,
   type TeamMember,
 } from "./teamVocab";
+import { toAbsoluteUrl } from "../../services/uploadService";
 
 /*
  * The team, drawn to the comp.
@@ -109,7 +110,7 @@ const Avatar = ({ member, status }: { member: TeamMember; status: MemberStatus }
   return (
     <View style={styles.avatarWrap}>
       {photo ? (
-        <Image source={{ uri: photo }} style={styles.avatarImage} />
+        <Image source={{ uri: toAbsoluteUrl(photo) }} style={styles.avatarImage} />
       ) : (
         <View style={[styles.avatarImage, { backgroundColor: tone.bg }]}>
           <Text style={[styles.avatarText, { color: tone.fg }]}>{initialsOf(member.name)}</Text>

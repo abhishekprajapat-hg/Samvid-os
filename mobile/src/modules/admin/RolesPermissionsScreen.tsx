@@ -33,6 +33,7 @@ import {
   initialsOf,
   toPagePermission,
 } from "./teamVocab";
+import { PhotoOverlay, profilePhotoOf } from "../../components/common/PhotoOverlay";
 
 /*
  * Roles & Permissions, drawn to the comp.
@@ -484,6 +485,7 @@ export const RolesPermissionsScreen = () => {
                         <Text style={[styles.memberInitials, { color: tone.fg }]}>
                           {initialsOf(member.name)}
                         </Text>
+                        <PhotoOverlay uri={profilePhotoOf(member)} />
                       </View>
                     );
                   })}

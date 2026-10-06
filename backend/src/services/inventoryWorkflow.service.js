@@ -57,7 +57,11 @@ const INVENTORY_DIRECT_MANAGE_ROLES = Object.freeze([
   USER_ROLES.ADMIN,
   USER_ROLES.MANAGER,
 ]);
-const INVENTORY_DIRECT_CREATE_ROLES = INVENTORY_CREATE_REQUEST_ROLES;
+// A Channel Partner is an outside broker: they may propose a property, but it
+// goes live only once an Admin or Manager approves the create request.
+const INVENTORY_DIRECT_CREATE_ROLES = Object.freeze(
+  INVENTORY_CREATE_REQUEST_ROLES.filter((role) => role !== USER_ROLES.CHANNEL_PARTNER),
+);
 const INVENTORY_DELETE_REQUEST_ROLES = Object.freeze([
   USER_ROLES.MANAGER,
   USER_ROLES.EXECUTIVE,
@@ -107,6 +111,8 @@ const RESIDENTIAL_PROPERTY_TYPES = Object.freeze([
   "HOUSE",
   "PLOT",
   "PG_HOSTEL",
+  "BUNGALOW",
+  "FARM_HOUSE",
   "OTHER",
 ]);
 const RESIDENTIAL_BHK_TYPES = Object.freeze([
@@ -140,6 +146,7 @@ const normalizeResidentialPropertyType = (value) => {
   if (["INDEPENDENT_HOUSE", "VILLA", "BUILDER_FLOOR"].includes(normalized)) return "HOUSE";
   if (normalized === "APARTMENT") return "FLAT";
   if (["PG", "HOSTEL", "PG_HOSTEL"].includes(normalized)) return "PG_HOSTEL";
+  if (["FARMHOUSE", "FARM_HOUSE"].includes(normalized)) return "FARM_HOUSE";
   return normalized;
 };
 
@@ -390,7 +397,7 @@ const syncLinkedLeadsFromInventory = async (inventory = {}) => {
   const lat = normalizeLatitude(inventory?.siteLocation?.lat);
   const lng = normalizeLongitude(inventory?.siteLocation?.lng);
   const leadProjectInterested = buildLeadProjectInterested(inventory);
-  const leadCity = sanitizeString(inventory?.location);
+  const leadCity = sanitizeString(inventory?.city) || sanitizeString(inventory?.location);
 
   await Lead.updateMany(
     { inventoryId },
@@ -459,7 +466,16 @@ const normalizeLegacyCategory = (category) => {
     return "Flat";
   }
 
-  if (["house", "houses", "villa", "villas", "builder floor", "builder_floor"].includes(normalized)) {
+  if ([
+    "house",
+    "houses",
+    "independent house",
+    "independent_house",
+    "villa",
+    "villas",
+    "builder floor",
+    "builder_floor",
+  ].includes(normalized)) {
     return "House";
   }
 
@@ -469,6 +485,14 @@ const normalizeLegacyCategory = (category) => {
 
   if (["plot", "plots", "land"].includes(normalized)) {
     return "Plot";
+  }
+
+  if (["bungalow", "bungalows"].includes(normalized)) {
+    return "Bungalow";
+  }
+
+  if (["farm house", "farm_house", "farmhouse"].includes(normalized)) {
+    return "Farm House";
   }
 
   const commercialCategoryMap = {
@@ -776,14 +800,18 @@ const normalizeLegacyInventoryPayload = (payload = {}) => {
   if (normalizedArea) normalized.area = normalizedArea;
   if (normalizedPincode) normalized.pincode = normalizedPincode;
 
-  const derivedLocation = buildLocationFromParts({
-    city: normalized.city,
-    area: normalized.area,
-    pincode: normalized.pincode,
-    fallbackLocation: normalized.location,
-  });
-  if (derivedLocation) {
-    normalized.location = derivedLocation;
+  // Keep the address the user typed. Only build one from city / area / pincode
+  // when no location was given, so a full address is never replaced by a summary.
+  if (!sanitizeString(normalized.location)) {
+    const derivedLocation = buildLocationFromParts({
+      city: normalized.city,
+      area: normalized.area,
+      pincode: normalized.pincode,
+      fallbackLocation: normalized.location,
+    });
+    if (derivedLocation) {
+      normalized.location = derivedLocation;
+    }
   }
 
   return normalized;
@@ -828,7 +856,7 @@ const ensureManagerExistsInCompany = async ({ managerId, companyId, roleType = "
     _id: managerId,
     companyId,
   })
-    .select("_id name role roleType isActive companyId")
+    .select("_id name role roleType isActive companyId profileImageUrl")
     .lean();
 
   if (!manager) {
@@ -1151,7 +1179,7 @@ const sanitizeInventoryPayload = ({
         return;
       }
       if (!isValidObjectId(leadId)) {
-        throw createHttpError(400, "reservationLeadId must be a valid lead id");
+        throw createHttpError(400, "Select a valid lead for the blocked property");
       }
       safePayload[field] = leadId;
       return;
@@ -1173,7 +1201,12 @@ const sanitizeInventoryPayload = ({
     }
 
     if (field === "pincode") {
-      safePayload[field] = sanitizeCappedString(value, 20);
+      // Indian PIN code: 6 digits, not starting with 0. Blank is allowed.
+      const pincode = sanitizeCappedString(value, 20).replace(/\s+/g, "");
+      if (pincode && !/^[1-9][0-9]{5}$/.test(pincode)) {
+        throw createHttpError(400, "Pincode must be a 6-digit Indian PIN code");
+      }
+      safePayload[field] = pincode;
       return;
     }
 
@@ -1370,13 +1403,13 @@ const sanitizeInventoryPayload = ({
 
   if (effectiveStatus === "Blocked" && shouldValidateBlockedReason) {
     if (!effectiveReservationReason) {
-      throw createHttpError(400, "reservationReason is required when status is Reserved");
+      throw createHttpError(400, "Block reason is required when status is Blocked");
     }
     if (!effectiveReservationLeadId) {
-      throw createHttpError(400, "reservationLeadId is required when status is Reserved");
+      throw createHttpError(400, "Select the lead this property is blocked for");
     }
     if (!isValidObjectId(effectiveReservationLeadId)) {
-      throw createHttpError(400, "reservationLeadId must be a valid lead id");
+      throw createHttpError(400, "Select a valid lead for the blocked property");
     }
 
     if (hasReservationReasonPatch) {
@@ -1477,19 +1510,19 @@ const logInventoryActivity = async ({
 
 const applyInventoryPopulates = (query) =>
   query
-    .populate("teamId", "name role companyId")
-    .populate("createdBy", "name role companyId")
-    .populate("approvedBy", "name role companyId")
-    .populate("updatedBy", "name role companyId")
+    .populate("teamId", "name role companyId profileImageUrl")
+    .populate("createdBy", "name role companyId profileImageUrl")
+    .populate("approvedBy", "name role companyId profileImageUrl")
+    .populate("updatedBy", "name role companyId profileImageUrl")
     .populate("reservationLeadId", "name phone status projectInterested")
     .populate("saleDetails.leadId", "name phone status projectInterested")
     .lean();
 
 const applyRequestPopulates = (query) =>
   query
-    .populate("requestedBy", "name role parentId companyId")
-    .populate("reviewedBy", "name role companyId")
-    .populate("teamId", "name role companyId")
+    .populate("requestedBy", "name role parentId companyId profileImageUrl")
+    .populate("reviewedBy", "name role companyId profileImageUrl")
+    .populate("teamId", "name role companyId profileImageUrl")
     .populate("inventoryId")
     .populate("relatedLead", "name phone status projectInterested")
     .lean();
@@ -2325,6 +2358,15 @@ const approveRequest = async ({ user, requestId, io }) => {
     throw createHttpError(404, "Pending request not found");
   }
 
+  /*
+   * A Manager can do everything an Admin can except delete, so a delete
+   * request needs an Admin - including one a Manager raised themselves
+   * (BUG-33). Edit and create requests keep Manager approval.
+   */
+  if (request.type === "delete" && user.role !== USER_ROLES.ADMIN) {
+    throw createHttpError(403, "Only an Admin can approve a delete request");
+  }
+
   const companyId = getCompanyIdForUser(user);
   let inventory = null;
   let approvedLeadId = null;
@@ -2587,7 +2629,7 @@ const getInventoryActivities = async ({ user, inventoryId, limit = 100 }) => {
   })
     .sort({ timestamp: -1 })
     .limit(resolvedLimit)
-    .populate("changedBy", "name role")
+    .populate("changedBy", "name role profileImageUrl")
     .lean();
 };
 

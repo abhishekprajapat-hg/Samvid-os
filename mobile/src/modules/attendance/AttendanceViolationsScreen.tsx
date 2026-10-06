@@ -211,7 +211,7 @@ export const AttendanceViolationsScreen = () => {
                 accessibilityRole="button"
               >
                 <View style={styles.cardHead}>
-                  <SolidAvatar name={name} />
+                  <SolidAvatar name={name} photo={String((row as { profileImageUrl?: string }).profileImageUrl || "")} />
                   <View style={styles.cardCopy}>
                     <Text style={styles.name} numberOfLines={1}>{name}</Text>
                     <Text style={styles.role} numberOfLines={1}>{prettyRole(row.role)}</Text>

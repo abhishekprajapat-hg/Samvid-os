@@ -5,6 +5,7 @@ import { AppSheet } from "../../components/ui";
 import { radii, spacing, typography } from "../../theme/tokens";
 import { themedStyles, themePalette } from "../../theme/themedStyles";
 import type { AttendanceRecord } from "../../services/attendanceService";
+import { PhotoOverlay } from "../../components/common/PhotoOverlay";
 
 /*
  * The vocabulary and the repeated furniture of the Attendance module.
@@ -125,7 +126,7 @@ export const initialsOf = (name = ""): string =>
  * ones the Tasks roster uses. Colour is derived from the name so the same
  * person keeps the same disc everywhere in the module.
  */
-export const SolidAvatar = ({ name, size = 48 }: { name: string; size?: number }) => {
+export const SolidAvatar = ({ name, size = 48, photo }: { name: string; size?: number; photo?: string }) => {
   const c = themePalette;
   const fills = [c.amber[600], c.violet[600], c.emerald[600], c.rose[600], c.cyan[600], c.blue[600]];
   let hash = 0;
@@ -138,6 +139,7 @@ export const SolidAvatar = ({ name, size = 48 }: { name: string; size?: number }
       ]}
     >
       <Text style={[styles.avatarText, { fontSize: size * 0.34 }]}>{initialsOf(name)}</Text>
+      <PhotoOverlay uri={photo} />
     </View>
   );
 };
@@ -236,7 +238,7 @@ export const TeamRow = ({
 
   return (
     <Pressable style={styles.row} onPress={onPress} accessibilityRole="button">
-      <SolidAvatar name={name} />
+      <SolidAvatar name={name} photo={String((row.user as { profileImageUrl?: string } | undefined)?.profileImageUrl || "")} />
 
       <View style={styles.rowBody}>
         <Text style={styles.rowName} numberOfLines={1}>

@@ -4,6 +4,8 @@ const router = express.Router();
 const clientController = require("../controllers/coworkingClient.controller");
 const { requirePermission } = require("../middleware/permission.middleware");
 const { writeLimiter } = require("../middleware/rateLimit.middleware");
+const CoworkingClient = require("../models/CoworkingClient");
+const { requireAdminApprovalForDelete, describeByModel } = require("../services/deleteApproval.service");
 
 router.get("/", requirePermission("clients.view"), clientController.listClients);
 router.get("/birthdays", requirePermission("clients.view"), async (req, res) => {
@@ -21,7 +23,20 @@ router.get("/:clientId/activity", requirePermission("clients.view"), clientContr
 
 router.post("/", writeLimiter, requirePermission("clients.create"), clientController.createClient);
 router.patch("/:clientId", writeLimiter, requirePermission("clients.update"), clientController.updateClient);
-router.delete("/:clientId", writeLimiter, requirePermission("clients.delete"), clientController.deleteClient);
+router.delete(
+  "/:clientId",
+  writeLimiter,
+  requirePermission("clients.delete"),
+  // A Manager's delete becomes a request an Admin approves.
+  requireAdminApprovalForDelete("coworking_client", {
+    label: "Coworking client",
+    pageKey: "coworking_clients",
+    idParam: "clientId",
+    handler: clientController.deleteClient,
+    describe: describeByModel(CoworkingClient, ["companyName", "clientCode"]),
+  }),
+  clientController.deleteClient,
+);
 
 router.post(
   "/:clientId/contacts",

@@ -176,6 +176,7 @@ const toAuthResponse = ({ user, tokenBundle, tenant = null }) => ({
     name: user.name,
     email: user.email,
     role: user.role,
+    profileImageUrl: user.profileImageUrl || "",
     roleType: normalizeRoleType(user.roleType),
     companyId: user.companyId,
     parentId: user.parentId || null,
@@ -308,7 +309,7 @@ exports.refresh = async (req, res) => {
     }
 
     const user = await User.findById(rotated.userId).select(
-      "_id name email role roleType companyId parentId partnerCode canViewInventory brokerageConfig isActive",
+      "_id name email role roleType companyId parentId partnerCode canViewInventory brokerageConfig isActive profileImageUrl",
     );
 
     if (!user || !user.isActive) {
@@ -326,6 +327,7 @@ exports.refresh = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        profileImageUrl: user.profileImageUrl || "",
         roleType: normalizeRoleType(user.roleType),
         companyId: user.companyId || null,
         parentId: user.parentId || null,

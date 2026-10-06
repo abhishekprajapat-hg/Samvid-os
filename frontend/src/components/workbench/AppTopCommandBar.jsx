@@ -2,6 +2,8 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Bell, CalendarDays, LogOut, Menu, MessageCircle, Moon, Search, Sun, User } from "lucide-react";
 import { PROFILE_ITEM, getAllVisibleMenuGroups, roleCanSeeItem } from "./workbenchNavigation";
+import AvatarFace from "../ui/AvatarFace";
+import { getMyProfile } from "../../services/userService";
 import "./AppTopCommandBar.css";
 
 const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogout, actions, user, userRole, unreadAlerts = 0, unreadChats = 0 }) => {
@@ -24,6 +26,37 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
     ? `Welcome back, ${firstName} 👋`
     : currentItem?.label || String(pageHeader?.title || "Workspace").replace(/\s+Command\s+Center$/i, "").replace(/\s+Dashboard$/i, "") || "Home";
   const initials = String(user?.name || user?.fullName || "User").trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+  // The photo can change on the Profile page while this header stays mounted.
+  const [changedPhoto, setChangedPhoto] = useState(null);
+  const profilePhoto = changedPhoto ?? String(user?.profileImageUrl || "");
+  useEffect(() => {
+    const onPhotoChange = (event) => setChangedPhoto(String(event.detail?.profileImageUrl || ""));
+    window.addEventListener("crm:profile-image-changed", onPhotoChange);
+    return () => window.removeEventListener("crm:profile-image-changed", onPhotoChange);
+  }, []);
+  // The login copy of the user can be older than the photo (or predate the
+  // photo field), so read the current photo from the server once per session.
+  const userKey = String(user?._id || user?.id || user?.email || "");
+  useEffect(() => {
+    if (!userKey) return undefined;
+    let alive = true;
+    getMyProfile()
+      .then(({ profile }) => {
+        if (!alive || !profile) return;
+        const latest = String(profile.profileImageUrl || "");
+        setChangedPhoto(latest);
+        try {
+          const stored = JSON.parse(localStorage.getItem("user") || "null");
+          if (stored && stored.profileImageUrl !== latest) {
+            localStorage.setItem("user", JSON.stringify({ ...stored, profileImageUrl: latest }));
+          }
+        } catch {
+          // A bad cached user is not worth failing the header over.
+        }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [userKey]);
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }).format(new Date());
   const results = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
 
@@ -71,7 +104,7 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
         {canNotify && <button type="button" className="app-header-icon" aria-label="Open notifications" title="Notifications" onClick={() => navigate("/admin/notifications")}><Bell size={21} />{unreadAlerts > 0 && <span className="app-header-unread">{unreadAlerts > 99 ? "99+" : unreadAlerts}</span>}</button>}
         {canChat && <button type="button" className="app-header-icon" aria-label="Open team chat" title="Chat" onClick={openChat}><MessageCircle size={21} />{unreadChats > 0 && <span className="app-header-unread">{unreadChats > 99 ? "99+" : unreadChats}</span>}</button>}
         <div className="app-header-date"><CalendarDays size={17} />{today}</div>
-        {canProfile && <button type="button" className="app-header-avatar" aria-label="Open profile" title={user?.name || "Profile"} onClick={() => navigate("/profile")}>{initials || <User size={18} />}</button>}
+        {canProfile && <button type="button" className="app-header-avatar" aria-label="Open profile" title={user?.name || "Profile"} onClick={() => navigate("/profile")}><AvatarFace src={profilePhoto} initials={initials} fallback={<User size={18} />} /></button>}
         <button type="button" className="app-header-icon" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={onToggleTheme}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
         <button type="button" className="app-header-logout" onClick={onLogout} aria-label="Logout" title="Logout"><LogOut size={18} /><span>Logout</span></button>
       </div>

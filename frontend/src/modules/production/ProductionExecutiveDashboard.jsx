@@ -232,10 +232,10 @@ const ProductionExecutiveDashboard = ({ mode = "home" }) => {
                   {statusLabel(attendance?.status)}
                 </p>
                 <p className="mt-2 text-xs text-slate-500">
-                  Check-in: {attendance?.checkIn ? new Date(attendance.checkIn).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "-"}
+                  Check-in: {(attendance?.checkInAt || attendance?.checkIn) ? new Date(attendance.checkInAt || attendance.checkIn).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "-"}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Check-out: {attendance?.checkOut ? new Date(attendance.checkOut).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "-"}
+                  Check-out: {(attendance?.checkOutAt || attendance?.checkOut) ? new Date(attendance.checkOutAt || attendance.checkOut).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "-"}
                 </p>
               </div>
             </div>

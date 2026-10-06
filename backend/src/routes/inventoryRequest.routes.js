@@ -13,6 +13,7 @@ const {
 } = require("../middleware/pageAccess.middleware");
 
 router.use(authMiddleware.protect);
+router.use(require("../middleware/partnerInventoryAccess.middleware").requirePartnerInventoryAccess);
 router.use(companyMiddleware.requireCompanyContext);
 router.use(requirePageAccess("inventory"));
 router.use(requirePageActionForMethod("inventory"));

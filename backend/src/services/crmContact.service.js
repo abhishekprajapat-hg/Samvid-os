@@ -98,4 +98,28 @@ const bulkUpsertContacts = async ({ companyId, kind, rows, actor }) => {
  return { createdCount, updatedCount, failedCount: failures.length, failures };
 };
 
-module.exports = { normalizePhone, upsertContact, findBrokerByPhone, recordBlockedLead, bulkUpsertContacts, MAX_BULK_CONTACT_ROWS };
+/*
+ * Bulk upload writes leads with insertMany / bulkWrite, which skip the Lead
+ * save hook that files Owner/Broker leads into the contact database. This
+ * does the same filing for a batch, keyed on phone so nothing duplicates.
+ */
+const syncContactsForLeads = async ({ companyId, leadIds = [], phones = [], actor }) => {
+ if (!companyId || (!leadIds.length && !phones.length)) return 0;
+ const Lead = require("../models/Lead");
+ const or = [];
+ if (leadIds.length) or.push({ _id: { $in: leadIds } });
+ if (phones.length) or.push({ phone: { $in: phones } });
+ const leads = await Lead.find({ companyId, status: { $in: ["OWNER", "BROKER"] }, $or: or })
+  .select("_id phone name email status inventoryId createdBy")
+  .lean();
+ let synced = 0;
+ for (const lead of leads) {
+  const contact = await upsertContact({ companyId, kind: lead.status, phone: lead.phone, name: lead.name, email: lead.email, leadId: lead._id, inventoryId: lead.inventoryId, actor: actor || lead.createdBy });
+  if (!contact) continue;
+  synced += 1;
+  if (lead.status === "BROKER") await Lead.updateOne({ _id: lead._id }, { $set: { brokerContactId: contact._id } });
+ }
+ return synced;
+};
+
+module.exports = { normalizePhone, upsertContact, findBrokerByPhone, recordBlockedLead, bulkUpsertContacts, syncContactsForLeads, MAX_BULK_CONTACT_ROWS };

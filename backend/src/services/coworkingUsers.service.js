@@ -6,12 +6,12 @@ const { writeAuditLog } = require("./auditLog.service");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
-const USER_LIST_FIELDS = "_id name email phone role parentId isActive createdAt";
+const USER_LIST_FIELDS = "_id name email phone role parentId isActive createdAt profileImageUrl";
 
 const listCompanyUsers = async (companyId) =>
   User.find({ companyId })
     .select(USER_LIST_FIELDS)
-    .populate("parentId", "name role")
+    .populate("parentId", "name role profileImageUrl")
     .sort({ createdAt: -1 })
     .lean();
 

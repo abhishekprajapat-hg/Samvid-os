@@ -182,11 +182,8 @@ const seedCompanyAndUsers = async () => {
     const _id =
       existingUserIdByEmail.get(String(email).toLowerCase())
       || (isAdmin ? adminId : isManager ? managerId : oid(`user-${email}`));
-    const parentId = isAdmin
-      ? null
-      : isManager || role === USER_ROLES.COWORKING_ADMIN
-        ? adminId
-        : managerId;
+    // Every role except Admin reports to a Manager; the Manager reports to Admin.
+    const parentId = isAdmin ? null : isManager ? adminId : managerId;
 
     users[email] = await upsert(User, { _id }, {
       name,

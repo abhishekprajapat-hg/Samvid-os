@@ -5,6 +5,7 @@ import { getAllLeads } from "../../services/leadService";
 import { getMyTargets } from "../../services/targetService";
 import { getRoleLeaderboard } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const WINDOW_OPTIONS = [
   { key: "MONTH", label: "This month", days: () => new Date().getDate() },
@@ -288,7 +289,7 @@ const RoleLeaderboard = () => {
                       <td><b className={row.displayRank === 1 ? "leaderboard-rank-top" : ""}>{row.displayRank}</b></td>
                       <td>
                         <div className="leaderboard-cellname">
-                          <div className="leaderboard-avatar">{getInitials(row.name)}</div>
+                          <div className="leaderboard-avatar"><AvatarFace user={row} initials={getInitials(row.name)} /></div>
                           <div>
                             <b>{row.name || "Unknown User"}</b>
                             <small>{row.isSelf ? "You" : data.roleLabel || row.role || "Executive"}</small>

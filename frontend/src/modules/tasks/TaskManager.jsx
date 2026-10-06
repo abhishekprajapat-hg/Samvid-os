@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "./tasks-reference.css";
 import SubtaskDetailPanel from "./SubtaskDetailPanel";
+import TaskAssigneePicker from "./TaskAssigneePicker";
 import { useNavigate } from "react-router-dom";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import {
@@ -38,15 +39,20 @@ import {
   getTasks,
   getTaskById,
   createTask,
+  addTaskSubtask,
   updateTask,
+  updateTaskSubtask,
+  deleteTaskSubtask,
   deleteTask,
   getTaskStats,
   getTaskStatsByUser,
   getTaskAssignees
 } from "../../services/taskService";
+import { deleteOutcomeMessage, isDeleteApprovalPending } from "../../services/deleteRequestService";
 import { getUsers } from "../../services/userService";
 import { getAllLeads } from "../../services/leadService";
 import ToastNotice from "../../components/ui/ToastNotice";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const STATUS_COLUMNS = [
   { id: "BACKLOG", label: "Backlog", color: "text-slate-400 border-slate-400 bg-slate-400/5" },
@@ -106,6 +112,15 @@ const PRIORITIES = [
   { value: "HIGH", label: "High", color: "bg-rose-500/10 text-rose-400 border-rose-500/20" }
 ];
 
+const localDateKey = (value = new Date()) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+};
+
+const subtaskStatus = (subtask) => subtask?.status || (subtask?.isCompleted ? "COMPLETED" : "TODO");
+const subtaskDone = (subtask) => subtaskStatus(subtask) === "COMPLETED";
+
 export default function TaskManager({ theme = "light" }) {
   const isDark = theme === "dark";
   const navigate = useNavigate();
@@ -125,7 +140,10 @@ export default function TaskManager({ theme = "light" }) {
   const isTaskCreator = (task) => Boolean(currentUserId) && taskReferenceId(task?.createdBy) === currentUserId;
   const isTaskReceiver = (task) => Boolean(currentUserId) && taskReferenceId(task?.assignedTo) === currentUserId && !isTaskCreator(task);
   const canEditTask = (task) => Boolean(currentUserId) && (isTaskCreator(task) || (!isTaskReceiver(task) && canViewRoster));
-  const canDeleteTask = (task) => Boolean(currentUserId) && (isTaskCreator(task) || (!isTaskReceiver(task) && currentRole === "ADMIN"));
+  // A Manager can delete what an Admin can, but only through an Admin's
+  // approval: their delete sends a request (see deleteRequestService.js).
+  const deleteNeedsApproval = currentRole === "MANAGER";
+  const canDeleteTask = (task) => Boolean(currentUserId) && (isTaskCreator(task) || (!isTaskReceiver(task) && ["ADMIN", "MANAGER"].includes(currentRole)));
 
   const handleOpenAssigneeProfile = (e, assignee) => {
     e.stopPropagation();
@@ -168,8 +186,8 @@ export default function TaskManager({ theme = "light" }) {
     description: "",
     status: "TODO",
     priority: "MEDIUM",
-    dueDate: "",
-    assignedTo: "",
+    dueDate: localDateKey(),
+    assignedTo: currentUserId,
     leadId: "",
     subtasks: [],
     tags: []
@@ -192,7 +210,7 @@ export default function TaskManager({ theme = "light" }) {
   const [activeDragCol, setActiveDragCol] = useState(null);
 
   // Roster (team) view - Admins/Managers land here first, then drill into a user's board
-  const [viewLevel, setViewLevel] = useState(canViewRoster ? "roster" : "board");
+  const [viewLevel, setViewLevel] = useState("board");
   const [selectedUserObj, setSelectedUserObj] = useState(null);
   const [userStatsMap, setUserStatsMap] = useState({});
   const [rosterLoading, setRosterLoading] = useState(false);
@@ -285,17 +303,19 @@ export default function TaskManager({ theme = "light" }) {
     return () => { cancelled = true; };
   }, [viewLevel, canViewRoster]);
 
-  const handleSelectRosterUser = (user) => {
+  const handleSelectRosterUser = (user, status = "") => {
     setTaskScope("all");
     setSelectedUserObj(user);
     setAssigneeFilter(user._id);
+    setStatusFilter(status);
     setViewLevel("board");
   };
 
-  const handleViewAllTasks = () => {
+  const handleViewAllTasks = (status = "") => {
     setTaskScope("all");
     setSelectedUserObj(null);
     setAssigneeFilter("");
+    setStatusFilter(status);
     setViewLevel("board");
   };
 
@@ -308,7 +328,7 @@ export default function TaskManager({ theme = "light" }) {
       description: "",
       status: "TODO",
       priority: "MEDIUM",
-      dueDate: "",
+      dueDate: localDateKey(),
       assignedTo: user._id,
       leadId: "",
       subtasks: [],
@@ -349,8 +369,8 @@ export default function TaskManager({ theme = "light" }) {
       description: "",
       status: "TODO",
       priority: "MEDIUM",
-      dueDate: "",
-      assignedTo: selectedUserObj?._id || "",
+      dueDate: localDateKey(),
+      assignedTo: selectedUserObj?._id || currentUserId,
       leadId: "",
       subtasks: [],
       tags: []
@@ -369,10 +389,19 @@ export default function TaskManager({ theme = "light" }) {
       description: task.description || "",
       status: task.status || "TODO",
       priority: task.priority || "MEDIUM",
-      dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split("T")[0] : "",
+      dueDate: task.dueDate ? new Date(task.dueDate).toISOString().split("T")[0] : localDateKey(),
       assignedTo: task.assignedTo?._id || task.assignedTo || "",
       leadId: task.leadId?._id || task.leadId || "",
-      subtasks: task.subtasks || [],
+      subtasks: (task.subtasks || []).map((subtask) => ({
+        ...subtask,
+        assignedTo: taskReferenceId(subtask.assignedTo) || taskReferenceId(task.assignedTo) || currentUserId,
+        dueDate: subtask.dueDate
+          ? new Date(subtask.dueDate).toISOString().split("T")[0]
+          : (task.dueDate ? new Date(task.dueDate).toISOString().split("T")[0] : localDateKey()),
+        status: subtaskStatus(subtask),
+        priority: subtask.priority || task.priority || "MEDIUM",
+        isCompleted: subtaskDone(subtask),
+      })),
       tags: task.tags || []
     });
     setNewSubtaskTitle("");
@@ -406,6 +435,22 @@ export default function TaskManager({ theme = "light" }) {
       setError("Title is required");
       return;
     }
+    if (!formData.assignedTo) {
+      setError("Choose an assignee for the task");
+      return;
+    }
+    if (!formData.dueDate) {
+      setError("Choose a due date for the task");
+      return;
+    }
+    const invalidSubtaskIndex = (formData.subtasks || []).findIndex((subtask) =>
+      !String(subtask.title || "").trim() || !taskReferenceId(subtask.assignedTo) || !subtask.dueDate,
+    );
+    if (invalidSubtaskIndex >= 0) {
+      setError(`Subtask ${invalidSubtaskIndex + 1} needs a title, assignee, and due date`);
+      setSubtaskDetailKey(`form:${invalidSubtaskIndex}`);
+      return;
+    }
 
     setSubmitting(true);
     setError("");
@@ -419,7 +464,12 @@ export default function TaskManager({ theme = "light" }) {
         dueDate: formData.dueDate || null,
         assignedTo: formData.assignedTo || null,
         leadId: isProductionExecutive ? null : formData.leadId || null,
-        subtasks: formData.subtasks,
+        subtasks: formData.subtasks.map((subtask) => ({
+          ...subtask,
+          assignedTo: taskReferenceId(subtask.assignedTo),
+          status: subtaskStatus(subtask),
+          isCompleted: subtaskDone(subtask),
+        })),
         tags: formData.tags
       };
 
@@ -448,12 +498,15 @@ export default function TaskManager({ theme = "light" }) {
   };
 
   const handleDeleteTask = async (taskId) => {
-    if (!window.confirm("Are you sure you want to delete this task?")) return;
+    const question = deleteNeedsApproval
+      ? "Send a request to Admin to delete this task? It stays until they approve."
+      : "Are you sure you want to delete this task?";
+    if (!window.confirm(question)) return;
 
     try {
-      await deleteTask(taskId);
-      setSuccess("Task deleted successfully");
-      fetchData();
+      const result = await deleteTask(taskId);
+      setSuccess(deleteOutcomeMessage(result, "Task deleted successfully"));
+      if (!isDeleteApprovalPending(result)) fetchData();
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.message || "Failed to delete task");
@@ -480,7 +533,7 @@ export default function TaskManager({ theme = "light" }) {
       console.error(err);
       setTasks(previousTasks);
       setDetailsTask(previousDetails);
-      setError("Failed to update status");
+      setError(err.response?.data?.message || "Failed to update status");
     }
   };
 
@@ -496,6 +549,7 @@ export default function TaskManager({ theme = "light" }) {
         title,
         status: "TODO",
         priority: "MEDIUM",
+        dueDate: localDateKey(),
         assignedTo: selectedUserObj?._id || (() => {
           try { const user = JSON.parse(localStorage.getItem("user") || "{}"); return user.id || user._id || null; }
           catch { return null; }
@@ -543,39 +597,45 @@ export default function TaskManager({ theme = "light" }) {
     }
   };
 
-  const handleInlineAddSubtask = (task) => {
+  const applyUpdatedTask = (updated) => {
+    if (!updated?._id) return;
+    setTasks((previous) => previous.map((task) => (task._id === updated._id ? updated : task)));
+    setDetailsTask((previous) => (previous?._id === updated._id ? updated : previous));
+  };
+
+  const canUpdateSubtaskStatus = (task, subtask) => canEditTask(task)
+    || (Boolean(currentUserId) && taskReferenceId(subtask?.assignedTo) === currentUserId);
+
+  const handleInlineAddSubtask = async (task) => {
     const title = inlineSubtaskInput.trim();
-    if (!title) return;
-    handleInlineUpdate(task._id, { subtasks: [...(task.subtasks || []), { title, isCompleted: false }] });
-    setInlineSubtaskInput("");
-  };
-
-  const handleInlineToggleSubtask = (task, index) => {
-    const updatedSubtasks = (task.subtasks || []).map((s, i) => (i === index ? { ...s, isCompleted: !s.isCompleted } : s));
-    persistSubtasks(task, updatedSubtasks);
-  };
-
-  // Subtask edit / delete on an already saved task (expanded row + details modal)
-  const persistSubtasks = async (task, nextSubtasks) => {
-    if (!task || !canEditTask(task)) return;
-    const previousTasks = tasks;
-    const previousDetails = detailsTask;
-
-    setTasks(prev => prev.map(t => (t._id === task._id ? { ...t, subtasks: nextSubtasks } : t)));
-    setDetailsTask(prev => (prev?._id === task._id ? { ...prev, subtasks: nextSubtasks } : prev));
-
+    if (!title || !canEditTask(task)) return;
     try {
-      const updated = await updateTask(task._id, { subtasks: nextSubtasks });
-      if (updated) {
-        setTasks(prev => prev.map(t => (t._id === task._id ? updated : t)));
-        setDetailsTask(prev => (prev?._id === task._id ? updated : prev));
-      }
+      const updated = await addTaskSubtask(task._id, {
+        title,
+        description: "",
+        assignedTo: taskReferenceId(task.assignedTo) || currentUserId,
+        dueDate: task.dueDate ? String(task.dueDate).slice(0, 10) : localDateKey(),
+        status: "TODO",
+        priority: task.priority || "MEDIUM",
+      });
+      applyUpdatedTask(updated);
+      setInlineSubtaskInput("");
       fetchData({ silent: true });
     } catch (err) {
-      console.error(err);
-      setTasks(previousTasks);
-      setDetailsTask(previousDetails);
-      setError(err.response?.data?.message || "Failed to update checklist");
+      setError(err.response?.data?.message || "Failed to add subtask");
+    }
+  };
+
+  const handleInlineToggleSubtask = async (task, index) => {
+    const subtask = task.subtasks?.[index];
+    if (!subtask?._id || !canUpdateSubtaskStatus(task, subtask)) return;
+    const status = subtaskDone(subtask) ? "TODO" : "COMPLETED";
+    try {
+      const updated = await updateTaskSubtask(task._id, subtask._id, { status });
+      applyUpdatedTask(updated);
+      fetchData({ silent: true });
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update subtask status");
     }
   };
 
@@ -593,18 +653,24 @@ export default function TaskManager({ theme = "light" }) {
   const handleSaveSubtaskEdit = async (task, index) => {
     const title = subtaskEditValue.trim();
     if (!title) return;
-    const nextSubtasks = (task.subtasks || []).map((s, i) => (i === index ? { ...s, title } : s));
     handleCancelSubtaskEdit();
-    await persistSubtasks(task, nextSubtasks);
+    await patchSubtask(task, index, { title });
   };
 
   const handleDeleteSubtask = async (task, index) => {
     if (!canEditTask(task)) return;
     if (!window.confirm("Delete this subtask?")) return;
-    const nextSubtasks = (task.subtasks || []).filter((_, i) => i !== index);
+    const subtask = task.subtasks?.[index];
+    if (!subtask?._id) return;
     handleCancelSubtaskEdit();
     setSubtaskDetailKey(null);
-    await persistSubtasks(task, nextSubtasks);
+    try {
+      const updated = await deleteTaskSubtask(task._id, subtask._id);
+      applyUpdatedTask(updated);
+      fetchData({ silent: true });
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to remove subtask");
+    }
   };
 
   // Detail panel plumbing. A saved task writes through to the API; a task still
@@ -625,14 +691,20 @@ export default function TaskManager({ theme = "light" }) {
   // A one-glance hint that a subtask carries more than its title.
   const subtaskMeta = (subtask) => {
     const parts = [];
-    if (subtask?.description) parts.push("note");
     if (subtask?.dueDate) parts.push(new Date(subtask.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" }));
     return parts.join(" · ");
   };
 
-  const patchSubtask = (task, index, patch) => {
-    if (!canEditTask(task)) return;
-    persistSubtasks(task, (task.subtasks || []).map((s, i) => (i === index ? { ...s, ...patch } : s)));
+  const patchSubtask = async (task, index, patch) => {
+    const subtask = task.subtasks?.[index];
+    if (!subtask?._id || (!canEditTask(task) && !canUpdateSubtaskStatus(task, subtask))) return;
+    try {
+      const updated = await updateTaskSubtask(task._id, subtask._id, patch);
+      applyUpdatedTask(updated);
+      fetchData({ silent: true });
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to update subtask");
+    }
   };
 
   const patchFormSubtask = (index, patch) =>
@@ -725,10 +797,22 @@ export default function TaskManager({ theme = "light" }) {
   // Subtasks checklist modifications in form
   const handleAddSubtask = () => {
     if (!newSubtaskTitle.trim()) return;
-    setFormData(prev => ({
-      ...prev,
-      subtasks: [...(prev.subtasks || []), { title: newSubtaskTitle.trim(), isCompleted: false, description: "", dueDate: null }]
-    }));
+    setFormData(prev => {
+      const nextIndex = (prev.subtasks || []).length;
+      setSubtaskDetailKey(`form:${nextIndex}`);
+      return {
+        ...prev,
+        subtasks: [...(prev.subtasks || []), {
+          title: newSubtaskTitle.trim(),
+          description: "",
+          assignedTo: prev.assignedTo || currentUserId,
+          dueDate: prev.dueDate || localDateKey(),
+          status: "TODO",
+          priority: prev.priority || "MEDIUM",
+          isCompleted: false,
+        }],
+      };
+    });
     setNewSubtaskTitle("");
   };
 
@@ -766,9 +850,11 @@ export default function TaskManager({ theme = "light" }) {
     setFormData(prev => {
       const updatedSubtasks = [...(prev.subtasks || [])];
       if (updatedSubtasks[index]) {
+        const completed = !subtaskDone(updatedSubtasks[index]);
         updatedSubtasks[index] = {
           ...updatedSubtasks[index],
-          isCompleted: !updatedSubtasks[index].isCompleted
+          status: completed ? "COMPLETED" : "TODO",
+          isCompleted: completed,
         };
       }
       return { ...prev, subtasks: updatedSubtasks };
@@ -864,11 +950,27 @@ export default function TaskManager({ theme = "light" }) {
 
   const getSubtasksProgress = (task) => {
     if (!task.subtasks || task.subtasks.length === 0) return null;
-    const completed = task.subtasks.filter(s => s.isCompleted).length;
+    const completed = task.subtasks.filter(subtaskDone).length;
     const total = task.subtasks.length;
     const percent = Math.round((completed / total) * 100);
     return { completed, total, percent };
   };
+
+  const groupedTaskRows = useMemo(() => {
+    const today = localDateKey();
+    const buckets = { Today: [], Upcoming: [], Completed: [] };
+    sortedTasks.forEach((task) => {
+      if (task.status === "COMPLETED") {
+        buckets.Completed.push(task);
+        return;
+      }
+      const dueKey = task.dueDate ? String(task.dueDate).slice(0, 10) : "";
+      buckets[dueKey && dueKey > today ? "Upcoming" : "Today"].push(task);
+    });
+    return ["Today", "Upcoming", "Completed"].flatMap((group) =>
+      buckets[group].map((task, index) => ({ task, group, isFirst: index === 0, count: buckets[group].length })),
+    );
+  }, [sortedTasks]);
 
   const TAG_COLORS = {
     "Call": "bg-blue-500/10 text-blue-400 border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20",
@@ -890,9 +992,18 @@ export default function TaskManager({ theme = "light" }) {
     });
   };
 
+  // Same rule as the server: overdue once the due date (a calendar date) is
+  // before today and the task is not completed. A task due today is not overdue.
   const isOverdue = (task) => {
-    if (task.status === "COMPLETED" || !task.dueDate) return false;
-    return new Date(task.dueDate) < new Date().setHours(0,0,0,0);
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const deadlinePassed = (value) => {
+      const due = value ? new Date(value) : null;
+      return due && !Number.isNaN(due.getTime()) && due.toISOString().slice(0, 10) < todayKey;
+    };
+    const parentOverdue = task.status !== "COMPLETED" && deadlinePassed(task.dueDate);
+    const subtaskOverdue = (task.subtasks || []).some((subtask) => !subtaskDone(subtask) && deadlinePassed(subtask.dueDate));
+    return parentOverdue || subtaskOverdue;
   };
 
   // Task shown in the side detail panel: the clicked one, falling back to the first row
@@ -1020,9 +1131,10 @@ export default function TaskManager({ theme = "light" }) {
       primaryButton: isDark
         ? "bg-sky-600 hover:bg-sky-500 text-white shadow-sky-950/30 shadow-md"
         : "bg-slate-900 hover:bg-slate-800 text-white shadow-slate-300 shadow-md",
-      text: isDark ? "text-slate-300" : "text-slate-600",
-      title: isDark ? "text-slate-100" : "text-slate-800",
-      label: isDark ? "text-slate-400" : "text-slate-500",
+      // R4: one step more contrast on body text and labels.
+      text: isDark ? "text-slate-200" : "text-slate-700",
+      title: isDark ? "text-slate-50" : "text-slate-900",
+      label: isDark ? "text-slate-300" : "text-slate-600",
       column: isDark
         ? "bg-slate-950/40 border-white/5 shadow-inner"
         : "bg-slate-100/60 border-slate-200/80 shadow-sm"
@@ -1034,21 +1146,26 @@ export default function TaskManager({ theme = "light" }) {
       <div className={`inline-flex flex-wrap items-center gap-1 rounded-xl border p-1 ${
         isDark ? "border-slate-800 bg-slate-900" : "border-slate-200 bg-white"
       }`}>
-        {[["all", "All Task"], ["assigned", "Assigned to Me"], ["mine", "My Task"]].map(([scope, label]) => {
-          const isActiveScope = taskScope === scope && viewLevel === "board" && !selectedUserObj;
+        {[
+          { scope: "all", label: "All tasks", status: "" },
+          { scope: "assigned", label: "Assigned to me", status: "" },
+          { scope: "mine", label: "Created by me", status: "" },
+          { scope: "all", label: "Completed", status: "COMPLETED" },
+        ].map(({ scope, label, status }) => {
+          const isActiveScope = taskScope === scope && statusFilter === status && viewLevel === "board" && !selectedUserObj;
           return (
             <button
-              key={scope}
+              key={label}
               type="button"
               aria-pressed={isActiveScope}
-              className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors ${
+              className={`rounded-lg px-3.5 py-2 text-[15px] font-semibold transition-colors ${
                 isActiveScope
                   ? (isDark ? "bg-sky-500/15 text-sky-300" : "bg-sky-100 text-sky-700")
                   : `${styles.label} hover:bg-slate-500/10`
               }`}
               onClick={() => {
                 setTaskScope(scope); setViewLevel("board"); setSelectedUserObj(null);
-                setAssigneeFilter(""); setStatusFilter(""); setPriorityFilter("");
+                setAssigneeFilter(""); setStatusFilter(status); setPriorityFilter("");
                 setLeadFilter(""); setTagFilter(""); setSearchQuery("");
               }}
             >
@@ -1061,19 +1178,19 @@ export default function TaskManager({ theme = "light" }) {
             type="button"
             aria-pressed={viewLevel === "roster"}
             onClick={handleBackToRoster}
-            className={`rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors ${
+            className={`rounded-lg px-3.5 py-2 text-[15px] font-semibold transition-colors ${
               viewLevel === "roster"
                 ? (isDark ? "bg-sky-500/15 text-sky-300" : "bg-sky-100 text-sky-700")
                 : `${styles.label} hover:bg-slate-500/10`
             }`}
           >
-            Team Tasks
+            Team
           </button>
         )}
       </div>
       {selectedUserObj && (
         <span
-          className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold ${
+          className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-[15px] font-semibold ${
             isDark ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-sky-500 bg-sky-50 text-sky-700"
           }`}
         >
@@ -1097,7 +1214,7 @@ export default function TaskManager({ theme = "light" }) {
             <div className="tasks-roster-heading flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="min-w-0">
                 <h1 className={`text-2xl font-black tracking-tight sm:text-3xl ${styles.title}`}>Team Tasks</h1>
-                <p className={`mt-1 text-sm ${styles.label}`}>Monitor workload and progress</p>
+                <p className={`mt-1 text-[15px] ${styles.label}`}>Monitor workload and progress</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative min-w-[180px] flex-1 sm:max-w-[220px]">
@@ -1107,14 +1224,14 @@ export default function TaskManager({ theme = "light" }) {
                     value={rosterSearch}
                     onChange={(e) => setRosterSearch(e.target.value)}
                     placeholder="Search..."
-                    className={`h-10 w-full rounded-xl border pl-9 pr-3 text-sm ${styles.input}`}
+                    className={`h-10 w-full rounded-xl border pl-9 pr-3 text-[15px] ${styles.input}`}
                   />
                 </div>
                 <button
                   type="button"
                   onClick={() => setShowRosterFilters(v => !v)}
                   aria-pressed={showRosterFilters}
-                  className={`flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3.5 text-sm font-semibold ${
+                  className={`flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3.5 text-[15px] font-semibold ${
                     showRosterFilters
                       ? (isDark ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-sky-500 bg-sky-50 text-sky-700")
                       : styles.button
@@ -1124,15 +1241,15 @@ export default function TaskManager({ theme = "light" }) {
                 </button>
                 <button
                   type="button"
-                  onClick={handleViewAllTasks}
-                  className={`flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3.5 text-sm font-semibold ${styles.button}`}
+                  onClick={() => handleViewAllTasks()}
+                  className={`flex h-10 shrink-0 items-center gap-2 rounded-xl border px-3.5 text-[15px] font-semibold ${styles.button}`}
                 >
                   <ListTodo size={15} /> View all tasks
                 </button>
                 <button
                   type="button"
                   onClick={handleOpenCreateModal}
-                  className={`flex h-10 shrink-0 items-center gap-2 rounded-xl px-4 text-sm font-bold ${styles.primaryButton}`}
+                  className={`flex h-10 shrink-0 items-center gap-2 rounded-xl px-4 text-[15px] font-bold ${styles.primaryButton}`}
                 >
                     <Plus size={16} /> Create
                 </button>
@@ -1151,19 +1268,33 @@ export default function TaskManager({ theme = "light" }) {
                     { key: "done", label: "Completed", value: rosterSummary.done, icon: CheckCircle2, tone: isDark ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-50 text-emerald-600", valueTone: isDark ? "text-emerald-400" : "text-emerald-600" },
                     { key: "overdue", label: "Overdue", value: rosterSummary.overdue, icon: AlertCircle, tone: isDark ? "bg-rose-500/10 text-rose-400" : "bg-rose-50 text-rose-600", valueTone: isDark ? "text-rose-400" : "text-rose-600" },
                     { key: "rate", label: "Completion Rate", value: `${rosterSummary.completionRate}%`, icon: BarChart3, tone: isDark ? "bg-violet-500/10 text-violet-400" : "bg-violet-50 text-violet-600", valueTone: styles.title }
-                  ].map(card => (
-                    <div key={card.key} className={`rounded-2xl border p-3.5 ${styles.card}`}>
+                  ].map(card => {
+                    const body = (
                       <div className="flex items-center gap-3">
                         <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${card.tone}`}>
                           <card.icon size={18} />
                         </div>
                         <div className="min-w-0">
-                          <p className={`truncate text-[11px] font-semibold ${styles.label}`}>{card.label}</p>
+                          <p className={`truncate text-[12.5px] font-semibold ${styles.label}`}>{card.label}</p>
                           <p className={`text-xl font-black ${card.valueTone}`}>{card.value}</p>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                    // Overdue opens every overdue task across the team.
+                    return card.key === "overdue" ? (
+                      <button
+                        key={card.key}
+                        type="button"
+                        onClick={() => handleViewAllTasks("OVERDUE")}
+                        title="Show all overdue tasks"
+                        className={`rounded-2xl border p-3.5 text-left transition hover:-translate-y-0.5 hover:border-rose-300 hover:shadow-md ${styles.card}`}
+                      >
+                        {body}
+                      </button>
+                    ) : (
+                      <div key={card.key} className={`rounded-2xl border p-3.5 ${styles.card}`}>{body}</div>
+                    );
+                  })}
                 </div>
 
                 {showRosterFilters && (
@@ -1175,14 +1306,14 @@ export default function TaskManager({ theme = "light" }) {
                         value={rosterSearch}
                         onChange={(e) => setRosterSearch(e.target.value)}
                         placeholder="Search team member..."
-                        className={`h-10 w-full rounded-xl border pl-9 pr-3 text-sm ${styles.input}`}
+                        className={`h-10 w-full rounded-xl border pl-9 pr-3 text-[15px] ${styles.input}`}
                       />
                     </div>
                     <select
                       value={rosterRoleFilter}
                       onChange={(e) => setRosterRoleFilter(e.target.value)}
                       aria-label="Filter by role"
-                      className={`h-10 rounded-xl border px-3 text-sm font-semibold sm:w-40 ${styles.input}`}
+                      className={`h-10 rounded-xl border px-3 text-[15px] font-semibold sm:w-40 ${styles.input}`}
                     >
                       <option value="">All Roles</option>
                       {rosterRoles.map(role => <option key={role} value={role}>{role}</option>)}
@@ -1191,18 +1322,18 @@ export default function TaskManager({ theme = "light" }) {
                       value={rosterWorkloadFilter}
                       onChange={(e) => setRosterWorkloadFilter(e.target.value)}
                       aria-label="Filter by workload"
-                      className={`h-10 rounded-xl border px-3 text-sm font-semibold sm:w-40 ${styles.input}`}
+                      className={`h-10 rounded-xl border px-3 text-[15px] font-semibold sm:w-40 ${styles.input}`}
                     >
                       <option value="">All Workload</option>
                       {WORKLOAD_STATUSES.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
                     </select>
                     <div className="flex items-center gap-2 sm:ml-auto">
-                      <span className={`shrink-0 text-xs font-semibold ${styles.label}`}>Sort by:</span>
+                      <span className={`shrink-0 text-[13px] font-semibold ${styles.label}`}>Sort by:</span>
                       <select
                         value={rosterSort}
                         onChange={(e) => setRosterSort(e.target.value)}
                         aria-label="Sort team members"
-                        className={`h-10 min-w-0 flex-1 rounded-xl border px-3 text-sm font-semibold sm:w-40 sm:flex-none ${styles.input}`}
+                        className={`h-10 min-w-0 flex-1 rounded-xl border px-3 text-[15px] font-semibold sm:w-40 sm:flex-none ${styles.input}`}
                       >
                         {ROSTER_SORTS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
                       </select>
@@ -1212,7 +1343,7 @@ export default function TaskManager({ theme = "light" }) {
 
                 {rosterLoading ? (
                   <div className={`flex items-center justify-center rounded-2xl border p-10 ${styles.card}`}>
-                    <p className={`text-sm ${styles.label}`}>Loading team...</p>
+                    <p className={`text-[15px] ${styles.label}`}>Loading team...</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
@@ -1233,19 +1364,20 @@ export default function TaskManager({ theme = "light" }) {
                         >
                           <div className="flex items-start gap-3">
                             {u.profileImageUrl ? (
-                              <img src={u.profileImageUrl} alt={u.name} className="h-11 w-11 shrink-0 rounded-full object-cover" />
+                              <img src={u.profileImageUrl} alt={u.name} className="tasks-member-avatar h-14 w-14 shrink-0 rounded-full object-cover" />
                             ) : (
-                              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-black uppercase ${avatarColor}`}>
+                              <div className={`tasks-member-avatar flex h-14 w-14 shrink-0 items-center justify-center rounded-full text-base font-black uppercase ${avatarColor}`}>
                                 {(u.name || "?").slice(0, 2)}
                               </div>
                             )}
 
                             <div className="min-w-0 flex-1">
                               <div className="flex items-start justify-between gap-2">
-                                <p className={`truncate text-sm font-black ${styles.title}`}>{u.name}</p>
+                                {/* R1: the name is how people find each other here, so it leads the card. */}
+                                <p className={`tasks-member-name min-w-0 break-words text-lg font-black leading-snug sm:text-xl ${styles.title}`} title={u.name}>{u.name}</p>
                                 <div className="flex shrink-0 items-center gap-1">
                                   {needsAttention && (
-                                    <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold ${
+                                    <span className={`rounded-md px-2 py-0.5 text-[12px] font-bold ${
                                       isDark ? "bg-rose-500/15 text-rose-300" : "bg-rose-50 text-rose-600"
                                     }`}>
                                       Needs attention
@@ -1274,14 +1406,14 @@ export default function TaskManager({ theme = "light" }) {
                                           <button
                                             type="button"
                                             onClick={(e) => { e.stopPropagation(); setOpenMemberMenuId(null); handleSelectRosterUser(u); }}
-                                            className={`block w-full px-3 py-2 text-left text-xs font-semibold ${styles.title} hover:bg-slate-500/10`}
+                                            className={`block w-full px-3 py-2 text-left text-[13px] font-semibold ${styles.title} hover:bg-slate-500/10`}
                                           >
                                             View tasks
                                           </button>
                                           <button
                                             type="button"
                                             onClick={(e) => { e.stopPropagation(); handleAssignTaskToMember(u); }}
-                                            className={`block w-full px-3 py-2 text-left text-xs font-semibold ${styles.title} hover:bg-slate-500/10`}
+                                            className={`block w-full px-3 py-2 text-left text-[13px] font-semibold ${styles.title} hover:bg-slate-500/10`}
                                           >
                                             Assign task
                                           </button>
@@ -1289,7 +1421,7 @@ export default function TaskManager({ theme = "light" }) {
                                             <button
                                               type="button"
                                               onClick={(e) => { e.stopPropagation(); setOpenMemberMenuId(null); navigate(`/admin/users/${u._id}`); }}
-                                              className={`block w-full px-3 py-2 text-left text-xs font-semibold ${styles.title} hover:bg-slate-500/10`}
+                                              className={`block w-full px-3 py-2 text-left text-[13px] font-semibold ${styles.title} hover:bg-slate-500/10`}
                                             >
                                               View profile
                                             </button>
@@ -1302,12 +1434,12 @@ export default function TaskManager({ theme = "light" }) {
                               </div>
 
                               <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                                <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                <span className={`rounded-md px-2 py-0.5 text-[12px] font-bold uppercase tracking-wider ${
                                   isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
                                 }`}>
                                   {u.role}
                                 </span>
-                                <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${styles.label}`}>
+                                <span className={`flex items-center gap-1.5 text-[12.5px] font-semibold ${styles.label}`}>
                                   <span className={`h-2 w-2 rounded-full ${status.dot}`} />
                                   {status.label}
                                 </span>
@@ -1319,22 +1451,22 @@ export default function TaskManager({ theme = "light" }) {
                             <div className={`h-1.5 min-w-0 flex-1 overflow-hidden rounded-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`}>
                               <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${progress}%` }} />
                             </div>
-                            <span className={`shrink-0 text-[11px] font-bold ${styles.label}`}>{progress}%</span>
+                            <span className={`shrink-0 text-[12.5px] font-bold ${styles.label}`}>{progress}%</span>
                           </div>
 
                           <div className="mt-3">
                             <div className="grid grid-cols-3 gap-1">
                               <div>
                                 <p className={`text-base font-black ${styles.title}`}>{total}</p>
-                                <p className={`text-[10px] font-semibold ${styles.label}`}>Total</p>
+                                <p className={`text-[12px] font-semibold ${styles.label}`}>Total</p>
                               </div>
                               <div>
                                 <p className={`text-base font-black ${isDark ? "text-emerald-400" : "text-emerald-600"}`}>{done}</p>
-                                <p className={`text-[10px] font-semibold ${styles.label}`}>Done</p>
+                                <p className={`text-[12px] font-semibold ${styles.label}`}>Done</p>
                               </div>
                               <div>
                                 <p className={`text-base font-black ${overdue > 0 ? (isDark ? "text-rose-400" : "text-rose-600") : styles.title}`}>{overdue}</p>
-                                <p className={`text-[10px] font-semibold ${styles.label}`}>Overdue</p>
+                                <p className={`text-[12px] font-semibold ${styles.label}`}>Overdue</p>
                               </div>
                             </div>
                           </div>
@@ -1343,7 +1475,7 @@ export default function TaskManager({ theme = "light" }) {
                     })}
                     {visibleRosterRows.length === 0 && (
                       <div className={`col-span-full flex items-center justify-center rounded-2xl border p-10 ${styles.card}`}>
-                        <p className={`text-sm ${styles.label}`}>
+                        <p className={`text-[15px] ${styles.label}`}>
                           {rosterRows.length === 0 ? "No team members found" : "No team members match these filters"}
                         </p>
                       </div>
@@ -1360,20 +1492,20 @@ export default function TaskManager({ theme = "light" }) {
                       <Users size={18} />
                     </div>
                     <div className="min-w-0">
-                      <button type="button" aria-expanded={workloadExpanded} onClick={() => setWorkloadExpanded(value => !value)} className={`flex items-center gap-3 text-sm font-black ${styles.title}`}>Team workload <ChevronRight size={16} className={workloadExpanded ? "-rotate-90" : "rotate-90"} /></button>
-                      <p className={`text-xs ${styles.label}`}>{rosterSummary.members} members</p>
+                      <button type="button" aria-expanded={workloadExpanded} onClick={() => setWorkloadExpanded(value => !value)} className={`flex items-center gap-3 text-[15px] font-black ${styles.title}`}>Team workload <ChevronRight size={16} className={workloadExpanded ? "-rotate-90" : "rotate-90"} /></button>
+                      <p className={`text-[13px] ${styles.label}`}>{rosterSummary.members} members</p>
                     </div>
                   </div>
                   <div hidden={!workloadExpanded} className="mt-4 space-y-2.5">
                     {rosterSummary.workload.map(w => (
                       <div key={w.id} className="flex items-center gap-2">
                         <span className={`h-2 w-2 shrink-0 rounded-full ${w.dot}`} />
-                        <span className={`w-16 shrink-0 text-xs font-semibold ${styles.title}`}>{w.label}</span>
-                        <span className={`w-4 shrink-0 text-xs font-bold ${styles.label}`}>{w.count}</span>
+                        <span className={`w-16 shrink-0 text-[13px] font-semibold ${styles.title}`}>{w.label}</span>
+                        <span className={`w-4 shrink-0 text-[13px] font-bold ${styles.label}`}>{w.count}</span>
                         <div className={`h-1.5 min-w-0 flex-1 overflow-hidden rounded-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`}>
                           <div className={`h-full rounded-full ${w.bar}`} style={{ width: `${w.pct}%` }} />
                         </div>
-                        <span className={`w-9 shrink-0 text-right text-[11px] font-semibold ${styles.label}`}>{w.pct}%</span>
+                        <span className={`w-9 shrink-0 text-right text-[12.5px] font-semibold ${styles.label}`}>{w.pct}%</span>
                       </div>
                     ))}
                   </div>
@@ -1384,8 +1516,20 @@ export default function TaskManager({ theme = "light" }) {
                     <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${isDark ? "bg-rose-500/10 text-rose-400" : "bg-rose-50 text-rose-600"}`}>
                       <AlertCircle size={18} />
                     </div>
-                    <p className={`min-w-0 flex-1 text-sm font-black ${styles.title}`}>Overdue tasks</p>
-                    <span className={`text-sm font-black ${styles.label}`}>{rosterSummary.overdue}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleViewAllTasks("OVERDUE")}
+                      className={`min-w-0 flex-1 text-left text-[15px] font-black hover:underline ${styles.title}`}
+                    >
+                      Overdue tasks
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleViewAllTasks("OVERDUE")}
+                      className={`text-[15px] font-black hover:underline ${styles.label}`}
+                    >
+                      View all {rosterSummary.overdue}
+                    </button>
                   </div>
                   <div className="mt-3 space-y-1">
                     {rosterSummary.overdueRows.map(({ user: u, overdue }) => {
@@ -1394,21 +1538,22 @@ export default function TaskManager({ theme = "light" }) {
                         <button
                           key={u._id}
                           type="button"
-                          onClick={() => handleSelectRosterUser(u)}
+                          onClick={() => handleSelectRosterUser(u, "OVERDUE")}
+                          title={`Show ${u.name}'s overdue tasks`}
                           className="flex w-full items-center gap-2.5 rounded-xl p-2 text-left transition-colors hover:bg-slate-500/10"
                         >
                           {u.profileImageUrl ? (
                             <img src={u.profileImageUrl} alt={u.name} className="h-8 w-8 shrink-0 rounded-full object-cover" />
                           ) : (
-                            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-black uppercase ${avatarColor}`}>
+                            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-black uppercase ${avatarColor}`}>
                               {(u.name || "?").slice(0, 2)}
                             </div>
                           )}
                           <div className="min-w-0 flex-1">
-                            <p className={`truncate text-xs font-bold ${styles.title}`}>{u.name}</p>
-                            <p className={`truncate text-[10px] font-semibold uppercase tracking-wider ${styles.label}`}>{u.role}</p>
+                            <p className={`truncate text-[13px] font-bold ${styles.title}`}>{u.name}</p>
+                            <p className={`truncate text-[12px] font-semibold uppercase tracking-wider ${styles.label}`}>{u.role}</p>
                           </div>
-                          <span className={`shrink-0 text-[11px] font-bold ${isDark ? "text-rose-400" : "text-rose-600"}`}>
+                          <span className={`shrink-0 text-[12.5px] font-bold ${isDark ? "text-rose-400" : "text-rose-600"}`}>
                             {overdue} overdue
                           </span>
                           <ChevronRight size={14} className={`shrink-0 ${styles.label}`} />
@@ -1416,7 +1561,7 @@ export default function TaskManager({ theme = "light" }) {
                       );
                     })}
                     {rosterSummary.overdueRows.length === 0 && (
-                      <p className={`px-2 py-3 text-xs ${styles.label}`}>Nothing overdue. The team is on track.</p>
+                      <p className={`px-2 py-3 text-[13px] ${styles.label}`}>Nothing overdue. The team is on track.</p>
                     )}
                   </div>
                 </div>
@@ -1427,8 +1572,8 @@ export default function TaskManager({ theme = "light" }) {
                   <div className="flex items-start gap-2.5">
                     <Lightbulb size={16} className={`mt-0.5 shrink-0 ${isDark ? "text-amber-300" : "text-amber-500"}`} />
                     <div className="min-w-0">
-                      <p className={`text-sm font-black ${isDark ? "text-sky-300" : "text-sky-700"}`}>Quick insight</p>
-                      <p className={`mt-1 text-xs leading-relaxed ${isDark ? "text-sky-200/80" : "text-sky-700/80"}`}>
+                      <p className={`text-[15px] font-black ${isDark ? "text-sky-300" : "text-sky-700"}`}>Quick insight</p>
+                      <p className={`mt-1 text-[13px] leading-relaxed ${isDark ? "text-sky-200/80" : "text-sky-700/80"}`}>
                         {rosterSummary.membersWithOverdue > 0
                           ? `${rosterSummary.overduePct}% of your team members have overdue tasks. Follow up to keep work on track.`
                           : "No overdue work across the team. Keep the momentum going."}
@@ -1447,7 +1592,7 @@ export default function TaskManager({ theme = "light" }) {
             {canViewRoster && (
               <button
                 onClick={handleBackToRoster}
-                className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold ${styles.button}`}
+                className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-[13px] font-bold ${styles.button}`}
               >
                 <ArrowLeft size={14} />
                 <span className="hidden sm:inline">Back to </span>Team Tasks
@@ -1468,14 +1613,14 @@ export default function TaskManager({ theme = "light" }) {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className={`truncate text-xl font-black ${styles.title}`}>{selectedUserObj.name}</h2>
-                    <span className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                    <span className={`flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px] font-bold ${
                       isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
                     }`}>
                       <span className={`h-2 w-2 rounded-full ${memberStatus.dot}`} />
                       {memberStatus.label}
                     </span>
                   </div>
-                  <span className={`mt-1 inline-block rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  <span className={`mt-1 inline-block rounded-md px-2 py-0.5 text-[12px] font-bold uppercase tracking-wider ${
                     isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
                   }`}>
                     {selectedUserObj.role}
@@ -1495,18 +1640,31 @@ export default function TaskManager({ theme = "light" }) {
               { label: "Completed", value: stats.COMPLETED || 0, tone: (stats.COMPLETED || 0) > 0 ? (isDark ? "text-emerald-400" : "text-emerald-600") : styles.title },
               { label: "Pending", value: stats.pending || 0, tone: (stats.pending || 0) > 0 ? (isDark ? "text-rose-400" : "text-rose-600") : styles.title },
               { label: "Overdue", value: stats.overdue || 0, tone: (stats.overdue || 0) > 0 ? (isDark ? "text-rose-400" : "text-rose-600") : styles.title }
-            ].map((metric, i) => (
-              <div key={metric.label} className={`px-2 text-center ${i > 0 ? (isDark ? "border-l border-white/5" : "border-l border-slate-200") : ""}`}>
-                <p className={`text-xl font-black ${metric.tone}`}>{metric.value}</p>
-                <p className={`truncate text-[11px] font-semibold ${styles.label}`}>{metric.label}</p>
-              </div>
-            ))}
+            ].map((metric, i) => {
+              const filterFor = { Total: "", Completed: "COMPLETED", Overdue: "OVERDUE" }[metric.label];
+              const clickable = filterFor !== undefined;
+              const isActive = clickable && statusFilter === filterFor && (filterFor !== "" || !statusFilter);
+              return (
+                <button
+                  key={metric.label}
+                  type="button"
+                  disabled={!clickable}
+                  onClick={() => clickable && setStatusFilter(filterFor)}
+                  aria-pressed={clickable ? isActive : undefined}
+                  title={clickable ? `Show ${metric.label.toLowerCase()} tasks` : undefined}
+                  className={`rounded-lg px-2 py-1 text-center transition-colors ${clickable ? "hover:bg-slate-500/10" : "cursor-default"} ${isActive && filterFor ? (isDark ? "bg-rose-500/10" : "bg-rose-50") : ""} ${i > 0 ? (isDark ? "border-l border-white/5" : "border-l border-slate-200") : ""}`}
+                >
+                  <p className={`text-xl font-black ${metric.tone}`}>{metric.value}</p>
+                  <p className={`truncate text-[12.5px] font-semibold ${styles.label}`}>{metric.label}</p>
+                </button>
+              );
+            })}
           </div>
 
           <div className="min-w-0 xl:w-64">
             <div className="flex items-center justify-between gap-2">
-              <span className={`text-xs font-semibold ${styles.title}`}>Completion</span>
-              <span className={`text-xs font-bold ${styles.label}`}>{boardCompletion}%</span>
+              <span className={`text-[13px] font-semibold ${styles.title}`}>Completion</span>
+              <span className={`text-[13px] font-bold ${styles.label}`}>{boardCompletion}%</span>
             </div>
             <div className={`mt-2 h-2 overflow-hidden rounded-full ${isDark ? "bg-slate-800" : "bg-slate-100"}`}>
               <div className="h-full rounded-full bg-sky-500 transition-all" style={{ width: `${boardCompletion}%` }} />
@@ -1524,7 +1682,7 @@ export default function TaskManager({ theme = "light" }) {
               placeholder="Search tasks by title or description..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={`h-10 w-full rounded-xl border pl-9 pr-3 text-sm ${styles.input}`}
+              className={`h-10 w-full rounded-xl border pl-9 pr-3 text-[15px] ${styles.input}`}
             />
           </div>
 
@@ -1533,17 +1691,18 @@ export default function TaskManager({ theme = "light" }) {
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
               aria-label="Filter by status"
-              className={`h-10 rounded-xl border px-3 text-sm font-semibold ${styles.input}`}
+              className={`h-10 rounded-xl border px-3 text-[15px] font-semibold ${styles.input}`}
             >
               <option value="">Status</option>
               {STATUS_COLUMNS.map(col => <option key={col.id} value={col.id}>{col.label}</option>)}
+              <option value="OVERDUE">Overdue</option>
             </select>
 
             <select
               value={priorityFilter}
               onChange={(e) => setPriorityFilter(e.target.value)}
               aria-label="Filter by priority"
-              className={`h-10 rounded-xl border px-3 text-sm font-semibold ${styles.input}`}
+              className={`h-10 rounded-xl border px-3 text-[15px] font-semibold ${styles.input}`}
             >
               <option value="">Priority</option>
               {PRIORITIES.map(pr => <option key={pr.value} value={pr.value}>{pr.label}</option>)}
@@ -1553,7 +1712,7 @@ export default function TaskManager({ theme = "light" }) {
               value={assigneeFilter}
               onChange={(e) => setAssigneeFilter(e.target.value)}
               aria-label="Filter by assignee"
-              className={`h-10 max-w-[160px] rounded-xl border px-3 text-sm font-semibold ${styles.input}`}
+              className={`h-10 max-w-[160px] rounded-xl border px-3 text-[15px] font-semibold ${styles.input}`}
             >
               <option value="">Assignee</option>
               {teamUsers.map(u => <option key={u._id} value={u._id}>{u.name}</option>)}
@@ -1563,7 +1722,7 @@ export default function TaskManager({ theme = "light" }) {
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value)}
               aria-label="Sort tasks"
-              className={`h-10 rounded-xl border px-3 text-sm font-semibold ${styles.input}`}
+              className={`h-10 rounded-xl border px-3 text-[15px] font-semibold ${styles.input}`}
             >
               <option value="createdNewest">Newest</option>
               <option value="dueDate">Due Date</option>
@@ -1576,7 +1735,7 @@ export default function TaskManager({ theme = "light" }) {
                 value={groupBy}
                 onChange={(e) => setGroupBy(e.target.value)}
                 aria-label="Group board by"
-                className={`h-10 rounded-xl border px-3 text-sm font-semibold ${styles.input}`}
+                className={`h-10 rounded-xl border px-3 text-[15px] font-semibold ${styles.input}`}
               >
                 <option value="status">Group: Status</option>
                 <option value="priority">Group: Priority</option>
@@ -1604,7 +1763,7 @@ export default function TaskManager({ theme = "light" }) {
                 type="button"
                 onClick={() => setViewMode("kanban")}
                 aria-pressed={viewMode === "kanban"}
-                className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors ${
+                className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-[15px] font-semibold transition-colors ${
                   viewMode === "kanban"
                     ? (isDark ? "bg-sky-500/15 text-sky-300" : "bg-sky-50 text-sky-700")
                     : `${styles.label} hover:bg-slate-500/10`
@@ -1616,7 +1775,7 @@ export default function TaskManager({ theme = "light" }) {
                 type="button"
                 onClick={() => setViewMode("list")}
                 aria-pressed={viewMode === "list"}
-                className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-sm font-semibold transition-colors ${
+                className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-[15px] font-semibold transition-colors ${
                   viewMode === "list"
                     ? (isDark ? "bg-sky-500/15 text-sky-300" : "bg-sky-50 text-sky-700")
                     : `${styles.label} hover:bg-slate-500/10`
@@ -1629,7 +1788,7 @@ export default function TaskManager({ theme = "light" }) {
             <button
               type="button"
               onClick={handleOpenCreateModal}
-              className={`flex h-10 items-center justify-center gap-1.5 rounded-xl px-4 text-sm font-bold ${styles.primaryButton}`}
+              className={`flex h-10 items-center justify-center gap-1.5 rounded-xl px-4 text-[15px] font-bold ${styles.primaryButton}`}
             >
               <Plus size={16} /> New Task
             </button>
@@ -1643,7 +1802,7 @@ export default function TaskManager({ theme = "light" }) {
                 value={leadFilter}
                 onChange={(e) => setLeadFilter(e.target.value)}
                 aria-label="Filter by lead"
-                className={`h-9 max-w-[180px] rounded-xl border px-3 text-xs font-semibold ${styles.input}`}
+                className={`h-9 max-w-[180px] rounded-xl border px-3 text-[13px] font-semibold ${styles.input}`}
               >
                 <option value="">All Leads</option>
                 {leads.map(l => <option key={l._id} value={l._id}>{l.name}</option>)}
@@ -1653,7 +1812,7 @@ export default function TaskManager({ theme = "light" }) {
               value={tagFilter}
               onChange={(e) => setTagFilter(e.target.value)}
               aria-label="Filter by tag"
-              className={`h-9 rounded-xl border px-3 text-xs font-semibold ${styles.input}`}
+              className={`h-9 rounded-xl border px-3 text-[13px] font-semibold ${styles.input}`}
             >
               <option value="">All Tags</option>
               {["Call", "Meeting", "Document", "Site Visit", "Urgent", "Follow-up"].map(tagOpt => (
@@ -1671,7 +1830,7 @@ export default function TaskManager({ theme = "light" }) {
                   setSearchQuery("");
                   setTagFilter("");
                 }}
-                className={`h-9 rounded-xl border px-3 text-xs font-semibold ${
+                className={`h-9 rounded-xl border px-3 text-[13px] font-semibold ${
                   isDark ? "border-slate-800 text-rose-400 hover:bg-rose-950/20" : "border-slate-200 text-rose-600 hover:bg-rose-50"
                 }`}
               >
@@ -1685,20 +1844,20 @@ export default function TaskManager({ theme = "light" }) {
         {loading ? (
           <div className="flex-1 flex flex-col items-center justify-center space-y-2 py-12">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-sky-500 border-t-transparent" />
-            <p className={`text-sm font-semibold ${styles.label}`}>Fetching tasks...</p>
+            <p className={`text-[15px] font-semibold ${styles.label}`}>Fetching tasks...</p>
           </div>
         ) : tasks.length === 0 ? (
           <div className={`flex-1 rounded-2xl border p-12 text-center flex flex-col items-center justify-center space-y-3 ${styles.card}`}>
             <ListTodo size={40} className={isDark ? "text-slate-700" : "text-slate-300"} />
             <div>
               <p className={`text-base font-bold ${styles.title}`}>No tasks found</p>
-              <p className={`text-xs mt-1 max-w-sm mx-auto ${styles.label}`}>
+              <p className={`text-[13px] mt-1 max-w-sm mx-auto ${styles.label}`}>
                 Try relaxing your search or filter queries, or create a brand new task.
               </p>
             </div>
             <button
               onClick={handleOpenCreateModal}
-              className={`h-9 px-4 rounded-xl flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider ${styles.primaryButton}`}
+              className={`h-9 px-4 rounded-xl flex items-center gap-1.5 text-[13px] font-bold uppercase tracking-wider ${styles.primaryButton}`}
             >
               <Plus size={14} />
               Create First Task
@@ -1727,9 +1886,9 @@ export default function TaskManager({ theme = "light" }) {
                   <div className="p-3 flex items-center justify-between border-b border-slate-800/10 dark:border-white/5">
                     <div className="flex items-center gap-2">
                       <span className={`inline-block w-2.5 h-2.5 rounded-full border ${col.color ? col.color.split(" ")[0] : "text-sky-450"} ${col.color ? col.color.split(" ")[1] : "border-sky-450"}`} />
-                      <span className={`text-sm font-bold tracking-tight ${styles.title}`}>{col.label}</span>
+                      <span className={`text-[15px] font-bold tracking-tight ${styles.title}`}>{col.label}</span>
                     </div>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isDark ? "bg-slate-900 text-slate-400" : "bg-slate-200 text-slate-600"}`}>
+                    <span className={`text-[13px] font-bold px-2 py-0.5 rounded-full ${isDark ? "bg-slate-900 text-slate-400" : "bg-slate-200 text-slate-600"}`}>
                       {columnTasks.length}
                     </span>
                   </div>
@@ -1761,7 +1920,7 @@ export default function TaskManager({ theme = "light" }) {
                           >
                             {/* Priority & Quick Actions */}
                             <div className="flex items-center justify-between mb-2">
-                              <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${priority.color}`}>
+                              <span className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${priority.color}`}>
                                 {priority.label}
                               </span>
                               
@@ -1786,7 +1945,7 @@ export default function TaskManager({ theme = "light" }) {
                             </div>
 
                             {/* Task Content */}
-                            <h4 className={`text-xs font-semibold leading-snug break-words ${styles.title}`}>
+                            <h4 className={`text-[13px] font-semibold leading-snug break-words ${styles.title}`}>
                               {task.title}
                             </h4>
 
@@ -1798,7 +1957,7 @@ export default function TaskManager({ theme = "light" }) {
                                   return (
                                     <span 
                                       key={t} 
-                                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border ${colorClass}`}
+                                      className={`text-[11px] font-bold px-1.5 py-0.5 rounded-md border ${colorClass}`}
                                     >
                                       {t}
                                     </span>
@@ -1808,7 +1967,7 @@ export default function TaskManager({ theme = "light" }) {
                             )}
 
                             {task.description && (
-                              <p className={`text-[11px] mt-1 line-clamp-2 break-words ${styles.label}`}>
+                              <p className={`text-[12.5px] mt-1 line-clamp-2 break-words ${styles.label}`}>
                                 {task.description}
                               </p>
                             )}
@@ -1816,7 +1975,7 @@ export default function TaskManager({ theme = "light" }) {
                             {/* Subtask progress bar */}
                             {progress && (
                               <div className="mt-2.5 space-y-1">
-                                <div className="flex items-center justify-between text-[9px] text-slate-400 font-medium">
+                                <div className="flex items-center justify-between text-[11px] text-slate-400 font-medium">
                                   <span className="flex items-center gap-1">
                                     <CheckSquare size={9} />
                                     {progress.completed}/{progress.total} Subtasks
@@ -1833,7 +1992,7 @@ export default function TaskManager({ theme = "light" }) {
                             )}
 
                             {/* Metadata (Lead, Assignee, Date) */}
-                            <div className="mt-3 pt-2 border-t border-slate-800/10 dark:border-white/5 space-y-1.5 text-[10px]">
+                            <div className="mt-3 pt-2 border-t border-slate-800/10 dark:border-white/5 space-y-1.5 text-[12px]">
                               {/* Linked Lead */}
                               {!isProductionExecutive && task.leadId && (
                                 <div className={`flex items-center gap-1 truncate ${styles.label}`}>
@@ -1849,23 +2008,23 @@ export default function TaskManager({ theme = "light" }) {
                                 }`}>
                                   <Calendar size={10} className="shrink-0" />
                                   <span>{formatDate(task.dueDate)}</span>
-                                  {expired && <span className="text-[9px] uppercase tracking-wider ml-1">Overdue</span>}
+                                  {expired && <span className="text-[11px] uppercase tracking-wider ml-1">Overdue</span>}
                                 </div>
                               )}
                             </div>
 
                             {/* Assignee Avatar Indicator */}
                             <div className="mt-2.5 flex items-center justify-between">
-                              <span className={`text-[9px] ${styles.label}`}>
+                              <span className={`text-[11px] ${styles.label}`}>
                                 By {task.createdBy?.name || "System"}
                               </span>
                               {task.assignedTo ? (
                                 <div
                                   onClick={(e) => handleOpenAssigneeProfile(e, task.assignedTo)}
-                                  className={`h-5 w-5 rounded-full bg-sky-500 flex items-center justify-center text-[10px] text-white font-bold tracking-tight shadow-sm shrink-0 border border-slate-800 dark:border-slate-900 ${canViewProfiles ? "cursor-pointer hover:ring-2 hover:ring-sky-400" : ""}`}
+                                  className={`h-5 w-5 rounded-full bg-sky-500 flex items-center justify-center text-[12px] text-white font-bold tracking-tight shadow-sm shrink-0 border border-slate-800 dark:border-slate-900 ${canViewProfiles ? "cursor-pointer hover:ring-2 hover:ring-sky-400" : ""}`}
                                   title={canViewProfiles ? `View ${task.assignedTo.name}'s profile` : `Assigned to ${task.assignedTo.name}`}
                                 >
-                                  {task.assignedTo.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                                  <AvatarFace user={task.assignedTo} initials={task.assignedTo.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()} />
                                 </div>
                               ) : (
                                 <div 
@@ -1883,7 +2042,7 @@ export default function TaskManager({ theme = "light" }) {
                                 {col.id !== "BACKLOG" && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleUpdateStatus(task._id, STATUS_COLUMNS[STATUS_COLUMNS.findIndex(c => c.id === col.id) - 1].id); }}
-                                    className={`p-1 rounded text-[9px] font-semibold flex items-center gap-0.5 border ${styles.button}`}
+                                    className={`p-1 rounded text-[11px] font-semibold flex items-center gap-0.5 border ${styles.button}`}
                                   >
                                     Move Left
                                   </button>
@@ -1891,7 +2050,7 @@ export default function TaskManager({ theme = "light" }) {
                                 {col.id !== "COMPLETED" && (
                                   <button
                                     onClick={(e) => { e.stopPropagation(); handleUpdateStatus(task._id, STATUS_COLUMNS[STATUS_COLUMNS.findIndex(c => c.id === col.id) + 1].id); }}
-                                    className={`p-1 rounded text-[9px] font-semibold flex items-center gap-0.5 border ${styles.button}`}
+                                    className={`p-1 rounded text-[11px] font-semibold flex items-center gap-0.5 border ${styles.button}`}
                                   >
                                     Move Right
                                   </button>
@@ -1921,7 +2080,8 @@ export default function TaskManager({ theme = "light" }) {
                   { id: "", label: "All", count: stats.total || 0 },
                   { id: "TODO", label: "To Do", count: stats.TODO || 0 },
                   { id: "IN_PROGRESS", label: "In Progress", count: stats.IN_PROGRESS || 0 },
-                  { id: "COMPLETED", label: "Completed", count: stats.COMPLETED || 0 }
+                  { id: "COMPLETED", label: "Completed", count: stats.COMPLETED || 0 },
+                  { id: "OVERDUE", label: "Overdue", count: stats.overdue || 0, alert: true }
                 ].map(tab => {
                   const isActiveTab = statusFilter === tab.id;
                   return (
@@ -1930,14 +2090,18 @@ export default function TaskManager({ theme = "light" }) {
                       type="button"
                       onClick={() => setStatusFilter(tab.id)}
                       aria-pressed={isActiveTab}
-                      className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-bold transition-colors ${
+                      className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[13px] font-bold transition-colors ${
                         isActiveTab
-                          ? (isDark ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-sky-500 bg-sky-50 text-sky-700")
-                          : styles.button
+                          ? (tab.alert
+                            ? (isDark ? "border-rose-500/40 bg-rose-500/10 text-rose-300" : "border-rose-500 bg-rose-50 text-rose-700")
+                            : (isDark ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-sky-500 bg-sky-50 text-sky-700"))
+                          : (tab.alert && tab.count > 0
+                            ? (isDark ? "border-rose-500/30 text-rose-300 hover:bg-rose-500/10" : "border-rose-200 text-rose-700 hover:bg-rose-50")
+                            : styles.button)
                       }`}
                     >
                       {tab.label}
-                      <span className={`rounded-md px-1.5 py-0.5 text-[10px] font-black ${
+                      <span className={`rounded-md px-1.5 py-0.5 text-[12px] font-black ${
                         isActiveTab
                           ? (isDark ? "bg-sky-500/20 text-sky-200" : "bg-sky-100 text-sky-700")
                           : (isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600")
@@ -1960,13 +2124,13 @@ export default function TaskManager({ theme = "light" }) {
                   onChange={(e) => setQuickAddTitle(e.target.value)}
                   placeholder={selectedUserObj ? `Add a task for ${selectedUserObj.name}...` : "Add a task..."}
                   disabled={quickAddSubmitting}
-                  className={`h-6 min-w-0 flex-1 bg-transparent text-sm focus:outline-none ${styles.title}`}
+                  className={`h-6 min-w-0 flex-1 bg-transparent text-[15px] focus:outline-none ${styles.title}`}
                 />
                 {quickAddTitle.trim() && (
                   <button
                     type="submit"
                     disabled={quickAddSubmitting}
-                    className={`h-8 shrink-0 rounded-lg px-3 text-xs font-bold disabled:opacity-60 ${styles.primaryButton}`}
+                    className={`h-8 shrink-0 rounded-lg px-3 text-[13px] font-bold disabled:opacity-60 ${styles.primaryButton}`}
                   >
                     Add
                   </button>
@@ -1974,7 +2138,7 @@ export default function TaskManager({ theme = "light" }) {
               </form>
 
               <div className="space-y-2">
-                {sortedTasks.map(task => {
+                {groupedTaskRows.map(({ task, group, isFirst, count }) => {
                   const priority = PRIORITIES.find(pr => pr.value === task.priority) || PRIORITIES[1];
                   const statusCol = STATUS_COLUMNS.find(col => col.id === task.status) || STATUS_COLUMNS[1];
                   const isSelected = panelTask?._id === task._id;
@@ -1982,8 +2146,13 @@ export default function TaskManager({ theme = "light" }) {
                   const expired = isOverdue(task);
                   const subtasks = task.subtasks || [];
                   return (
+                    <React.Fragment key={task._id}>
+                    {isFirst ? (
+                      <div className="task-list-group-heading">
+                        <span>{group}</span><small>{count}</small>
+                      </div>
+                    ) : null}
                     <div
-                      key={task._id}
                       role="button"
                       tabIndex={0}
                       onClick={() => { setSelectedTaskId(task._id); setMobileTaskDetailsOpen(true); }}
@@ -2009,10 +2178,10 @@ export default function TaskManager({ theme = "light" }) {
                         </button>
 
                         <div className="min-w-0 flex-1">
-                          <p className={`truncate text-sm font-bold ${styles.title}`}>{task.title}</p>
-                          <p className={`truncate text-xs ${styles.label}`}>{task.description?.trim() || "No description"}</p>
+                          <p className={`truncate text-[15px] font-bold ${styles.title}`}>{task.title}</p>
+                          <p className={`truncate text-[13px] ${styles.label}`}>{task.description?.trim() || "No description"}</p>
 
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
                             <span className={`flex items-center gap-1.5 rounded-md px-2 py-0.5 font-semibold ${
                               isDark ? "bg-slate-800 text-slate-300" : "bg-slate-100 text-slate-600"
                             }`}>
@@ -2028,15 +2197,16 @@ export default function TaskManager({ theme = "light" }) {
                             <span className={`flex items-center gap-1 ${expired ? (isDark ? "text-rose-400" : "text-rose-600") : styles.label}`}>
                               <Calendar size={12} /> {task.dueDate ? formatDate(task.dueDate) : "Not set"}
                             </span>
+                            {expired ? <span className="rounded-md bg-rose-100 px-2 py-0.5 font-bold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300">Overdue</span> : null}
                             <span className={`flex min-w-0 items-center gap-1 ${styles.label}`}>
                               <User size={12} />
                               <span className="truncate">{task.assignedTo ? `Assigned to ${task.assignedTo.name}` : "Unassigned"}</span>
                             </span>
                           </div>
 
-                          <div className={`mt-1.5 flex flex-wrap items-center gap-3 text-[11px] ${styles.label}`}>
+                          <div className={`mt-1.5 flex flex-wrap items-center gap-3 text-[12.5px] ${styles.label}`}>
                             <span className="flex items-center gap-1">
-                              <List size={12} /> {subtasks.filter(st => st.isCompleted).length} of {subtasks.length} subtasks
+                              <List size={12} /> {subtasks.filter(subtaskDone).length} of {subtasks.length} subtasks
                             </span>
                             <span className="truncate">Created by {task.createdBy?.name || "System"}</span>
                           </div>
@@ -2066,7 +2236,7 @@ export default function TaskManager({ theme = "light" }) {
                                   type="button"
                                   disabled={!canEditTask(task)}
                                   onClick={(e) => { e.stopPropagation(); setOpenTaskMenuId(null); handleOpenEditModal(task); }}
-                                  className={`block w-full px-3 py-2 text-left text-xs font-semibold disabled:opacity-40 ${styles.title} hover:bg-slate-500/10`}
+                                  className={`block w-full px-3 py-2 text-left text-[13px] font-semibold disabled:opacity-40 ${styles.title} hover:bg-slate-500/10`}
                                 >
                                   Edit task
                                 </button>
@@ -2074,7 +2244,7 @@ export default function TaskManager({ theme = "light" }) {
                                   type="button"
                                   disabled={!canDeleteTask(task)}
                                   onClick={(e) => { e.stopPropagation(); setOpenTaskMenuId(null); handleDeleteTask(task._id); }}
-                                  className="block w-full px-3 py-2 text-left text-xs font-semibold text-rose-500 disabled:opacity-40 hover:bg-rose-500/10"
+                                  className="block w-full px-3 py-2 text-left text-[13px] font-semibold text-rose-500 disabled:opacity-40 hover:bg-rose-500/10"
                                 >
                                   Delete task
                                 </button>
@@ -2084,6 +2254,7 @@ export default function TaskManager({ theme = "light" }) {
                         </div>
                       </div>
                     </div>
+                    </React.Fragment>
                   );
                 })}
               </div>
@@ -2092,8 +2263,8 @@ export default function TaskManager({ theme = "light" }) {
                 isDark ? "border-slate-800" : "border-slate-200"
               }`}>
                 <CheckCircle2 size={28} className={isDark ? "text-slate-700" : "text-slate-300"} />
-                <p className={`text-sm font-bold ${styles.title}`}>No more tasks</p>
-                <p className={`text-xs ${styles.label}`}>
+                <p className={`text-[15px] font-bold ${styles.title}`}>No more tasks</p>
+                <p className={`text-[13px] ${styles.label}`}>
                   {selectedUserObj ? `All tasks for ${selectedUserObj.name} are shown here.` : "All matching tasks are shown here."}
                 </p>
               </div>
@@ -2111,7 +2282,7 @@ export default function TaskManager({ theme = "light" }) {
                         type="button"
                         onClick={() => handleOpenEditModal(panelTask)}
                         disabled={!canEditTask(panelTask)}
-                        className={`flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-bold disabled:opacity-40 ${styles.button}`}
+                        className={`flex h-9 items-center gap-1.5 rounded-xl border px-3 text-[13px] font-bold disabled:opacity-40 ${styles.button}`}
                       >
                         <Edit2 size={13} /> Edit task
                       </button>
@@ -2132,43 +2303,43 @@ export default function TaskManager({ theme = "light" }) {
 
                   <div className="mt-4">
                     <p className={`text-base font-black ${styles.title}`}>{panelTask.title}</p>
-                    <p className={`mt-1 text-xs ${styles.label}`}>{panelTask.description?.trim() || "No description"}</p>
+                    <p className={`mt-1 text-[13px] ${styles.label}`}>{panelTask.description?.trim() || "No description"}</p>
                   </div>
 
                   <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="min-w-0">
-                      <span className={`mb-1 block text-xs font-semibold ${styles.label}`}>Status</span>
+                      <span className={`mb-1 block text-[13px] font-semibold ${styles.label}`}>Status</span>
                       <select
                         value={panelTask.status}
                         onChange={(e) => handleUpdateStatus(panelTask._id, e.target.value)}
                         aria-label="Task status"
-                        className={`h-9 w-full rounded-xl border px-2 text-xs font-semibold ${styles.input}`}
+                        className={`h-9 w-full rounded-xl border px-2 text-[13px] font-semibold ${styles.input}`}
                       >
                         {STATUS_COLUMNS.map(col => <option key={col.id} value={col.id}>{col.label}</option>)}
                       </select>
                     </div>
 
                     <div className="min-w-0">
-                      <span className={`mb-1 block text-xs font-semibold ${styles.label}`}>Priority</span>
+                      <span className={`mb-1 block text-[13px] font-semibold ${styles.label}`}>Priority</span>
                       <select
                         value={panelTask.priority}
                         disabled={!canEditTask(panelTask)}
                         onChange={(e) => handleInlineUpdate(panelTask._id, { priority: e.target.value })}
                         aria-label="Task priority"
-                        className={`h-9 w-full rounded-xl border px-2 text-xs font-semibold ${styles.input}`}
+                        className={`h-9 w-full rounded-xl border px-2 text-[13px] font-semibold ${styles.input}`}
                       >
                         {PRIORITIES.map(pr => <option key={pr.value} value={pr.value}>{pr.label}</option>)}
                       </select>
                     </div>
 
                     <div className="min-w-0">
-                      <span className={`mb-1 block text-xs font-semibold ${styles.label}`}>Assignee</span>
+                      <span className={`mb-1 block text-[13px] font-semibold ${styles.label}`}>Assignee</span>
                       <select
                         value={panelTask.assignedTo?._id || panelTask.assignedTo || ""}
                         disabled={!canEditTask(panelTask)}
                         onChange={(e) => handleInlineUpdate(panelTask._id, { assignedTo: e.target.value || null })}
                         aria-label="Task assignee"
-                        className={`h-9 w-full rounded-xl border px-2 text-xs font-semibold ${styles.input}`}
+                        className={`h-9 w-full rounded-xl border px-2 text-[13px] font-semibold ${styles.input}`}
                       >
                         <option value="">Unassigned</option>
                         {assignableUsers.map(u => (
@@ -2180,28 +2351,28 @@ export default function TaskManager({ theme = "light" }) {
                     </div>
 
                     <div className="min-w-0">
-                      <span className={`mb-1 block text-xs font-semibold ${styles.label}`}>Due date</span>
+                      <span className={`mb-1 block text-[13px] font-semibold ${styles.label}`}>Due date</span>
                       <input
                         type="date"
                         value={panelTask.dueDate ? new Date(panelTask.dueDate).toISOString().split("T")[0] : ""}
                         disabled={!canEditTask(panelTask)}
                         onChange={(e) => handleInlineUpdate(panelTask._id, { dueDate: e.target.value || null })}
                         aria-label="Task due date"
-                        className={`h-9 w-full rounded-xl border px-2 text-xs font-semibold ${styles.input}`}
+                        className={`h-9 w-full rounded-xl border px-2 text-[13px] font-semibold ${styles.input}`}
                       />
                     </div>
                   </div>
 
                   <div className="mt-5">
-                    <p className={`text-sm font-black ${styles.title}`}>
-                      Subtasks ({(panelTask.subtasks || []).filter(st => st.isCompleted).length} of {(panelTask.subtasks || []).length})
+                    <p className={`text-[15px] font-black ${styles.title}`}>
+                      Subtasks ({(panelTask.subtasks || []).filter(subtaskDone).length} of {(panelTask.subtasks || []).length})
                     </p>
                     <div className={`mt-2 grid gap-2 ${openSubtaskIndex(panelTask._id, panelTask.subtasks) !== null ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,230px)]" : ""}`}>
                     <div className="space-y-1.5">
                       {(panelTask.subtasks || []).map((st, idx) => {
                         const isEditingSubtask = subtaskEditKey === `${panelTask._id}:${idx}`;
                         return (
-                          <div key={idx} className="flex items-center gap-2 text-xs">
+                          <div key={idx} className="flex items-center gap-2 text-[13px]">
                             {isEditingSubtask ? (
                               <>
                                 <input
@@ -2213,7 +2384,7 @@ export default function TaskManager({ theme = "light" }) {
                                     if (e.key === "Enter") { e.preventDefault(); handleSaveSubtaskEdit(panelTask, idx); }
                                     if (e.key === "Escape") { e.preventDefault(); handleCancelSubtaskEdit(); }
                                   }}
-                                  className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs ${styles.input}`}
+                                  className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-[13px] ${styles.input}`}
                                 />
                                 <button type="button" onClick={() => handleSaveSubtaskEdit(panelTask, idx)} title="Save subtask" aria-label="Save subtask" className="rounded p-1 text-emerald-500 hover:bg-emerald-500/10">
                                   <Check size={13} />
@@ -2226,9 +2397,9 @@ export default function TaskManager({ theme = "light" }) {
                               <>
                                 <input
                                   type="checkbox"
-                                  checked={st.isCompleted}
+                                  checked={subtaskDone(st)}
                                   aria-label={st.title}
-                                  disabled={!canEditTask(panelTask)}
+                                  disabled={!canUpdateSubtaskStatus(panelTask, st)}
                                   onChange={() => handleInlineToggleSubtask(panelTask, idx)}
                                   className="h-3.5 w-3.5 shrink-0 rounded"
                                 />
@@ -2237,13 +2408,28 @@ export default function TaskManager({ theme = "light" }) {
                                   onClick={() => toggleSubtaskDetail(panelTask._id, idx)}
                                   aria-expanded={isSubtaskDetailOpen(panelTask._id, idx)}
                                   title="Open subtask details"
-                                  className={`min-w-0 flex-1 truncate text-left hover:underline ${st.isCompleted ? `line-through ${styles.label}` : styles.title}`}
+                                  className={`min-w-0 flex-1 truncate text-left hover:underline ${subtaskDone(st) ? `line-through ${styles.label}` : styles.title}`}
                                 >
                                   {st.title}
                                 </button>
                                 {subtaskMeta(st) ? (
-                                  <span className={`shrink-0 text-[10px] ${styles.label}`}>{subtaskMeta(st)}</span>
+                                  <span className={`shrink-0 text-[12px] ${styles.label}`}>{subtaskMeta(st)}</span>
                                 ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleSubtaskDetail(panelTask._id, idx)}
+                                  aria-expanded={isSubtaskDetailOpen(panelTask._id, idx)}
+                                  title={st.description ? `Details: ${st.description.slice(0, 140)}` : "Add details for this subtask"}
+                                  aria-label={`${st.description ? "View" : "Add"} details for subtask ${st.title}`}
+                                  className={`subtask-details-button inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[12px] font-bold ${
+                                    st.description
+                                      ? (isDark ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-sky-200 bg-sky-50 text-sky-700")
+                                      : `border-transparent ${styles.label} hover:bg-slate-500/10`
+                                  }`}
+                                >
+                                  <AlignLeft size={11} />
+                                  {st.description ? "Details" : "Add details"}
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleStartSubtaskEdit(panelTask, idx, st.title)}
@@ -2274,7 +2460,9 @@ export default function TaskManager({ theme = "light" }) {
                       <SubtaskDetailPanel
                         key={subtaskDetailKey}
                         subtask={panelTask.subtasks[openSubtaskIndex(panelTask._id, panelTask.subtasks)]}
-                        readOnly={!canEditTask(panelTask)}
+                        users={assignableUsers}
+                        readOnly={!canUpdateSubtaskStatus(panelTask, panelTask.subtasks[openSubtaskIndex(panelTask._id, panelTask.subtasks)])}
+                        statusOnly={!canEditTask(panelTask) && canUpdateSubtaskStatus(panelTask, panelTask.subtasks[openSubtaskIndex(panelTask._id, panelTask.subtasks)])}
                         styles={styles}
                         isDark={isDark}
                         onClose={() => setSubtaskDetailKey(null)}
@@ -2291,36 +2479,36 @@ export default function TaskManager({ theme = "light" }) {
                         onChange={(e) => setInlineSubtaskInput(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleInlineAddSubtask(panelTask); } }}
                         placeholder="Add a subtask..."
-                        className={`h-6 min-w-0 flex-1 bg-transparent text-xs focus:outline-none ${styles.title}`}
+                        className={`h-6 min-w-0 flex-1 bg-transparent text-[13px] focus:outline-none ${styles.title}`}
                       />
                     </div>
                   </div>
 
                   <div className={`mt-5 flex items-center gap-3 border-t pt-4 ${isDark ? "border-white/5" : "border-slate-100"}`}>
-                    <span className={`text-xs font-semibold ${styles.label}`}>Created by</span>
-                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-black uppercase ${
+                    <span className={`text-[13px] font-semibold ${styles.label}`}>Created by</span>
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-black uppercase ${
                       AVATAR_COLORS[(panelTask.createdBy?.name || "?").charCodeAt(0) % AVATAR_COLORS.length]
                     }`}>
                       {(panelTask.createdBy?.name || "?").slice(0, 2)}
                     </div>
                     <div className="min-w-0">
-                      <p className={`truncate text-xs font-bold ${styles.title}`}>{panelTask.createdBy?.name || "System"}</p>
-                      <p className={`text-[11px] ${styles.label}`}>{formatDate(panelTask.createdAt)}</p>
+                      <p className={`truncate text-[13px] font-bold ${styles.title}`}>{panelTask.createdBy?.name || "System"}</p>
+                      <p className={`text-[12.5px] ${styles.label}`}>{formatDate(panelTask.createdAt)}</p>
                     </div>
                   </div>
 
                   <div className={`mt-5 border-t pt-4 ${isDark ? "border-white/5" : "border-slate-100"}`}>
-                    <p className={`text-sm font-black ${styles.title}`}>Activity</p>
+                    <p className={`text-[15px] font-black ${styles.title}`}>Activity</p>
                     <div className="mt-3 space-y-3">
                       {panelTask.status === "COMPLETED" && (
                         <div className="flex items-start gap-3">
                           <span className="mt-1 h-3 w-3 shrink-0 rounded-full border-2 border-emerald-500 bg-emerald-500/30" />
                           <div className="flex min-w-0 flex-1 flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0">
-                              <p className={`text-xs font-bold ${styles.title}`}>Task completed</p>
-                              <p className={`text-[11px] ${styles.label}`}>Marked completed</p>
+                              <p className={`text-[13px] font-bold ${styles.title}`}>Task completed</p>
+                              <p className={`text-[12.5px] ${styles.label}`}>Marked completed</p>
                             </div>
-                            <span className={`text-[11px] ${styles.label}`}>{formatDateTime(panelTask.updatedAt)}</span>
+                            <span className={`text-[12.5px] ${styles.label}`}>{formatDateTime(panelTask.updatedAt)}</span>
                           </div>
                         </div>
                       )}
@@ -2328,12 +2516,12 @@ export default function TaskManager({ theme = "light" }) {
                         <span className="mt-1 h-3 w-3 shrink-0 rounded-full border-2 border-sky-500 bg-sky-500/30" />
                         <div className="flex min-w-0 flex-1 flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <p className={`text-xs font-bold ${styles.title}`}>Task created</p>
-                            <p className={`truncate text-[11px] ${styles.label}`}>
+                            <p className={`text-[13px] font-bold ${styles.title}`}>Task created</p>
+                            <p className={`truncate text-[12.5px] ${styles.label}`}>
                               {panelTask.createdBy?.name || "System"} created this task
                             </p>
                           </div>
-                          <span className={`text-[11px] ${styles.label}`}>{formatDateTime(panelTask.createdAt)}</span>
+                          <span className={`text-[12.5px] ${styles.label}`}>{formatDateTime(panelTask.createdAt)}</span>
                         </div>
                       </div>
                     </div>
@@ -2342,7 +2530,7 @@ export default function TaskManager({ theme = "light" }) {
               ) : (
                 <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
                   <ListTodo size={28} className={isDark ? "text-slate-700" : "text-slate-300"} />
-                  <p className={`text-sm font-semibold ${styles.label}`}>Select a task to see its details</p>
+                  <p className={`text-[15px] font-semibold ${styles.label}`}>Select a task to see its details</p>
                 </div>
               )}
             </aside>
@@ -2399,7 +2587,7 @@ export default function TaskManager({ theme = "light" }) {
                     {(() => {
                       const priority = PRIORITIES.find(p => p.value === detailsTask.priority) || PRIORITIES[1];
                       return (
-                        <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${priority.color}`}>
+                        <span className={`shrink-0 text-[12px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${priority.color}`}>
                           {priority.label}
                         </span>
                       );
@@ -2408,19 +2596,19 @@ export default function TaskManager({ theme = "light" }) {
 
                   {/* Status */}
                   <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Status:</span>
+                    <span className={`text-[12px] font-bold uppercase tracking-wider ${styles.label}`}>Status:</span>
                     <select
                       aria-label="Task status"
                       value={detailsTask.status}
                       onChange={(e) => handleUpdateStatus(detailsTask._id, e.target.value)}
-                      className={`h-8 rounded-lg border px-2 text-xs font-semibold ${styles.input}`}
+                      className={`h-8 rounded-lg border px-2 text-[13px] font-semibold ${styles.input}`}
                     >
                       {STATUS_COLUMNS.map(colOpt => (
                         <option key={colOpt.id} value={colOpt.id}>{colOpt.label}</option>
                       ))}
                     </select>
                     {isOverdue(detailsTask) && (
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-rose-500 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-rose-500 bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.5 rounded">
                         Overdue
                       </span>
                     )}
@@ -2428,19 +2616,19 @@ export default function TaskManager({ theme = "light" }) {
 
                   {/* Description */}
                   <div className="space-y-2">
-                    <p className={`text-sm ${styles.text}`}>{detailsTask.status === "COMPLETED" ? "Completed. No further action is required unless the task needs to be reopened." : "Review the requirement below, mark the task In Progress when you start, and mark Completed when finished."}</p>
+                    <p className={`text-[15px] ${styles.text}`}>{detailsTask.status === "COMPLETED" ? "Completed. No further action is required unless the task needs to be reopened." : "Review the requirement below, mark the task In Progress when you start, and mark Completed when finished."}</p>
                     <div className="flex flex-wrap gap-2">
                       {detailsTask.status !== "COMPLETED" && <>
-                        <button type="button" disabled={detailsTask.status === "IN_PROGRESS"} onClick={() => handleUpdateStatus(detailsTask._id, "IN_PROGRESS")} className={`rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50 ${styles.button}`}>In Progress / Ongoing</button>
-                        <button type="button" disabled={detailsTask.status === "COMPLETED"} onClick={() => handleUpdateStatus(detailsTask._id, "COMPLETED")} className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Mark Completed</button>
+                        <button type="button" disabled={detailsTask.status === "IN_PROGRESS"} onClick={() => handleUpdateStatus(detailsTask._id, "IN_PROGRESS")} className={`rounded-lg border px-3 py-2 text-[15px] font-semibold disabled:opacity-50 ${styles.button}`}>In Progress / Ongoing</button>
+                        <button type="button" disabled={detailsTask.status === "COMPLETED"} onClick={() => handleUpdateStatus(detailsTask._id, "COMPLETED")} className="rounded-lg bg-emerald-600 px-3 py-2 text-[15px] font-semibold text-white disabled:opacity-50">Mark Completed</button>
                       </>}
-                      <button type="button" onClick={handleCloseDetails} className={`rounded-lg border px-3 py-2 text-sm font-semibold ${styles.button}`}>Back to task list</button>
+                      <button type="button" onClick={handleCloseDetails} className={`rounded-lg border px-3 py-2 text-[15px] font-semibold ${styles.button}`}>Back to task list</button>
                     </div>
                   </div>
                   {detailsTask.description && (
                     <div className="space-y-1">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Description</span>
-                      <p className={`text-sm whitespace-pre-wrap break-words ${styles.text}`}>{detailsTask.description}</p>
+                      <span className={`text-[12px] font-bold uppercase tracking-wider ${styles.label}`}>Description</span>
+                      <p className={`text-[15px] whitespace-pre-wrap break-words ${styles.text}`}>{detailsTask.description}</p>
                     </div>
                   )}
 
@@ -2450,7 +2638,7 @@ export default function TaskManager({ theme = "light" }) {
                       {detailsTask.tags.map((t) => {
                         const colorClass = TAG_COLORS[t] || "bg-sky-500/10 text-sky-400 border-sky-500/20";
                         return (
-                          <span key={t} className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${colorClass}`}>
+                          <span key={t} className={`text-[12px] font-bold px-2 py-0.5 rounded-md border ${colorClass}`}>
                             {t}
                           </span>
                         );
@@ -2459,15 +2647,15 @@ export default function TaskManager({ theme = "light" }) {
                   )}
 
                   {/* Meta grid */}
-                  <div className={`grid grid-cols-2 gap-3 rounded-xl border p-3 text-xs ${isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-150 bg-slate-50/60"}`}>
+                  <div className={`grid grid-cols-2 gap-3 rounded-xl border p-3 text-[13px] ${isDark ? "border-slate-800 bg-slate-950/40" : "border-slate-150 bg-slate-50/60"}`}>
                     <div>
-                      <div className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Due Date</div>
+                      <div className={`text-[12px] font-bold uppercase tracking-wider ${styles.label}`}>Due Date</div>
                       <div className={`mt-0.5 font-semibold ${isOverdue(detailsTask) ? "text-rose-500" : styles.title}`}>
                         {detailsTask.dueDate ? formatDate(detailsTask.dueDate) : "-"}
                       </div>
                     </div>
                     <div>
-                      <div className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Assignee</div>
+                      <div className={`text-[12px] font-bold uppercase tracking-wider ${styles.label}`}>Assignee</div>
                       <div
                         onClick={(e) => detailsTask.assignedTo && handleOpenAssigneeProfile(e, detailsTask.assignedTo)}
                         className={`mt-0.5 font-semibold ${styles.title} ${detailsTask.assignedTo && canViewProfiles ? "cursor-pointer underline decoration-dotted hover:text-sky-500 w-fit" : ""}`}
@@ -2478,20 +2666,20 @@ export default function TaskManager({ theme = "light" }) {
                     </div>
                     {!isProductionExecutive && (
                       <div className="col-span-2">
-                        <div className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Linked Lead</div>
+                        <div className={`text-[12px] font-bold uppercase tracking-wider ${styles.label}`}>Linked Lead</div>
                         <div className={`mt-0.5 font-semibold ${styles.title}`}>
                           {detailsTask.leadId?.name || "-"}
                         </div>
                       </div>
                     )}
                     <div>
-                      <div className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Created By</div>
+                      <div className={`text-[12px] font-bold uppercase tracking-wider ${styles.label}`}>Created By</div>
                       <div className={`mt-0.5 font-semibold ${styles.title}`}>
                         {detailsTask.createdBy?.name || "System"}
                       </div>
                     </div>
                     <div>
-                      <div className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>Created On</div>
+                      <div className={`text-[12px] font-bold uppercase tracking-wider ${styles.label}`}>Created On</div>
                       <div className={`mt-0.5 font-semibold ${styles.title}`}>
                         {detailsTask.createdAt ? formatDate(detailsTask.createdAt) : "-"}
                       </div>
@@ -2501,13 +2689,13 @@ export default function TaskManager({ theme = "light" }) {
                   {/* Subtasks */}
                   {detailsTask.subtasks && detailsTask.subtasks.length > 0 && (
                     <div className="space-y-2">
-                      <span className={`text-[10px] font-bold uppercase tracking-wider ${styles.label}`}>
-                        Subtasks ({detailsTask.subtasks.filter(s => s.isCompleted).length}/{detailsTask.subtasks.length})
+                      <span className={`text-[12px] font-bold uppercase tracking-wider ${styles.label}`}>
+                        Subtasks ({detailsTask.subtasks.filter(subtaskDone).length}/{detailsTask.subtasks.length})
                       </span>
                       <div className={`grid gap-2 ${openSubtaskIndex(detailsTask._id, detailsTask.subtasks) !== null ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,230px)]" : ""}`}>
                       <div className={`rounded-xl border p-2 space-y-1.5 ${isDark ? "border-slate-850 bg-slate-950/40" : "border-slate-150 bg-slate-50/50"}`}>
                         {detailsTask.subtasks.map((st, idx) => (
-                          <div key={idx} className="flex items-center gap-2 text-xs py-0.5">
+                          <div key={idx} className="flex items-center gap-2 text-[13px] py-0.5">
                             {subtaskEditKey === `${detailsTask._id}:${idx}` ? (
                               <>
                                 <input
@@ -2519,7 +2707,7 @@ export default function TaskManager({ theme = "light" }) {
                                     if (e.key === "Enter") { e.preventDefault(); handleSaveSubtaskEdit(detailsTask, idx); }
                                     if (e.key === "Escape") { e.preventDefault(); handleCancelSubtaskEdit(); }
                                   }}
-                                  className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs ${styles.input}`}
+                                  className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-[13px] ${styles.input}`}
                                 />
                                 <button
                                   type="button"
@@ -2545,8 +2733,8 @@ export default function TaskManager({ theme = "light" }) {
                             <input
                               type="checkbox"
                               aria-label={st.title}
-                              checked={st.isCompleted}
-                              disabled={!canEditTask(detailsTask)}
+                              checked={subtaskDone(st)}
+                              disabled={!canUpdateSubtaskStatus(detailsTask, st)}
                               onChange={() => handleInlineToggleSubtask(detailsTask, idx)}
                               className="h-3.5 w-3.5 shrink-0 rounded"
                             />
@@ -2555,13 +2743,28 @@ export default function TaskManager({ theme = "light" }) {
                               onClick={() => toggleSubtaskDetail(detailsTask._id, idx)}
                               aria-expanded={isSubtaskDetailOpen(detailsTask._id, idx)}
                               title="Open subtask details"
-                              className={`min-w-0 flex-1 truncate text-left hover:underline ${st.isCompleted ? "line-through text-slate-500" : styles.text}`}
+                              className={`min-w-0 flex-1 truncate text-left hover:underline ${subtaskDone(st) ? "line-through text-slate-500" : styles.text}`}
                             >
                               {st.title}
                             </button>
                             {subtaskMeta(st) ? (
-                              <span className={`shrink-0 text-[10px] ${styles.label}`}>{subtaskMeta(st)}</span>
+                              <span className={`shrink-0 text-[12px] ${styles.label}`}>{subtaskMeta(st)}</span>
                             ) : null}
+                            <button
+                              type="button"
+                              onClick={() => toggleSubtaskDetail(detailsTask._id, idx)}
+                              aria-expanded={isSubtaskDetailOpen(detailsTask._id, idx)}
+                              title={st.description ? `Details: ${st.description.slice(0, 140)}` : "Add details for this subtask"}
+                              aria-label={`${st.description ? "View" : "Add"} details for subtask ${st.title}`}
+                              className={`subtask-details-button inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[12px] font-bold ${
+                                st.description
+                                  ? (isDark ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-sky-200 bg-sky-50 text-sky-700")
+                                  : `border-transparent ${styles.label} hover:bg-slate-500/10`
+                              }`}
+                            >
+                              <AlignLeft size={11} />
+                              {st.description ? "Details" : "Add details"}
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleStartSubtaskEdit(detailsTask, idx, st.title)}
@@ -2591,7 +2794,9 @@ export default function TaskManager({ theme = "light" }) {
                         <SubtaskDetailPanel
                           key={subtaskDetailKey}
                           subtask={detailsTask.subtasks[openSubtaskIndex(detailsTask._id, detailsTask.subtasks)]}
-                          readOnly={!canEditTask(detailsTask)}
+                          users={assignableUsers}
+                          readOnly={!canUpdateSubtaskStatus(detailsTask, detailsTask.subtasks[openSubtaskIndex(detailsTask._id, detailsTask.subtasks)])}
+                          statusOnly={!canEditTask(detailsTask) && canUpdateSubtaskStatus(detailsTask, detailsTask.subtasks[openSubtaskIndex(detailsTask._id, detailsTask.subtasks)])}
                           styles={styles}
                           isDark={isDark}
                           onClose={() => setSubtaskDetailKey(null)}
@@ -2603,7 +2808,7 @@ export default function TaskManager({ theme = "light" }) {
                   )}
 
                   {/* Actions */}
-                  {isTaskReceiver(detailsTask) && <p className={`text-sm ${styles.label}`}>You can only change the status of this assigned task. Contact the task creator for other changes.</p>}
+                  {isTaskReceiver(detailsTask) && <p className={`text-[15px] ${styles.label}`}>You can only change the status of this assigned task. Contact the task creator for other changes.</p>}
                   <div className={`mobile-safe-footer sticky bottom-0 z-10 -mx-4 flex flex-wrap items-center justify-end gap-2 border-t px-4 pb-1 pt-3 sm:mx-0 sm:px-0 ${
                     isDark ? "border-white/5 bg-slate-900" : "border-slate-200 bg-white"
                   }`}>
@@ -2613,7 +2818,7 @@ export default function TaskManager({ theme = "light" }) {
                         handleCloseDetails();
                         handleDeleteTask(detailsTask._id);
                       }}
-                      className="h-10 px-4 rounded-xl border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 text-sm font-semibold"
+                      className="h-10 px-4 rounded-xl border border-rose-500/20 text-rose-500 hover:bg-rose-500/10 text-[15px] font-semibold"
                     >
                       Delete
                     </button>
@@ -2623,7 +2828,7 @@ export default function TaskManager({ theme = "light" }) {
                         handleCloseDetails();
                         handleOpenEditModal(detailsTask);
                       }}
-                      className={`h-10 px-5 rounded-xl text-sm font-semibold ${styles.primaryButton}`}
+                      className={`h-10 px-5 rounded-xl text-[15px] font-semibold ${styles.primaryButton}`}
                     >
                       Edit Task
                     </button>
@@ -2664,11 +2869,11 @@ export default function TaskManager({ theme = "light" }) {
                     <ListTodo size={18} />
                   </div>
                   <div>
-                    <h3 className={`text-sm font-black ${styles.title}`}>
+                    <h3 className={`text-[15px] font-black ${styles.title}`}>
                       {editingTask ? "Edit Task" : "New Task"}
                     </h3>
-                    <p className={`text-[11px] ${styles.label}`}>
-                      {editingTask ? "Update details, assignment, or checklist" : "Fill in what matters — the rest can wait"}
+                    <p className={`text-[12.5px] ${styles.label}`}>
+                      {editingTask ? "Update the task and its subtasks." : "Create a task and add subtasks to break it down."}
                     </p>
                   </div>
                 </div>
@@ -2684,7 +2889,8 @@ export default function TaskManager({ theme = "light" }) {
               {/* Form */}
               <form onSubmit={handleSubmit} className="tasks-edit-form mobile-modal-scroll scrollbar-hide flex-1 space-y-4">
                 {/* Title - the focal point: bigger and bolder than every other field, not boxless */}
-                <div>
+                <label className="block space-y-1.5">
+                  <span className={`text-[13px] font-semibold ${styles.label}`}>Title <span className="text-rose-500">*</span></span>
                   <input
                     type="text"
                     required
@@ -2694,18 +2900,18 @@ export default function TaskManager({ theme = "light" }) {
                     onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
                     className={`h-12 w-full rounded-xl border px-3.5 text-base font-bold ${styles.input}`}
                   />
-                </div>
+                </label>
 
                 {/* Description */}
                 <div className="space-y-1.5">
-                  <label className={`flex items-center gap-1.5 text-xs font-semibold ${styles.label}`}>
+                  <label className={`flex items-center gap-1.5 text-[13px] font-semibold ${styles.label}`}>
                     <AlignLeft size={14} /> Description
                   </label>
                   <textarea
                     placeholder="Add notes, instructions, or goals..."
                     value={formData.description}
                     onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                    className={`h-16 w-full resize-none rounded-xl border px-3 py-2 text-sm ${styles.input}`}
+                    className={`h-16 w-full resize-none rounded-xl border px-3 py-2 text-[15px] ${styles.input}`}
                   />
                 </div>
 
@@ -2713,7 +2919,7 @@ export default function TaskManager({ theme = "light" }) {
                 <div className={`tasks-edit-fields divide-y overflow-hidden rounded-xl border ${isDark ? "divide-white/5 border-slate-800" : "divide-slate-100 border-slate-200"}`}>
                   {/* Priority */}
                   <div className="flex flex-wrap items-center gap-2 p-2.5">
-                    <div className={`flex w-24 shrink-0 items-center gap-2 text-xs font-semibold sm:w-28 ${styles.label}`}>
+                    <div className={`flex w-24 shrink-0 items-center gap-2 text-[13px] font-semibold sm:w-28 ${styles.label}`}>
                       <Flag size={14} /> Priority
                     </div>
                     <div className="flex min-w-0 flex-1 gap-1.5">
@@ -2722,7 +2928,7 @@ export default function TaskManager({ theme = "light" }) {
                           type="button"
                           key={p.value}
                           onClick={() => setFormData(prev => ({ ...prev, priority: p.value }))}
-                          className={`h-8 flex-1 rounded-lg border text-xs font-bold transition-all ${
+                          className={`h-8 flex-1 rounded-lg border text-[13px] font-bold transition-all ${
                             formData.priority === p.value ? `${p.color} ring-1 ring-inset ring-current` : styles.button
                           }`}
                         >
@@ -2734,7 +2940,7 @@ export default function TaskManager({ theme = "light" }) {
 
                   {/* Status */}
                   <div className="flex flex-wrap items-center gap-2 p-2.5">
-                    <div className={`flex w-24 shrink-0 items-center gap-2 text-xs font-semibold sm:w-28 ${styles.label}`}>
+                    <div className={`flex w-24 shrink-0 items-center gap-2 text-[13px] font-semibold sm:w-28 ${styles.label}`}>
                       <ListTodo size={14} /> Status
                     </div>
                     <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
@@ -2743,7 +2949,7 @@ export default function TaskManager({ theme = "light" }) {
                           type="button"
                           key={col.id}
                           onClick={() => setFormData(prev => ({ ...prev, status: col.id }))}
-                          className={`h-8 min-w-[72px] flex-1 rounded-lg border px-2 text-xs font-bold transition-all ${
+                          className={`h-8 min-w-[72px] flex-1 rounded-lg border px-2 text-[13px] font-bold transition-all ${
                             formData.status === col.id ? `${col.color} ring-1 ring-inset ring-current` : styles.button
                           }`}
                         >
@@ -2755,54 +2961,37 @@ export default function TaskManager({ theme = "light" }) {
 
                   {/* Due Date */}
                   <div className="flex items-center gap-2 p-2.5">
-                    <div className={`flex w-24 shrink-0 items-center gap-2 text-xs font-semibold sm:w-28 ${styles.label}`}>
+                    <div className={`flex w-24 shrink-0 items-center gap-2 text-[13px] font-semibold sm:w-28 ${styles.label}`}>
                       <Calendar size={14} /> Due date
                     </div>
                     <input
                       type="date"
                       value={formData.dueDate}
                       onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))}
-                      className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs ${styles.input}`}
+                      className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-[13px] ${styles.input}`}
                     />
-                    {formData.dueDate && (
-                      <button
-                        type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, dueDate: "" }))}
-                        className={`rounded-lg p-1.5 ${styles.label} hover:text-rose-500`}
-                        title="Clear date"
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
                   </div>
 
                   {/* Assignee */}
                   <div className="flex items-center gap-2 p-2.5">
-                    <div className={`flex w-24 shrink-0 items-center gap-2 text-xs font-semibold sm:w-28 ${styles.label}`}>
+                    <div className={`flex w-24 shrink-0 items-center gap-2 text-[13px] font-semibold sm:w-28 ${styles.label}`}>
                       <User size={14} /> Assign to
                     </div>
-                    <select
-                      value={formData.assignedTo}
-                      onChange={(e) => setFormData(prev => ({ ...prev, assignedTo: e.target.value }))}
-                      className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs ${styles.input}`}
-                    >
-                      <option value="">Unassigned</option>
-                      {assignableUsers.map(u => (
-                        <option key={u._id} value={u._id}>
-                          {String(u._id) === currentUserId
-                            ? `${u.name} (Me)`
-                            : `${u.name}${u.role ? ` — ${u.role}` : ""}`}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="min-w-0 flex-1">
+                      <TaskAssigneePicker
+                        users={assignableUsers}
+                        value={formData.assignedTo}
+                        onChange={(assignedTo) => setFormData(prev => ({ ...prev, assignedTo }))}
+                      />
+                    </div>
                     {currentUserId && String(formData.assignedTo) !== currentUserId && (
                       <button
                         type="button"
                         onClick={() => setFormData(prev => ({ ...prev, assignedTo: currentUserId }))}
                         title="Assign this task to me"
-                        className={`h-8 shrink-0 rounded-lg border px-2.5 text-[11px] font-bold ${styles.button}`}
+                        className={`h-8 shrink-0 rounded-lg border px-2.5 text-[12.5px] font-bold ${styles.button}`}
                       >
-                        Me
+                        Assign to me
                       </button>
                     )}
                   </div>
@@ -2810,13 +2999,13 @@ export default function TaskManager({ theme = "light" }) {
                   {/* Linked Lead */}
                   {!isProductionExecutive && (
                     <div className="flex items-center gap-2 p-2.5">
-                      <div className={`flex w-24 shrink-0 items-center gap-2 text-xs font-semibold sm:w-28 ${styles.label}`}>
+                      <div className={`flex w-24 shrink-0 items-center gap-2 text-[13px] font-semibold sm:w-28 ${styles.label}`}>
                         <LinkIcon size={14} /> Lead
                       </div>
                       <select
                         value={formData.leadId}
                         onChange={(e) => setFormData(prev => ({ ...prev, leadId: e.target.value }))}
-                        className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs ${styles.input}`}
+                        className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-[13px] ${styles.input}`}
                       >
                         <option value="">No linked lead</option>
                         {leads.map(l => (
@@ -2829,8 +3018,8 @@ export default function TaskManager({ theme = "light" }) {
 
                 {/* Subtasks Section */}
                 <div className="space-y-2">
-                  <label className={`flex items-center gap-1.5 text-xs font-semibold ${styles.label}`}>
-                    <CheckSquare size={14} /> Subtasks / Checklist
+                  <label className={`flex items-center gap-1.5 text-[13px] font-semibold ${styles.label}`}>
+                    <CheckSquare size={14} /> Subtasks ({formData.subtasks?.length || 0})
                   </label>
 
                   <div className="flex gap-2">
@@ -2840,12 +3029,12 @@ export default function TaskManager({ theme = "light" }) {
                       value={newSubtaskTitle}
                       onChange={(e) => setNewSubtaskTitle(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddSubtask(); } }}
-                      className={`flex-1 h-9 px-3 rounded-lg border text-xs ${styles.input}`}
+                      className={`flex-1 h-9 px-3 rounded-lg border text-[13px] ${styles.input}`}
                     />
                     <button
                       type="button"
                       onClick={handleAddSubtask}
-                      className={`h-9 px-3 rounded-lg text-xs font-bold ${styles.button}`}
+                      className={`h-9 px-3 rounded-lg text-[13px] font-bold ${styles.button}`}
                     >
                       Add
                     </button>
@@ -2857,7 +3046,7 @@ export default function TaskManager({ theme = "light" }) {
                       isDark ? "border-slate-850 bg-slate-950/40" : "border-slate-150 bg-slate-50/50"
                     }`}>
                       {formData.subtasks.map((st, idx) => (
-                        <div key={idx} className="flex items-center justify-between gap-1 text-xs py-0.5">
+                        <div key={idx} className="flex items-center justify-between gap-1 text-[13px] py-0.5">
                           {formSubtaskEditIndex === idx ? (
                             <>
                               <input
@@ -2869,7 +3058,7 @@ export default function TaskManager({ theme = "light" }) {
                                   if (e.key === "Enter") { e.preventDefault(); handleSaveFormSubtaskEdit(); }
                                   if (e.key === "Escape") { e.preventDefault(); handleCancelFormSubtaskEdit(); }
                                 }}
-                                className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-xs ${styles.input}`}
+                                className={`h-8 min-w-0 flex-1 rounded-lg border px-2 text-[13px] ${styles.input}`}
                               />
                               <button
                                 type="button"
@@ -2895,7 +3084,7 @@ export default function TaskManager({ theme = "light" }) {
                               <input
                                 type="checkbox"
                                 aria-label={st.title}
-                                checked={st.isCompleted}
+                                checked={subtaskDone(st)}
                                 onChange={() => handleToggleSubtaskInForm(idx)}
                                 className="rounded border-slate-700 bg-transparent text-sky-500 focus:ring-0 focus:ring-offset-0"
                               />
@@ -2904,13 +3093,28 @@ export default function TaskManager({ theme = "light" }) {
                                 onClick={() => toggleSubtaskDetail("form", idx)}
                                 aria-expanded={isSubtaskDetailOpen("form", idx)}
                                 title="Open subtask details"
-                                className={`min-w-0 flex-1 truncate pr-2 text-left hover:underline ${st.isCompleted ? "line-through text-slate-500" : styles.text}`}
+                                className={`min-w-0 flex-1 truncate pr-2 text-left hover:underline ${subtaskDone(st) ? "line-through text-slate-500" : styles.text}`}
                               >
                                 {st.title}
                               </button>
                               {subtaskMeta(st) ? (
-                                <span className={`shrink-0 text-[10px] ${styles.label}`}>{subtaskMeta(st)}</span>
+                                <span className={`shrink-0 text-[12px] ${styles.label}`}>{subtaskMeta(st)}</span>
                               ) : null}
+                              <button
+                                type="button"
+                                onClick={() => toggleSubtaskDetail("form", idx)}
+                                aria-expanded={isSubtaskDetailOpen("form", idx)}
+                                title={st.description ? `Details: ${st.description.slice(0, 140)}` : "Add details for this subtask"}
+                                aria-label={`${st.description ? "View" : "Add"} details for subtask ${st.title}`}
+                                className={`subtask-details-button inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-[12px] font-bold ${
+                                  st.description
+                                    ? (isDark ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-sky-200 bg-sky-50 text-sky-700")
+                                    : `border-transparent ${styles.label} hover:bg-slate-500/10`
+                                }`}
+                              >
+                                <AlignLeft size={11} />
+                                {st.description ? "Details" : "Add details"}
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleStartFormSubtaskEdit(idx, st.title)}
@@ -2938,6 +3142,7 @@ export default function TaskManager({ theme = "light" }) {
                       <SubtaskDetailPanel
                         key={subtaskDetailKey}
                         subtask={formData.subtasks[openSubtaskIndex("form", formData.subtasks)]}
+                        users={assignableUsers}
                         styles={styles}
                         isDark={isDark}
                         onClose={() => setSubtaskDetailKey(null)}
@@ -2950,7 +3155,7 @@ export default function TaskManager({ theme = "light" }) {
 
                 {/* Tags Section */}
                 <div className="space-y-2">
-                  <label className={`flex items-center gap-1.5 text-xs font-semibold ${styles.label}`}>
+                  <label className={`flex items-center gap-1.5 text-[13px] font-semibold ${styles.label}`}>
                     <Tag size={14} /> Category Tags
                   </label>
 
@@ -2962,7 +3167,7 @@ export default function TaskManager({ theme = "light" }) {
                           key={t}
                           type="button"
                           onClick={() => handleToggleTag(t)}
-                          className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors ${
+                          className={`px-2 py-1 rounded-lg text-[12px] font-bold border transition-colors ${
                             isSelected
                               ? "bg-sky-500/20 text-sky-400 border-sky-500/40"
                               : isDark
@@ -2983,12 +3188,12 @@ export default function TaskManager({ theme = "light" }) {
                       value={newTagInput}
                       onChange={(e) => setNewTagInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddCustomTag(); } }}
-                      className={`flex-1 h-9 px-3 rounded-lg border text-xs ${styles.input}`}
+                      className={`flex-1 h-9 px-3 rounded-lg border text-[13px] ${styles.input}`}
                     />
                     <button
                       type="button"
                       onClick={handleAddCustomTag}
-                      className={`h-9 px-3 rounded-lg text-xs font-bold ${styles.button}`}
+                      className={`h-9 px-3 rounded-lg text-[13px] font-bold ${styles.button}`}
                     >
                       Add Tag
                     </button>
@@ -3001,7 +3206,7 @@ export default function TaskManager({ theme = "light" }) {
                         .map(t => (
                           <span
                             key={t}
-                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[12px] font-bold border ${
                               isDark ? "bg-slate-850 text-slate-300 border-slate-700" : "bg-slate-100 text-slate-700 border-slate-200"
                             }`}
                           >
@@ -3027,14 +3232,14 @@ export default function TaskManager({ theme = "light" }) {
                   <button
                     type="button"
                     onClick={() => setIsModalOpen(false)}
-                    className={`h-10 px-4 rounded-xl border text-sm font-semibold ${styles.button}`}
+                    className={`h-10 px-4 rounded-xl border text-[15px] font-semibold ${styles.button}`}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
                     disabled={submitting || !formData.title.trim()}
-                    className={`flex h-10 items-center gap-1.5 rounded-xl px-5 text-sm font-semibold disabled:opacity-50 ${styles.primaryButton}`}
+                    className={`flex h-10 items-center gap-1.5 rounded-xl px-5 text-[15px] font-semibold disabled:opacity-50 ${styles.primaryButton}`}
                   >
                     {submitting ? (
                       <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />

@@ -89,6 +89,17 @@ const PROPERTY_REQUIREMENT_CONFIG = {
       text("facing"), bool("loanRequired"), bool("semiCommercialPlot"), bool("commercialPlot"),
       bool("gardenFacing"), bool("cornerPlot"), bool("gatedColony"), bool("approvedColony"),
     ],
+    BUNGALOW: [
+      select("bhkType"), number("area"), number("superBuiltUpArea"), number("carpetArea"),
+      select("purpose"), select("bathrooms"), select("numberOfFloors"), number("balconies"), text("facing"),
+      bool("cornerProperty"), bool("privateParking"), bool("garden"), bool("terrace"), bool("servantRoom"),
+      bool("storageRoom"), bool("powerBackup"), bool("gasPipeline"), bool("separateEntry"),
+    ],
+    FARM_HOUSE: [
+      number("landArea"), number("builtUpArea"), select("purpose"), select("bathrooms"), text("facing"),
+      bool("privateParking"), bool("garden"), bool("swimmingPool"), bool("servantRoom"), bool("powerBackup"),
+      bool("waterConnection"), bool("boundaryWall"), date("moveInDate"),
+    ],
     PG_HOSTEL: [
       select("occupancyType"), select("sharingType"), number("numberOfBeds"), number("perBedBudget"),
       bool("foodIncluded"), bool("attachedWashroom"), bool("acRequired"), bool("wifi"),

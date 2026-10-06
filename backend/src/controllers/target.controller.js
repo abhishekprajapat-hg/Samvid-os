@@ -160,6 +160,7 @@ const toUserRef = (userLike) => {
     name: userLike.name || "",
     email: userLike.email || "",
     role: userLike.role || "",
+    profileImageUrl: userLike.profileImageUrl || "",
     roleLabel: ROLE_LABELS[userLike.role] || userLike.role || "",
   };
 };
@@ -202,8 +203,8 @@ const toTargetView = (row, achievements = {}) => {
 
 const buildPopulationQuery = (queryBuilder) =>
   queryBuilder
-    .populate("assignedBy", "_id name email role")
-    .populate("assignedTo", "_id name email role")
+    .populate("assignedBy", "_id name email role profileImageUrl")
+    .populate("assignedTo", "_id name email role profileImageUrl")
     .lean();
 
 const getAssignableUsersForActor = async ({ actor }) => {
@@ -215,7 +216,7 @@ const getAssignableUsersForActor = async ({ actor }) => {
       isActive: true,
       role: { $ne: USER_ROLES.ADMIN },
     })
-      .select("_id name email role parentId")
+      .select("_id name email role parentId profileImageUrl")
       .sort({ name: 1 })
       .lean();
   }
@@ -225,7 +226,7 @@ const getAssignableUsersForActor = async ({ actor }) => {
       rootUserId: actor._id,
       companyId: actor.companyId,
       includeInactive: false,
-      select: "_id name email role parentId companyId isActive",
+      select: "_id name email role parentId companyId isActive profileImageUrl",
     });
     return descendants
       .filter((row) => row.role !== USER_ROLES.ADMIN)
@@ -251,7 +252,7 @@ exports.getMyTargets = async (req, res) => {
       companyId: req.user.companyId,
       isActive: true,
     })
-      .select("_id name email role parentId companyId isActive")
+      .select("_id name email role parentId companyId isActive profileImageUrl")
       .lean();
 
     if (!me) {
@@ -299,7 +300,7 @@ exports.getMyTargets = async (req, res) => {
         _id: { $in: assigneeIds },
         companyId: req.user.companyId,
       })
-        .select("_id name email role parentId companyId isActive")
+        .select("_id name email role parentId companyId isActive profileImageUrl")
         .lean()
       : [];
     const userById = new Map(scopedUsers.map((user) => [String(user._id), user]));
@@ -347,6 +348,7 @@ exports.getMyTargets = async (req, res) => {
         name: row.name,
         email: row.email || "",
         role: row.role,
+        profileImageUrl: row.profileImageUrl || "",
         roleLabel: ROLE_LABELS[row.role] || row.role,
       })),
       myTarget: incoming[0] || null,
@@ -374,7 +376,7 @@ exports.assignTarget = async (req, res) => {
       companyId: req.user.companyId,
       isActive: true,
     })
-      .select("_id name email role parentId companyId isActive")
+      .select("_id name email role parentId companyId isActive profileImageUrl")
       .lean();
     if (!actor) {
       return res.status(404).json({ message: "User not found" });
@@ -424,7 +426,7 @@ exports.assignTarget = async (req, res) => {
       companyId: req.user.companyId,
       isActive: true,
     })
-      .select("_id name email role parentId companyId isActive")
+      .select("_id name email role parentId companyId isActive profileImageUrl")
       .lean();
 
     if (!assignee) {

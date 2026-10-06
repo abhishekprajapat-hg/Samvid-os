@@ -22,35 +22,63 @@ export const CLIENT_KINDS = [
 
 export const ENTITY_TYPES = ["Private Limited", "Limited", "One Person Company", "LLP"];
 
-const COMMON_TENANCY_DOCUMENTS = [
-  { key: "rentAgreement", label: "Rent agreement", required: true },
-  { key: "policeVerification", label: "Police verification", required: true },
-];
+/*
+ * Two people (30 Sep 2026 requirements update).
+ *
+ * An agreement is often signed by two people - two partners, a couple, two
+ * directors - so every client type has room for a second person's Aadhaar, PAN
+ * and police verification, and a company for a second signing authority. Each
+ * document carries a `group` so the checklist can show Person 1 and Person 2
+ * (or Signing authority 1 and 2) as separate blocks.
+ *
+ * Keys of documents that already existed are unchanged, so files already on a
+ * client still line up. Everything for the second person is optional: most
+ * clients have one, and a required second person would mark every existing
+ * client's KYC incomplete overnight.
+ */
+const personDocuments = (person, { panRequired = true, aadhaarHint, panHint } = {}) => {
+  const second = person === 2;
+  const suffix = second ? "2" : "";
+  const group = `Person ${person}`;
+  return [
+    { key: `aadhaar${suffix}`, label: `Aadhaar card - Person ${person}`, hint: aadhaarHint, required: !second, group },
+    { key: `pan${suffix}`, label: `PAN card - Person ${person}`, hint: panHint, required: !second && panRequired, group },
+    { key: `policeVerification${suffix}`, label: `Police verification - Person ${person}`, required: !second, group },
+  ];
+};
+
+const RENT_AGREEMENT = { key: "rentAgreement", label: "Rent agreement", required: true, group: "Agreement" };
 
 export const DOCUMENT_SETS = {
   individual: [
-    { key: "aadhaar", label: "Aadhaar card", required: true },
-    { key: "pan", label: "PAN card", required: true },
-    { key: "photo", label: "Passport size photo", required: true },
-    ...COMMON_TENANCY_DOCUMENTS,
+    ...personDocuments(1),
+    { key: "photo", label: "Passport size photo", required: true, group: "Person 1" },
+    ...personDocuments(2),
+    RENT_AGREEMENT,
   ],
   proprietorship: [
-    { key: "gumasta", label: "Gumasta", hint: "Shop and establishment licence", required: true },
-    { key: "msme", label: "MSME certificate", required: true },
-    { key: "aadhaar", label: "Aadhaar card", hint: "Of the proprietor", required: true },
-    { key: "pan", label: "PAN card", hint: "Of the proprietor", required: true },
-    { key: "photo", label: "Passport size photo", required: true },
-    ...COMMON_TENANCY_DOCUMENTS,
+    { key: "gumasta", label: "Gumasta", hint: "Shop and establishment licence", required: true, group: "Business" },
+    { key: "msme", label: "MSME certificate", required: true, group: "Business" },
+    ...personDocuments(1, { aadhaarHint: "Of the proprietor", panHint: "Of the proprietor" }),
+    { key: "photo", label: "Passport size photo", required: true, group: "Person 1" },
+    ...personDocuments(2, { aadhaarHint: "Partner or co-signatory, if any" }),
+    RENT_AGREEMENT,
   ],
   company: [
-    { key: "coi", label: "COI", hint: "Certificate of incorporation", required: true },
-    { key: "companyPan", label: "Company PAN card", required: true },
-    { key: "gst", label: "GST certificate", hint: "If available", required: false },
-    { key: "signatureAuthority", label: "Signature authority", required: true },
-    { key: "signatureAuthorityAadhaar", label: "Signature authority Aadhaar card", required: true },
-    { key: "photo", label: "Passport size photo", required: true },
-    { key: "authorisationLetter", label: "Authorization letter", required: true },
-    ...COMMON_TENANCY_DOCUMENTS,
+    { key: "coi", label: "COI", hint: "Certificate of incorporation", required: true, group: "Company" },
+    { key: "companyPan", label: "Company PAN card", required: true, group: "Company" },
+    { key: "gst", label: "GST certificate", hint: "If available", required: false, group: "Company" },
+    { key: "authorisationLetter", label: "Authorization letter", required: true, group: "Company" },
+    { key: "signatureAuthority", label: "Signing authority 1 - proof", hint: "Board resolution or authority document", required: true, group: "Signing authority 1" },
+    { key: "signatureAuthorityAadhaar", label: "Aadhaar card - Signing authority 1", required: true, group: "Signing authority 1" },
+    { key: "signatoryPan", label: "PAN card - Signing authority 1", required: false, group: "Signing authority 1" },
+    { key: "policeVerification", label: "Police verification - Signing authority 1", required: true, group: "Signing authority 1" },
+    { key: "photo", label: "Passport size photo", required: true, group: "Signing authority 1" },
+    { key: "signatureAuthority2", label: "Signing authority 2 - proof", hint: "Only if a second person signs", required: false, group: "Signing authority 2" },
+    { key: "signatureAuthorityAadhaar2", label: "Aadhaar card - Signing authority 2", required: false, group: "Signing authority 2" },
+    { key: "signatoryPan2", label: "PAN card - Signing authority 2", required: false, group: "Signing authority 2" },
+    { key: "policeVerification2", label: "Police verification - Signing authority 2", required: false, group: "Signing authority 2" },
+    RENT_AGREEMENT,
   ],
 };
 
@@ -237,6 +265,7 @@ export const attachFile = (doc, file) => {
     id,
     key: doc.key,
     label: doc.label,
+    url: null,
     fileName: file.name,
     size: file.size,
     type: file.type,

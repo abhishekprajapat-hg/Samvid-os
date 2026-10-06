@@ -3,6 +3,7 @@ const router = express.Router();
 
 const userController = require("../controllers/user.controller");
 const authMiddleware = require("../middleware/auth.middleware");
+const { requirePageAction } = require("../middleware/pageAccess.middleware");
 const { writeLimiter } = require("../middleware/rateLimit.middleware");
 
 router.get(
@@ -60,6 +61,7 @@ router.patch(
   "/profile",
   writeLimiter,
   authMiddleware.protect,
+  requirePageAction("edit", "profile"),
   userController.updateMyProfile
 );
 

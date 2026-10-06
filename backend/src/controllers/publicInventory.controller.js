@@ -20,14 +20,37 @@ const signMediaUrls = (safe) => {
   return safe;
 };
 
+// Internal brokerage details a client must never see on a shared page, even if
+// a field is later added to the allowlist by mistake: which building it is,
+// the office/unit number, which floor, and anything about the owner.
+// towerName is filled from the building name by the inventory form, and
+// unitNumber can hold the real office number on older records.
+const CLIENT_HIDDEN_FIELDS = new Set([
+  "buildingName",
+  "towerName",
+  "officeNumber",
+  "unitNumber",
+  "floorNumber",
+  "ownerName",
+  "ownerNumber",
+  "ownerWhatsappNumber",
+  "ownerContactId",
+  "ownerType",
+  "keyManagerName",
+  "keyManagerNumber",
+]);
+
+// subtypeData is free-form and can carry plot numbers or similar identifiers;
+// the shared page does not show it, so it is not sent at all.
+const HIDDEN_DETAIL_KEYS = ["subtypeData"];
+
 const CLIENT_SAFE_FIELDS = [
   "_id",
   "projectName",
-  "towerName",
-  "unitNumber",
   "propertyId",
   "inventoryType",
   "price",
+  "rent",
   "deposit",
   "type",
   "category",
@@ -37,8 +60,6 @@ const CLIENT_SAFE_FIELDS = [
   "city",
   "area",
   "pincode",
-  "buildingName",
-  "floorNumber",
   "totalFloors",
   "totalArea",
   "carpetArea",
@@ -63,18 +84,27 @@ const toClientSafeView = (inventory) => {
 
   const safe = {};
   CLIENT_SAFE_FIELDS.forEach((field) => {
+    if (CLIENT_HIDDEN_FIELDS.has(field)) return;
     if (inventory[field] !== undefined) {
       safe[field] = inventory[field];
     }
   });
 
-  const titleParts = [inventory.projectName, inventory.towerName, inventory.unitNumber]
-    .map((v) => String(v || "").trim())
-    .filter(Boolean);
-  safe.title = titleParts.join(" - ") || "Property";
+  ["commercialDetails", "residentialDetails"].forEach((key) => {
+    if (!safe[key] || typeof safe[key] !== "object") return;
+    const details = { ...safe[key] };
+    HIDDEN_DETAIL_KEYS.forEach((hidden) => { delete details[hidden]; });
+    safe[key] = details;
+  });
+
+  // The title is built only from the listing name, never the building,
+  // tower or unit, so the heading cannot give the building away.
+  safe.title = String(inventory.projectName || "").trim() || "Property";
 
   return signMediaUrls(safe);
 };
+
+exports.toClientSafeView = toClientSafeView;
 
 exports.getSharedInventory = async (req, res) => {
   try {

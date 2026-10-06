@@ -22,6 +22,7 @@ import { formatDateTime } from "../../utils/date";
 import { updateCallLog } from "../../services/chatService";
 import type { ChatContact, ChatConversation } from "../../types";
 import { themedStyles, themeColor } from "../../theme/themedStyles";
+import { toAbsoluteUrl } from "../../services/uploadService";
 
 const initials = (name: string) =>
   (name || "")
@@ -217,7 +218,7 @@ export const TeamChatScreen = () => {
     if (person?.avatarUrl) {
       return (
         <Image
-          source={{ uri: person.avatarUrl }}
+          source={{ uri: toAbsoluteUrl(String(person.avatarUrl)) }}
           style={{ width: size, height: size, borderRadius: size / 2 }}
         />
       );
