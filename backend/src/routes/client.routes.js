@@ -29,5 +29,6 @@ router.use("/push", require("./push.routes"));
 router.use("/tasks", require("./task.routes"));
 router.use("/coworking", require("./coworkingAccess.routes"));
 router.use("/access", require("./accessControl.routes"));
+router.use('/billing', require('./billstack.routes'));
 
 module.exports = router;

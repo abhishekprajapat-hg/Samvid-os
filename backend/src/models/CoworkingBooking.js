@@ -8,6 +8,7 @@ const {
 
 const coworkingBookingSchema = new mongoose.Schema(
   {
+    billstackSyncPending: { type: Boolean, default: false },
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       required: true,

@@ -32,6 +32,8 @@ const userSchema = new mongoose.Schema(
     // The company-defined role this user was given, if any. Their role,
     // roleType and pageAccessOverride are copied from it on assignment.
     customRoleId: { type: mongoose.Schema.Types.ObjectId, ref: "CustomRole", default: null },
+    // Sparse page actions overlay the existing defaults/full override.
+    pageActionOverrides: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
     name: {
       type: String,
       required: true,

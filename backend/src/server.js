@@ -226,6 +226,7 @@ const startAttendanceViolationSweep = () => {
 };
 const bootstrap = async () => {
   await connectDB();
+  require('./services/billstackSync.service').startWorker();
   startAttendanceAutoCheckoutSweep();
   startAttendanceViolationSweep();
   startBookingExpirySweep();

@@ -168,7 +168,10 @@ const updateClient = async ({ companyId, clientId, payload, actingUser }) => {
   }
 
   Object.assign(client, safePayload, { updatedBy: actingUser._id });
+  const needsBillingUpdate = (Boolean(client.billstack?.customerId) || ['PENDING', 'FAILED'].includes(client.billstack?.syncStatus)) && require('../config/billstack').isBillstackEnabled(companyId);
+  if (needsBillingUpdate) client.set('billstack.syncStatus', 'PENDING');
   await client.save();
+  if (needsBillingUpdate) await require('./billstackSync.service').scheduleSafely(companyId, 'coworking-client', client._id);
 
   await writeAuditLog({
     companyId,

@@ -5,6 +5,12 @@ const loggerOptions = {
   timestamp: pino.stdTimeFunctions.isoTime,
   redact: {
     paths: [
+      'req.headers["x-billstack-api-key"]',
+      'headers["X-Billstack-Api-Key"]',
+      'headers["x-billstack-api-key"]',
+      'config.headers["X-Billstack-Api-Key"]',
+      'handoffUrl',
+      'apiKey',
       "req.headers.authorization",
       "headers.authorization",
       "password",

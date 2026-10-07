@@ -38,6 +38,7 @@ const statusOf = (server, path) =>
 // One representative GET per router. Each is behind protect, so an existing
 // route answers 401 rather than 404.
 const ROUTES = [
+  '/billing/lead/111111111111111111111111',
   "/access/me",
   "/access/users/111111111111111111111111/pages",
   "/saas/companies",

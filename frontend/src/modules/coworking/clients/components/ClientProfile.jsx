@@ -1,4 +1,5 @@
 import React from "react";
+import BillstackSection from '../../../../components/billing/BillstackSection';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -81,6 +82,7 @@ const ClientProfile = ({ client, onOpenCabin, onRecordPayment, onDocumentsChange
 
   return (
     <div className="custom-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+      {client.cabins?.some(cabin => cabin.status === 'BOOKED') && <BillstackSection key={client.id} entityType="board" entityId={client.cabins.find(cabin => cabin.status === 'BOOKED').code} />}
       <header className="flex items-start gap-3">
         <span
           className={cn(

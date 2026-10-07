@@ -67,32 +67,77 @@ exports.handle = (update = false) => async (req, res) => {
       if (entries?.some((entry) => !entry)) {
         return res.status(400).json({ message: "Choose valid pages and actions or use role defaults" });
       }
-      const nextOverride = entries === null
+      const billingPatch = req.body?.scope === "billing"
+        || (hasActionPayload && entries?.length > 0 && entries.every((entry) => entry.pageKey === "billing"));
+      let before;
+      let after;
+      if (billingPatch) {
+        if (!hasActionPayload || entries === null || entries.some((entry) => entry.pageKey !== "billing")) {
+          return res.status(403).json({ message: "Billing updates may change Billing access only" });
+        }
+        const actions = [...new Set(entries.flatMap((entry) => ["view", ...entry.actions]))];
+        if (!isAdmin(req.user)) {
+          const team = await require("../services/hierarchy.service").getDescendantUsers({
+            rootUserId: req.user._id,
+            companyId: req.user.companyId,
+          });
+          if (!team.some((member) => String(member._id) === String(user._id))) {
+            return res.status(403).json({ message: "Managers can grant Billing only to employees in their reporting team" });
+          }
+          const actorAccess = await resolveAccessProfile(req.user);
+          if (actions.some((action) => !actorAccess.permissions.includes(`page.billing.${action}`))) {
+            return res.status(403).json({ message: "You cannot grant Billing actions you do not hold" });
+          }
+        }
+        before = user.pageActionOverrides?.billing ?? null;
+        await User.updateOne(
+          { _id: user._id, companyId: req.user.companyId },
+          { $set: { "pageActionOverrides.billing": actions } },
+        );
+        user.pageActionOverrides = { ...user.pageActionOverrides, billing: actions };
+        after = actions;
+      } else {
+        const nextOverride = entries === null
         ? null
         : (hasActionPayload
           ? [...new Map(entries.map((entry) => [entry.pageKey, entry])).values()]
           : [...new Set(entries)]);
-
-      if (!isAdmin(req.user)) {
-        // Compare what the employee would reach with what they reach today:
-        // only the additions are grants, and those must pass the same checks
-        // as a role edit - held by the Manager, not protected, not a delete.
-        const [current, next] = await Promise.all([
-          resolveAccessProfile(user),
-          resolveAccessProfile({ ...user.toObject(), pageAccessOverride: nextOverride }),
-        ]);
-        await assertGrantablePermissions({
-          actor: req.user,
-          permissions: toPagePermissions(next.pages),
-          existing: toPagePermissions(current.pages),
-        });
+        if (!isAdmin(req.user)) {
+          const [current, next] = await Promise.all([
+            resolveAccessProfile(user),
+            resolveAccessProfile({
+              ...(typeof user.toObject === "function" ? user.toObject() : user),
+              pageAccessOverride: nextOverride,
+              pageActionOverrides: {},
+            }),
+          ]);
+          const currentPermissions = toPagePermissions(current.pages);
+          const nextPermissions = toPagePermissions(next.pages);
+          await assertGrantablePermissions({
+            actor: req.user,
+            permissions: nextPermissions,
+            existing: currentPermissions,
+          });
+          const newlyGrantedBilling = nextPermissions.some((permission) =>
+            permission.startsWith("page.billing.") && !currentPermissions.includes(permission));
+          if (newlyGrantedBilling) {
+            const team = await require("../services/hierarchy.service").getDescendantUsers({
+              rootUserId: req.user._id,
+              companyId: req.user.companyId,
+            });
+            if (!team.some((member) => String(member._id) === String(user._id))) {
+              return res.status(403).json({ message: "Managers can grant Billing only to employees in their reporting team" });
+            }
+          }
+        }
+        before = { pageAccessOverride: user.pageAccessOverride, pageActionOverrides: user.pageActionOverrides };
+        user.pageAccessOverride = nextOverride;
+        user.pageActionOverrides = {};
+        await user.save();
+        after = { pageAccessOverride: nextOverride, pageActionOverrides: {} };
       }
-
-      const before = user.pageAccessOverride;
-      user.pageAccessOverride = nextOverride;
-      await user.save();
       invalidateAccessCache();
-      await writeAuditLog({ companyId: req.user.companyId, actor: req.user, action: "USER_PAGE_ACCESS_UPDATED", entityType: "User", entityId: user._id, metadata: { before, after: user.pageAccessOverride }, req });
+      await writeAuditLog({ companyId: req.user.companyId, actor: req.user, action: "USER_PAGE_ACCESS_UPDATED", entityType: "User", entityId: user._id, metadata: { before, after, scope: billingPatch ? "billing" : "all" }, req });
     }
     const access = await resolveAccessProfile(user);
     return res.json({
@@ -109,6 +154,7 @@ exports.handle = (update = false) => async (req, res) => {
       currentDeleteGrants: deleteGrantsOf(access.pages),
       // A Manager's "Delete" is a request an Admin approves.
       deleteNeedsApproval: user.role === USER_ROLES.MANAGER,
+      billingOnly: false,
     });
   } catch (error) {
     if (error.statusCode) return res.status(error.statusCode).json({ message: error.message });

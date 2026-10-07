@@ -11,9 +11,15 @@ const PAGE_ACTIONS = Object.freeze({
   APPROVE: "approve",
   ASSIGN: "assign",
   FOLLOW_UP: "follow_up",
+  CREATE_INVOICE: "create_invoice",
+  SYNC_CUSTOMER: "sync_customer",
 });
 
 const CRM_PAGES = Object.freeze([
+  {
+    key: 'billing', label: 'Billing', group: 'Business', path: '/leads',
+    actions: [PAGE_ACTIONS.VIEW, PAGE_ACTIONS.CREATE_INVOICE, PAGE_ACTIONS.SYNC_CUSTOMER],
+  },
   {
     key: "dashboard",
     label: "Dashboard",

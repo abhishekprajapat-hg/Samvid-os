@@ -231,8 +231,10 @@ const activateContract = async ({ companyId, contractId, actingUser }) => {
   await cabin.save();
 
   contract.status = "ACTIVE";
+  contract.billstackSyncPending = require('../config/billstack').isBillstackEnabled(companyId);
   contract.updatedBy = actingUser._id;
   await contract.save();
+  await require('./billstackSync.service').scheduleStructuredSafely('contract', contract);
 
   await writeAuditLog({
     companyId,
