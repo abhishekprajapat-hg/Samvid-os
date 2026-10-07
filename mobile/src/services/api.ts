@@ -128,3 +128,17 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+/*
+ * Where the web app lives, for links that are meant to be opened in a browser
+ * rather than called as an API - a share link, a legal page.
+ *
+ * Web gets this free from window.location.origin. A native app has no origin,
+ * so it is derived from the API base by dropping the /api suffix, with an
+ * explicit override for deployments where the two differ.
+ */
+export const getWebAppOrigin = () => {
+  const explicit = String(process.env.EXPO_PUBLIC_WEB_APP_URL || "").trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  return String(API_BASE_URL || "").replace(/\/api\/?$/, "");
+};

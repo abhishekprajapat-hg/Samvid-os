@@ -14,3 +14,5 @@ export { default as Skeleton } from "./Skeleton";
 export { default as Tabs, TabButton } from "./Tabs";
 export { default as Tooltip } from "./Tooltip";
 export { cn } from "./utils";
+export { default as AvatarFace } from "./AvatarFace";
+export { getNameInitials, getProfileImageUrl } from "./avatarUtils";

@@ -69,9 +69,23 @@ foreach ($port in @(5000, 5173)) {
   $lines = netstat -ano | findstr LISTENING | findstr ":$port "
   foreach ($line in $lines) {
     $procId = ($line -split "\s+")[-1]
-    if ($procId -match "^\d+$") {
+    if ($procId -match "^\d+$" -and $procId -ne "0") {
+      # /T also ends the npm/nodemon parent, which otherwise restarts node.
+      # taskkill writes to stderr when a child is already gone; with
+      # ErrorActionPreference=Stop that used to abort the whole restart.
+      try { taskkill /PID $procId /T /F 2>$null | Out-Null } catch { }
       Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
     }
+  }
+}
+
+Start-Sleep -Seconds 2
+foreach ($port in @(5000, 5173)) {
+  if (Test-LocalPort -HostName "127.0.0.1" -Port $port) {
+    Write-Warning "Port $port is still in use, so the new server cannot start and the OLD code keeps running."
+    Write-Warning "Close that server's window, or run this script as Administrator, then run it again."
+    Read-Host "Press Enter to exit"
+    exit 1
   }
 }
 
@@ -80,7 +94,7 @@ Start-Process -FilePath powershell -ArgumentList @(
   "-NoProfile",
   "-NoExit",
   "-Command",
-  "cd `"$($root)\backend`"; npm run start"
+  "cd `"$($root)\backend`"; npm run start 2>&1 | Tee-Object -FilePath `"$($root)\backend-start.log`""
 ) -WorkingDirectory (Join-Path $root "backend")
 
 Start-Sleep -Seconds 3

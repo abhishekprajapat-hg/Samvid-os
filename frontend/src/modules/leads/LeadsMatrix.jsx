@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence } from "framer-motion";
+import { Search as SearchIcon } from "lucide-react";
+import { EmptyState } from "../../components/ui";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   getLeadPool,
@@ -14,7 +16,9 @@ import {
   getLeadActivity,
   getLeadDiary,
   addLeadDiaryEntry,
+  deleteLead,
 } from "../../services/leadService";
+import { deleteOutcomeMessage, isDeleteApprovalPending } from "../../services/deleteRequestService";
 import {
   getInventoryAssets,
 } from "../../services/inventoryService";
@@ -176,7 +180,10 @@ const defaultFormData = {
   clientProfession: "",
   siteLat: "",
   siteLng: "",
+  company: "",
+  sourceChannel: "",
   requirementsInventoryType: "",
+  requirementsCoworking: {},
   requirementsPropertySubtype: "",
   requirementsSubtypeData: {},
   requirementsTransactionType: "",
@@ -295,6 +302,36 @@ const toPreferredLocationsList = (value) => {
     .slice(0, 20);
 };
 
+/*
+ * A coworking enquiry, read off a lead and written back.
+ *
+ * Cabins are a list of seat counts, one entry per cabin, because a client
+ * commonly takes a four-seater and a six-seater together - a single size times
+ * a count could not express that. Zero-seat entries are dropped rather than
+ * kept, so a half-filled row cannot travel back to the server.
+ */
+const toCoworkingDraft = (coworking = {}) => ({
+  cabins: (Array.isArray(coworking?.cabins) ? coworking.cabins : [])
+    .map((cabin) => ({ seats: Number(cabin?.seats) || 0 }))
+    .filter((cabin) => cabin.seats > 0),
+  workstations: coworking?.workstations ?? null,
+  depositMonths: coworking?.depositMonths ?? null,
+  agreedRent: coworking?.agreedRent ?? null,
+  noticePeriodMonths: coworking?.noticePeriodMonths ?? null,
+  lockInMonths: coworking?.lockInMonths ?? null,
+});
+
+const toCoworkingPayload = (draft = {}) => ({
+  cabins: (Array.isArray(draft?.cabins) ? draft.cabins : [])
+    .map((cabin) => ({ seats: toAmountNumber(cabin?.seats) }))
+    .filter((cabin) => cabin.seats !== null && cabin.seats > 0),
+  workstations: toAmountNumber(draft?.workstations),
+  depositMonths: toAmountNumber(draft?.depositMonths),
+  agreedRent: toAmountNumber(draft?.agreedRent),
+  noticePeriodMonths: toAmountNumber(draft?.noticePeriodMonths),
+  lockInMonths: toAmountNumber(draft?.lockInMonths),
+});
+
 const mapLeadRequirementsToDraft = (requirements = {}) => {
   const base = createDefaultLeadRequirementsDraft();
   const commercial = requirements?.commercial || {};
@@ -314,6 +351,7 @@ const mapLeadRequirementsToDraft = (requirements = {}) => {
     areaMin: "",
     areaMax: "",
     areaUnit: base.areaUnit,
+    coworking: toCoworkingDraft(requirements?.coworking),
     commercial: {
       seats: toRequirementDraftText(commercial?.seats),
       cabins: toRequirementDraftText(commercial?.cabins),
@@ -368,7 +406,7 @@ const buildLeadRequirementsPayloadFromDraft = (draft = {}) => {
     inventoryType: String(draft?.inventoryType || "").trim().toUpperCase(),
     propertySubtype,
     subtypeData: sanitizeRequirementSubtypeData(draft?.subtypeData),
-    transactionType: toRequirementTransactionType(draft?.transactionType),
+    transactionType: toLeadDealType(draft?.transactionType, draft?.inventoryType, propertySubtype),
     furnishingStatus: String(draft?.furnishingStatus || "").trim().toUpperCase(),
     budgetMin: toAmountNumber(draft?.budgetMin),
     budgetMax: toAmountNumber(draft?.budgetMax),
@@ -376,6 +414,11 @@ const buildLeadRequirementsPayloadFromDraft = (draft = {}) => {
     areaMax: null,
     areaUnit: null,
   };
+
+  if (payload.inventoryType === "COWORKING") {
+    payload.coworking = toCoworkingPayload(draft?.coworking);
+    return payload;
+  }
 
   if (propertySubtype) return payload;
 
@@ -439,16 +482,24 @@ const getStoredUserRoleType = () => {
   try {
     const parsedUser = JSON.parse(localStorage.getItem("user") || "{}");
     const normalized = String(parsedUser?.roleType || "").trim().toUpperCase();
-    return ["RESIDENTIAL", "BOTH"].includes(normalized) ? normalized : "COMMERCIAL";
+    return ["RESIDENTIAL", "BOTH", "COWORKING"].includes(normalized) ? normalized : "COMMERCIAL";
   } catch {
     return "COMMERCIAL";
   }
 };
 
-const getDefaultFormDataForRoleType = () => ({
-  ...defaultFormData,
-  requirementsInventoryType: getStoredUserRoleType() === "RESIDENTIAL" ? "RESIDENTIAL" : "COMMERCIAL",
-});
+/*
+ * Open the form on the category the user actually works in. Anything else is
+ * rejected by the server for a single-category user, so defaulting a coworking
+ * executive to COMMERCIAL would have made every lead they filed fail.
+ */
+const getDefaultFormDataForRoleType = () => {
+  const roleType = getStoredUserRoleType();
+  return {
+    ...defaultFormData,
+    requirementsInventoryType: ["RESIDENTIAL", "COWORKING"].includes(roleType) ? roleType : "COMMERCIAL",
+  };
+};
 
 const getInventoryLeadSearchText = (inventoryLike = {}) => {
   const commercialLayout = inventoryLike?.commercialDetails?.officeLayout || {};
@@ -476,6 +527,32 @@ const getInventoryLeadSearchText = (inventoryLike = {}) => {
     .map((value) => String(value || "").trim())
     .filter(Boolean)
     .join(" ");
+};
+
+/**
+ * Deal type the lead can actually hold: Rent only for homes (not plots),
+ * commercial rentals are a Lease, and coworking is never a purchase.
+ */
+const toLeadDealType = (value, inventoryType, propertySubtype) => {
+  const dealType = toRequirementTransactionType(value);
+  const type = String(inventoryType || "").trim().toUpperCase();
+  const subtype = String(propertySubtype || "").trim().toUpperCase();
+  if (dealType === "RENT" && !(type === "RESIDENTIAL" && subtype !== "PLOT")) return "LEASE";
+  if (dealType === "SALE" && type === "COWORKING") return "LEASE";
+  return dealType;
+};
+
+const LEAD_PHONE_ERROR = "Enter a valid phone number: a 10-digit mobile, or country code + number";
+
+/** Same rule as the server: 10-digit Indian number (+91 / 0 allowed) or country code + number, max 15 digits. */
+const isValidLeadPhone = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw || !/^[0-9+().\-\s]+$/.test(raw)) return false;
+  let digits = raw.replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  return digits.length >= 10 && digits.length <= 15;
 };
 
 const toRequirementTransactionType = (value) => {
@@ -617,6 +694,9 @@ const mapLeadToFormData = (lead = {}) => {
       : "",
     projectInterested: String(lead?.projectInterested || ""),
     clientProfession: String(lead?.clientProfession || ""),
+    company: String(lead?.company || ""),
+    sourceChannel: String(lead?.sourceChannel || ""),
+    requirementsCoworking: toCoworkingDraft(lead?.requirements?.coworking),
     siteLat: siteLat === null ? "" : String(siteLat),
     siteLng: siteLng === null ? "" : String(siteLng),
     requirementsInventoryType: requirements.inventoryType,
@@ -785,6 +865,32 @@ const toAmountNumber = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+/*
+ * The coworking half of a lead payload.
+ *
+ * Shared because this file builds the lead payload in two places - the add
+ * modal and buildLeadFormPayload - and a coworking enquiry saved from one but
+ * not the other would lose its cabins depending on which button was pressed.
+ *
+ * Cabins are sent as a list of seat counts, one entry per cabin: a client
+ * commonly takes a four-seater and a six-seater together, which a single size
+ * multiplied by a count could not express.
+ */
+const applyCoworkingLeadFields = (payload, formData = {}) => {
+  payload.company = String(formData.company || "").trim();
+  payload.sourceChannel = String(formData.sourceChannel || "").trim().toUpperCase();
+
+  if (!payload.requirements || payload.requirements.inventoryType !== "COWORKING") return payload;
+
+  payload.requirements.coworking = toCoworkingPayload(formData.requirementsCoworking);
+
+  // Coworking has no property subtype, so the blank-subtype branch above would
+  // otherwise attach empty commercial and residential blobs to the enquiry.
+  delete payload.requirements.commercial;
+  delete payload.requirements.residential;
+  return payload;
+};
+
 const buildLeadFormPayload = (formData = {}) => {
   const payload = {
     name: String(formData.name || "").trim(),
@@ -813,7 +919,7 @@ const buildLeadFormPayload = (formData = {}) => {
       inventoryType: String(formData.requirementsInventoryType || "").trim().toUpperCase(),
       propertySubtype,
       subtypeData: sanitizeRequirementSubtypeData(formData.requirementsSubtypeData),
-      transactionType: toRequirementTransactionType(formData.requirementsTransactionType),
+      transactionType: toLeadDealType(formData.requirementsTransactionType, formData.requirementsInventoryType, propertySubtype),
       furnishingStatus: String(formData.requirementsFurnishingStatus || "").trim().toUpperCase(),
       budgetMin: toAmountNumber(formData.requirementsBudgetMin),
       budgetMax: toAmountNumber(formData.requirementsBudgetMax),
@@ -863,6 +969,8 @@ const buildLeadFormPayload = (formData = {}) => {
       };
     }
   }
+
+  applyCoworkingLeadFields(payload, formData);
 
   return {
     payload,
@@ -1017,7 +1125,8 @@ const resolveLeadCsvHeaderKey = (rawHeader) => {
   if (["requirement", "requirment", "requiremnt", "requiremewnt"].includes(normalized)) return "requirement";
   if (["projectname"].includes(normalized)) return "projectName";
   if (["comment", "comments", "remark", "remarks", "feedback"].includes(normalized)) return "comment";
-  if (["company", "companyname", "working", "business", "workprofile"].includes(normalized)) return "company";
+  if (["workprofile", "profession", "occupation", "clientprofession"].includes(normalized)) return "workProfile";
+  if (["company", "companyname", "working", "business"].includes(normalized)) return "company";
   if (["status", "leadstatus", "leadstutas", "leadstutus"].includes(normalized)) return "status";
   if (["date", "leaddate"].includes(normalized)) return "date";
   if (["followup", "followup2", "followupdate", "followupdate2"].includes(normalized)) return "followUp";
@@ -1109,7 +1218,7 @@ const buildBulkLeadProjectSummary = (row) => {
     transactionType ? `Transaction: ${transactionType}` : "",
     row.city ? `Location: ${row.city}` : "",
     row.budget ? `Budget: ${row.budget}` : "",
-    row.company ? `Work Profile: ${row.company}` : "",
+    row.company ? `Company: ${row.company}` : "",
     row.callUpdate ? `Call Update: ${row.callUpdate}` : "",
     row.comment ? `Comment: ${row.comment}` : "",
     row.visit ? `Visit: ${row.visit}` : "",
@@ -1269,6 +1378,7 @@ const normalizeBulkLeadRow = ({ rawRow, mappedHeaders, sheetName = "", sheetType
     email: row.email || "",
     city: row.city || "",
     projectInterested,
+    clientProfession: normalizeBulkCellText(row.workProfile).slice(0, 120),
     requirements,
     source: sourceText.includes("META") ? "META" : "MANUAL",
     status: resolveBulkLeadStatus({ sheetName, row }),
@@ -1634,6 +1744,10 @@ const LeadsMatrix = () => {
     userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole) || isExecutiveUser;
   const canAssignLeadByRole = MANUAL_LEAD_TRANSFER_ACTOR_ROLES.includes(userRole);
   const canEditLead = canPageAction(currentPageKey, "edit");
+  // Same gate as the API: Admin deletes, Manager requests Admin approval, and
+  // anyone else only with an explicit Delete grant from an Admin.
+  const canDeleteLead = canPageAction(currentPageKey, "delete")
+    && (["ADMIN", "MANAGER"].includes(userRole) || enforcePageAccess);
   const canExportLeads = canPageAction(currentPageKey, "export");
   const canFollowUpLead = canPageAction(currentPageKey, "follow_up");
   const canAddLeadByPage = canPageAction(currentPageKey, "create");
@@ -1647,27 +1761,64 @@ const LeadsMatrix = () => {
   const canConfigureSiteLocation =
     userRole === "ADMIN" || MANAGEMENT_ROLES.includes(userRole);
   const canReviewDealPayment = userRole === "ADMIN";
-  const availableLeadInventoryTypes = useMemo(
-    () =>
-      canChooseLeadRoleType
-        ? [
-          { label: "Commercial", value: "COMMERCIAL" },
-          { label: "Residential", value: "RESIDENTIAL" },
-        ]
-        : [{ label: userRoleType === "RESIDENTIAL" ? "Residential" : "Commercial", value: userRoleType }],
-    [canChooseLeadRoleType, userRoleType],
-  );
-  const defaultBulkUploadSheetType = availableLeadInventoryTypes[0]?.value || DEFAULT_BULK_LEAD_SHEET_TYPE;
+  const availableLeadInventoryTypes = useMemo(() => {
+    const labels = { COMMERCIAL: "Commercial", RESIDENTIAL: "Residential", COWORKING: "Coworking" };
+    /*
+     * An Admin and an "All categories" user work every pipeline.
+     *
+     * Both are unscoped on the server - addLeadRoleTypeScope and
+     * assertLeadTypeMatchesUser return early for each of them - so offering
+     * an All-categories user only commercial and residential hid a pipeline
+     * they could already see, file into and be assigned from. Anyone tied to
+     * a single category gets that one and no other.
+     */
+    if (canChooseLeadRoleType) {
+      return ["COMMERCIAL", "RESIDENTIAL", "COWORKING"].map((value) => ({ label: labels[value], value }));
+    }
+    return [{ label: labels[userRoleType] || labels.COMMERCIAL, value: userRoleType }];
+  }, [canChooseLeadRoleType, userRoleType]);
+
+  /*
+   * Bulk upload reads a commercial or residential sheet; there is no coworking
+   * template. Kept as its own list so a coworking user's single lead category
+   * cannot become the sheet type and quietly file commercial rows the server
+   * then refuses.
+   */
+  /*
+   * Editing a lead has to be able to show the type the lead already is.
+   *
+   * A "Both" user is scoped to commercial and residential for new leads, but
+   * can see and open a coworking one - and a select whose value matches none
+   * of its options renders blank, so the field looked unset and one stray
+   * click silently reclassified the enquiry. The lead's own type is carried
+   * as an option for as long as that lead is open.
+   */
+  const editLeadInventoryTypes = useMemo(() => {
+    const current = String(formData.requirementsInventoryType || "").trim().toUpperCase();
+    if (!current || availableLeadInventoryTypes.some((option) => option.value === current)) {
+      return availableLeadInventoryTypes;
+    }
+    const labels = { COMMERCIAL: "Commercial", RESIDENTIAL: "Residential", COWORKING: "Coworking" };
+    return [...availableLeadInventoryTypes, { label: labels[current] || current, value: current }];
+  }, [availableLeadInventoryTypes, formData.requirementsInventoryType]);
+
+  const availableBulkSheetTypes = useMemo(() => {
+    const parsable = availableLeadInventoryTypes.filter(
+      (option) => Object.values(BULK_LEAD_SHEET_TYPES).includes(option.value),
+    );
+    return parsable.length ? parsable : [{ label: "Commercial", value: DEFAULT_BULK_LEAD_SHEET_TYPE }];
+  }, [availableLeadInventoryTypes]);
+  const defaultBulkUploadSheetType = availableBulkSheetTypes[0]?.value || DEFAULT_BULK_LEAD_SHEET_TYPE;
 
   useEffect(() => {
-    const allowedSheetTypes = new Set(availableLeadInventoryTypes.map((option) => option.value));
+    const allowedSheetTypes = new Set(availableBulkSheetTypes.map((option) => option.value));
     if (!allowedSheetTypes.has(bulkUploadSheetType)) {
       setBulkUploadSheetType(defaultBulkUploadSheetType);
       setBulkUploadParsedRows(null);
       setBulkUploadText("");
       setBulkUploadFileName("");
     }
-  }, [availableLeadInventoryTypes, bulkUploadSheetType, defaultBulkUploadSheetType]);
+  }, [availableBulkSheetTypes, bulkUploadSheetType, defaultBulkUploadSheetType]);
 
   useEffect(() => {
     if (!error) return undefined;
@@ -1772,6 +1923,7 @@ const LeadsMatrix = () => {
           "propertyId",
           "inventoryType",
           "price",
+          "rent",
           "type",
           "category",
           "furnishingStatus",
@@ -1811,12 +1963,6 @@ const LeadsMatrix = () => {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  useEffect(() => {
-    if (success) {
-      const timer = setTimeout(() => setSuccess(""), 1600);
-      return () => clearTimeout(timer);
-    }
-  }, [success]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -2261,8 +2407,41 @@ const LeadsMatrix = () => {
   const leadTotalCount =
     leadPagination?.totalItems ?? leadPagination?.total ?? leadPagination?.totalCount ?? 0;
 
+  /*
+   * The table's fallback empty state was written for the "Needs action" view
+   * ("Every live lead here has a follow-up in the future"), but it was shown for
+   * every empty result - so a search that matched nothing told the user their
+   * follow-ups were all scheduled. Say what actually happened instead.
+   */
+  const hasNarrowedLeads = Boolean(
+    query.trim()
+    || statusFilter !== "ALL"
+    || propertySubtypeFilter
+    || Object.values(advancedFilters).some(Boolean),
+  );
+
+  const pipelineEmptyState = hasNarrowedLeads ? (
+    <EmptyState
+      icon={SearchIcon}
+      title="No leads match these filters"
+      description={
+        query.trim()
+          ? `Nothing matched "${query.trim()}". Try a different name, phone number or project.`
+          : "No lead matches the filters you have applied. Clear or widen them to see more."
+      }
+      actionLabel="Clear all filters"
+      onAction={() => {
+        setQuery("");
+        setAdvancedFilters({});
+        setStatusFilter("ALL");
+        setPropertySubtypeFilter("");
+      }}
+    />
+  ) : undefined;
+
   const pipelineListProps = {
     leads: filteredLeads,
+    emptyState: pipelineEmptyState,
     loading,
     nowMs,
     showAssigned: canAssignLead,
@@ -2419,17 +2598,22 @@ const LeadsMatrix = () => {
       const inventorySiteLat = toCoordinateNumber(selectedInventory?.siteLocation?.lat);
       const inventorySiteLng = toCoordinateNumber(selectedInventory?.siteLocation?.lng);
       const inventoryType = String(selectedInventory?.inventoryType || "").trim().toUpperCase();
-      const transactionType = toRequirementTransactionType(selectedInventory?.type);
+      const listingType = String(selectedInventory?.type || "").trim().toUpperCase();
       const price = toAmountNumber(selectedInventory?.price);
+      const rent = toAmountNumber(selectedInventory?.rent);
       const commercialLayout = selectedInventory?.commercialDetails?.officeLayout || {};
       const commercialAmenities = selectedInventory?.commercialDetails?.amenities || {};
       const commercialBuilding = selectedInventory?.commercialDetails?.buildingDetails || {};
       const residentialDetails = selectedInventory?.residentialDetails || {};
       const residentialAmenities = residentialDetails?.amenities || {};
-      const propertySubtype =
+      // Inventory stores FLAT / HOUSE; the lead form calls them APARTMENT / INDEPENDENT_HOUSE.
+      const rawInventorySubtype =
         inventoryType === "COMMERCIAL"
           ? String(selectedInventory?.commercialDetails?.officeType || "").trim().toUpperCase()
           : String(residentialDetails?.propertyType || "").trim().toUpperCase();
+      const propertySubtype = inventoryType === "RESIDENTIAL"
+        ? ({ FLAT: "APARTMENT", HOUSE: "INDEPENDENT_HOUSE" }[rawInventorySubtype] || rawInventorySubtype)
+        : rawInventorySubtype;
       const commercialSeats = toAmountNumber(commercialLayout?.seats);
       const commercialCabins = toAmountNumber(commercialLayout?.totalCabins);
       const commercialConferenceRooms = toAmountNumber(commercialLayout?.conferenceRooms);
@@ -2438,82 +2622,117 @@ const LeadsMatrix = () => {
       const residentialFloor = toAmountNumber(selectedInventory?.floorNumber);
       const residentialParking = toAmountNumber(residentialDetails?.parking);
 
+      // Deal type a lead for this listing would have. Commercial rentals are a
+      // lease (the commercial dropdown has no "Rent"); Sale & Rent is left to the user.
+      let inventoryTransactionType = "";
+      if (listingType === "SALE") inventoryTransactionType = "SALE";
+      else if (listingType === "RENT") inventoryTransactionType = inventoryType === "COMMERCIAL" ? "LEASE" : "RENT";
+      // The lead pays the rent on a rental, not the (zero) sale price.
+      let inventoryBudget = null;
+      if (inventoryTransactionType === "SALE") inventoryBudget = price;
+      else if (inventoryTransactionType) inventoryBudget = rent;
+
+      // Linking a property only fills what the user has not entered yet; it
+      // never overwrites a requirement that was already typed.
+      const isBlank = (value) => String(value ?? "").trim() === "";
+      const keepOrFill = (previousValue, nextValue) => (isBlank(previousValue) ? nextValue : previousValue);
+      const previousSubtypeData = prev.requirementsSubtypeData || {};
+      const hasTypedSubtypeData = Object.values(previousSubtypeData)
+        .some((value) => value !== false && !isBlank(value));
+      const hasTypedRequirement =
+        !isBlank(prev.requirementsPropertySubtype)
+        || !isBlank(prev.requirementsTransactionType)
+        || !isBlank(prev.requirementsBudgetMin)
+        || !isBlank(prev.requirementsBudgetMax)
+        || hasTypedSubtypeData;
+      const nextInventoryType = !hasTypedRequirement && ["COMMERCIAL", "RESIDENTIAL"].includes(inventoryType)
+        ? inventoryType
+        : prev.requirementsInventoryType;
+      const nextPropertySubtype = !isBlank(prev.requirementsPropertySubtype)
+        ? prev.requirementsPropertySubtype
+        : (nextInventoryType === inventoryType && getPropertySubtypeConfig(inventoryType, propertySubtype)
+          ? propertySubtype
+          : prev.requirementsPropertySubtype);
+      // Copy the property's own details (BHK, seats, plot size...) only when the
+      // lead has none yet and uses the same property type.
+      const leadSubtypeConfig = getPropertySubtypeConfig(nextInventoryType, nextPropertySubtype);
+      const inventorySubtypeData = (
+        inventoryType === "COMMERCIAL"
+          ? selectedInventory?.commercialDetails?.subtypeData
+          : residentialDetails?.subtypeData
+      ) || {};
+      const prefilledSubtypeData = leadSubtypeConfig && nextPropertySubtype === propertySubtype
+        ? Object.fromEntries(
+          (leadSubtypeConfig.fields || [])
+            .filter((field) => inventorySubtypeData[field.key] !== undefined && !isBlank(inventorySubtypeData[field.key]))
+            .map((field) => [field.key, inventorySubtypeData[field.key]]),
+        )
+        : {};
+      const hasTypedBudget = !isBlank(prev.requirementsBudgetMin) || !isBlank(prev.requirementsBudgetMax);
+      const fillBudget = !hasTypedBudget && inventoryBudget !== null && inventoryBudget > 0;
+      const fillFlag = (previousValue, inventoryValue) => (hasTypedRequirement ? previousValue : Boolean(inventoryValue));
+      const fillNumber = (previousValue, inventoryValue) =>
+        keepOrFill(previousValue, inventoryValue === null ? "" : String(inventoryValue));
+
       return {
         ...prev,
         inventoryId: normalizedInventoryId,
         relatedInventoryIds: nextRelatedInventoryIds,
-        projectInterested: inventoryProjectLabel || prev.projectInterested,
-        city: getInventoryLeadCity(selectedInventory) || prev.city,
-        siteLat: inventorySiteLat === null ? "" : String(inventorySiteLat),
-        siteLng: inventorySiteLng === null ? "" : String(inventorySiteLng),
-        requirementsInventoryType:
-          inventoryType === "COMMERCIAL" || inventoryType === "RESIDENTIAL"
-            ? inventoryType
-            : prev.requirementsInventoryType,
-        requirementsPropertySubtype:
-          getPropertySubtypeConfig(inventoryType, propertySubtype)
-            ? propertySubtype
-            : prev.requirementsPropertySubtype,
-        requirementsSubtypeData: {},
-        requirementsTransactionType: transactionType,
-        requirementsFurnishingStatus:
-          String(selectedInventory?.furnishingStatus || "").trim().toUpperCase()
-          || prev.requirementsFurnishingStatus,
-        requirementsBudgetMin:
-          price === null ? prev.requirementsBudgetMin : String(price),
-        requirementsBudgetMax:
-          price === null ? prev.requirementsBudgetMax : String(price),
-        requirementsAreaMin: "",
-        requirementsAreaMax: "",
-        requirementsAreaUnit: "SQ_FT",
-        requirementsCommercialSeats:
-          commercialSeats === null
-            ? prev.requirementsCommercialSeats
-            : String(commercialSeats),
-        requirementsCommercialCabins:
-          commercialCabins === null
-            ? prev.requirementsCommercialCabins
-            : String(commercialCabins),
-        requirementsCommercialConferenceRooms:
-          commercialConferenceRooms === null
-            ? prev.requirementsCommercialConferenceRooms
-            : String(commercialConferenceRooms),
-        requirementsCommercialParkingAvailable:
+        projectInterested: keepOrFill(prev.projectInterested, inventoryProjectLabel || ""),
+        city: keepOrFill(prev.city, getInventoryLeadCity(selectedInventory) || ""),
+        siteLat: keepOrFill(prev.siteLat, inventorySiteLat === null ? "" : String(inventorySiteLat)),
+        siteLng: keepOrFill(prev.siteLng, inventorySiteLng === null ? "" : String(inventorySiteLng)),
+        requirementsInventoryType: nextInventoryType,
+        requirementsPropertySubtype: nextPropertySubtype,
+        requirementsSubtypeData: hasTypedSubtypeData ? previousSubtypeData : prefilledSubtypeData,
+        requirementsTransactionType: keepOrFill(prev.requirementsTransactionType, inventoryTransactionType),
+        requirementsFurnishingStatus: keepOrFill(
+          prev.requirementsFurnishingStatus,
+          String(selectedInventory?.furnishingStatus || "").trim().toUpperCase(),
+        ),
+        requirementsBudgetMin: fillBudget ? String(inventoryBudget) : prev.requirementsBudgetMin,
+        requirementsBudgetMax: fillBudget ? String(inventoryBudget) : prev.requirementsBudgetMax,
+        requirementsCommercialSeats: fillNumber(prev.requirementsCommercialSeats, commercialSeats),
+        requirementsCommercialCabins: fillNumber(prev.requirementsCommercialCabins, commercialCabins),
+        requirementsCommercialConferenceRooms: fillNumber(prev.requirementsCommercialConferenceRooms, commercialConferenceRooms),
+        requirementsCommercialParkingAvailable: fillFlag(
+          prev.requirementsCommercialParkingAvailable,
           (commercialParkingSlots !== null && commercialParkingSlots > 0)
           || (Boolean(commercialParkingType) && commercialParkingType !== "NONE"),
-        requirementsCommercialPantry: Boolean(commercialAmenities?.pantry),
-        requirementsCommercialReceptionArea: Boolean(commercialAmenities?.receptionArea),
-        requirementsCommercialWaitingArea: Boolean(commercialAmenities?.waitingArea),
-        requirementsCommercialCafeteria: Boolean(commercialAmenities?.cafeteria),
-        requirementsCommercialServerRoom: Boolean(commercialAmenities?.serverRoom),
-        requirementsCommercialStorageRoom: Boolean(commercialAmenities?.storageRoom),
-        requirementsCommercialBreakoutArea: Boolean(commercialAmenities?.breakoutArea),
-        requirementsCommercialLiftAvailable: Boolean(commercialAmenities?.liftAvailable),
-        requirementsCommercialPowerBackup: Boolean(commercialAmenities?.powerBackup),
-        requirementsCommercialCentralAC: Boolean(commercialAmenities?.centralAC),
-        requirementsCommercialFireSafety: Boolean(commercialAmenities?.fireSafety),
-        requirementsCommercialReadyToMove: Boolean(commercialAmenities?.readyToMove),
-        requirementsCommercialUnderConstruction: Boolean(commercialAmenities?.underConstruction),
-        requirementsResidentialBhkType:
-          String(residentialDetails?.bhkType || "").trim().toUpperCase()
-          || prev.requirementsResidentialBhkType,
-        requirementsResidentialFloor:
-          residentialFloor === null
-            ? prev.requirementsResidentialFloor
-            : String(residentialFloor),
-        requirementsResidentialAmenityLift: Boolean(residentialAmenities?.lift),
-        requirementsResidentialAmenitySecurity: Boolean(residentialAmenities?.security),
-        requirementsResidentialAmenityGym: Boolean(residentialAmenities?.gym),
-        requirementsResidentialAmenitySwimmingPool: Boolean(residentialAmenities?.swimmingPool),
-        requirementsResidentialAmenityClubhouse: Boolean(residentialAmenities?.clubhouse),
-        requirementsResidentialAmenityPowerBackup: Boolean(residentialAmenities?.powerBackup),
-        requirementsResidentialAmenityParking:
+        ),
+        requirementsCommercialPantry: fillFlag(prev.requirementsCommercialPantry, commercialAmenities?.pantry),
+        requirementsCommercialReceptionArea: fillFlag(prev.requirementsCommercialReceptionArea, commercialAmenities?.receptionArea),
+        requirementsCommercialWaitingArea: fillFlag(prev.requirementsCommercialWaitingArea, commercialAmenities?.waitingArea),
+        requirementsCommercialCafeteria: fillFlag(prev.requirementsCommercialCafeteria, commercialAmenities?.cafeteria),
+        requirementsCommercialServerRoom: fillFlag(prev.requirementsCommercialServerRoom, commercialAmenities?.serverRoom),
+        requirementsCommercialStorageRoom: fillFlag(prev.requirementsCommercialStorageRoom, commercialAmenities?.storageRoom),
+        requirementsCommercialBreakoutArea: fillFlag(prev.requirementsCommercialBreakoutArea, commercialAmenities?.breakoutArea),
+        requirementsCommercialLiftAvailable: fillFlag(prev.requirementsCommercialLiftAvailable, commercialAmenities?.liftAvailable),
+        requirementsCommercialPowerBackup: fillFlag(prev.requirementsCommercialPowerBackup, commercialAmenities?.powerBackup),
+        requirementsCommercialCentralAC: fillFlag(prev.requirementsCommercialCentralAC, commercialAmenities?.centralAC),
+        requirementsCommercialFireSafety: fillFlag(prev.requirementsCommercialFireSafety, commercialBuilding?.fireSafety),
+        requirementsCommercialReadyToMove: fillFlag(prev.requirementsCommercialReadyToMove, commercialAmenities?.readyToMove),
+        requirementsCommercialUnderConstruction: fillFlag(prev.requirementsCommercialUnderConstruction, commercialAmenities?.underConstruction),
+        requirementsResidentialBhkType: keepOrFill(
+          prev.requirementsResidentialBhkType,
+          String(residentialDetails?.bhkType || "").trim().toUpperCase(),
+        ),
+        requirementsResidentialFloor: fillNumber(prev.requirementsResidentialFloor, residentialFloor),
+        requirementsResidentialAmenityLift: fillFlag(prev.requirementsResidentialAmenityLift, residentialAmenities?.lift),
+        requirementsResidentialAmenitySecurity: fillFlag(prev.requirementsResidentialAmenitySecurity, residentialAmenities?.security),
+        requirementsResidentialAmenityGym: fillFlag(prev.requirementsResidentialAmenityGym, residentialAmenities?.gym),
+        requirementsResidentialAmenitySwimmingPool: fillFlag(prev.requirementsResidentialAmenitySwimmingPool, residentialAmenities?.swimmingPool),
+        requirementsResidentialAmenityClubhouse: fillFlag(prev.requirementsResidentialAmenityClubhouse, residentialAmenities?.clubhouse),
+        requirementsResidentialAmenityPowerBackup: fillFlag(prev.requirementsResidentialAmenityPowerBackup, residentialAmenities?.powerBackup),
+        requirementsResidentialAmenityParking: fillFlag(
+          prev.requirementsResidentialAmenityParking,
           residentialParking !== null && residentialParking > 0,
-        requirementsResidentialAmenityStudyRoom: Boolean(residentialAmenities?.studyRoom),
-        requirementsResidentialAmenityServantRoom: Boolean(residentialAmenities?.servantRoom),
-        requirementsResidentialAmenityModularKitchen: Boolean(residentialAmenities?.modularKitchen),
-        requirementsResidentialAmenityElectricityBackup: Boolean(residentialAmenities?.electricityBackup),
-        requirementsResidentialAmenityGasPipeline: Boolean(residentialAmenities?.gasPipeline),
+        ),
+        requirementsResidentialAmenityStudyRoom: fillFlag(prev.requirementsResidentialAmenityStudyRoom, residentialDetails?.studyRoom),
+        requirementsResidentialAmenityServantRoom: fillFlag(prev.requirementsResidentialAmenityServantRoom, residentialDetails?.servantRoom),
+        requirementsResidentialAmenityModularKitchen: fillFlag(prev.requirementsResidentialAmenityModularKitchen, residentialAmenities?.modularKitchen),
+        requirementsResidentialAmenityElectricityBackup: fillFlag(prev.requirementsResidentialAmenityElectricityBackup, residentialDetails?.utilities?.electricityBackup),
+        requirementsResidentialAmenityGasPipeline: fillFlag(prev.requirementsResidentialAmenityGasPipeline, residentialDetails?.utilities?.gasPipeline),
       };
     });
   };
@@ -2523,6 +2742,11 @@ const LeadsMatrix = () => {
 
     if (!formData.name.trim() || !formData.phone.trim()) {
       setError("Name and phone are required");
+      return;
+    }
+
+    if (!isValidLeadPhone(formData.phone)) {
+      setError(LEAD_PHONE_ERROR);
       return;
     }
 
@@ -2597,7 +2821,7 @@ const LeadsMatrix = () => {
           inventoryType: String(formData.requirementsInventoryType || "").trim().toUpperCase(),
           propertySubtype,
           subtypeData: sanitizeRequirementSubtypeData(formData.requirementsSubtypeData),
-          transactionType: toRequirementTransactionType(formData.requirementsTransactionType),
+          transactionType: toLeadDealType(formData.requirementsTransactionType, formData.requirementsInventoryType, propertySubtype),
           furnishingStatus: String(formData.requirementsFurnishingStatus || "").trim().toUpperCase(),
           budgetMin: toAmountNumber(formData.requirementsBudgetMin),
           budgetMax: toAmountNumber(formData.requirementsBudgetMax),
@@ -2648,6 +2872,8 @@ const LeadsMatrix = () => {
         }
       }
 
+      applyCoworkingLeadFields(payload, formData);
+
       const created = await createLead(payload);
 
       if (created) {
@@ -2668,6 +2894,33 @@ const LeadsMatrix = () => {
     }
   };
 
+  const handleDeleteLead = async () => {
+    if (!selectedLead?._id || !canDeleteLead) return;
+    const leadName = String(selectedLead?.name || "this lead").trim();
+    const needsApproval = userRole === "MANAGER";
+    const confirmed = window.confirm(
+      needsApproval
+        ? `Ask an Admin to delete "${leadName}"? The lead stays until an Admin approves.`
+        : `Delete "${leadName}" permanently? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      setError("");
+      const result = await deleteLead(selectedLead._id);
+      if (isDeleteApprovalPending(result)) {
+        setSuccess(deleteOutcomeMessage(result));
+        return;
+      }
+      const deletedLeadId = String(selectedLead._id);
+      setLeads((prev) => prev.filter((lead) => String(lead?._id || "") !== deletedLeadId));
+      closeDetails();
+      setSuccess("Lead deleted");
+    } catch (deleteError) {
+      setError(toErrorMessage(deleteError, "Failed to delete lead"));
+    }
+  };
+
   const handleOpenEditLeadForm = () => {
     if (!selectedLead || !canEditLead) return;
     setFormData(mapLeadToFormData(selectedLead));
@@ -2682,8 +2935,8 @@ const LeadsMatrix = () => {
       return;
     }
 
-    if (!/^\d{8,15}$/.test(String(formData.phone || "").trim())) {
-      setError("Phone should be 8 to 15 digits");
+    if (!isValidLeadPhone(formData.phone)) {
+      setError(LEAD_PHONE_ERROR);
       return;
     }
 
@@ -2898,9 +3151,9 @@ const LeadsMatrix = () => {
 
       if (
         normalizedPhoneDraft !== normalizedExistingPhone
-        && (!normalizedPhoneDraft || !/^\d{8,15}$/.test(normalizedPhoneDraft))
+        && !isValidLeadPhone(normalizedPhoneDraft)
       ) {
-        setError("Phone should be 8 to 15 digits");
+        setError(LEAD_PHONE_ERROR);
         setSavingUpdates(false);
         return;
       }
@@ -3513,7 +3766,7 @@ const LeadsMatrix = () => {
             formData={formData}
             setFormData={setFormData}
             inventoryOptions={inventoryOptions}
-            availableInventoryTypes={availableLeadInventoryTypes}
+            availableInventoryTypes={editLeadInventoryTypes}
             getInventoryLeadLabel={getInventoryLeadLabel}
             onInventorySelection={handleInventorySelection}
             onClose={() => {
@@ -3532,7 +3785,7 @@ const LeadsMatrix = () => {
             isDark={isDark}
             csvText={bulkUploadText}
             sheetType={bulkUploadSheetType}
-            availableInventoryTypes={availableLeadInventoryTypes}
+            availableInventoryTypes={availableBulkSheetTypes}
             onSheetTypeChange={(value) => {
               setBulkUploadSheetType(value);
               setBulkUploadParsedRows(null);
@@ -3586,6 +3839,8 @@ const LeadsMatrix = () => {
             linkingProperty={linkingProperty}
             onLinkPropertyToLead={handleLinkPropertyToLead}
             onOpenEditLeadForm={handleOpenEditLeadForm}
+            canDeleteLead={canDeleteLead}
+            onDeleteLead={handleDeleteLead}
             leadStatuses={LEAD_STATUSES}
             nameDraft={nameDraft}
             setNameDraft={setNameDraft}

@@ -11,29 +11,21 @@ const page = (pageKey, actions = [VIEW]) => ({ pageKey, actions: [...actions] })
 const SALES_FULL_LEADS = [VIEW, CREATE, EDIT, ASSIGN, FOLLOW_UP, EXPORT];
 const OWN_LEADS = [VIEW, CREATE, EDIT, FOLLOW_UP];
 
-const MANAGER_PAGES = [
-  page("dashboard"),
-  page("leads", [...SALES_FULL_LEADS, DELETE]),
-  page("inventory", [VIEW, CREATE, EDIT, DELETE, APPROVE, EXPORT]),
-  page("projects", [VIEW, CREATE, EDIT, DELETE]),
-  page("field_ops", [VIEW, EDIT]),
-  page("finance", [VIEW, EXPORT]),
-  page("reports", [VIEW, EXPORT]),
-  page("leaderboard"),
-  page("targets", [VIEW, EDIT]),
-  page("calendar", [VIEW, CREATE, EDIT]),
-  page("tasks", [VIEW, CREATE, EDIT, DELETE]),
-  page("attendance", [VIEW, EDIT, APPROVE]),
-  page("chat", [VIEW, CREATE]),
-  page("coworking_booking", [VIEW, CREATE, EDIT]),
-  page("coworking_clients", [VIEW, CREATE, EDIT, DELETE]),
-  page("admin_team", [VIEW, CREATE, EDIT]),
-  page("admin_notifications", [VIEW, EDIT]),
-  page("admin_console", [VIEW, EDIT]),
-  page("admin_meta_ads", [VIEW, EDIT]),
-  page("settings", [VIEW, EDIT]),
-  page("profile", [VIEW, EDIT]),
-];
+/*
+ * Business rule (29 Sep 2026): a Manager can do everything an Admin can,
+ * except delete. So a Manager starts with every page and every action, the
+ * same list an Admin gets.
+ *
+ * "delete" in a Manager's list means "may ask to delete": the delete routes
+ * turn a Manager's delete into a request that an Admin approves (see
+ * services/deleteApproval.service.js). Taking "delete" off a page in the
+ * Manager's page access removes even the request.
+ *
+ * "My Leads" is left out: it is the executives' own-leads view, which an
+ * Admin never sees either, and listing it would put it in the Manager's menu
+ * as soon as an Admin customises their access.
+ */
+const MANAGER_PAGES = buildFullPageAccess().filter((entry) => entry.pageKey !== "my_leads");
 
 const EXECUTIVE_PAGES = [
   page("dashboard"),
@@ -69,6 +61,7 @@ const PRODUCTION_PAGES = [
 const CHANNEL_PARTNER_PAGES = [
   page("dashboard"),
   page("leads", [VIEW, CREATE, EDIT, FOLLOW_UP]),
+  page("tasks", [VIEW, CREATE, EDIT]),
   // Inventory stays subject to the per-account canViewInventory flag, which the
   // page guard does not replace.
   page("inventory", [VIEW]),
@@ -81,6 +74,7 @@ const CHANNEL_PARTNER_PAGES = [
 
 const COWORKING_ADMIN_PAGES = [
   page("dashboard"),
+  page("tasks", [VIEW, CREATE, EDIT]),
   page("coworking_booking", [VIEW, CREATE, EDIT]),
   page("coworking_clients", [VIEW, CREATE, EDIT, DELETE]),
   page("profile", [VIEW, EDIT]),
@@ -101,7 +95,8 @@ const DEFAULT_ROLE_PAGE_ACCESS = Object.freeze({
 
 const DEFAULT_ROLE_DATA_SCOPE = Object.freeze({
   [USER_ROLES.ADMIN]: "ALL",
-  [USER_ROLES.MANAGER]: "TEAM",
+  // Same reach as an Admin; see MANAGER_PAGES above.
+  [USER_ROLES.MANAGER]: "ALL",
   [USER_ROLES.EXECUTIVE]: "ASSIGNED",
   [USER_ROLES.INSIDE_EXECUTIVE]: "ASSIGNED",
   [USER_ROLES.FIELD_EXECUTIVE]: "ASSIGNED",

@@ -139,14 +139,7 @@ describe("RealtimeAlertsContext", () => {
     });
 
     expect(screen.getByTestId("chatUnread").props.children).toBe(1);
-    expect(pushNotifications.notifyChatMessage).toHaveBeenCalledWith({
-      conversationId: "conversation-1",
-      contactId: "user-2",
-      contactName: "Peer User",
-      contactRole: "EXECUTIVE",
-      contactAvatar: "",
-      message: "Please check this lead",
-    });
+    // Chat pushes are now delivered server-side; the context only counts.
   });
 
   it("ignores echoed chat messages from the logged-in user", async () => {

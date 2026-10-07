@@ -294,9 +294,14 @@ const loadModuleGate = (profile) =>
 test("a configured role reaches a module its built-in role never had", async () => {
   // A Production Executive is not in the projects module's role list, but an
   // Admin has granted the role the Projects page.
+  // hasExplicitPageOverride is what "configured" means now: role defaults can
+  // also be enforced (PAGE_ACCESS_ENFORCEMENT), so enforcePageAccess alone no
+  // longer distinguishes "an Admin granted this person the page" from "their
+  // role's defaults happen to list it". Only the former may widen a module.
   const guard = loadModuleGate({
     isAdmin: false,
     enforcePageAccess: true,
+    hasExplicitPageOverride: true,
     permissions: ["page.projects.view", "page.tasks.view", "page.profile.view"],
   }).checkRoleOrPageAccess(["ADMIN", "MANAGER", "EXECUTIVE"], "projects");
 
@@ -310,6 +315,7 @@ test("an unconfigured role cannot widen into a module", async () => {
   const guard = loadModuleGate({
     isAdmin: false,
     enforcePageAccess: false,
+    hasExplicitPageOverride: false,
     permissions: ["page.projects.view"],
   }).checkRoleOrPageAccess(["ADMIN", "MANAGER", "EXECUTIVE"], "projects");
 
@@ -449,4 +455,69 @@ test("inventory refuses an ungranted role and scopes a granted one", async () =>
     "COMMERCIAL",
     "the account's vertical still narrows what it sees",
   );
+});
+
+/*
+ * A company-defined role that says nothing about pages must leave the built-in
+ * role's pages alone.
+ *
+ * CustomRole.pages has no route that fills it, so it is always []. Writing that
+ * empty array onto the user made it an override - an array, even an empty one,
+ * is read as a deliberate grant and enforced - and everyone hired onto a named
+ * role could open Dashboard and Profile and nothing else.
+ */
+test("a user created on a company-defined role keeps their base role's pages", async () => {
+  const created = [];
+  const customRole = {
+    _id: "222222222222222222222222",
+    companyId,
+    name: "Senior Sales Executive",
+    baseRole: "EXECUTIVE",
+    businessCategory: "COMMERCIAL",
+    pages: [],
+    isActive: true,
+  };
+  const controller = load("controllers/user.controller.js", {
+    "../models/User": {
+      findOne: (filter) => query(filter.email ? null : { _id: managerId, role: "MANAGER", isActive: true }),
+      create: async (doc) => { created.push(doc); return { ...doc, _id: targetUserId }; },
+    },
+    "../models/CustomRole": { findOne: () => query(customRole) },
+    "../models/Lead": { updateMany: async () => {} },
+    "../models/Inventory": {},
+    "../models/UserDeleteRequest": {},
+    "../models/leadActivity.model": {},
+    "../models/leadDiary.model": {},
+    "../config/logger": { error(details) { throw new Error(details.error); }, warn() {}, info() {} },
+    "../services/leadAssignment.service": {},
+    "../services/hierarchy.service": { getDescendantUsers: async () => [] },
+    "../services/auditLog.service": auditStub,
+  });
+
+  const res = userResponse();
+  await controller.createUserByRole({
+    user: adminUser,
+    body: {
+      name: "Employee", email: "named-role@example.com", password: "test-password",
+      customRoleId: customRole._id, reportingToId: managerId,
+    },
+  }, res);
+
+  assert.equal(res.code, 201, JSON.stringify(res.body));
+  assert.equal(created.at(-1).role, "EXECUTIVE", "the base role is what the CRM treats them as");
+  assert.equal(created.at(-1).customRoleId, customRole._id);
+  assert.equal(
+    created.at(-1).pageAccessOverride,
+    null,
+    "an empty page list means 'nothing to say', not 'may reach nothing'",
+  );
+
+  // And the access profile that flows from it is the built-in role's, not two pages.
+  const { resolveAccessProfile } = require("../src/services/access.service");
+  const profile = await resolveAccessProfile({
+    _id: targetUserId, role: "EXECUTIVE", companyId: null,
+    pageAccessOverride: created.at(-1).pageAccessOverride,
+  });
+  assert.equal(profile.enforcePageAccess, false);
+  assert.ok(profile.pages.some((page) => page.pageKey === "leads"), "Leads must still be reachable");
 });

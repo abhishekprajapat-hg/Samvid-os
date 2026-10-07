@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react";
 import ToastNotice from "../../components/ui/ToastNotice";
 import { getAllLeads } from "../../services/leadService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const RANGE_OPTIONS = [
   { key: "THIS_MONTH", label: "This month" },
@@ -368,7 +369,7 @@ const IntelligenceReports = () => {
       const assignee = lead.assignedTo || lead.assignedExecutive || lead.createdBy;
       const key = String(assignee?._id || assignee?.email || "unassigned");
       const name = assignee?.name || "Unassigned";
-      const current = rows.get(key) || { key, name, leads: 0, visits: 0, closed: 0 };
+      const current = rows.get(key) || { key, name, profileImageUrl: assignee?.profileImageUrl || "", leads: 0, visits: 0, closed: 0 };
       const status = String(lead.status || "").toUpperCase();
       current.leads += 1;
       if (SITE_VISIT_STATUSES.has(status)) current.visits += 1;
@@ -562,7 +563,7 @@ const IntelligenceReports = () => {
                   <tr key={row.key}>
                     <td>
                       <div className="reports-cellname">
-                        <div className="reports-avatar reports-avatar-sm">{getInitials(row.name)}</div>
+                        <div className="reports-avatar reports-avatar-sm"><AvatarFace user={row} initials={getInitials(row.name)} /></div>
                         <b>{row.name}</b>
                       </div>
                     </td>

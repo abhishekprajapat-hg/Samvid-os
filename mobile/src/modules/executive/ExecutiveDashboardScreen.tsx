@@ -7,6 +7,7 @@ import { getAllLeads, getCompanyPerformanceOverview } from "../../services/leadS
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
 import type { CompanyPerformanceOverview } from "../../services/leadService";
+import { themedStyles } from "../../theme/themedStyles";
 
 const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
 
@@ -193,35 +194,35 @@ const StatCard = ({ label, value, onPress }: { label: string; value: string | nu
   </Pressable>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   container: {
     gap: 10,
     paddingBottom: 14,
   },
   hero: {
     borderWidth: 1,
-    borderColor: "#c7d2fe",
+    borderColor: c.violet[200],
     borderRadius: 14,
-    backgroundColor: "#eef2ff",
+    backgroundColor: c.violet[50],
     padding: 14,
   },
   heroLabel: {
     fontSize: 10,
     textTransform: "uppercase",
     fontWeight: "700",
-    color: "#3730a3",
+    color: c.violet[800],
     letterSpacing: 0.8,
   },
   heroTitle: {
     marginTop: 6,
     fontSize: 24,
     fontWeight: "800",
-    color: "#0f172a",
+    color: c.text,
   },
   heroSub: {
     marginTop: 4,
     fontSize: 12,
-    color: "#475569",
+    color: c.slate[600],
   },
   row: {
     flexDirection: "row",
@@ -230,33 +231,33 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
   },
   statLabel: {
     fontSize: 11,
-    color: "#64748b",
+    color: c.textMuted,
     textTransform: "uppercase",
     fontWeight: "700",
   },
   statValue: {
     marginTop: 6,
     fontSize: 22,
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "800",
   },
   riskCard: {
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 12,
-    backgroundColor: "#fff1f2",
+    backgroundColor: c.errorBg,
     padding: 12,
   },
   riskTitle: {
     fontSize: 12,
-    color: "#be123c",
+    color: c.rose[700],
     textTransform: "uppercase",
     fontWeight: "700",
   },
@@ -264,50 +265,50 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 30,
     fontWeight: "800",
-    color: "#9f1239",
+    color: c.rose[800],
   },
   riskSub: {
     marginTop: 2,
     fontSize: 12,
-    color: "#be123c",
+    color: c.rose[700],
   },
   listCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
   },
   listTitle: {
     fontSize: 12,
-    color: "#0f172a",
+    color: c.text,
     textTransform: "uppercase",
     fontWeight: "700",
     marginBottom: 8,
   },
   empty: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 13,
   },
   itemRow: {
     paddingVertical: 8,
     borderTopWidth: 1,
-    borderTopColor: "#f1f5f9",
+    borderTopColor: c.surfaceMuted,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   itemName: {
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "700",
   },
   itemMeta: {
     marginTop: 2,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 12,
   },
   itemDate: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -318,9 +319,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   linkTextCompact: {
-    color: "#2563eb",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
   },
-});
+}));
 

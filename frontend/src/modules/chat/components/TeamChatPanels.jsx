@@ -3,6 +3,7 @@ import {
   RefreshCw,
   Search,
 } from "lucide-react";
+import AvatarFace from "../../../components/ui/AvatarFace";
 
 export const TeamChatSidebar = ({
   mobileSidebarVisible,
@@ -160,7 +161,7 @@ export const TeamChatSidebar = ({
                 className={`chatrow chat-list-item w-full text-left transition ${active ? "on" : ""}`}
               >
                 <div className="avatar chat-avatar">
-                    {getInitials(peer.name)}
+                    <AvatarFace user={peer} initials={getInitials(peer.name)} />
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
@@ -214,7 +215,7 @@ export const TeamChatSidebar = ({
                 <div className="flex items-center justify-between gap-1.5">
                   <div className="flex min-w-0 items-center gap-2">
                     <div className="avatar chat-avatar">
-                      {getInitials(contact.name)}
+                      <AvatarFace user={contact} initials={getInitials(contact.name)} />
                     </div>
                     <b className="truncate">
                       {contact.name}

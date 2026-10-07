@@ -3,5 +3,6 @@
   "compilerOptions": {
     "strict": true
   },
-  "exclude": ["dist", "dist-android", "node_modules"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "dist", "dist-android", ".expo", ".expo-shared", "android", "ios"]
 }

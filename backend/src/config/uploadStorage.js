@@ -10,6 +10,9 @@ const UPLOAD_CATEGORIES = Object.freeze([
   "chat",
   "lead-documents",
   "profile-images",
+  // Coworking client KYC scans and deposit cheques. Kept on the server so every
+  // desk sees the same file; before this they lived in one browser's storage.
+  "coworking-documents",
 ]);
 const DEFAULT_CATEGORY = "chat";
 
@@ -19,12 +22,19 @@ const uploadsRootDir = path.isAbsolute(process.env.UPLOAD_DIR || "")
 
 const maxFileSizeBytes = Number.parseInt(process.env.UPLOAD_MAX_FILE_SIZE_BYTES, 10) || 25 * 1024 * 1024;
 
+/*
+ * "application/octet-stream" used to sit in this set. Because the MIME type
+ * comes from the client, that one entry made the whole allowlist advisory: an
+ * .html or .exe declared as octet-stream was accepted and then served back
+ * under its own extension. Both the declared type and the file extension now
+ * have to be recognised, and SVG is gone - it is a script-bearing document
+ * dressed as an image.
+ */
 const ALLOWED_MIME_TYPES = new Set([
   "image/jpeg",
   "image/png",
   "image/webp",
   "image/gif",
-  "image/svg+xml",
   "image/heic",
   "image/heif",
   "video/mp4",
@@ -40,7 +50,13 @@ const ALLOWED_MIME_TYPES = new Set([
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/octet-stream",
+]);
+
+const ALLOWED_EXTENSIONS = new Set([
+  ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif",
+  ".mp4", ".mov", ".webm",
+  ".mp3", ".m4a", ".wav", ".aac", ".ogg",
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx",
 ]);
 
 const sanitizeCategory = (value) => {
@@ -74,10 +90,20 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (_req, file, callback) => {
-  if (!ALLOWED_MIME_TYPES.has(String(file.mimetype || "").toLowerCase())) {
+  const mimeType = String(file.mimetype || "").toLowerCase();
+  if (!ALLOWED_MIME_TYPES.has(mimeType)) {
     callback(new Error(`Unsupported file type: ${file.mimetype}`));
     return;
   }
+
+  // The extension is what the file is finally served as, so it has to be
+  // allowed in its own right - "invoice.pdf.html" keeps only ".html".
+  const ext = path.extname(String(file.originalname || "")).toLowerCase();
+  if (!ALLOWED_EXTENSIONS.has(ext)) {
+    callback(new Error(`Unsupported file extension: ${ext || "(none)"}`));
+    return;
+  }
+
   callback(null, true);
 };
 

@@ -581,9 +581,14 @@ const BookingBoard = () => {
             termMonths: Math.max(1, Math.round((new Date(editingContract.endDate) - new Date(editingContract.startDate)) / (30 * 24 * 60 * 60 * 1000))),
             lockInMonths: editingContract.lockInMonths,
             rent: editingCabins.reduce((total, cabin) => total + (cabin.contract?.monthlyRent || 0), 0),
-            depositMonths: editingContract.monthlyRent
-              ? Math.max(1, Math.round(editingContract.deposit / editingContract.monthlyRent))
-              : 2,
+            depositMonths: editingContract.depositMonths
+              || (editingContract.monthlyRent
+                ? Math.max(1, Math.round(editingContract.deposit / editingContract.monthlyRent))
+                : 2),
+            depositMode: editingContract.depositMode === "custom" ? "custom" : "months",
+            depositAmount: editingContract.depositMode === "custom"
+              ? editingCabins.reduce((total, cabin) => total + (cabin.contract?.deposit || 0), 0)
+              : "",
             notes: editingContract.notes,
             noticePeriodDays: editingContract.noticePeriodDays,
             tokenAmount: editingCabins.reduce((total, cabin) => total + (cabin.contract?.tokenAmount || 0), 0),

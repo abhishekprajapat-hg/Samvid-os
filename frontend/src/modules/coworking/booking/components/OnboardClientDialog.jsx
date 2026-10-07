@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Building2, Check, Search, UserPlus } from "lucide-react";
+import React, { useMemo, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, Building2, Check, Eye, Paperclip, Search, Upload, UserPlus, X } from "lucide-react";
 import { Button, Input, Modal, Select, cn } from "../../../../components/ui";
 import { formatCurrency, formatDate } from "../../../../utils/format";
 import { CLIENT_KINDS, ENTITY_TYPES, kycStatusOf } from "../kycDocuments";
 import DocumentChecklist from "./DocumentChecklist";
+import { uploadFile } from "../../../../services/uploadService";
 
 /*
  * Checkout for the cabins in the cart: who is taking them, on what terms, then
@@ -30,6 +31,21 @@ const INDUSTRIES = [
   "Data & AI", "Consulting", "Financial services", "Healthcare", "Legal",
   "Logistics", "Media & content", "Product design", "Retail tech", "Other",
 ];
+
+const DEPOSIT_MONTH_OPTIONS = [1, 2, 3, 6];
+const CHEQUE_ACCEPT = ".pdf,.jpg,.jpeg,.png";
+const MAX_CHEQUE_BYTES = 10 * 1024 * 1024;
+
+// "Other" opens a free-text box; whatever is typed there is the work profile
+// that gets saved and shown everywhere (e.g. "Cybersecurity").
+const splitIndustry = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return { industryChoice: INDUSTRIES[0], industryCustom: "" };
+  if (INDUSTRIES.includes(text) && text !== "Other") return { industryChoice: text, industryCustom: "" };
+  return { industryChoice: "Other", industryCustom: text === "Other" ? "" : text };
+};
+const resolveIndustry = ({ industryChoice, industryCustom }) =>
+  industryChoice === "Other" ? (String(industryCustom || "").trim() || "Other") : industryChoice;
 
 const today = () => new Date().toISOString().slice(0, 10);
 const addMonths = (iso, months) => {
@@ -81,6 +97,101 @@ const Stepper = ({ index }) => (
     })}
   </ol>
 );
+
+const WorkProfileField = ({ label, form, setForm }) => (
+  <>
+    <Field label={label}>
+      <Select
+        value={form.industryChoice}
+        onChange={(event) => {
+          const industryChoice = event.target.value;
+          setForm((value) => ({ ...value, industryChoice }));
+        }}
+      >
+        {INDUSTRIES.map((industry) => (
+          <option key={industry}>{industry}</option>
+        ))}
+      </Select>
+    </Field>
+    {form.industryChoice === "Other" ? (
+      <Field label="Specify work profile" hint="e.g. Cybersecurity, Architecture, DSA">
+        <Input
+          value={form.industryCustom}
+          onChange={(event) => setForm((value) => ({ ...value, industryCustom: event.target.value }))}
+          placeholder="Type the client's work profile"
+          autoFocus
+          maxLength={80}
+          aria-invalid={!String(form.industryCustom || "").trim()}
+        />
+      </Field>
+    ) : null}
+  </>
+);
+
+/*
+ * The deposit cheque itself (R9). The file goes to the server, so the copy is
+ * on the client's record for every desk, not just the browser that took it.
+ */
+const ChequeUpload = ({ file, onChange }) => {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const pick = async (event) => {
+    const chosen = event.target.files?.[0];
+    event.target.value = "";
+    if (!chosen) return;
+    if (chosen.size > MAX_CHEQUE_BYTES) {
+      setError("File is over the 10 MB limit.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const saved = await uploadFile(chosen, "coworking-documents");
+      onChange({
+        url: saved.url,
+        fileName: saved.fileName || chosen.name,
+        size: saved.size || chosen.size,
+        type: saved.mimeType || chosen.type,
+        uploadedAt: new Date().toISOString(),
+      });
+    } catch (uploadError) {
+      setError(uploadError?.message || "Upload failed. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="sm:col-span-2">
+      <span className="mb-1 block text-[11.5px] font-medium text-slate-600 dark:text-slate-300">Deposit cheque copy</span>
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 p-2.5 dark:border-slate-600">
+        <Paperclip aria-hidden="true" size={14} className="text-slate-400" />
+        {file?.url ? (
+          <>
+            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-slate-800 dark:text-slate-100">{file.fileName}</span>
+            <a href={file.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[12px] font-semibold text-blue-700 hover:underline dark:text-blue-400">
+              <Eye aria-hidden="true" size={12} /> View
+            </a>
+            <button type="button" aria-label="Remove cheque copy" onClick={() => onChange(null)} className="rounded p-1 text-slate-400 hover:text-rose-600">
+              <X aria-hidden="true" size={13} />
+            </button>
+          </>
+        ) : (
+          <span className="min-w-0 flex-1 text-[12px] text-slate-500 dark:text-slate-400">
+            {busy ? "Uploading..." : "Photo or PDF of the cheque the client gave (optional)"}
+          </span>
+        )}
+        <input ref={inputRef} type="file" accept={CHEQUE_ACCEPT} className="sr-only" onChange={pick} aria-label="Upload deposit cheque" />
+        <Button type="button" variant="secondary" size="sm" leftIcon={Upload} disabled={busy} onClick={() => inputRef.current?.click()}>
+          {file?.url ? "Replace" : "Upload cheque"}
+        </Button>
+      </div>
+      {error ? <p className="mt-1 text-[11px] font-medium text-rose-600 dark:text-rose-400">{error}</p> : null}
+    </div>
+  );
+};
 
 const OrderSummary = ({ cabins, rent, deposit, term, startDate }) => (
   <aside className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
@@ -141,7 +252,9 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
     dateOfBirth: initialClient?.dateOfBirth?.slice(0, 10) || "",
     phone: initialClient?.phone || "",
     email: initialClient?.email || "",
-    industry: initialClient?.industry || INDUSTRIES[0],
+    ...splitIndustry(initialClient?.industry),
+    signingAuthority2: initialClient?.signingAuthority2 || "",
+    secondPersonName: initialClient?.secondPersonName || "",
     gstin: initialClient?.gstin || "",
     pan: initialClient?.pan || "",
     documents: Array.isArray(initialClient?.documents) ? initialClient.documents : [],
@@ -152,6 +265,9 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
     lockInMonths: initialTerms?.lockInMonths ?? 6,
     rentOverride: initialTerms?.rent ?? "",
     depositMonths: initialTerms?.depositMonths ?? 2,
+    // "months" = a multiple of rent; "custom" = an amount typed in.
+    depositMode: initialTerms?.depositMode === "custom" ? "custom" : "months",
+    depositAmount: initialTerms?.depositAmount ?? "",
     noticePeriodDays: initialTerms?.noticePeriodDays ?? 30,
     tokenAmount: initialTerms?.tokenAmount ?? 0,
     securityCheque: initialTerms?.securityCheque || { number: "", bank: "", amount: 0, date: "", notes: "" },
@@ -160,7 +276,9 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
 
   const listRent = cabins.reduce((total, cabin) => total + cabin.monthlyRent, 0);
   const rent = terms.rentOverride === "" ? listRent : Number(terms.rentOverride) || 0;
-  const deposit = rent * terms.depositMonths;
+  const isCustomDeposit = terms.depositMode === "custom";
+  const customDeposit = Number(terms.depositAmount);
+  const deposit = isCustomDeposit ? (Number.isFinite(customDeposit) ? customDeposit : 0) : rent * terms.depositMonths;
   const capacity = cabins.reduce((total, cabin) => total + cabin.seats, 0);
 
   const matchingClients = useMemo(() => {
@@ -175,9 +293,11 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
   const kyc = kycStatusOf(form);
   const selectedClient = null;
   const clientName = mode === "new" ? form.companyName.trim() : selectedClient?.name || "";
-  const validTerms = [terms.noticePeriodDays, terms.tokenAmount, terms.securityCheque.amount].every(value => Number.isFinite(Number(value)) && Number(value) >= 0);
+  const validDeposit = !isCustomDeposit || (String(terms.depositAmount).trim() !== "" && Number.isFinite(customDeposit) && customDeposit >= 0);
+  const validTerms = validDeposit && [terms.noticePeriodDays, terms.tokenAmount, terms.securityCheque.amount].every(value => Number.isFinite(Number(value)) && Number(value) >= 0);
   const validBirthDate = !form.dateOfBirth || (form.dateOfBirth >= "1900-01-01" && form.dateOfBirth <= today());
-  const canAdvance = step === 0 ? Boolean(clientName) : validTerms && validBirthDate;
+  const validWorkProfile = form.industryChoice !== "Other" || Boolean(String(form.industryCustom || "").trim());
+  const canAdvance = step === 0 ? Boolean(clientName) && validWorkProfile : validTerms && validBirthDate;
 
   const set = (key) => (event) => setForm((value) => ({ ...value, [key]: event.target.value }));
   const setTerm = (key) => (event) => setTerms((value) => ({ ...value, [key]: event.target.value }));
@@ -222,9 +342,18 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
                   client:
                     mode === "existing" && selectedClient
                       ? selectedClient
-                      : { ...form, name: clientName },
+                      : (({ industryChoice, industryCustom, ...rest }) => ({
+                        ...rest,
+                        industry: resolveIndustry({ industryChoice, industryCustom }),
+                        name: clientName,
+                      }))(form),
                   cabins,
-                  terms: { ...terms, rent },
+                  terms: {
+                    ...terms,
+                    rent,
+                    deposit,
+                    depositAmount: isCustomDeposit ? customDeposit : null,
+                  },
                 })
               }
             >
@@ -303,8 +432,11 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
                           ))}
                         </Select>
                       </Field>
-                      <Field label="Authorised signatory" hint="The person who signs the agreement">
+                      <Field label="Signing authority 1" hint="The person who signs the agreement">
                         <Input value={form.contactPerson} onChange={set("contactPerson")} placeholder="Rohit Ambekar" />
+                      </Field>
+                      <Field label="Signing authority 2" hint="Optional - only if a second person signs">
+                        <Input value={form.signingAuthority2} onChange={set("signingAuthority2")} placeholder="Second signatory name" />
                       </Field>
                     </>
                   ) : (
@@ -315,12 +447,9 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
                       <Field label="PAN" hint="As printed on the card">
                         <Input value={form.pan} onChange={set("pan")} placeholder="ABCDE1234F" />
                       </Field>
-                      <Field label="Occupation">
-                        <Select value={form.industry} onChange={set("industry")}>
-                          {INDUSTRIES.map((industry) => (
-                            <option key={industry}>{industry}</option>
-                          ))}
-                        </Select>
+                      <WorkProfileField label="Work profile" form={form} setForm={setForm} />
+                      <Field label="Person 2 name" hint="Optional - a second person on the agreement" className="sm:col-span-2">
+                        <Input value={form.secondPersonName} onChange={set("secondPersonName")} placeholder="Second person's full name" />
                       </Field>
                     </>
                   )}
@@ -334,13 +463,7 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
 
                   {isCompany ? (
                     <>
-                      <Field label="Industry">
-                        <Select value={form.industry} onChange={set("industry")}>
-                          {INDUSTRIES.map((industry) => (
-                            <option key={industry}>{industry}</option>
-                          ))}
-                        </Select>
-                      </Field>
+                      <WorkProfileField label="Work profile / industry" form={form} setForm={setForm} />
                       <Field label="GSTIN" hint="Optional. Needed before the first invoice.">
                         <Input value={form.gstin} onChange={set("gstin")} placeholder="27ABCDE1234K1Z5" />
                       </Field>
@@ -459,18 +582,40 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
                   placeholder={String(listRent)}
                 />
               </Field>
-              <Field label="Deposit" hint={formatCurrency(deposit)}>
+              <Field label="Deposit" hint={isCustomDeposit ? "Custom amount" : formatCurrency(deposit)}>
                 <Select
-                  value={terms.depositMonths}
-                  onChange={(event) => setTerms((value) => ({ ...value, depositMonths: Number(event.target.value) }))}
+                  value={isCustomDeposit ? "custom" : terms.depositMonths}
+                  onChange={(event) => {
+                    const choice = event.target.value;
+                    setTerms((value) => (choice === "custom"
+                      ? { ...value, depositMode: "custom", depositAmount: value.depositAmount === "" ? String(deposit || "") : value.depositAmount }
+                      : { ...value, depositMode: "months", depositMonths: Number(choice) }));
+                  }}
                 >
-                  {[1, 2, 3, 6].map((months) => (
+                  {DEPOSIT_MONTH_OPTIONS.map((months) => (
                     <option key={months} value={months}>
                       {months} {months === 1 ? "month" : "months"} of rent
                     </option>
                   ))}
+                  <option value="custom">Custom amount</option>
                 </Select>
               </Field>
+              {isCustomDeposit ? (
+                <Field
+                  label="Deposit amount (₹)"
+                  hint={validDeposit ? `${formatCurrency(deposit)} security deposit` : "Enter the deposit amount"}
+                >
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={terms.depositAmount}
+                    onChange={setTerm("depositAmount")}
+                    placeholder="e.g. 75000"
+                    aria-invalid={!validDeposit}
+                  />
+                </Field>
+              ) : null}
 
               <Field label="Lock-in">
                 <Select
@@ -486,7 +631,10 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
               </Field>
               <Field label="Notice period (days)"><Input type="number" min="0" value={terms.noticePeriodDays} onChange={setTerm("noticePeriodDays")} /></Field>
               <Field label="Token amount paid" hint="Recorded separately from rent and deposit"><Input type="number" min="0" value={terms.tokenAmount} onChange={setTerm("tokenAmount")} /></Field>
-              <fieldset className="rounded-lg border p-3 sm:col-span-2"><legend className="px-2 text-sm font-semibold">Security Cheque</legend><div className="grid gap-3 sm:grid-cols-2">{["number", "bank", "amount", "date", "notes"].map(key => <Field key={key} label={key === "number" ? "Cheque number" : key.charAt(0).toUpperCase() + key.slice(1)}><Input type={key === "amount" ? "number" : key === "date" ? "date" : "text"} min={key === "amount" ? "0" : undefined} value={terms.securityCheque[key]} onChange={e => setTerms(old => ({ ...old, securityCheque: { ...old.securityCheque, [key]: e.target.value } }))}/></Field>)}</div></fieldset>
+              <fieldset className="rounded-lg border p-3 sm:col-span-2"><legend className="px-2 text-sm font-semibold">Security / Deposit Cheque</legend><div className="grid gap-3 sm:grid-cols-2">{["number", "bank", "amount", "date", "notes"].map(key => <Field key={key} label={key === "number" ? "Cheque number" : key.charAt(0).toUpperCase() + key.slice(1)}><Input type={key === "amount" ? "number" : key === "date" ? "date" : "text"} min={key === "amount" ? "0" : undefined} value={terms.securityCheque[key]} onChange={e => setTerms(old => ({ ...old, securityCheque: { ...old.securityCheque, [key]: e.target.value } }))}/></Field>)}<ChequeUpload
+                    file={terms.securityCheque.file || null}
+                    onChange={(file) => setTerms((old) => ({ ...old, securityCheque: { ...old.securityCheque, file } }))}
+                  /></div></fieldset>
               <Field label="Total capacity" hint="Cabins are let whole, not by the seat">
                 <Input value={`${capacity} seater`} readOnly disabled />
               </Field>
@@ -512,7 +660,7 @@ const OnboardClientDialog = ({ open, cabins = [], onClose, onConfirm, initialCli
                 </p>
                 <p className="text-[12px] text-slate-500 dark:text-slate-400">
                   {mode === "new"
-                    ? [form.contactPerson, form.phone, form.industry].filter(Boolean).join(" · ") || "New client record"
+                    ? [form.contactPerson, form.signingAuthority2 || form.secondPersonName, form.phone, resolveIndustry(form)].filter(Boolean).join(" · ") || "New client record"
                     : `${selectedClient?.contactPerson} · ${selectedClient?.phone} · existing client`}
                 </p>
               </div>

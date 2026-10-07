@@ -1,3 +1,6 @@
+> **Superseded (2026-09-21).** Current planning lives in `docs/mobile/`.
+> Start at [docs/mobile/README.md](../docs/mobile/README.md). Kept for history.
+
 # Mobile-Web Parity Queue
 
 ## Status

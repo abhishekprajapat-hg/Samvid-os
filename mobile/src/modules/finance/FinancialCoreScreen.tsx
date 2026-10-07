@@ -1,1145 +1,940 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
-  FlatList,
-  Modal,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import { Screen } from "../../components/common/Screen";
-import { AppButton, AppChip } from "../../components/common/ui";
-import { clearLeadFollowUp, getAllLeads } from "../../services/leadService";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import Svg, { Circle, Polyline, Rect } from "react-native-svg";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
+import { Glyph, type GlyphName } from "../../components/ui/Glyph";
+import { AppSheet } from "../../components/ui/Overlay";
+import { brand, brandStyles, layout, round, type as t } from "../../theme/brand";
 import { toErrorMessage } from "../../utils/errorMessage";
-import type { Lead } from "../../types";
+import {
+  getFinanceOverview,
+  getFinanceTransactions,
+  type FinanceSeriesPoint,
+  type FinanceSummary,
+  type FinanceTransaction,
+} from "../../services/financeService";
+import {
+  axisMoney,
+  categoryIcon,
+  categoryLabel,
+  compactMoney,
+  dayShortOf,
+  methodLabel,
+  monthKeyOf,
+  monthLabelOf,
+  monthTickOf,
+  signedMoney,
+  statusTone,
+} from "./financeVocab";
 
-const COMMISSION_PER_DEAL = 50000;
-const RANGE_OPTIONS = ["ALL", "THIS_MONTH", "CUSTOM"] as const;
-const PIPELINE_STATUSES = [
-  { key: "NEW", label: "New" },
-  { key: "CONTACTED", label: "Contacted" },
-  { key: "INTERESTED", label: "Interested" },
-  { key: "SITE_VISIT", label: "Site Visit" },
-  { key: "CLOSED", label: "Closed" },
-  { key: "LOST", label: "Lost" },
+/*
+ * Finance, drawn to the comp.
+ *
+ * Everything on this page comes from /api/finance/overview, which reads the
+ * one ledger the product has - invoices, the payment ledger and expenses. The
+ * old screen here derived a company's money from lead deal payments and a flat
+ * commission per closed deal; that was a stand-in for a ledger, and this is
+ * the ledger.
+ */
+
+/** The comp's range control. */
+const RANGES: Array<{ key: string; label: string; back: number }> = [
+  { key: "THIS_MONTH", label: "This Month", back: 0 },
+  { key: "LAST_MONTH", label: "Last Month", back: 1 },
+  { key: "TWO_BACK", label: "Two Months Ago", back: 2 },
 ];
 
-type RangeKey = (typeof RANGE_OPTIONS)[number];
-
-const toDate = (value?: string) => {
-  if (!value) return null;
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
+const monthFor = (back: number) => {
+  const date = new Date();
+  date.setDate(1);
+  date.setMonth(date.getMonth() - back);
+  return monthKeyOf(date);
 };
 
-const getRangeStart = (rangeKey: RangeKey) => {
-  const now = new Date();
-  if (rangeKey === "THIS_MONTH") {
-    return new Date(now.getFullYear(), now.getMonth(), 1);
-  }
-  return null;
-};
+/* --------------------------------------------------------------- chart -- */
 
-const formatCurrency = (value: number) => `Rs ${Math.round(value || 0).toLocaleString("en-IN")}`;
+/*
+ * Grouped income/expense bars with the income trend drawn over them, as the
+ * comp does. Plain SVG: a charting dependency for one card on one screen is
+ * not worth the bundle.
+ */
+const CashFlowChart = ({ series }: { series: FinanceSeriesPoint[] }) => {
+  const width = 358;
+  const height = 150;
+  const padLeft = 34;
+  const padBottom = 22;
+  const padTop = 8;
 
-const formatDateTime = (value?: string) => {
-  const parsed = toDate(value);
-  if (!parsed) return "-";
-  return parsed.toLocaleString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
+  const peak = Math.max(1, ...series.flatMap((point) => [point.income, point.expenses]));
+  /* Round the top up to a clean step so the axis reads ₹1L / ₹2L / ₹3L. */
+  const step = Math.pow(10, Math.floor(Math.log10(peak)));
+  const top = Math.ceil(peak / step) * step;
 
-const getAssigneeName = (assignedTo?: Lead["assignedTo"]) => {
-  if (!assignedTo) return "Unassigned";
-  if (typeof assignedTo === "string") return "Unassigned";
-  return assignedTo.name || "Unassigned";
-};
+  const plotW = width - padLeft;
+  const plotH = height - padBottom - padTop;
+  const slot = plotW / Math.max(1, series.length);
+  const barW = Math.min(14, slot * 0.26);
+  const yOf = (value: number) => padTop + plotH - (value / top) * plotH;
+  const xOf = (index: number) => padLeft + slot * index + slot / 2;
 
-const toObjectIdString = (value: any): string => {
-  if (!value) return "";
-  if (typeof value === "string") return value;
-  if (typeof value === "object" && value._id) return String(value._id);
-  return String(value);
-};
+  const ticks = [top, (top / 3) * 2, top / 3, 0];
 
-const toAmountNumber = (value: unknown): number | null => {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string" && value.trim() === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const getLeadRelatedInventories = (lead: Lead): any[] => {
-  const merged: any[] = [];
-  const seen = new Set<string>();
-  const pushUnique = (value: any) => {
-    const id = toObjectIdString(value);
-    if (!id || seen.has(id)) return;
-    seen.add(id);
-    merged.push(value);
-  };
-
-  pushUnique((lead as any)?.inventoryId);
-  if (Array.isArray((lead as any)?.relatedInventoryIds)) {
-    (lead as any).relatedInventoryIds.forEach((row: any) => pushUnique(row));
-  }
-
-  return merged;
-};
-
-const getLeadSaleEntries = (lead: Lead): Array<{ entryKey: string; totalAmount: number; remainingAmount: number }> => {
-  const leadId = toObjectIdString((lead as any)?._id) || "lead";
-  const leadStatus = String((lead as any)?.status || "").trim().toUpperCase();
-  const isClosedContext = ["CLOSED", "REQUESTED"].includes(leadStatus);
-  const linkedInventories = getLeadRelatedInventories(lead);
-  const entries: Array<{ entryKey: string; totalAmount: number; remainingAmount: number }> = [];
-
-  linkedInventories.forEach((inventory, index) => {
-    if (!inventory || typeof inventory !== "object") return;
-
-    const saleTotalAmount = toAmountNumber((inventory as any)?.saleDetails?.totalAmount);
-    const inventoryPrice = toAmountNumber((inventory as any)?.price);
-    const totalAmount =
-      saleTotalAmount !== null && saleTotalAmount > 0
-        ? saleTotalAmount
-        : inventoryPrice;
-
-    if (totalAmount === null || totalAmount <= 0) return;
-
-    const inventoryStatus = String((inventory as any)?.status || "").trim().toUpperCase();
-    const hasSaleDetails = saleTotalAmount !== null && saleTotalAmount > 0;
-    const isSoldInventory = inventoryStatus === "SOLD" || hasSaleDetails;
-    if (!isClosedContext && !isSoldInventory) return;
-
-    const remainingRaw = toAmountNumber((inventory as any)?.saleDetails?.remainingAmount);
-    const remainingAmount =
-      remainingRaw === null
-        ? 0
-        : Math.max(0, Math.min(remainingRaw, totalAmount));
-    const entryKey = toObjectIdString(inventory) || `${leadId}:${index}`;
-
-    entries.push({
-      entryKey,
-      totalAmount,
-      remainingAmount,
-    });
-  });
-
-  if (entries.length > 0 || !isClosedContext) return entries;
-
-  const fallbackInventory = linkedInventories.find((inventory) => {
-    if (!inventory || typeof inventory !== "object") return false;
-    const amount = toAmountNumber((inventory as any)?.price);
-    return amount !== null && amount > 0;
-  });
-  const fallbackTotalAmount = toAmountNumber((fallbackInventory as any)?.price);
-  if (fallbackTotalAmount === null || fallbackTotalAmount <= 0) return entries;
-
-  const paymentType = String((lead as any)?.dealPayment?.paymentType || "").trim().toUpperCase();
-  const dealRemainingRaw = toAmountNumber((lead as any)?.dealPayment?.remainingAmount);
-  const fallbackRemainingAmount =
-    paymentType === "PARTIAL" && dealRemainingRaw !== null
-      ? Math.max(0, Math.min(dealRemainingRaw, fallbackTotalAmount))
-      : 0;
-
-  entries.push({
-    entryKey: `${leadId}:fallback`,
-    totalAmount: fallbackTotalAmount,
-    remainingAmount: fallbackRemainingAmount,
-  });
-
-  return entries;
-};
-
-const pad2 = (value: number) => String(value).padStart(2, "0");
-const toDateInputValue = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
-
-const WebDateInput = ({
-  value,
-  onChange,
-  placeholder,
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  placeholder?: string;
-}) => {
-  if (Platform.OS === "web") {
-    return (
-      <View style={styles.webInputWrap}>
-        <input
-          value={value}
-          onChange={(event) => onChange((event.target as HTMLInputElement).value)}
-          placeholder={placeholder}
-          type="date"
-          style={styles.webDateInput as any}
-        />
-      </View>
-    );
-  }
-  return <TextInput style={styles.modalInput} value={value} onChangeText={onChange} placeholder={placeholder} />;
-};
-
-export const FinancialCoreScreen = () => {
-  const navigation = useNavigation<any>();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const [rangeKey, setRangeKey] = useState<RangeKey>("ALL");
-  const [selectedMonthDate, setSelectedMonthDate] = useState(new Date());
-  const [customFromDate, setCustomFromDate] = useState<Date | null>(null);
-  const [customToDate, setCustomToDate] = useState<Date | null>(null);
-  const [showMonthPicker, setShowMonthPicker] = useState(false);
-  const [showCustomFromPicker, setShowCustomFromPicker] = useState(false);
-  const [showCustomToPicker, setShowCustomToPicker] = useState(false);
-  const [webMonthPickerVisible, setWebMonthPickerVisible] = useState(false);
-  const [webMonthDateValue, setWebMonthDateValue] = useState(toDateInputValue(new Date()));
-  const [webCustomPickerVisible, setWebCustomPickerVisible] = useState(false);
-  const [webCustomFromValue, setWebCustomFromValue] = useState("");
-  const [webCustomToValue, setWebCustomToValue] = useState("");
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [clearingFollowUpId, setClearingFollowUpId] = useState("");
-
-  const load = async (silent = false) => {
-    try {
-      if (silent) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      setError("");
-      const rows = await getAllLeads();
-      setLeads(Array.isArray(rows) ? rows : []);
-    } catch (e) {
-      setError(toErrorMessage(e, "Failed to load finance data"));
-      setLeads([]);
-    } finally {
-      setRefreshing(false);
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load(false);
-  }, []);
-
-  const scopedLeads = useMemo(() => {
-    if (rangeKey === "ALL") return leads;
-    if (rangeKey === "THIS_MONTH") {
-      return leads.filter((lead) => {
-        const createdAt = toDate(lead.createdAt);
-        if (!createdAt) return false;
-        return (
-          createdAt.getFullYear() === selectedMonthDate.getFullYear()
-          && createdAt.getMonth() === selectedMonthDate.getMonth()
-        );
-      });
-    }
-    if (!customFromDate || !customToDate) return [];
-    const start = new Date(customFromDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(customToDate);
-    end.setHours(23, 59, 59, 999);
-    return leads.filter((lead) => {
-      const createdAt = toDate(lead.createdAt);
-      if (!createdAt) return false;
-      return createdAt >= start && createdAt <= end;
-    });
-  }, [leads, rangeKey, selectedMonthDate, customFromDate, customToDate]);
-
-  const periodLabel = useMemo(() => {
-    if (rangeKey === "ALL") return "All data";
-    if (rangeKey === "THIS_MONTH") {
-      return selectedMonthDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
-    }
-    if (customFromDate && customToDate) {
-      return `${customFromDate.toLocaleDateString("en-IN")} to ${customToDate.toLocaleDateString("en-IN")}`;
-    }
-    if (customFromDate) return `From ${customFromDate.toLocaleDateString("en-IN")}`;
-    return "Custom range";
-  }, [rangeKey, selectedMonthDate, customFromDate, customToDate]);
-
-  const dashboard = useMemo(() => {
-    const statusCount: Record<string, number> = {};
-    PIPELINE_STATUSES.forEach((status) => {
-      statusCount[status.key] = 0;
-    });
-
-    const sourceCount = { META: 0, MANUAL: 0, OTHER: 0 };
-    const activeStatuses = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
-    const countedSaleKeys = new Set<string>();
-    let totalSellAmount = 0;
-    let pendingSellCollection = 0;
-
-    scopedLeads.forEach((lead) => {
-      const status = String(lead.status || "NEW");
-      const source = String(lead.source || "");
-      if (Object.prototype.hasOwnProperty.call(statusCount, status)) {
-        statusCount[status] += 1;
-      }
-      if (source === "META") sourceCount.META += 1;
-      else if (source === "MANUAL") sourceCount.MANUAL += 1;
-      else sourceCount.OTHER += 1;
-
-      getLeadSaleEntries(lead).forEach((entry) => {
-        if (countedSaleKeys.has(entry.entryKey)) return;
-        countedSaleKeys.add(entry.entryKey);
-        totalSellAmount += entry.totalAmount;
-        pendingSellCollection += entry.remainingAmount;
-      });
-    });
-
-    const totalLeads = scopedLeads.length;
-    const closedDeals = statusCount.CLOSED || 0;
-    const lostDeals = statusCount.LOST || 0;
-    const activePipeline = [...activeStatuses].reduce((sum, status) => sum + (statusCount[status] || 0), 0);
-    const conversionRate = totalLeads > 0 ? Math.round((closedDeals / totalLeads) * 100) : 0;
-    const winRate = closedDeals + lostDeals > 0 ? Math.round((closedDeals / (closedDeals + lostDeals)) * 100) : 0;
-    const collectedSellValue = Math.max(0, totalSellAmount - pendingSellCollection);
-    const commissionPayable = closedDeals * COMMISSION_PER_DEAL;
-    const avgCommissionPerClosed = closedDeals > 0 ? commissionPayable / closedDeals : 0;
-
-    return {
-      totalLeads,
-      closedDeals,
-      lostDeals,
-      activePipeline,
-      conversionRate,
-      winRate,
-      totalSellAmount,
-      pendingSellCollection,
-      collectedSellValue,
-      commissionPayable,
-      avgCommissionPerClosed,
-      statusCount,
-      sourceCount,
-    };
-  }, [scopedLeads]);
-
-  const statusRows = useMemo(
-    () =>
-      PIPELINE_STATUSES.map((status) => {
-        const count = dashboard.statusCount[status.key] || 0;
-        const share = dashboard.totalLeads > 0 ? Math.round((count / dashboard.totalLeads) * 100) : 0;
-        return { ...status, count, share };
-      }),
-    [dashboard.statusCount, dashboard.totalLeads],
-  );
-
-  const followUps = useMemo(() => {
-    const now = new Date();
-    const next7Days = new Date(now);
-    next7Days.setDate(next7Days.getDate() + 7);
-
-    const upcoming = scopedLeads
-      .filter((lead) => !["CLOSED", "LOST"].includes(String(lead.status || "")))
-      .filter((lead) => toDate(lead.nextFollowUp))
-      .map((lead) => {
-        const followUpDate = toDate(lead.nextFollowUp);
-        return {
-          ...lead,
-          followUpDate,
-          isOverdue: followUpDate ? followUpDate < now : false,
-        };
-      })
-      .sort((a, b) => (a.followUpDate?.getTime() || 0) - (b.followUpDate?.getTime() || 0));
-
-    return {
-      overdue: upcoming.filter((lead) => lead.isOverdue),
-      thisWeek: upcoming.filter(
-        (lead) => (lead.followUpDate?.getTime() || 0) >= now.getTime() && (lead.followUpDate?.getTime() || 0) <= next7Days.getTime(),
-      ),
-      all: upcoming,
-    };
-  }, [scopedLeads]);
-
-  const recentClosures = useMemo(
-    () =>
-      scopedLeads
-        .filter((lead) => String(lead.status || "") === "CLOSED")
-        .sort((a, b) => (toDate(b.updatedAt || b.createdAt)?.getTime() || 0) - (toDate(a.updatedAt || a.createdAt)?.getTime() || 0))
-        .slice(0, 8),
-    [scopedLeads],
-  );
-
-  const openMonthPicker = () => {
-    if (Platform.OS === "web") {
-      setWebMonthDateValue(toDateInputValue(selectedMonthDate));
-      setWebMonthPickerVisible(true);
-      return;
-    }
-    setShowMonthPicker(true);
-  };
-
-  const openCustomRangePicker = () => {
-    if (Platform.OS === "web") {
-      setWebCustomFromValue(customFromDate ? toDateInputValue(customFromDate) : "");
-      setWebCustomToValue(customToDate ? toDateInputValue(customToDate) : "");
-      setWebCustomPickerVisible(true);
-      return;
-    }
-    setShowCustomFromPicker(true);
-  };
-
-  const applyWebMonthPicker = () => {
-    if (!webMonthDateValue) {
-      setError("Please select date");
-      return;
-    }
-    const parsed = new Date(`${webMonthDateValue}T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-      setError("Please select valid date");
-      return;
-    }
-    setSelectedMonthDate(parsed);
-    setWebMonthPickerVisible(false);
-  };
-
-  const applyWebCustomRange = () => {
-    if (!webCustomFromValue || !webCustomToValue) {
-      setError("Please select from and to date");
-      return;
-    }
-    const parsedFrom = new Date(`${webCustomFromValue}T00:00:00`);
-    const parsedTo = new Date(`${webCustomToValue}T00:00:00`);
-    if (Number.isNaN(parsedFrom.getTime()) || Number.isNaN(parsedTo.getTime())) {
-      setError("Please select valid custom dates");
-      return;
-    }
-    if (parsedTo < parsedFrom) {
-      setError("To date cannot be before from date");
-      return;
-    }
-    setCustomFromDate(parsedFrom);
-    setCustomToDate(parsedTo);
-    setWebCustomPickerVisible(false);
-  };
-
-  const clearFollowUpForLead = (lead: Lead) => {
-    if (!lead?._id) return;
-    Alert.alert(
-      "Delete follow-up",
-      `Delete follow-up for "${lead.name || "this lead"}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              setClearingFollowUpId(String(lead._id));
-              const updated = await clearLeadFollowUp(String(lead._id), String(lead.status || "NEW"));
-              if (!updated || updated.nextFollowUp) {
-                throw new Error("Follow-up not cleared");
-              }
-              await load(true);
-            } catch (e) {
-              setError(toErrorMessage(e, "Failed to delete follow-up"));
-            } finally {
-              setClearingFollowUpId("");
-            }
-          },
-        },
-      ],
-    );
-  };
+  const linePoints = series
+    .map((point, index) => `${xOf(index) - barW * 0.7},${yOf(point.income)}`)
+    .join(" ");
 
   return (
-    <Screen title="Financial Core" subtitle="Finance Dashboard" loading={loading} error={error}>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.sectionCard}>
-          <View style={styles.filterRow}>
-            <AppChip label="All" active={rangeKey === "ALL"} onPress={() => setRangeKey("ALL")} />
-            <AppChip label="This Month" active={rangeKey === "THIS_MONTH"} onPress={() => setRangeKey("THIS_MONTH")} />
-            <AppChip
-              label="Custom"
-              active={rangeKey === "CUSTOM"}
-              onPress={() => {
-                setRangeKey("CUSTOM");
-                openCustomRangePicker();
-              }}
+    <View>
+      <Svg width={width} height={height}>
+        {ticks.map((tick) => (
+          <Rect
+            key={`grid-${tick}`}
+            x={padLeft}
+            y={yOf(tick)}
+            width={plotW}
+            height={0.6}
+            fill={brand.hairline}
+          />
+        ))}
+
+        {series.map((point, index) => (
+          <React.Fragment key={point.month}>
+            <Rect
+              x={xOf(index) - barW - 1.5}
+              y={yOf(point.income)}
+              width={barW}
+              height={Math.max(1, padTop + plotH - yOf(point.income))}
+              rx={3}
+              fill="#1a9e6a"
             />
-            <View style={{ flex: 1 }} />
-            <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-              <Ionicons name="calendar-outline" size={14} color="#334155" />
-            </Pressable>
-            <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} disabled={refreshing} />
-          </View>
-          <Text style={styles.periodText}>Showing: {periodLabel}</Text>
-          {rangeKey === "CUSTOM" ? (
-            <View style={styles.customRangeRow}>
-              <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
-                <Text style={styles.customDateText}>From: {customFromDate ? customFromDate.toLocaleDateString("en-IN") : "Select"}</Text>
-              </Pressable>
-              <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
-                <Text style={styles.customDateText}>To: {customToDate ? customToDate.toLocaleDateString("en-IN") : "Select"}</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
-
-        {showMonthPicker ? (
-          <DateTimePicker
-            value={selectedMonthDate}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowMonthPicker(false);
-              if (next) setSelectedMonthDate(next);
-            }}
-          />
-        ) : null}
-        {showCustomFromPicker ? (
-          <DateTimePicker
-            value={customFromDate || new Date()}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowCustomFromPicker(false);
-              if (next) {
-                setCustomFromDate(next);
-                if (!customToDate || customToDate < next) {
-                  setCustomToDate(next);
-                }
-                setTimeout(() => setShowCustomToPicker(true), 30);
-              }
-            }}
-          />
-        ) : null}
-        {showCustomToPicker ? (
-          <DateTimePicker
-            value={customToDate || customFromDate || new Date()}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowCustomToPicker(false);
-              if (next) {
-                if (customFromDate && next < customFromDate) {
-                  setCustomToDate(customFromDate);
-                  return;
-                }
-                setCustomToDate(next);
-              }
-            }}
-          />
-        ) : null}
-
-        <View style={styles.metricsGrid}>
-          <MetricCard
-            title="Leads In Scope"
-            value={dashboard.totalLeads}
-            helper="Filtered by selected range"
-            onPress={() => navigation.navigate("Leads", { initialStatus: "ALL" })}
-          />
-          <MetricCard
-            title="Active Pipeline"
-            value={dashboard.activePipeline}
-            helper="New to Site Visit stages"
-            onPress={() => navigation.navigate("Leads", { filterPreset: "PIPELINE", initialStatus: "ALL" })}
-          />
-          <MetricCard
-            title="Closed Deals"
-            value={dashboard.closedDeals}
-            helper={`Win rate ${dashboard.winRate}%`}
-            onPress={() => navigation.navigate("Leads", { initialStatus: "CLOSED" })}
-          />
-          <MetricCard
-            title="Total Sell Value"
-            value={formatCurrency(dashboard.totalSellAmount)}
-            helper={`Collected ${formatCurrency(dashboard.collectedSellValue)} | Pending ${formatCurrency(dashboard.pendingSellCollection)}`}
-            onPress={() => navigation.navigate("Leads", { initialStatus: "CLOSED" })}
-          />
-          <MetricCard
-            title="Remaining Amount"
-            value={formatCurrency(dashboard.pendingSellCollection)}
-            helper="Pending collection on partial closures"
-            onPress={() => navigation.navigate("Leads", { initialStatus: "CLOSED" })}
-          />
-          <MetricCard
-            title="Conversion Rate"
-            value={`${dashboard.conversionRate}%`}
-            helper={`${dashboard.lostDeals} leads lost`}
-            onPress={() => navigation.navigate("Leads", { initialStatus: "CLOSED" })}
-          />
-          <MetricCard
-            title="Commission Payable"
-            value={formatCurrency(dashboard.commissionPayable)}
-            helper={`Avg ${formatCurrency(dashboard.avgCommissionPerClosed)} per closed`}
-            onPress={() => navigation.navigate("Leads", { initialStatus: "CLOSED" })}
-          />
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Pipeline Breakdown</Text>
-          {statusRows.map((row) => (
-            <Pressable
-              key={row.key}
-              style={styles.progressBlock}
-              onPress={() => navigation.navigate("Leads", { initialStatus: row.key })}
-            >
-              <View style={styles.progressHead}>
-                <Text style={styles.progressLabel}>{row.label}</Text>
-                <Text style={styles.progressMeta}>{row.count} ({row.share}%)</Text>
-              </View>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${Math.max(3, Math.min(100, row.share))}%` }]} />
-              </View>
-            </Pressable>
-          ))}
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Source Mix</Text>
-          <SourceRow
-            label="Meta Leads"
-            count={dashboard.sourceCount.META}
-            total={dashboard.totalLeads}
-            onPress={() => navigation.navigate("Leads", { initialStatus: "ALL", initialQuery: "META" })}
-          />
-          <SourceRow
-            label="Manual Leads"
-            count={dashboard.sourceCount.MANUAL}
-            total={dashboard.totalLeads}
-            onPress={() => navigation.navigate("Leads", { initialStatus: "ALL", initialQuery: "MANUAL" })}
-          />
-          <SourceRow
-            label="Other Sources"
-            count={dashboard.sourceCount.OTHER}
-            total={dashboard.totalLeads}
-            onPress={() => navigation.navigate("Leads", { initialStatus: "ALL", initialQuery: "OTHER" })}
-          />
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Recent Closed Deals</Text>
-          {recentClosures.length === 0 ? (
-            <Text style={styles.empty}>No closed deals in selected range.</Text>
-          ) : (
-            recentClosures.map((lead) => (
-              <Pressable key={lead._id} style={styles.listRow} onPress={() => navigation.navigate("LeadDetails", { leadId: lead._id })}>
-                <View style={styles.listMain}>
-                  <Text style={styles.listTitle}>{lead.name || "-"}</Text>
-                  <Text style={styles.listMeta}>{lead.projectInterested || "-"} | {lead.phone || "-"}</Text>
-                </View>
-                <View style={styles.listRight}>
-                  <Text style={styles.listMeta}>{getAssigneeName(lead.assignedTo)}</Text>
-                  <Text style={styles.listDate}>{formatDateTime(lead.updatedAt || lead.createdAt)}</Text>
-                </View>
-              </Pressable>
-            ))
-          )}
-        </View>
-
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Follow-up Watchlist</Text>
-          <View style={styles.badgeRow}>
-            <Pressable style={styles.badgeDanger} onPress={() => navigation.navigate("Leads", { filterPreset: "DUE_FOLLOWUP" })}>
-              <Text style={styles.badgeDangerText}>Overdue: {followUps.overdue.length}</Text>
-            </Pressable>
-            <Pressable style={styles.badgeWarn} onPress={() => navigation.navigate("Leads", { filterPreset: "DUE_FOLLOWUP" })}>
-              <Text style={styles.badgeWarnText}>Next 7 days: {followUps.thisWeek.length}</Text>
-            </Pressable>
-          </View>
-
-          {followUps.all.length === 0 ? (
-            <Text style={styles.empty}>No upcoming follow-ups in selected range.</Text>
-          ) : (
-            <FlatList
-              scrollEnabled={false}
-              data={followUps.all.slice(0, 8)}
-              keyExtractor={(item) => item._id}
-              renderItem={({ item }) => (
-                <Pressable
-                  style={[styles.watchRow, item.isOverdue ? styles.watchOverdue : styles.watchNormal]}
-                  onPress={() => navigation.navigate("LeadDetails", { leadId: item._id })}
-                >
-                  <View style={styles.listMain}>
-                    <Text style={styles.listTitle}>{item.name || "-"}</Text>
-                    <Text style={styles.listMeta}>{item.projectInterested || "-"}</Text>
-                  </View>
-                  <View style={styles.watchRightCol}>
-                    <Text style={[styles.watchDate, item.isOverdue && styles.watchDateOverdue]}>
-                      {formatDateTime(item.nextFollowUp)}
-                    </Text>
-                    <Pressable
-                      style={styles.followupDeleteBtn}
-                      onPress={(event: any) => {
-                        event?.stopPropagation?.();
-                        clearFollowUpForLead(item);
-                      }}
-                      disabled={clearingFollowUpId === item._id}
-                    >
-                      <Ionicons name="trash-outline" size={13} color="#b91c1c" />
-                      <Text style={styles.followupDeleteText}>{clearingFollowUpId === item._id ? "..." : "Delete"}</Text>
-                    </Pressable>
-                  </View>
-                </Pressable>
-              )}
+            <Rect
+              x={xOf(index) + 1.5}
+              y={yOf(point.expenses)}
+              width={barW}
+              height={Math.max(1, padTop + plotH - yOf(point.expenses))}
+              rx={3}
+              fill="#fbc3c6"
             />
-          )}
-        </View>
+          </React.Fragment>
+        ))}
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.actionRow}>
-            <Pressable style={styles.actionBtn} onPress={() => navigation.navigate("Leads")}>
-              <Text style={styles.actionBtnText}>Open Leads</Text>
-            </Pressable>
-            <Pressable style={styles.actionBtn} onPress={() => navigation.navigate("Inventory")}>
-              <Text style={styles.actionBtnText}>Open Inventory</Text>
-            </Pressable>
-          </View>
-        </View>
-      </ScrollView>
+        <Polyline points={linePoints} fill="none" stroke="#0f7a55" strokeWidth={1.8} />
+        {series.map((point, index) => (
+          <Circle
+            key={`dot-${point.month}`}
+            cx={xOf(index) - barW * 0.7}
+            cy={yOf(point.income)}
+            r={3.4}
+            fill="#0f7a55"
+          />
+        ))}
+      </Svg>
 
-      <Modal visible={webMonthPickerVisible} transparent animationType="fade" onRequestClose={() => setWebMonthPickerVisible(false)}>
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Month/Date</Text>
-            <WebDateInput value={webMonthDateValue} onChange={setWebMonthDateValue} placeholder="YYYY-MM-DD" />
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancelBtn} onPress={() => setWebMonthPickerVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.modalApplyBtn} onPress={applyWebMonthPicker}>
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <View style={styles.axisY} pointerEvents="none">
+        {ticks.map((tick) => (
+          <Text key={`y-${tick}`} style={[styles.axisText, { top: yOf(tick) - 7 }]}>
+            {tick === 0 ? "0" : axisMoney(tick)}
+          </Text>
+        ))}
+      </View>
 
-      <Modal visible={webCustomPickerVisible} transparent animationType="fade" onRequestClose={() => setWebCustomPickerVisible(false)}>
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Custom Range</Text>
-            <WebDateInput value={webCustomFromValue} onChange={setWebCustomFromValue} placeholder="From date" />
-            <WebDateInput value={webCustomToValue} onChange={setWebCustomToValue} placeholder="To date" />
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancelBtn} onPress={() => setWebCustomPickerVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.modalApplyBtn} onPress={applyWebCustomRange}>
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </Screen>
+      <View style={[styles.axisX, { paddingLeft: padLeft }]}>
+        {series.map((point) => (
+          <Text key={`x-${point.month}`} style={styles.axisTick}>
+            {monthTickOf(point.month)}
+          </Text>
+        ))}
+      </View>
+    </View>
   );
 };
 
-const MetricCard = ({
-  title,
+/* -------------------------------------------------------------- pieces -- */
+
+const StatCard = ({
+  icon,
+  tint,
+  color,
+  label,
   value,
-  helper,
+  caption,
   onPress,
 }: {
-  title: string;
-  value: string | number;
-  helper: string;
+  icon: GlyphName;
+  tint: string;
+  color: string;
+  label: string;
+  value: string;
+  caption: string;
   onPress: () => void;
 }) => (
-  <Pressable style={styles.metricCard} onPress={onPress}>
-    <Text style={styles.metricTitle}>{title}</Text>
-    <Text style={styles.metricValue}>{value}</Text>
-    <Text style={styles.metricHelper}>{helper}</Text>
+  <Pressable style={styles.statCard} onPress={onPress} accessibilityRole="button">
+    <View style={[styles.statIcon, { backgroundColor: tint }]}>
+      <Glyph name={icon} size={19} color={color} />
+    </View>
+    <View style={styles.grow}>
+      <Text style={styles.statLabel} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text style={[styles.statValue, { color }]} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={styles.statCaption} numberOfLines={1}>
+        {caption}
+      </Text>
+    </View>
+    <Glyph name="chevron-forward" size={17} color={brand.textMuted} />
   </Pressable>
 );
 
-const SourceRow = ({
-  label,
-  count,
-  total,
-  onPress,
-}: {
-  label: string;
-  count: number;
-  total: number;
-  onPress: () => void;
-}) => {
-  const share = total > 0 ? Math.round((count / total) * 100) : 0;
+/* -------------------------------------------------------------- screen -- */
+
+export const FinancialCoreScreen = () => {
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+
+  const [range, setRange] = useState(RANGES[0]);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [summary, setSummary] = useState<FinanceSummary | null>(null);
+  const [previous, setPrevious] = useState<FinanceSummary | null>(null);
+  const [series, setSeries] = useState<FinanceSeriesPoint[]>([]);
+  const [recent, setRecent] = useState<FinanceTransaction[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+
+  const month = monthFor(range.back);
+
+  const load = useCallback(
+    async (quiet = false) => {
+      try {
+        if (quiet) setRefreshing(true);
+        else setLoading(true);
+        setError("");
+
+        const [overview, prior, feed] = await Promise.all([
+          getFinanceOverview({ month, months: 6 }),
+          getFinanceOverview({ month: monthFor(range.back + 1), months: 1 }),
+          getFinanceTransactions({ month, limit: 5 }),
+        ]);
+
+        setSummary(overview.summary);
+        setSeries(overview.series);
+        setPrevious(prior.summary);
+        setRecent(feed.transactions.slice(0, 4));
+      } catch (e) {
+        setError(toErrorMessage(e, "Failed to load finance"));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [month, range.back],
+  );
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void load(true);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
+
+  const change = useMemo(() => {
+    const now = Number(summary?.net || 0);
+    const before = Number(previous?.net || 0);
+    if (!before) return null;
+    return ((now - before) / Math.abs(before)) * 100;
+  }, [summary, previous]);
+
+  /*
+   * Export writes the month's rows to a CSV and hands it to the share sheet -
+   * the backend has no report generator, and a file the accountant can open is
+   * what "Export Report" is for.
+   */
+  const exportReport = async () => {
+    try {
+      const { transactions } = await getFinanceTransactions({ month, limit: 300 });
+      const head = "Date,Type,Title,Party,Category,Amount,Method,Status,Reference";
+      const body = transactions
+        .map((row) =>
+          [
+            new Date(row.date).toISOString().slice(0, 10),
+            row.kind,
+            row.title,
+            row.party,
+            row.category,
+            row.amount,
+            row.method,
+            row.status,
+            row.reference,
+          ]
+            .map((cell) => `"${String(cell ?? "").replaceAll('"', '""')}"`)
+            .join(","),
+        )
+        .join("\n");
+
+      const path = `${FileSystem.cacheDirectory}finance-${month}.csv`;
+      await FileSystem.writeAsStringAsync(path, `${head}\n${body}`);
+      if (await Sharing.isAvailableAsync()) await Sharing.shareAsync(path);
+      else Alert.alert("Export", `Saved to ${path}`);
+    } catch (e) {
+      Alert.alert("Export", toErrorMessage(e, "Could not build the report"));
+    }
+  };
+
+  const quickActions: Array<{ id: string; label: string; icon: GlyphName; run: () => void }> = [
+    {
+      id: "invoice",
+      label: "Create Invoice",
+      icon: "document-text-outline",
+      run: () => navigation.navigate("AddEntry", { kind: "INCOME" }),
+    },
+    {
+      id: "payment",
+      label: "Record Payment",
+      icon: "card-outline",
+      run: () => navigation.navigate("AddEntry", { kind: "INCOME" }),
+    },
+    {
+      id: "expense",
+      label: "Add Expense",
+      icon: "receipt-outline",
+      run: () => navigation.navigate("AddEntry", { kind: "EXPENSE" }),
+    },
+    { id: "export", label: "Export Report", icon: "stats-chart", run: exportReport },
+  ];
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
+        <View style={styles.centred}>
+          <ActivityIndicator size="large" color={brand.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <Pressable style={styles.sourceRow} onPress={onPress}>
-      <View style={styles.progressHead}>
-        <Text style={styles.progressLabel}>{label}</Text>
-        <Text style={styles.progressMeta}>{count} ({share}%)</Text>
+    <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
+      <View style={styles.header}>
+        <Text style={styles.pageTitle} numberOfLines={1}>
+          Finance
+        </Text>
+        <Text style={styles.pageSubtitle}>Revenue, expenses &amp; payments</Text>
+
+        <View style={styles.headerActions}>
+          <Pressable
+            style={styles.rangeBtn}
+            onPress={() => setRangeOpen(true)}
+            accessibilityRole="button"
+          >
+            <Glyph name="calendar-outline" size={16} color={brand.text} />
+            <Text style={styles.rangeLabel}>{range.label}</Text>
+            <Glyph name="chevron-down" size={14} color={brand.textSecondary} />
+          </Pressable>
+          <Pressable
+            style={styles.addBtn}
+            onPress={() => navigation.navigate("AddEntry")}
+            accessibilityRole="button"
+          >
+            <Glyph name="add" size={19} color={brand.onPrimary} />
+            <Text style={styles.addBtnText}>Add Entry</Text>
+          </Pressable>
+        </View>
       </View>
-      <View style={styles.progressTrack}>
-        <View style={[styles.progressFillDark, { width: `${Math.max(3, Math.min(100, share))}%` }]} />
-      </View>
-    </Pressable>
+
+      <ScrollView
+        contentContainerStyle={[styles.body, { paddingBottom: 26 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={brand.primary} />
+        }
+      >
+        {error ? (
+          <Pressable style={styles.banner} onPress={() => load()} accessibilityRole="button">
+            <Text style={styles.bannerText}>{error}</Text>
+          </Pressable>
+        ) : null}
+
+        {/* ---- hero ---- */}
+        <View style={styles.hero}>
+          <View style={styles.heroLeft}>
+            <Text style={styles.heroLabel}>Net cash flow</Text>
+            <Text style={styles.heroValue} numberOfLines={1}>
+              {compactMoney(summary?.net)}
+            </Text>
+            <View style={styles.heroChangeRow}>
+              {change != null ? (
+                <View style={styles.heroChip}>
+                  <Glyph
+                    name={change >= 0 ? "arrow-up" : "arrow-down"}
+                    size={12}
+                    color={brand.onPrimary}
+                  />
+                  <Text style={styles.heroChipText}>
+                    {`${change >= 0 ? "+" : ""}${change.toFixed(1)}%`}
+                  </Text>
+                </View>
+              ) : null}
+              <Text style={styles.heroNote}>vs last month</Text>
+            </View>
+          </View>
+
+          <View style={styles.heroRule} />
+
+          <View style={styles.heroRight}>
+            <Text style={styles.heroSmallLabel}>Income</Text>
+            <Text style={styles.heroSmallValue} numberOfLines={1}>
+              {compactMoney(summary?.income)}
+            </Text>
+            <View style={styles.heroDivider} />
+            <Text style={styles.heroSmallLabel}>Expenses</Text>
+            <Text style={styles.heroSmallValue} numberOfLines={1}>
+              {compactMoney(summary?.expenses)}
+            </Text>
+          </View>
+        </View>
+
+        {/* ---- four tiles ---- */}
+        <View style={styles.statRow}>
+          <StatCard
+            icon="wallet-outline"
+            tint={brand.tint}
+            color={brand.text}
+            label="Receivables"
+            value={compactMoney(summary?.receivables)}
+            caption={`${summary?.receivablesCount || 0} pending`}
+            onPress={() => navigation.navigate("Transactions", { month, type: "INCOME", status: "PENDING" })}
+          />
+          <StatCard
+            icon="card-outline"
+            tint={brand.alertTint}
+            color={brand.text}
+            label="Payables"
+            value={compactMoney(summary?.payables)}
+            caption={`${summary?.payablesCount || 0} due`}
+            onPress={() => navigation.navigate("Transactions", { month, type: "EXPENSE", status: "PENDING" })}
+          />
+        </View>
+        <View style={styles.statRow}>
+          <StatCard
+            icon="checkmark-circle-outline"
+            tint={brand.tint}
+            color={brand.primary}
+            label="Collected"
+            value={compactMoney(summary?.collected)}
+            caption=""
+            onPress={() => navigation.navigate("Transactions", { month, type: "INCOME", status: "PAID" })}
+          />
+          <StatCard
+            icon="alert-circle-outline"
+            tint={brand.alertTint}
+            color={brand.alertInk}
+            label="Overdue"
+            value={compactMoney(summary?.overdue)}
+            caption=""
+            onPress={() => navigation.navigate("Transactions", { month, status: "OVERDUE" })}
+          />
+        </View>
+
+        {/* ---- chart ---- */}
+        <View style={[styles.card, styles.cardGap]}>
+          <View style={styles.chartHead}>
+            <Text style={[styles.cardTitle, styles.chartTitle]}>Cash Flow</Text>
+            <View style={styles.legend}>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: "#1a9e6a" }]} />
+                <Text style={styles.legendText}>Income</Text>
+              </View>
+              <View style={styles.legendItem}>
+                <View style={[styles.legendDot, { backgroundColor: "#fbc3c6" }]} />
+                <Text style={styles.legendText}>Expenses</Text>
+              </View>
+            </View>
+          </View>
+          <CashFlowChart series={series} />
+        </View>
+
+        {/* ---- quick actions ---- */}
+        <View style={[styles.card, styles.cardGap]}>
+          <Text style={styles.cardTitle}>Quick Actions</Text>
+          <View style={styles.actionRow}>
+            {quickActions.map((action) => (
+              <Pressable
+                key={action.id}
+                style={styles.action}
+                onPress={action.run}
+                accessibilityRole="button"
+              >
+                <View style={styles.actionIcon}>
+                  <Glyph name={action.icon} size={21} color={brand.deep} />
+                </View>
+                <Text style={styles.actionLabel} numberOfLines={1}>
+                  {action.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
+        {/* ---- recent ---- */}
+        <View style={[styles.card, styles.cardGap]}>
+          <View style={styles.chartHead}>
+            <Text style={[styles.cardTitle, styles.chartTitle]}>Recent Transactions</Text>
+            <Pressable
+              style={styles.linkRow}
+              onPress={() => navigation.navigate("Transactions", { month })}
+              accessibilityRole="button"
+            >
+              <Text style={styles.linkText}>View all transactions</Text>
+              <Glyph name="arrow-forward" size={14} color={brand.primary} />
+            </Pressable>
+          </View>
+
+          {recent.length === 0 ? (
+            <Text style={styles.emptyText}>Nothing recorded this month.</Text>
+          ) : (
+            recent.map((row, index) => {
+              const tone = statusTone(row.status);
+              return (
+                <Pressable
+                  key={row.id}
+                  style={[styles.txRow, index > 0 && styles.txRowDivided]}
+                  onPress={() =>
+                    row.invoiceId
+                      ? navigation.navigate("InvoiceDetails", { invoiceId: row.invoiceId })
+                      : navigation.navigate("Transactions", { month })
+                  }
+                  accessibilityRole="button"
+                >
+                  <View style={styles.txIcon}>
+                    <Glyph name={categoryIcon(row.category)} size={17} color={brand.deep} />
+                  </View>
+                  <View style={styles.grow}>
+                    <Text style={styles.txTitle} numberOfLines={1}>
+                      {row.title}
+                    </Text>
+                    <Text style={styles.txSub} numberOfLines={1}>
+                      {categoryLabel(row.category)}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.txAmount,
+                      { color: row.amount < 0 ? brand.alertInk : brand.primary },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {signedMoney(row.amount)}
+                  </Text>
+                  <View style={[styles.txPill, { backgroundColor: tone.bg }]}>
+                    <Text style={[styles.txPillText, { color: tone.fg }]}>{tone.label}</Text>
+                  </View>
+                  <Text style={styles.txDate} numberOfLines={1}>
+                    {dayShortOf(row.date)}
+                  </Text>
+                  <Glyph name="chevron-forward" size={15} color={brand.textMuted} />
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+      </ScrollView>
+
+      <AppSheet visible={rangeOpen} onClose={() => setRangeOpen(false)} title="Period">
+        {RANGES.map((entry) => (
+          <Pressable
+            key={entry.key}
+            style={styles.sheetRow}
+            onPress={() => {
+              setRange(entry);
+              setRangeOpen(false);
+            }}
+            accessibilityRole="button"
+          >
+            <Text style={styles.sheetLabel}>
+              {entry.back === 0 ? entry.label : monthLabelOf(monthFor(entry.back))}
+            </Text>
+            {entry.key === range.key ? (
+              <Glyph name="checkmark" size={18} color={brand.primary} />
+            ) : null}
+          </Pressable>
+        ))}
+      </AppSheet>
+    </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    gap: 12,
-    paddingBottom: 16,
-  },
-  filterRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: 8,
-  },
-  calendarIconBtn: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 9,
-    backgroundColor: "#fff",
-    height: 36,
-    width: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  periodText: {
-    marginTop: 8,
-    color: "#475569",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  customRangeRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    gap: 8,
-  },
-  customDateBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    padding: 10,
-  },
-  customDateText: {
-    color: "#334155",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  metricsGrid: {
-    gap: 10,
-  },
-  metricCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-  },
-  metricTitle: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    color: "#64748b",
-    fontWeight: "700",
-    letterSpacing: 0.7,
-  },
-  metricValue: {
-    marginTop: 7,
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#0f172a",
-  },
-  metricHelper: {
-    marginTop: 3,
-    fontSize: 12,
-    color: "#64748b",
-  },
-  sectionCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-    gap: 8,
-  },
-  sectionTitle: {
-    fontSize: 12,
-    textTransform: "uppercase",
-    color: "#334155",
-    fontWeight: "700",
-    letterSpacing: 0.8,
-  },
-  progressBlock: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    backgroundColor: "#f8fafc",
-    padding: 8,
-  },
-  progressHead: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 8,
-  },
-  progressLabel: {
-    color: "#0f172a",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  progressMeta: {
-    color: "#475569",
-    fontSize: 12,
-  },
-  progressTrack: {
-    marginTop: 7,
-    height: 8,
-    borderRadius: 6,
-    backgroundColor: "#e2e8f0",
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: "#0f172a",
-  },
-  progressFillDark: {
-    height: "100%",
-    backgroundColor: "#334155",
-  },
-  sourceRow: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    backgroundColor: "#f8fafc",
-    padding: 8,
-  },
-  listRow: {
-    borderTopWidth: 1,
-    borderTopColor: "#f1f5f9",
-    paddingVertical: 8,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  listMain: {
-    flex: 1,
-  },
-  listTitle: {
-    color: "#0f172a",
-    fontWeight: "700",
-    fontSize: 13,
-  },
-  listMeta: {
-    marginTop: 2,
-    color: "#64748b",
-    fontSize: 12,
-  },
-  listRight: {
-    alignItems: "flex-end",
-  },
-  listDate: {
-    marginTop: 2,
-    color: "#475569",
-    fontSize: 11,
-  },
-  empty: {
-    color: "#64748b",
-    fontSize: 12,
-    marginTop: 4,
-  },
-  badgeRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  badgeDanger: {
-    borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  badgeDangerText: {
-    color: "#b91c1c",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  badgeWarn: {
-    borderWidth: 1,
-    borderColor: "#fde68a",
-    backgroundColor: "#fffbeb",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  badgeWarnText: {
-    color: "#92400e",
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  watchRow: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: 9,
-    marginBottom: 6,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  watchOverdue: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
-  },
-  watchNormal: {
-    borderColor: "#e2e8f0",
-    backgroundColor: "#f8fafc",
-  },
-  watchDate: {
-    color: "#475569",
-    fontSize: 11,
-    fontWeight: "600",
-    width: 126,
-    textAlign: "right",
-  },
-  watchRightCol: {
-    width: 126,
-    alignItems: "flex-end",
-    gap: 6,
-  },
-  watchDateOverdue: {
-    color: "#b91c1c",
-  },
-  followupDeleteBtn: {
-    borderWidth: 1,
-    borderColor: "#fecaca",
-    backgroundColor: "#fff1f2",
-    borderRadius: 8,
-    minHeight: 24,
-    paddingHorizontal: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-  },
-  followupDeleteText: {
-    color: "#b91c1c",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  actionBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    height: 40,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionBtnText: {
-    color: "#334155",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  modalWrap: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.35)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-  },
-  modalCard: {
-    width: "100%",
-    maxWidth: 420,
-    borderRadius: 14,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    padding: 14,
-  },
-  modalTitle: {
-    color: "#0f172a",
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 10,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    color: "#0f172a",
-    height: 44,
-    paddingHorizontal: 12,
-    marginBottom: 8,
-    fontSize: 13,
-  },
-  webInputWrap: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    height: 44,
-    marginBottom: 8,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-  webDateInput: {
-    height: 30,
-    fontSize: 13,
-    color: "#0f172a",
-    backgroundColor: "transparent",
-    borderWidth: 0,
-    padding: 0,
-  },
-  modalActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-    marginTop: 6,
-  },
-  modalCancelBtn: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    minWidth: 90,
-    height: 38,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    backgroundColor: "#fff",
-  },
-  modalCancelText: {
-    color: "#334155",
-    fontWeight: "600",
-    fontSize: 12,
-  },
-  modalApplyBtn: {
-    borderWidth: 1,
-    borderColor: "#0f172a",
-    borderRadius: 10,
-    minWidth: 90,
-    height: 38,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    backgroundColor: "#0f172a",
-  },
-  modalApplyText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-});
+const styles = brandStyles((b) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: b.bg },
+    centred: { flex: 1, alignItems: "center", justifyContent: "center" },
+    grow: { flex: 1, minWidth: 0 },
+
+    header: {
+      paddingHorizontal: layout.gutter,
+      paddingTop: 8,
+      paddingBottom: 12,
+    },
+    pageTitle: {
+      width: "48%",
+      fontSize: t.pageTitle,
+      lineHeight: 31,
+      fontWeight: "700",
+      letterSpacing: -0.8,
+      color: b.text,
+    },
+    pageSubtitle: {
+      marginTop: 1,
+      /* Kept clear of the range pill and the Add Entry button beside it. */
+      width: "62%",
+      fontSize: t.cardTitle,
+      lineHeight: 18,
+      color: b.textMuted,
+    },
+    headerActions: {
+      position: "absolute",
+      right: layout.gutter,
+      top: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    rangeBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 36,
+      paddingHorizontal: 11,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    rangeLabel: {
+      fontSize: t.cardTitle,
+      fontWeight: "500",
+      color: b.text,
+    },
+    addBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 36,
+      paddingHorizontal: 12,
+      borderRadius: round.field,
+      backgroundColor: "#0b7d52",
+    },
+    addBtnText: {
+      fontSize: t.cardTitle,
+      fontWeight: "700",
+      color: b.onPrimary,
+    },
+
+    body: { paddingHorizontal: layout.gutter },
+    banner: {
+      marginBottom: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      borderWidth: 1,
+      borderColor: b.alert,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    bannerText: { fontSize: t.body, lineHeight: 17, color: b.alert },
+
+    /* ---- hero ---- */
+    hero: {
+      flexDirection: "row",
+      padding: 16,
+      borderRadius: round.panel,
+      backgroundColor: "#0a7b4f",
+    },
+    heroLeft: { flex: 1.25, minWidth: 0 },
+    heroLabel: {
+      fontSize: t.field,
+      fontWeight: "600",
+      color: "rgba(255,255,255,0.88)",
+    },
+    heroValue: {
+      marginTop: 4,
+      fontSize: 34,
+      lineHeight: 42,
+      fontWeight: "700",
+      letterSpacing: -1.2,
+      color: "#ffffff",
+    },
+    heroChangeRow: {
+      marginTop: 6,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+    },
+    heroChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      height: 24,
+      paddingHorizontal: 9,
+      borderRadius: round.field,
+      backgroundColor: "rgba(255,255,255,0.2)",
+    },
+    heroChipText: {
+      fontSize: t.body,
+      fontWeight: "700",
+      color: "#ffffff",
+    },
+    heroNote: {
+      fontSize: t.body,
+      color: "rgba(255,255,255,0.82)",
+    },
+    heroRule: {
+      width: 1,
+      marginHorizontal: 14,
+      backgroundColor: "rgba(255,255,255,0.22)",
+    },
+    heroRight: { flex: 1, minWidth: 0, justifyContent: "center" },
+    heroSmallLabel: {
+      fontSize: t.body,
+      color: "rgba(255,255,255,0.82)",
+    },
+    heroSmallValue: {
+      marginTop: 2,
+      fontSize: t.hero,
+      lineHeight: 25,
+      fontWeight: "700",
+      letterSpacing: -0.5,
+      color: "#ffffff",
+    },
+    heroDivider: {
+      height: 1,
+      marginVertical: 10,
+      backgroundColor: "rgba(255,255,255,0.22)",
+    },
+
+    /* ---- tiles ---- */
+    statRow: {
+      marginTop: 10,
+      flexDirection: "row",
+      gap: 10,
+    },
+    statCard: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      paddingHorizontal: 11,
+      paddingVertical: 12,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+    },
+    statIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    statLabel: {
+      fontSize: t.body,
+      color: b.textSecondary,
+    },
+    statValue: {
+      marginTop: 1,
+      fontSize: t.hero,
+      lineHeight: 24,
+      fontWeight: "700",
+      letterSpacing: -0.5,
+    },
+    statCaption: {
+      fontSize: t.tagline,
+      color: b.textMuted,
+    },
+
+    /* ---- cards ---- */
+    card: {
+      padding: 13,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+    },
+    cardGap: { marginTop: 10 },
+    cardTitle: {
+      fontSize: t.barTitle,
+      lineHeight: 22,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    chartHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 12,
+    },
+    chartTitle: {
+      flex: 1,
+      minWidth: 0,
+    },
+    legend: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    legendItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    legendDot: {
+      width: 9,
+      height: 9,
+      borderRadius: round.pill,
+    },
+    legendText: {
+      fontSize: t.body,
+      color: b.textSecondary,
+    },
+
+    axisY: { ...StyleSheet.absoluteFillObject },
+    axisText: {
+      position: "absolute",
+      left: 0,
+      width: 30,
+      textAlign: "right",
+      fontSize: t.micro,
+      color: b.textMuted,
+    },
+    axisX: {
+      flexDirection: "row",
+      marginTop: -14,
+    },
+    axisTick: {
+      flex: 1,
+      textAlign: "center",
+      fontSize: t.tagline,
+      color: b.textSecondary,
+    },
+
+    /* ---- quick actions ---- */
+    actionRow: {
+      marginTop: 12,
+      flexDirection: "row",
+      gap: 6,
+    },
+    action: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: "center",
+      gap: 8,
+    },
+    actionIcon: {
+      width: 52,
+      height: 52,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: b.tint,
+    },
+    actionLabel: {
+      fontSize: t.tagline,
+      color: b.text,
+    },
+
+    /* ---- recent ---- */
+    linkRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+    },
+    linkText: {
+      fontSize: t.body,
+      fontWeight: "700",
+      color: b.primary,
+    },
+    emptyText: {
+      paddingVertical: 14,
+      fontSize: t.body,
+      color: b.textMuted,
+    },
+    txRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingVertical: 10,
+    },
+    txRowDivided: {
+      borderTopWidth: 1,
+      borderTopColor: b.hairline,
+    },
+    txIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: round.field,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: b.tint,
+    },
+    txTitle: {
+      fontSize: t.cardTitle,
+      fontWeight: "700",
+      color: b.text,
+    },
+    txSub: {
+      marginTop: 1,
+      fontSize: t.tagline,
+      color: b.textMuted,
+    },
+    txAmount: {
+      fontSize: t.cardTitle,
+      fontWeight: "700",
+    },
+    txPill: {
+      paddingHorizontal: 7,
+      paddingVertical: 3,
+      borderRadius: round.pill,
+    },
+    txPillText: {
+      fontSize: t.micro,
+      fontWeight: "700",
+    },
+    txDate: {
+      fontSize: t.tagline,
+      color: b.textMuted,
+    },
+
+    sheetRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: b.hairline,
+    },
+    sheetLabel: { fontSize: t.field, color: b.text },
+  }),
+);
+
+export default FinancialCoreScreen;

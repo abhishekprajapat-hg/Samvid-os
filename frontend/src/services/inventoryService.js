@@ -69,8 +69,11 @@ export const updateInventoryAsset = async (assetId, payload) => {
   return res.data?.asset;
 };
 
+// For a Manager this only sends a delete request: the result then has
+// approvalRequired: true (see deleteRequestService.js).
 export const deleteInventoryAsset = async (assetId) => {
-  await api.delete(`/inventory/${assetId}`);
+  const res = await api.delete(`/inventory/${assetId}`);
+  return res.data || null;
 };
 
 export const requestInventoryDelete = async (assetId, requestNote = "") => {

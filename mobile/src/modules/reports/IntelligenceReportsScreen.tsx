@@ -1,668 +1,674 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  FlatList,
-  Modal,
-  Platform,
+  ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
-import { useNavigation } from "@react-navigation/native";
-import { Screen } from "../../components/common/Screen";
-import { AppButton, AppChip } from "../../components/common/ui";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { Glyph, type GlyphName } from "../../components/ui/Glyph";
+import { AppSheet } from "../../components/ui/Overlay";
+import { brand, brandStyles, layout, round, type as t } from "../../theme/brand";
+import { toErrorMessage } from "../../utils/errorMessage";
 import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
-import { toErrorMessage } from "../../utils/errorMessage";
-import type { Lead } from "../../types";
+import { getTaskStats } from "../../services/taskService";
+import { getFinanceOverview } from "../../services/financeService";
+import { getSavedReports, type SavedReport } from "../../services/reportService";
+import { compactMoney, axisMoney, monthKeyOf } from "../finance/financeVocab";
+import { AreaChart } from "./reportCharts";
+import {
+  MONTHS_SHORT,
+  buildSalesReport,
+  changeLabel,
+  endOfMonth,
+  monthLabel,
+  startOfMonth,
+} from "./reportData";
 
-const RANGE_OPTIONS = ["ALL", "THIS_MONTH", "CUSTOM"] as const;
-type RangeKey = (typeof RANGE_OPTIONS)[number];
-const STAGES = ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT", "CLOSED", "LOST"];
+/*
+ * The reports hub, drawn to the comp.
+ *
+ * There is no reporting endpoint. Every figure here is counted from the
+ * records the app already reads - leads, the finance ledger, inventory and the
+ * task stats - so a report can never disagree with the screen it summarises.
+ */
 
-const toDate = (value?: string) => {
-  if (!value) return null;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
-};
+type Tab = "REVENUE" | "LEADS" | "DEALS";
 
-const pad2 = (value: number) => String(value).padStart(2, "0");
-const toDateInputValue = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+const RANGES = [
+  { key: "THIS_MONTH", label: "This Month", back: 0 },
+  { key: "LAST_MONTH", label: "Last Month", back: 1 },
+  { key: "QUARTER", label: "Last 3 Months", back: 2 },
+];
 
-const WebDateInput = ({
+const Metric = ({
+  icon,
+  label,
   value,
-  onChange,
-  placeholder,
+  change,
 }: {
+  icon: GlyphName;
+  label: string;
   value: string;
-  onChange: (next: string) => void;
-  placeholder?: string;
-}) => {
-  if (Platform.OS === "web") {
-    return (
-      <View style={styles.webInputWrap}>
-        <input
-          value={value}
-          onChange={(event) => onChange((event.target as HTMLInputElement).value)}
-          placeholder={placeholder}
-          type="date"
-          style={styles.webDateInput as any}
+  change: string | null;
+}) => (
+  <View style={styles.metric}>
+    <View style={styles.metricIcon}>
+      <Glyph name={icon} size={18} color={brand.deep} />
+    </View>
+    <Text style={styles.metricLabel} numberOfLines={1}>
+      {label}
+    </Text>
+    <Text style={styles.metricValue} numberOfLines={1}>
+      {value}
+    </Text>
+    {change ? (
+      <View style={styles.metricChange}>
+        <Glyph
+          name={change.startsWith("-") ? "trending-down" : "trending-up"}
+          size={13}
+          color={change.startsWith("-") ? brand.alertInk : brand.primary}
         />
+        <Text
+          style={[
+            styles.metricChangeText,
+            { color: change.startsWith("-") ? brand.alertInk : brand.primary },
+          ]}
+        >
+          {change}
+        </Text>
       </View>
-    );
-  }
-  return <TextInput style={styles.modalInput} value={value} onChangeText={onChange} placeholder={placeholder} />;
-};
+    ) : null}
+  </View>
+);
 
 export const IntelligenceReportsScreen = () => {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+
+  const [range, setRange] = useState(RANGES[0]);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [tab, setTab] = useState<Tab>("REVENUE");
+
+  const [leads, setLeads] = useState<any[]>([]);
+  const [properties, setProperties] = useState(0);
+  const [taskPct, setTaskPct] = useState(0);
+  const [series, setSeries] = useState<Array<{ month: string; income: number; expenses: number }>>([]);
+  const [summary, setSummary] = useState<{ income: number; net: number } | null>(null);
+  const [previous, setPrevious] = useState<{ income: number; net: number } | null>(null);
+  const [recent, setRecent] = useState<SavedReport[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [rangeKey, setRangeKey] = useState<RangeKey>("ALL");
-  const [selectedMonthDate, setSelectedMonthDate] = useState(new Date());
-  const [customFromDate, setCustomFromDate] = useState<Date | null>(null);
-  const [customToDate, setCustomToDate] = useState<Date | null>(null);
-  const [showMonthPicker, setShowMonthPicker] = useState(false);
-  const [showCustomFromPicker, setShowCustomFromPicker] = useState(false);
-  const [showCustomToPicker, setShowCustomToPicker] = useState(false);
-  const [webMonthPickerVisible, setWebMonthPickerVisible] = useState(false);
-  const [webMonthDateValue, setWebMonthDateValue] = useState(toDateInputValue(new Date()));
-  const [webCustomPickerVisible, setWebCustomPickerVisible] = useState(false);
-  const [webCustomFromValue, setWebCustomFromValue] = useState("");
-  const [webCustomToValue, setWebCustomToValue] = useState("");
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [assets, setAssets] = useState<Array<{ _id: string; status?: string; location?: string; price?: number; createdAt?: string }>>([]);
 
-  const load = async (silent = false) => {
-    try {
-      if (silent) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
+  const bounds = useMemo(() => {
+    const anchor = new Date();
+    anchor.setDate(1);
+    anchor.setMonth(anchor.getMonth() - range.back);
+    const to = range.back === 2 ? endOfMonth(new Date()) : endOfMonth(anchor);
+    return { from: startOfMonth(anchor), to };
+  }, [range.back]);
+
+  const load = useCallback(
+    async (quiet = false) => {
+      try {
+        if (quiet) setRefreshing(true);
+        else setLoading(true);
+        setError("");
+
+        const month = monthKeyOf(bounds.from);
+        const priorMonth = monthKeyOf(new Date(bounds.from.getFullYear(), bounds.from.getMonth() - 1, 1));
+
+        const [leadRows, assets, stats, overview, prior, saved] = await Promise.all([
+          getAllLeads({ limit: 500 }),
+          getInventoryAssets().catch(() => []),
+          getTaskStats().catch(() => null),
+          getFinanceOverview({ month, months: 6 }),
+          getFinanceOverview({ month: priorMonth, months: 1 }).catch(() => ({ summary: null, series: [] })),
+          getSavedReports({ limit: 5 }).catch(() => []),
+        ]);
+
+        setLeads(Array.isArray(leadRows) ? leadRows : []);
+        setProperties(Array.isArray(assets) ? assets.length : 0);
+
+        const done = Number((stats as any)?.completed ?? (stats as any)?.done ?? 0);
+        const all = Number((stats as any)?.total ?? 0);
+        setTaskPct(all > 0 ? Math.round((done / all) * 100) : 0);
+
+        setSeries(overview.series);
+        setSummary(overview.summary ? { income: overview.summary.income, net: overview.summary.net } : null);
+        setPrevious(prior.summary ? { income: prior.summary.income, net: prior.summary.net } : null);
+        setRecent(saved);
+      } catch (e) {
+        setError(toErrorMessage(e, "Failed to load reports"));
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-      setError("");
-
-      const [leadRows, inventoryRows] = await Promise.all([getAllLeads(), getInventoryAssets()]);
-      setLeads(Array.isArray(leadRows) ? leadRows : []);
-      setAssets(Array.isArray(inventoryRows) ? inventoryRows : []);
-    } catch (e) {
-      setError(toErrorMessage(e, "Failed to load reports"));
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
+    },
+    [bounds],
+  );
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [load]);
 
-  const scoped = useMemo(() => {
-    if (rangeKey === "ALL") return { leads, assets };
+  useFocusEffect(
+    useCallback(() => {
+      void load(true);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []),
+  );
 
-    if (rangeKey === "THIS_MONTH") {
+  const sales = useMemo(
+    () => buildSalesReport(leads as any, bounds.from, bounds.to),
+    [leads, bounds],
+  );
+
+  const priorSales = useMemo(() => {
+    const from = new Date(bounds.from.getFullYear(), bounds.from.getMonth() - 1, 1);
+    return buildSalesReport(leads as any, from, endOfMonth(from));
+  }, [leads, bounds]);
+
+  /* The comp's three chart tabs read the same six months, three ways. */
+  const chart = useMemo(() => {
+    if (tab === "REVENUE") {
+      return series.map((point) => ({
+        label: MONTHS_SHORT[Number(point.month.split("-")[1]) - 1]?.slice(0, 3) || "",
+        value: point.income,
+      }));
+    }
+    const months = series.length || 6;
+    return Array.from({ length: months }, (_, index) => {
+      const date = new Date();
+      date.setDate(1);
+      date.setMonth(date.getMonth() - (months - 1) + index);
+      const bucket = buildSalesReport(leads as any, startOfMonth(date), endOfMonth(date));
       return {
-        leads: leads.filter((lead) => {
-          const createdAt = toDate(lead.createdAt);
-          if (!createdAt) return false;
-          return (
-            createdAt.getFullYear() === selectedMonthDate.getFullYear()
-            && createdAt.getMonth() === selectedMonthDate.getMonth()
-          );
-        }),
-        assets: assets.filter((asset) => {
-          const createdAt = toDate(asset.createdAt);
-          if (!createdAt) return false;
-          return (
-            createdAt.getFullYear() === selectedMonthDate.getFullYear()
-            && createdAt.getMonth() === selectedMonthDate.getMonth()
-          );
-        }),
+        label: MONTHS_SHORT[date.getMonth()].slice(0, 3),
+        value: tab === "LEADS" ? bucket.total : bucket.closed,
       };
-    }
-
-    if (!customFromDate || !customToDate) return { leads: [], assets: [] };
-    const start = new Date(customFromDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(customToDate);
-    end.setHours(23, 59, 59, 999);
-
-    return {
-      leads: leads.filter((lead) => {
-        const createdAt = toDate(lead.createdAt);
-        return createdAt && createdAt >= start && createdAt <= end;
-      }),
-      assets: assets.filter((asset) => {
-        const createdAt = toDate(asset.createdAt);
-        return createdAt && createdAt >= start && createdAt <= end;
-      }),
-    };
-  }, [assets, leads, rangeKey, selectedMonthDate, customFromDate, customToDate]);
-
-  const periodLabel = useMemo(() => {
-    if (rangeKey === "ALL") return "All data";
-    if (rangeKey === "THIS_MONTH") {
-      return selectedMonthDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
-    }
-    if (customFromDate && customToDate) {
-      return `${customFromDate.toLocaleDateString("en-IN")} to ${customToDate.toLocaleDateString("en-IN")}`;
-    }
-    if (customFromDate) return `From ${customFromDate.toLocaleDateString("en-IN")}`;
-    return "Custom range";
-  }, [rangeKey, selectedMonthDate, customFromDate, customToDate]);
-
-  const metrics = useMemo(() => {
-    const total = scoped.leads.length;
-    const closed = scoped.leads.filter((lead) => lead.status === "CLOSED").length;
-    const active = scoped.leads.filter((lead) => ["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"].includes(String(lead.status))).length;
-    const conversion = total ? Math.round((closed / total) * 100) : 0;
-
-    const soldReserved = scoped.assets.filter((asset) => ["Sold", "Reserved", "Blocked"].includes(String(asset.status))).length;
-    const utilization = scoped.assets.length ? Math.round((soldReserved / scoped.assets.length) * 100) : 0;
-
-    const inventoryValue = scoped.assets.reduce((sum, asset) => sum + Number(asset.price || 0), 0);
-
-    return [
-      { id: "1", label: "Total Leads", value: total, onPress: () => navigation.navigate("Leads", { initialStatus: "ALL" }) },
-      {
-        id: "2",
-        label: "Active Leads",
-        value: active,
-        onPress: () => navigation.navigate("Leads", { filterPreset: "PIPELINE", initialStatus: "ALL" }),
-      },
-      { id: "3", label: "Closed Leads", value: closed, onPress: () => navigation.navigate("Leads", { initialStatus: "CLOSED" }) },
-      { id: "4", label: "Conversion", value: `${conversion}%`, onPress: () => navigation.navigate("Leads", { initialStatus: "CLOSED" }) },
-      { id: "5", label: "Inventory Utilization", value: `${utilization}%`, onPress: () => navigation.navigate("Inventory", { initialSearch: "Sold" }) },
-      { id: "6", label: "Inventory Value", value: `Rs ${inventoryValue.toLocaleString("en-IN")}`, onPress: () => navigation.navigate("Inventory") },
-    ];
-  }, [navigation, scoped.assets, scoped.leads]);
-
-  const stageRows = useMemo(() => {
-    const total = scoped.leads.length;
-    return STAGES.map((status) => {
-      const count = scoped.leads.filter((lead) => String(lead.status || "NEW") === status).length;
-      const share = total ? Math.round((count / total) * 100) : 0;
-      return { id: status, status, count, share };
     });
-  }, [scoped.leads]);
+  }, [tab, series, leads]);
 
-  const topLocations = useMemo(() => {
-    const map = new Map<string, { location: string; units: number }>();
+  const categories: Array<{
+    id: string;
+    icon: GlyphName;
+    tint: string;
+    color: string;
+    title: string;
+    subtitle: string;
+    value: string;
+    go: () => void;
+  }> = [
+    {
+      id: "sales",
+      icon: "stats-chart",
+      tint: brand.tint,
+      color: brand.deep,
+      title: "Sales & Pipeline",
+      subtitle: "Leads, stages and conversion",
+      value: `${sales.total} leads`,
+      go: () => navigation.navigate("SalesReport"),
+    },
+    {
+      /* Web's Intelligence Reports figures, which the comps left out. */
+      id: "intelligence",
+      icon: "analytics-outline",
+      tint: "#e6f4f0",
+      color: "#0a6b4a",
+      title: "Pipeline Intelligence",
+      subtitle: "Executives, losses and CSV export",
+      value: `${sales.conversion}% conv.`,
+      go: () => navigation.navigate("PipelineIntelligence"),
+    },
+    {
+      id: "finance",
+      icon: "server-outline",
+      tint: "#e2ecfb",
+      color: "#2f60a8",
+      title: "Finance",
+      subtitle: "Revenue, expenses and payments",
+      value: `${compactMoney(summary?.net)} net`,
+      go: () => navigation.navigate("FinanceReport"),
+    },
+    {
+      id: "inventory",
+      icon: "business",
+      tint: "#ece6fb",
+      color: "#6d4fc7",
+      title: "Inventory",
+      subtitle: "Properties, occupancy and status",
+      value: `${properties} properties`,
+      go: () => navigation.navigate("Inventory"),
+    },
+    {
+      id: "team",
+      icon: "people",
+      tint: "#fdeade",
+      color: "#c36a2b",
+      title: "Team & Tasks",
+      subtitle: "Productivity and completion",
+      value: `${taskPct}% complete`,
+      go: () => navigation.navigate("Tasks"),
+    },
+  ];
 
-    scoped.assets.forEach((asset) => {
-      const key = String(asset.location || "Unspecified");
-      if (!map.has(key)) {
-        map.set(key, { location: key, units: 0 });
-      }
-      map.get(key)!.units += 1;
-    });
-
-    return [...map.values()].sort((a, b) => b.units - a.units).slice(0, 6);
-  }, [scoped.assets]);
-
-  const shareReport = async () => {
-    const lines: string[] = [];
-    lines.push(`Range,${periodLabel}`);
-    lines.push("Section,Metric,Value");
-
-    metrics.forEach((row) => {
-      lines.push(`Summary,${row.label},${row.value}`);
-    });
-
-    stageRows.forEach((row) => {
-      lines.push(`Lead Funnel,${row.status},${row.count} (${row.share}%)`);
-    });
-
-    topLocations.forEach((row) => {
-      lines.push(`Locations,${row.location},${row.units} units`);
-    });
-
+  const shareSummary = async () => {
     await Share.share({
-      title: "Office Reports",
-      message: lines.join("\n"),
-    });
+      message: `${monthLabel(bounds.from)} — revenue ${compactMoney(summary?.income)}, ${sales.total} new leads, ${properties} properties, ${sales.conversion}% conversion.`,
+    }).catch(() => undefined);
   };
 
-  const openMonthPicker = () => {
-    if (Platform.OS === "web") {
-      setWebMonthDateValue(toDateInputValue(selectedMonthDate));
-      setWebMonthPickerVisible(true);
-      return;
-    }
-    setShowMonthPicker(true);
+  const whenLabel = (report: SavedReport) => {
+    const date = new Date(report.generatedAt);
+    if (Number.isNaN(date.getTime())) return "";
+    const days = Math.round(
+      (new Date().setHours(0, 0, 0, 0) - new Date(date).setHours(0, 0, 0, 0)) / 86400000,
+    );
+    if (days === 0) return "Generated today";
+    if (days === 1) return "Yesterday";
+    return `${date.getDate()} ${MONTHS_SHORT[date.getMonth()]}`;
   };
 
-  const openCustomRangePicker = () => {
-    if (Platform.OS === "web") {
-      setWebCustomFromValue(customFromDate ? toDateInputValue(customFromDate) : "");
-      setWebCustomToValue(customToDate ? toDateInputValue(customToDate) : "");
-      setWebCustomPickerVisible(true);
-      return;
-    }
-    setShowCustomFromPicker(true);
-  };
-
-  const applyWebMonthPicker = () => {
-    if (!webMonthDateValue) {
-      setError("Please select date");
-      return;
-    }
-    const parsed = new Date(`${webMonthDateValue}T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-      setError("Please select valid date");
-      return;
-    }
-    setSelectedMonthDate(parsed);
-    setWebMonthPickerVisible(false);
-  };
-
-  const applyWebCustomRange = () => {
-    if (!webCustomFromValue || !webCustomToValue) {
-      setError("Please select from and to date");
-      return;
-    }
-    const parsedFrom = new Date(`${webCustomFromValue}T00:00:00`);
-    const parsedTo = new Date(`${webCustomToValue}T00:00:00`);
-    if (Number.isNaN(parsedFrom.getTime()) || Number.isNaN(parsedTo.getTime())) {
-      setError("Please select valid custom dates");
-      return;
-    }
-    if (parsedTo < parsedFrom) {
-      setError("To date cannot be before from date");
-      return;
-    }
-    setCustomFromDate(parsedFrom);
-    setCustomToDate(parsedTo);
-    setWebCustomPickerVisible(false);
-  };
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
+        <View style={styles.centred}>
+          <ActivityIndicator size="large" color={brand.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <Screen title="Intelligence Reports" subtitle="Funnel + Inventory" loading={loading} error={error}>
-      <View style={styles.sectionCard}>
-        <View style={styles.filterRow}>
-          <AppChip label="All" active={rangeKey === "ALL"} onPress={() => setRangeKey("ALL")} />
-          <AppChip label="This Month" active={rangeKey === "THIS_MONTH"} onPress={() => setRangeKey("THIS_MONTH")} />
-          <AppChip
-            label="Custom"
-            active={rangeKey === "CUSTOM"}
-            onPress={() => {
-              setRangeKey("CUSTOM");
-              openCustomRangePicker();
-            }}
-          />
-          <View style={{ flex: 1 }} />
-          <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-            <Ionicons name="calendar-outline" size={14} color="#334155" />
+    <SafeAreaView style={styles.root} edges={["top", "left", "right"]}>
+      <View style={styles.header}>
+        <Text style={styles.pageTitle} numberOfLines={1}>
+          Reports
+        </Text>
+        <Text style={styles.pageSubtitle}>Insights across your business</Text>
+
+        <View style={styles.headerActions}>
+          <Pressable style={styles.rangeBtn} onPress={() => setRangeOpen(true)} accessibilityRole="button">
+            <Glyph name="calendar-outline" size={16} color={brand.text} />
+            <Text style={styles.rangeLabel}>{range.label}</Text>
+            <Glyph name="chevron-down" size={14} color={brand.textSecondary} />
           </Pressable>
-          <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} disabled={refreshing} />
-          <Pressable style={styles.exportBtn} onPress={shareReport}>
-            <Text style={styles.exportText}>Export</Text>
+          <Pressable style={styles.iconBtn} onPress={shareSummary} accessibilityRole="button" accessibilityLabel="Share summary">
+            <Glyph name="share-outline" size={18} color={brand.text} />
           </Pressable>
         </View>
-        <Text style={styles.periodText}>Showing: {periodLabel}</Text>
-        {rangeKey === "CUSTOM" ? (
-          <View style={styles.customRangeRow}>
-            <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
-              <Text style={styles.customDateText}>From: {customFromDate ? customFromDate.toLocaleDateString("en-IN") : "Select"}</Text>
-            </Pressable>
-            <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
-              <Text style={styles.customDateText}>To: {customToDate ? customToDate.toLocaleDateString("en-IN") : "Select"}</Text>
-            </Pressable>
-          </View>
-        ) : null}
       </View>
 
-      {showMonthPicker ? (
-        <DateTimePicker
-          value={selectedMonthDate}
-          mode="date"
-          display="default"
-          onChange={(_, next) => {
-            setShowMonthPicker(false);
-            if (next) setSelectedMonthDate(next);
-          }}
-        />
-      ) : null}
-      {showCustomFromPicker ? (
-        <DateTimePicker
-          value={customFromDate || new Date()}
-          mode="date"
-          display="default"
-          onChange={(_, next) => {
-            setShowCustomFromPicker(false);
-            if (next) {
-              setCustomFromDate(next);
-              if (!customToDate || customToDate < next) {
-                setCustomToDate(next);
-              }
-              setTimeout(() => setShowCustomToPicker(true), 30);
-            }
-          }}
-        />
-      ) : null}
-      {showCustomToPicker ? (
-        <DateTimePicker
-          value={customToDate || customFromDate || new Date()}
-          mode="date"
-          display="default"
-          onChange={(_, next) => {
-            setShowCustomToPicker(false);
-            if (next) {
-              if (customFromDate && next < customFromDate) {
-                setCustomToDate(customFromDate);
-                return;
-              }
-              setCustomToDate(next);
-            }
-          }}
-        />
-      ) : null}
-
-      <FlatList
-        data={metrics}
-        keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
-        renderItem={({ item }) => (
-          <Pressable style={styles.card} onPress={item.onPress}>
-            <Text style={styles.label}>{item.label}</Text>
-            <Text style={styles.value}>{item.value}</Text>
-          </Pressable>
-        )}
-        ListFooterComponent={
-          <>
-            <Text style={styles.section}>Lead Funnel Stages</Text>
-            {stageRows.map((row) => (
-              <Pressable
-                key={row.id}
-                style={styles.rowCard}
-                onPress={() => navigation.navigate("Leads", { initialStatus: row.status })}
-              >
-                <View style={styles.rowLine}>
-                  <Text style={styles.rowTitle}>{row.status}</Text>
-                  <Text style={styles.rowMeta}>{row.count} ({row.share}%)</Text>
-                </View>
-                <View style={styles.barTrack}>
-                  <View style={[styles.barFill, { width: `${Math.max(row.share, 4)}%` }]} />
-                </View>
-              </Pressable>
-            ))}
-
-            <Text style={styles.section}>Top Inventory Locations</Text>
-            {topLocations.length === 0 ? (
-              <Text style={styles.empty}>No location data</Text>
-            ) : (
-              topLocations.map((row) => (
-                <Pressable
-                  key={row.location}
-                  style={styles.rowCard}
-                  onPress={() => navigation.navigate("Inventory", { initialSearch: row.location })}
-                >
-                  <View style={styles.rowLine}>
-                    <Text style={styles.rowTitle}>{row.location}</Text>
-                    <Text style={styles.rowMeta}>{row.units} units</Text>
-                  </View>
-                </Pressable>
-              ))
-            )}
-          </>
+      <ScrollView
+        contentContainerStyle={[styles.body, { paddingBottom: 26 + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => load(true)} tintColor={brand.primary} />
         }
-      />
+      >
+        {error ? (
+          <Pressable style={styles.banner} onPress={() => load()} accessibilityRole="button">
+            <Text style={styles.bannerText}>{error}</Text>
+          </Pressable>
+        ) : null}
 
-      <Modal visible={webMonthPickerVisible} transparent animationType="fade" onRequestClose={() => setWebMonthPickerVisible(false)}>
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Month/Date</Text>
-            <WebDateInput value={webMonthDateValue} onChange={setWebMonthDateValue} placeholder="YYYY-MM-DD" />
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancelBtn} onPress={() => setWebMonthPickerVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.modalApplyBtn} onPress={applyWebMonthPicker}>
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </Pressable>
+        <View style={styles.metricRow}>
+          <Metric
+            icon="cash-outline"
+            label="Revenue"
+            value={compactMoney(summary?.income)}
+            change={changeLabel(Number(summary?.income || 0), Number(previous?.income || 0))}
+          />
+          <Metric
+            icon="person-outline"
+            label="New Leads"
+            value={String(sales.total)}
+            change={changeLabel(sales.total, priorSales.total)}
+          />
+          <Metric icon="business-outline" label="Properties" value={String(properties)} change={null} />
+          <Metric
+            icon="stats-chart"
+            label="Conversion"
+            value={`${sales.conversion}%`}
+            change={changeLabel(sales.conversion, priorSales.conversion)}
+          />
+        </View>
+
+        <View style={[styles.card, styles.cardGap]}>
+          <View style={styles.chartHead}>
+            <Text style={styles.cardTitle}>Performance Overview</Text>
+            <View style={styles.tabs}>
+              {(["REVENUE", "LEADS", "DEALS"] as Tab[]).map((key) => {
+                const active = tab === key;
+                return (
+                  <Pressable
+                    key={key}
+                    style={[styles.tab, active && styles.tabOn]}
+                    onPress={() => setTab(key)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={[styles.tabLabel, active && styles.tabLabelOn]}>
+                      {key === "REVENUE" ? "Revenue" : key === "LEADS" ? "Leads" : "Deals"}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
           </View>
-        </View>
-      </Modal>
 
-      <Modal visible={webCustomPickerVisible} transparent animationType="fade" onRequestClose={() => setWebCustomPickerVisible(false)}>
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Custom Range</Text>
-            <WebDateInput value={webCustomFromValue} onChange={setWebCustomFromValue} placeholder="From date" />
-            <WebDateInput value={webCustomToValue} onChange={setWebCustomToValue} placeholder="To date" />
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancelBtn} onPress={() => setWebCustomPickerVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={styles.modalApplyBtn} onPress={applyWebCustomRange}>
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </Pressable>
-            </View>
-          </View>
+          <AreaChart
+            points={chart}
+            tickFormat={(value) => (tab === "REVENUE" ? axisMoney(value) : String(Math.round(value)))}
+            calloutLabel={
+              chart.length
+                ? tab === "REVENUE"
+                  ? compactMoney(chart[chart.length - 1].value)
+                  : String(chart[chart.length - 1].value)
+                : undefined
+            }
+          />
         </View>
-      </Modal>
-    </Screen>
+
+        <Text style={styles.sectionTitle}>Report Categories</Text>
+        <View style={styles.categoryCard}>
+          {categories.map((entry, index) => (
+            <Pressable
+              key={entry.id}
+              style={[styles.categoryRow, index > 0 && styles.categoryRowDivided]}
+              onPress={entry.go}
+              accessibilityRole="button"
+            >
+              <View style={[styles.categoryIcon, { backgroundColor: entry.tint }]}>
+                <Glyph name={entry.icon} size={20} color={entry.color} />
+              </View>
+              <View style={styles.grow}>
+                <Text style={styles.categoryTitle} numberOfLines={1}>
+                  {entry.title}
+                </Text>
+                <Text style={styles.categorySub} numberOfLines={1}>
+                  {entry.subtitle}
+                </Text>
+              </View>
+              <Text style={styles.categoryValue} numberOfLines={1}>
+                {entry.value}
+              </Text>
+              <Glyph name="chevron-forward" size={17} color={brand.textMuted} />
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={styles.sectionTitle}>Recent Reports</Text>
+        <View style={styles.categoryCard}>
+          {recent.length === 0 ? (
+            <Text style={styles.emptyText}>Nothing generated yet.</Text>
+          ) : (
+            recent.map((report, index) => (
+              <Pressable
+                key={report._id}
+                style={[styles.categoryRow, index > 0 && styles.categoryRowDivided]}
+                onPress={() => navigation.navigate("CustomReport", { report })}
+                accessibilityRole="button"
+              >
+                <View style={[styles.categoryIcon, { backgroundColor: brand.tint }]}>
+                  <Glyph name="document-text-outline" size={19} color={brand.deep} />
+                </View>
+                <View style={styles.grow}>
+                  <Text style={styles.categoryTitle} numberOfLines={1}>
+                    {report.name}
+                  </Text>
+                  <Text style={styles.categorySub} numberOfLines={1}>
+                    {report.summary || monthLabel(new Date(report.generatedAt))}
+                  </Text>
+                </View>
+                <Text style={styles.categorySub} numberOfLines={1}>
+                  {whenLabel(report)}
+                </Text>
+                <Glyph name="chevron-forward" size={17} color={brand.textMuted} />
+              </Pressable>
+            ))
+          )}
+        </View>
+
+        <Pressable
+          style={styles.cta}
+          onPress={() => navigation.navigate("CustomReport")}
+          accessibilityRole="button"
+        >
+          <Text style={styles.ctaText}>Create custom report</Text>
+        </Pressable>
+      </ScrollView>
+
+      <AppSheet visible={rangeOpen} onClose={() => setRangeOpen(false)} title="Period">
+        {RANGES.map((entry) => (
+          <Pressable
+            key={entry.key}
+            style={styles.sheetRow}
+            onPress={() => {
+              setRange(entry);
+              setRangeOpen(false);
+            }}
+            accessibilityRole="button"
+          >
+            <Text style={styles.sheetLabel}>{entry.label}</Text>
+            {entry.key === range.key ? <Glyph name="checkmark" size={18} color={brand.primary} /> : null}
+          </Pressable>
+        ))}
+      </AppSheet>
+    </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  sectionCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-    marginBottom: 10,
-  },
-  filterRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: 8,
-  },
-  calendarIconBtn: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 9,
-    backgroundColor: "#fff",
-    height: 36,
-    width: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  periodText: {
-    marginTop: 8,
-    color: "#475569",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  customRangeRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    gap: 8,
-  },
-  customDateBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    padding: 10,
-  },
-  customDateText: {
-    color: "#334155",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  exportBtn: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: "#fff",
-  },
-  exportText: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  modalWrap: {
-    flex: 1,
-    backgroundColor: "rgba(15,23,42,0.35)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 16,
-  },
-  modalCard: {
-    width: "100%",
-    maxWidth: 420,
-    borderRadius: 14,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    padding: 14,
-  },
-  modalTitle: {
-    color: "#0f172a",
-    fontSize: 14,
-    fontWeight: "700",
-    marginBottom: 10,
-  },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    color: "#0f172a",
-    height: 44,
-    paddingHorizontal: 12,
-    marginBottom: 8,
-    fontSize: 13,
-  },
-  webInputWrap: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    height: 44,
-    marginBottom: 8,
-    justifyContent: "center",
-    paddingHorizontal: 12,
-  },
-  webDateInput: {
-    height: 30,
-    fontSize: 13,
-    color: "#0f172a",
-    backgroundColor: "transparent",
-    borderWidth: 0,
-    padding: 0,
-  },
-  modalActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-    marginTop: 6,
-  },
-  modalCancelBtn: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    minWidth: 90,
-    height: 38,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    backgroundColor: "#fff",
-  },
-  modalCancelText: {
-    color: "#334155",
-    fontWeight: "600",
-    fontSize: 12,
-  },
-  modalApplyBtn: {
-    borderWidth: 1,
-    borderColor: "#0f172a",
-    borderRadius: 10,
-    minWidth: 90,
-    height: 38,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    backgroundColor: "#0f172a",
-  },
-  modalApplyText: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 12,
-  },
-  card: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-    marginBottom: 8,
-  },
-  label: {
-    textTransform: "uppercase",
-    fontSize: 12,
-    color: "#64748b",
-  },
-  value: {
-    marginTop: 8,
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#0f172a",
-  },
-  section: {
-    marginTop: 12,
-    marginBottom: 8,
-    fontWeight: "700",
-    color: "#334155",
-  },
-  rowCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    padding: 10,
-    marginBottom: 8,
-  },
-  rowLine: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  rowTitle: {
-    color: "#0f172a",
-    fontWeight: "600",
-  },
-  rowMeta: {
-    color: "#64748b",
-    fontSize: 12,
-  },
-  barTrack: {
-    marginTop: 8,
-    height: 8,
-    borderRadius: 6,
-    backgroundColor: "#e2e8f0",
-    overflow: "hidden",
-  },
-  barFill: {
-    height: "100%",
-    backgroundColor: "#0f172a",
-  },
-  empty: {
-    textAlign: "center",
-    color: "#64748b",
-    marginVertical: 10,
-  },
-});
+const styles = brandStyles((b) =>
+  StyleSheet.create({
+    root: { flex: 1, backgroundColor: b.bg },
+    centred: { flex: 1, alignItems: "center", justifyContent: "center" },
+    grow: { flex: 1, minWidth: 0 },
+
+    header: {
+      paddingHorizontal: layout.gutter,
+      paddingTop: 8,
+      paddingBottom: 12,
+    },
+    pageTitle: {
+      width: "50%",
+      fontSize: t.pageTitle,
+      lineHeight: 31,
+      fontWeight: "700",
+      letterSpacing: -0.8,
+      color: b.text,
+    },
+    pageSubtitle: {
+      marginTop: 1,
+      width: "62%",
+      fontSize: t.cardTitle,
+      lineHeight: 18,
+      color: b.textMuted,
+    },
+    headerActions: {
+      position: "absolute",
+      right: layout.gutter,
+      top: 9,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
+    rangeBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      height: 36,
+      paddingHorizontal: 11,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    rangeLabel: { fontSize: t.cardTitle, fontWeight: "500", color: b.text },
+    iconBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: round.field,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: b.border,
+      backgroundColor: b.surface,
+    },
+
+    body: { paddingHorizontal: layout.gutter },
+    banner: {
+      marginBottom: 10,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      borderWidth: 1,
+      borderColor: b.alert,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    bannerText: { fontSize: t.body, lineHeight: 17, color: b.alert },
+
+    metricRow: { flexDirection: "row", gap: 6 },
+    metric: {
+      flex: 1,
+      minWidth: 0,
+      paddingHorizontal: 8,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+    },
+    metricIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: round.field,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: b.tint,
+    },
+    metricLabel: { marginTop: 8, fontSize: t.tagline, color: b.textSecondary },
+    metricValue: {
+      marginTop: 2,
+      fontSize: t.sectionTitle,
+      lineHeight: 20,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    metricChange: {
+      marginTop: 3,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+    },
+    metricChangeText: { fontSize: t.micro, fontWeight: "700" },
+
+    card: {
+      padding: 13,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+    },
+    cardGap: { marginTop: 10 },
+    cardTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: t.barTitle,
+      lineHeight: 22,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    chartHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      marginBottom: 14,
+    },
+    tabs: {
+      flexDirection: "row",
+      padding: 3,
+      borderRadius: round.field,
+      backgroundColor: b.fieldMuted,
+    },
+    tab: {
+      paddingHorizontal: 9,
+      height: 28,
+      justifyContent: "center",
+      borderRadius: round.button,
+    },
+    tabOn: { backgroundColor: "#d7efe3" },
+    tabLabel: { fontSize: t.tagline, fontWeight: "500", color: b.textSecondary },
+    tabLabelOn: { fontWeight: "700", color: b.text },
+
+    sectionTitle: {
+      marginTop: 18,
+      marginBottom: 9,
+      fontSize: t.barTitle,
+      lineHeight: 23,
+      fontWeight: "700",
+      letterSpacing: -0.5,
+      color: b.text,
+    },
+    categoryCard: {
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.panel,
+      backgroundColor: b.surface,
+      overflow: "hidden",
+    },
+    categoryRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 11,
+      paddingHorizontal: 12,
+      paddingVertical: 13,
+    },
+    categoryRowDivided: { borderTopWidth: 1, borderTopColor: b.hairline },
+    categoryIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: round.field,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    categoryTitle: { fontSize: t.rowTitle, fontWeight: "700", color: b.text },
+    categorySub: { marginTop: 2, fontSize: t.tagline, color: b.textMuted },
+    categoryValue: { fontSize: t.body, fontWeight: "500", color: b.textSecondary },
+    emptyText: { padding: 16, fontSize: t.body, color: b.textMuted },
+
+    cta: {
+      marginTop: 16,
+      height: 52,
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: round.field,
+      backgroundColor: "#0b7d52",
+    },
+    ctaText: { fontSize: t.sectionTitle, fontWeight: "700", color: b.onPrimary },
+
+    sheetRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: b.hairline,
+    },
+    sheetLabel: { fontSize: t.field, color: b.text },
+  }),
+);
+
+export default IntelligenceReportsScreen;

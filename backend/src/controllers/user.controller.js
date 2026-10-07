@@ -1,10 +1,12 @@
 const User = require("../models/User");
+const CustomRole = require("../models/CustomRole");
 const Lead = require("../models/Lead");
 const Inventory = require("../models/Inventory");
 const UserDeleteRequest = require("../models/UserDeleteRequest");
 const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
 const mongoose = require("mongoose");
+const { sendMongooseError } = require("../utils/mongooseError");
 const logger = require("../config/logger");
 const {
   redistributePipelineLeads,
@@ -23,6 +25,8 @@ const {
   isManagementRole,
   isPlatformAdminRole,
 } = require("../constants/role.constants");
+const { buildProfileLeadScope } = require("../utils/profileLeadScope");
+const { isAllowedProfileImageUrl } = require("../utils/profileImageUrl");
 const {
   getDescendantUsers,
   getDescendantExecutiveIds,
@@ -63,11 +67,13 @@ const LEAD_STATUSES = [
   "CLOSED",
   "LOST",
 ];
+// Every role except Admin reports to a Manager; Managers report to an Admin.
 const TEAM_HIERARCHY_CHILD_ROLES = {
   [USER_ROLES.MANAGER]: [
     ...EXECUTIVE_ROLES,
     ...PRODUCTION_ROLES,
     USER_ROLES.CHANNEL_PARTNER,
+    USER_ROLES.COWORKING_ADMIN,
   ],
   [USER_ROLES.ADMIN]: [USER_ROLES.MANAGER],
   [USER_ROLES.SUPER_ADMIN]: [USER_ROLES.ADMIN],
@@ -81,10 +87,25 @@ const USER_SELECTABLE_FIELDS = [
   "role",
   "companyId",
   "parentId",
+  "customRoleId",
   "partnerCode",
   "canViewInventory",
   "brokerageConfig",
   "isActive",
+  "profileImageUrl",
+  // The team screens read these, so a caller that narrows the selection can
+  // still ask for them by name.
+  "employeeId",
+  "department",
+  "branch",
+  "shiftTiming",
+  "monthlyTarget",
+  "joiningDate",
+  "invitedAt",
+  "inviteAcceptedAt",
+  "leadCapacity",
+  "taskCapacity",
+  "lastLoginAt",
   "lastAssignedAt",
   "liveLocation",
   "createdAt",
@@ -158,8 +179,67 @@ const sanitizeEmail = (value) => String(value || "").trim().toLowerCase();
 const sanitizeBrokerageNotes = (value) => String(value || "").trim();
 const normalizeRoleType = (value) => {
   const normalized = String(value || "").trim().toUpperCase();
-  return ["COMMERCIAL", "RESIDENTIAL", "BOTH"].includes(normalized) ? normalized : "COMMERCIAL";
+  return ["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"].includes(normalized) ? normalized : "COMMERCIAL";
 };
+/*
+ * The employment details the team screens collect.
+ *
+ * One reader for both create and update so the two cannot drift: each key is
+ * only written when the caller actually sent it, which keeps a partial patch
+ * from blanking a field nobody touched. Returns an error string rather than
+ * throwing, matching how the rest of this controller reports a bad field.
+ */
+const EMPLOYMENT_TEXT_LIMITS = Object.freeze({
+  employeeId: 40,
+  department: 80,
+  branch: 80,
+  shiftTiming: 60,
+});
+
+const readEmploymentFields = (body = {}, patch = {}) => {
+  const sent = (key) => Object.prototype.hasOwnProperty.call(body || {}, key);
+
+  for (const [key, limit] of Object.entries(EMPLOYMENT_TEXT_LIMITS)) {
+    if (sent(key)) patch[key] = String(body[key] || "").trim().slice(0, limit);
+  }
+
+  if (sent("joiningDate")) {
+    const raw = String(body.joiningDate || "").trim();
+    if (!raw) {
+      patch.joiningDate = null;
+    } else {
+      const parsed = new Date(raw);
+      if (Number.isNaN(parsed.getTime())) return { error: "Joining date is not a valid date" };
+      patch.joiningDate = parsed;
+    }
+  }
+
+  for (const key of ["monthlyTarget", "leadCapacity", "taskCapacity"]) {
+    if (!sent(key)) continue;
+    const parsed = Number(body[key]);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      return { error: `${key} must be 0 or more` };
+    }
+    patch[key] = parsed;
+  }
+
+  return { patch };
+};
+
+/*
+ * Two people in one company sharing a payroll number is a typo, not a second
+ * employee. Scoped to the company for the same reason the email check is:
+ * a global lookup would leak that a number exists in another tenant.
+ */
+const assertEmployeeIdFree = async ({ employeeId, companyId, excludeUserId = null }) => {
+  const value = String(employeeId || "").trim();
+  if (!value) return null;
+  const query = { employeeId: value, companyId };
+  if (excludeUserId) query._id = { $ne: excludeUserId };
+  const taken = await User.findOne(query).select("_id").lean();
+  return taken ? "That employee ID is already in use" : null;
+};
+
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || ""));
 const isValidObjectId = (value) =>
   /^[a-fA-F0-9]{24}$/.test(String(value || "").trim());
@@ -292,6 +372,9 @@ const buildLeadStatusMap = (rows) => {
 
 const buildProfilePerformanceSummary = async (userDoc) => {
   const leadQuery = await buildLeadScopeQuery(userDoc);
+  // aggregate() does not cast ids the way find() does, so a team scope built
+  // from string ids would silently match nothing; cast it first.
+  const leadMatch = Lead.find(leadQuery).cast(Lead);
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -301,7 +384,7 @@ const buildProfilePerformanceSummary = async (userDoc) => {
 
   const [leadSummaryRows, recentLeads, activitiesPerformed, diaryEntriesCreated, directReports, achievedTarget] = await Promise.all([
     Lead.aggregate([
-      { $match: leadQuery },
+      { $match: leadMatch },
       {
         $facet: {
           statusRows: [
@@ -335,7 +418,10 @@ const buildProfilePerformanceSummary = async (userDoc) => {
                   $sum: {
                     $cond: [
                       {
+                        // A lead with no follow-up date is not overdue; without the
+                        // type check null sorts below any date and every such lead counted.
                         $and: [
+                          { $eq: [{ $type: "$nextFollowUp" }, "date"] },
                           { $lt: ["$nextFollowUp", todayStart] },
                           { $not: [{ $in: ["$status", ["CLOSED", "LOST"]] }] },
                         ],
@@ -360,8 +446,8 @@ const buildProfilePerformanceSummary = async (userDoc) => {
       .select(
         "_id name phone city projectInterested status nextFollowUp updatedAt assignedTo createdBy",
       )
-      .populate("assignedTo", "name role")
-      .populate("createdBy", "name role")
+      .populate("assignedTo", "name role profileImageUrl")
+      .populate("createdBy", "name role profileImageUrl")
       .sort({ updatedAt: -1 })
       .limit(6)
       .lean(),
@@ -663,6 +749,8 @@ const toProfileView = (user) => ({
   roleType: normalizeRoleType(user.roleType),
   profileImageUrl: user.profileImageUrl || "",
   role: user.role,
+  customRoleId: user.customRoleId?._id || user.customRoleId || null,
+  customRoleName: user.customRoleId?.name || "",
   companyId: user.companyId || null,
   parentId: user.parentId || null,
   partnerCode: user.partnerCode || null,
@@ -673,6 +761,15 @@ const toProfileView = (user) => ({
   branch: user.branch || "",
   shiftTiming: user.shiftTiming || "",
   monthlyTarget: Number.isFinite(user.monthlyTarget) ? user.monthlyTarget : 10,
+  // The company's own number when it set one, the derived code when it did not,
+  // so the member screen always has something to print.
+  employeeId: user.employeeId || toEmployeeCode(user._id),
+  joiningDate: user.joiningDate || null,
+  invitedAt: user.invitedAt || null,
+  inviteAcceptedAt: user.inviteAcceptedAt || null,
+  mustChangePassword: Boolean(user.mustChangePassword),
+  leadCapacity: Number.isFinite(user.leadCapacity) ? user.leadCapacity : 25,
+  taskCapacity: Number.isFinite(user.taskCapacity) ? user.taskCapacity : 10,
   lastLoginAt: user.lastLoginAt || null,
   lastAssignedAt: user.lastAssignedAt || null,
   liveLocation: user.liveLocation || null,
@@ -778,11 +875,11 @@ const buildProfileSummary = async (userDoc) => {
     const todayEnd = new Date();
     todayEnd.setHours(23, 59, 59, 999);
 
+    const leadScope = buildProfileLeadScope({ companyId, userId, role });
     const [assignedLeads, openLeads, closedLeads, dueFollowUpsToday] = await Promise.all([
-      Lead.countDocuments({ companyId, assignedTo: userId }),
+      Lead.countDocuments(leadScope),
       Lead.countDocuments({
-        companyId,
-        assignedTo: userId,
+        ...leadScope,
         status: {
           $in: [
             "NEW",
@@ -799,10 +896,9 @@ const buildProfileSummary = async (userDoc) => {
           ],
         },
       }),
-      Lead.countDocuments({ companyId, assignedTo: userId, status: "CLOSED" }),
+      Lead.countDocuments({ ...leadScope, status: "CLOSED" }),
       Lead.countDocuments({
-        companyId,
-        assignedTo: userId,
+        ...leadScope,
         nextFollowUp: { $gte: todayStart, $lte: todayEnd },
       }),
     ]);
@@ -907,7 +1003,8 @@ exports.getUsers = async (req, res) => {
     );
 
     const usersQuery = User.find(query)
-      .populate("parentId", "name role")
+      .populate("parentId", "name role profileImageUrl")
+      .populate("customRoleId", "name businessCategory baseRole")
       .sort({ createdAt: -1 });
 
     if (selectedFields) {
@@ -983,7 +1080,7 @@ exports.getRoleLeaderboard = async (req, res) => {
       role: selectedRole,
       isActive: true,
     })
-      .select("_id name role")
+      .select("_id name role profileImageUrl")
       .sort({ name: 1 })
       .lean();
 
@@ -1093,6 +1190,7 @@ exports.getRoleLeaderboard = async (req, res) => {
         userId: peer._id,
         name: peer.name || "Unknown User",
         role: peer.role || selectedRole,
+        profileImageUrl: peer.profileImageUrl || "",
         totalLeads,
         closedLeads,
         siteVisits,
@@ -1127,7 +1225,7 @@ exports.getMyProfile = async (req, res) => {
       _id: req.user._id,
       companyId: req.user.companyId,
     })
-      .populate("parentId", "name email phone role")
+      .populate("parentId", "name email phone role profileImageUrl")
       .lean();
 
     if (!profileDoc) {
@@ -1170,7 +1268,8 @@ exports.getUserProfileForAdmin = async (req, res) => {
       _id: userId,
       companyId: req.user.companyId,
     })
-      .populate("parentId", "name email phone role")
+      .populate("parentId", "name email phone role profileImageUrl")
+      .populate("customRoleId", "name businessCategory baseRole")
       .lean();
 
     if (!profileDoc) {
@@ -1236,10 +1335,10 @@ exports.updateMyProfile = async (req, res) => {
       }
       if (
         profileImageUrl
-        && !/^https?:\/\//i.test(profileImageUrl)
+        && !isAllowedProfileImageUrl(profileImageUrl)
       ) {
         return res.status(400).json({
-          message: "Profile image URL must be a valid http/https URL",
+          message: "Profile image URL must be an uploaded profile image or a valid http/https URL",
         });
       }
       patch.profileImageUrl = profileImageUrl;
@@ -1255,10 +1354,10 @@ exports.updateMyProfile = async (req, res) => {
       { _id: req.user._id, companyId: req.user.companyId },
       { $set: patch },
       {
-        new: true,
+        returnDocument: "after",
       },
     )
-      .populate("parentId", "name email phone role")
+      .populate("parentId", "name email phone role profileImageUrl")
       .lean();
 
     if (!updated) {
@@ -1288,6 +1387,42 @@ exports.updateMyProfile = async (req, res) => {
 };
 
 // Hierarchy based user creation
+/*
+ * Account identity validation.
+ *
+ * The audit created working accounts with email "not-an-email" and phone
+ * "abcdefghij" / "1". Both fields are used to reach a real person (login,
+ * notifications, WhatsApp routing), so neither can be free text.
+ */
+const ACCOUNT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MAX_ACCOUNT_NAME_LENGTH = 120;
+
+const validateAccountIdentity = ({ name, email, phone }) => {
+  if (name !== undefined) {
+    const trimmed = String(name ?? "").trim();
+    if (!trimmed) return "Name is required";
+    if (trimmed.length > MAX_ACCOUNT_NAME_LENGTH) {
+      return `Name must be at most ${MAX_ACCOUNT_NAME_LENGTH} characters`;
+    }
+  }
+
+  if (email !== undefined) {
+    const trimmed = String(email ?? "").trim();
+    if (!trimmed) return "Email is required";
+    if (!ACCOUNT_EMAIL_PATTERN.test(trimmed)) return "Email is not a valid address";
+  }
+
+  if (phone !== undefined && String(phone ?? "").trim()) {
+    const trimmed = String(phone).trim();
+    const digits = trimmed.replace(/[^0-9]/g, "");
+    if (!/^[0-9+()\-\s]+$/.test(trimmed) || digits.length < 7 || digits.length > 15) {
+      return "Phone must be a valid number with 7 to 15 digits";
+    }
+  }
+
+  return null;
+};
+
 exports.createUserByRole = async (req, res) => {
   try {
     const {
@@ -1312,12 +1447,70 @@ exports.createUserByRole = async (req, res) => {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const existingUser = await User.findOne({ email }).select("_id").lean();
-    if (existingUser) {
-      return res.status(400).json({ message: "User already exists" });
+    const identityError = validateAccountIdentity({ name, email, phone });
+    if (identityError) {
+      return res.status(400).json({ message: identityError });
     }
 
-    const role = requestedRole;
+    const normalizedEmail = String(email).trim().toLowerCase();
+    // Scoped to the company: a global lookup let one tenant discover that an
+    // address exists in another. 409 is the right status for a conflict.
+    const existingUser = await User.findOne({
+      email: normalizedEmail,
+      companyId: req.user.companyId,
+    }).select("_id").lean();
+    if (existingUser) {
+      return res.status(409).json({ message: "User already exists" });
+    }
+
+    const normalizedPhone = String(phone ?? "").trim();
+    if (normalizedPhone) {
+      const phoneTaken = await User.findOne({
+        phone: normalizedPhone,
+        companyId: req.user.companyId,
+      }).select("_id").lean();
+      if (phoneTaken) {
+        return res.status(409).json({ message: "Phone number is already in use" });
+      }
+    }
+
+    const employment = readEmploymentFields(req.body, {});
+    if (employment.error) {
+      return res.status(400).json({ message: employment.error });
+    }
+
+    const employeeIdConflict = await assertEmployeeIdFree({
+      employeeId: employment.patch.employeeId,
+      companyId: req.user.companyId,
+    });
+    if (employeeIdConflict) {
+      return res.status(409).json({ message: employeeIdConflict });
+    }
+
+    /*
+     * A company-defined role is a preset, so it is expanded here rather than
+     * stored as a role value of its own: the base role is what every hierarchy
+     * and scoping rule in the CRM reads, the category is the role's, and its
+     * page list becomes the user's starting access. Everything below this point
+     * then runs exactly as it does for a built-in role.
+     */
+    let customRole = null;
+    const requestedCustomRoleId = String(req.body?.customRoleId || "").trim();
+    if (requestedCustomRoleId) {
+      if (!/^[a-f0-9]{24}$/i.test(requestedCustomRoleId)) {
+        return res.status(400).json({ message: "Invalid role" });
+      }
+      customRole = await CustomRole.findOne({
+        _id: requestedCustomRoleId,
+        companyId: req.user.companyId,
+        isActive: true,
+      }).lean();
+      if (!customRole) {
+        return res.status(400).json({ message: "That role no longer exists" });
+      }
+    }
+
+    const role = customRole ? customRole.baseRole : requestedRole;
 
     if (!Object.values(USER_ROLES).includes(role)) {
       return res.status(400).json({
@@ -1398,9 +1591,21 @@ exports.createUserByRole = async (req, res) => {
       name,
       email,
       phone,
-      roleType: normalizeRoleType(roleType),
+      // The role's own category wins: it is part of what the role means, and
+      // the form's category box is disabled while one is selected.
+      roleType: normalizeRoleType(customRole ? customRole.businessCategory : roleType),
       password,
       role,
+      customRoleId: customRole?._id || null,
+      /*
+       * A named role says nothing about pages, so a new user starts on their
+       * base role's defaults and an admin narrows that on the access screen.
+       * `null` is what the access service reads as "use the role defaults";
+       * an array - even an empty one - is read as a deliberate override and
+       * enforced, which is what once left everyone hired onto a named role
+       * able to open only Dashboard and Profile.
+       */
+      pageAccessOverride: null,
       companyId: req.user.companyId,
       parentId: resolvedParentId,
       canViewInventory:
@@ -1408,6 +1613,16 @@ exports.createUserByRole = async (req, res) => {
           ? Boolean(req.body?.canViewInventory)
           : false,
       brokerageConfig: parsedBrokerageConfig.value,
+      ...employment.patch,
+      /*
+       * The invitation is a record that the account was handed over, not a
+       * delivery mechanism: there is no mail transport here, so the client
+       * composes the message itself and says so by sending sendInvite. Without
+       * it the account is simply created and the admin passes the credentials
+       * on however they like.
+       */
+      invitedAt: req.body?.sendInvite ? new Date() : null,
+      mustChangePassword: Boolean(req.body?.mustChangePassword),
     });
 
     await writeAuditLog({
@@ -1428,9 +1643,18 @@ exports.createUserByRole = async (req, res) => {
         parentId: newUser.parentId,
         canViewInventory: Boolean(newUser.canViewInventory),
         brokerageConfig: toBrokerageConfigView(newUser.brokerageConfig),
+        employeeId: newUser.employeeId || toEmployeeCode(newUser._id),
+        department: newUser.department || "",
+        branch: newUser.branch || "",
+        joiningDate: newUser.joiningDate || null,
+        invitedAt: newUser.invitedAt || null,
+        mustChangePassword: Boolean(newUser.mustChangePassword),
       },
     });
   } catch (error) {
+    // A missing name, a short password or a bad enum is the caller's mistake:
+    // answer 400 naming the field instead of a blanket 500.
+    if (sendMongooseError(res, error)) return undefined;
     logger.error({
       requestId: req.requestId || null,
       error: error.message,
@@ -1471,6 +1695,7 @@ exports.updateUserByAdmin = async (req, res) => {
       "phone",
       "roleType",
       "role",
+      "customRoleId",
       "reportingToId",
       "parentId",
       "managerId",
@@ -1482,6 +1707,11 @@ exports.updateUserByAdmin = async (req, res) => {
       "branch",
       "shiftTiming",
       "monthlyTarget",
+      "employeeId",
+      "joiningDate",
+      "leadCapacity",
+      "taskCapacity",
+      "mustChangePassword",
     ].some((key) => Object.prototype.hasOwnProperty.call(req.body || {}, key));
 
     if (!hasAnyEditableField) {
@@ -1546,9 +1776,9 @@ exports.updateUserByAdmin = async (req, res) => {
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "roleType")) {
       const roleType = String(req.body.roleType || "").trim().toUpperCase();
-      if (!["COMMERCIAL", "RESIDENTIAL", "BOTH"].includes(roleType)) {
+      if (!["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"].includes(roleType)) {
         return res.status(400).json({
-          message: "roleType must be COMMERCIAL, RESIDENTIAL or BOTH",
+          message: "roleType must be COMMERCIAL, RESIDENTIAL, COWORKING or BOTH",
         });
       }
       patch.roleType = roleType;
@@ -1571,6 +1801,46 @@ exports.updateUserByAdmin = async (req, res) => {
 
       nextRole = requestedRole;
       patch.role = nextRole;
+      // Picking a built-in role by hand means the person is no longer on a role
+      // the company named, so the link is dropped rather than left dangling.
+      patch.customRoleId = null;
+    }
+
+    /*
+     * Moving someone onto a role the company named.
+     *
+     * Applied after the plain role field so it wins: the form sends both, and
+     * the role's own base role and category are what the role means. Page
+     * access is deliberately not copied here - it was set per user on the
+     * access screen, and changing someone's job title is no reason to discard
+     * what an admin decided they should reach.
+     */
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "customRoleId")) {
+      assertNotSelfPromotion({ actingUser: req.user, targetUserId: user._id });
+      const requestedCustomRoleId = String(req.body.customRoleId || "").trim();
+
+      if (!requestedCustomRoleId) {
+        patch.customRoleId = null;
+      } else {
+        if (!isValidObjectId(requestedCustomRoleId)) {
+          return res.status(400).json({ message: "Invalid role" });
+        }
+        const customRole = await CustomRole.findOne({
+          _id: requestedCustomRoleId,
+          companyId: req.user.companyId,
+          isActive: true,
+        }).lean();
+        if (!customRole) {
+          return res.status(400).json({ message: "That role no longer exists" });
+        }
+        if (customRole.baseRole === USER_ROLES.ADMIN) {
+          return res.status(400).json({ message: "Role cannot be changed to ADMIN" });
+        }
+        nextRole = customRole.baseRole;
+        patch.role = nextRole;
+        patch.roleType = normalizeRoleType(customRole.businessCategory);
+        patch.customRoleId = customRole._id;
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(req.body || {}, "isActive")) {
@@ -1600,24 +1870,24 @@ exports.updateUserByAdmin = async (req, res) => {
       patch.brokerageConfig = parsedBrokerageConfig.value;
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "department")) {
-      patch.department = String(req.body.department || "").trim().slice(0, 80);
+    const employment = readEmploymentFields(req.body, patch);
+    if (employment.error) {
+      return res.status(400).json({ message: employment.error });
     }
 
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "branch")) {
-      patch.branch = String(req.body.branch || "").trim().slice(0, 80);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "shiftTiming")) {
-      patch.shiftTiming = String(req.body.shiftTiming || "").trim().slice(0, 60);
-    }
-
-    if (Object.prototype.hasOwnProperty.call(req.body || {}, "monthlyTarget")) {
-      const monthlyTarget = Number(req.body.monthlyTarget);
-      if (!Number.isFinite(monthlyTarget) || monthlyTarget < 0) {
-        return res.status(400).json({ message: "monthlyTarget must be 0 or more" });
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "employeeId")) {
+      const employeeIdConflict = await assertEmployeeIdFree({
+        employeeId: patch.employeeId,
+        companyId: req.user.companyId,
+        excludeUserId: user._id,
+      });
+      if (employeeIdConflict) {
+        return res.status(409).json({ message: employeeIdConflict });
       }
-      patch.monthlyTarget = monthlyTarget;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, "mustChangePassword")) {
+      patch.mustChangePassword = Boolean(req.body.mustChangePassword);
     }
 
     if (EXECUTIVE_ROLES.includes(previousRole) && !EXECUTIVE_ROLES.includes(nextRole)) {
@@ -1791,7 +2061,7 @@ exports.updateUserByAdmin = async (req, res) => {
       _id: user._id,
       companyId: req.user.companyId,
     })
-      .populate("parentId", "name email phone role")
+      .populate("parentId", "name email phone role profileImageUrl")
       .lean();
 
     return res.json({
@@ -1983,9 +2253,9 @@ exports.updateUserDesignation = async (req, res) => {
               : false,
         },
       },
-      { new: true },
+      { returnDocument: "after" },
     )
-      .populate("parentId", "name role")
+      .populate("parentId", "name role profileImageUrl")
       .lean();
 
     if (!updatedUser) {
@@ -2059,10 +2329,10 @@ exports.updateChannelPartnerInventoryAccess = async (req, res) => {
         $set: { canViewInventory },
       },
       {
-        new: true,
+        returnDocument: "after",
       },
     )
-      .populate("parentId", "name role")
+      .populate("parentId", "name role profileImageUrl")
       .lean();
 
     if (!updatedUser) {
@@ -2115,7 +2385,7 @@ exports.rebalanceExecutives = async (req, res) => {
       isActive: true,
       companyId: req.user.companyId,
     })
-      .select("_id name role parentId createdAt")
+      .select("_id name role parentId createdAt profileImageUrl")
       .sort({ createdAt: 1 })
       .lean();
 
@@ -2258,8 +2528,8 @@ exports.createUserDeleteRequest = async (req, res) => {
       _id: userId,
       companyId: req.user.companyId,
     })
-      .populate("parentId", "name role")
-      .select("_id name email phone role parentId isActive")
+      .populate("parentId", "name role profileImageUrl")
+      .select("_id name email phone role parentId isActive profileImageUrl")
       .lean();
 
     if (!targetUser) {
@@ -2286,8 +2556,8 @@ exports.createUserDeleteRequest = async (req, res) => {
       targetUser: userId,
       status: "PENDING",
     })
-      .populate("requestedBy", "name email phone role")
-      .populate("targetUser", "name email phone role parentId isActive")
+      .populate("requestedBy", "name email phone role profileImageUrl")
+      .populate("targetUser", "name email phone role parentId isActive profileImageUrl")
       .lean();
 
     if (existingRequest) {
@@ -2307,6 +2577,7 @@ exports.createUserDeleteRequest = async (req, res) => {
         email: targetUser.email || "",
         phone: targetUser.phone || "",
         role: targetUser.role || "",
+        profileImageUrl: targetUser.profileImageUrl || "",
         parentName: targetUser.parentId?.name || "",
         parentRole: targetUser.parentId?.role || "",
         isActive: Boolean(targetUser.isActive),
@@ -2314,9 +2585,9 @@ exports.createUserDeleteRequest = async (req, res) => {
     });
 
     const populated = await UserDeleteRequest.findById(request._id)
-      .populate("requestedBy", "name email phone role")
-      .populate("targetUser", "name email phone role parentId isActive")
-      .populate("reviewedBy", "name email role")
+      .populate("requestedBy", "name email phone role profileImageUrl")
+      .populate("targetUser", "name email phone role parentId isActive profileImageUrl")
+      .populate("reviewedBy", "name email role profileImageUrl")
       .lean();
 
     emitUserDeleteRequestCreated({ req, request: populated || request });
@@ -2348,9 +2619,9 @@ exports.getAdminUserDeleteRequests = async (req, res) => {
     }
 
     const requests = await UserDeleteRequest.find(query)
-      .populate("requestedBy", "name email phone role")
-      .populate("targetUser", "name email phone role parentId isActive")
-      .populate("reviewedBy", "name email role")
+      .populate("requestedBy", "name email phone role profileImageUrl")
+      .populate("targetUser", "name email phone role parentId isActive profileImageUrl")
+      .populate("reviewedBy", "name email role profileImageUrl")
       .sort({ createdAt: -1 })
       .limit(200)
       .lean();
@@ -2415,9 +2686,9 @@ exports.reviewUserDeleteRequest = async (req, res) => {
     await request.save();
 
     const populated = await UserDeleteRequest.findById(request._id)
-      .populate("requestedBy", "name email phone role")
-      .populate("targetUser", "name email phone role parentId isActive")
-      .populate("reviewedBy", "name email role")
+      .populate("requestedBy", "name email phone role profileImageUrl")
+      .populate("targetUser", "name email phone role parentId isActive profileImageUrl")
+      .populate("reviewedBy", "name email role profileImageUrl")
       .lean();
 
     return res.json({
@@ -2526,10 +2797,10 @@ exports.updateUserByRole = async (req, res) => {
       }
       if (
         profileImageUrl
-        && !/^https?:\/\//i.test(profileImageUrl)
+        && !isAllowedProfileImageUrl(profileImageUrl)
       ) {
         return res.status(400).json({
-          message: "Profile image URL must be a valid http/https URL",
+          message: "Profile image URL must be an uploaded profile image or a valid http/https URL",
         });
       }
       patch.profileImageUrl = profileImageUrl;
@@ -2597,9 +2868,9 @@ exports.updateUserByRole = async (req, res) => {
     const updated = await User.findOneAndUpdate(
       { _id: userId, companyId: req.user.companyId },
       { $set: patch },
-      { new: true },
+      { returnDocument: "after" },
     )
-      .populate("parentId", "name role")
+      .populate("parentId", "name role profileImageUrl")
       .select("-password")
       .lean();
 
@@ -2683,8 +2954,8 @@ exports.updateMyLocation = async (req, res) => {
         },
       },
       {
-        new: true,
-        select: "_id name role liveLocation",
+        returnDocument: "after",
+        select: "_id name role liveLocation profileImageUrl",
         lean: true,
       },
     );
@@ -2753,7 +3024,7 @@ exports.getFieldExecutiveLocations = async (req, res) => {
     );
 
     const usersQuery = User.find(query)
-      .select("name email phone role parentId isActive lastAssignedAt liveLocation")
+      .select("name email phone role parentId isActive lastAssignedAt liveLocation profileImageUrl")
       .sort({ name: 1 });
 
     if (selectedFields) {
@@ -2778,6 +3049,7 @@ exports.getFieldExecutiveLocations = async (req, res) => {
         email: user.email,
         phone: user.phone,
         role: user.role,
+        profileImageUrl: user.profileImageUrl || "",
         parentId: user.parentId,
         isActive: user.isActive,
         lastAssignedAt: user.lastAssignedAt || null,

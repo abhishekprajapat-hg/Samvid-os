@@ -13,7 +13,11 @@ const {
   hasPermission,
   assertGrantablePermissions,
   invalidateAccessCache,
+  pageEntriesFromPermissions,
+  normalizePageEntries,
 } = require("./access.service");
+const { toPagePermissions } = require("../constants/page.constants");
+const { getDefaultPageAccessForRole } = require("../constants/rolePageAccess.constants");
 
 const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
 
@@ -66,16 +70,35 @@ const updateRolePermissions = async ({ companyId, role, permissions, actingUser,
 
   const uniquePermissions = [...new Set(permissions)];
 
-  // A non-admin editor may only hand out what they hold themselves, and never
-  // an admin-protected permission.
-  await assertGrantablePermissions({ actor: actingUser, permissions: uniquePermissions });
+  // A Manager edits every role below them, but not their own role or the
+  // Admin's: that would let a Manager widen what Managers can do.
+  if (!isAdminRole(actingUser?.role) && role === USER_ROLES.MANAGER) {
+    throw createHttpError(403, "Only an Admin can change the Manager role");
+  }
 
   const previous = await RolePermission.findOne({ companyId, role }).lean();
+
+  // What the role holds today, pages included, whether they come from its own
+  // list or from the built-in defaults.
+  const previousPermissions = previous?.permissions || getDefaultPermissionsForRole(role);
+  const previousPageEntries = pageEntriesFromPermissions(previousPermissions);
+  const previousPages = normalizePageEntries(
+    previousPageEntries.length ? previousPageEntries : getDefaultPageAccessForRole(role),
+  );
+
+  // A non-admin editor may only hand out what they hold themselves, never an
+  // admin-protected permission and never a delete. What the role already
+  // holds may stay.
+  await assertGrantablePermissions({
+    actor: actingUser,
+    permissions: uniquePermissions,
+    existing: [...previousPermissions, ...toPagePermissions(previousPages)],
+  });
 
   const updated = await RolePermission.findOneAndUpdate(
     { companyId, role },
     { $set: { permissions: uniquePermissions, updatedBy: actingUser._id } },
-    { new: true, upsert: true, setDefaultsOnInsert: true },
+    { returnDocument: "after", upsert: true, setDefaultsOnInsert: true },
   ).lean();
 
   invalidateAccessCache();

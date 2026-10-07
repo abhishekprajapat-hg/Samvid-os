@@ -23,7 +23,7 @@ const generateContractCode = async (companyId) => {
   const counter = await CoworkingIdCounter.findOneAndUpdate(
     { companyId, category: "CONTRACT" },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   return `CTR-${String(counter.seq).padStart(4, "0")}`;
 };

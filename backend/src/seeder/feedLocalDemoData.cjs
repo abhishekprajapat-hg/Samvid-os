@@ -10,6 +10,17 @@
  * record is upserted on its natural key.
  *
  * Usage: npm run seed:local-demo
+ *
+ * Demo company targeting (all optional; the defaults reproduce the original
+ * local dataset exactly):
+ *   DEMO_COMPANY_SLUG   subdomain of the company the demo lives in ("client")
+ *   DEMO_COMPANY_NAME   display name ("Client Company")
+ *   DEMO_EMAIL_DOMAIN   domain for every demo login ("test.com")
+ *   DEMO_EXTRAS=false   skip the extended dataset in demoDataExtras.cjs
+ *
+ * A shared/VPS database additionally needs FEED_LOCAL_DEMO_DATA_ALLOW_SHARED=true
+ * AND a non-default DEMO_COMPANY_SLUG + DEMO_EMAIL_DOMAIN, so the demo can only
+ * ever land in its own company and never touch a real tenant's records.
  */
 require("dotenv").config();
 
@@ -52,6 +63,17 @@ const DEMO_PASSWORD = "123456";
 const truthyValues = new Set(["1", "true", "yes", "y", "on"]);
 const parseBooleanEnv = (value) => truthyValues.has(String(value || "").trim().toLowerCase());
 
+const DEMO_EMAIL_DOMAIN = String(process.env.DEMO_EMAIL_DOMAIN || "test.com").trim().toLowerCase();
+const DEMO_COMPANY_SLUG = String(process.env.DEMO_COMPANY_SLUG || "client").trim().toLowerCase();
+const DEMO_COMPANY_NAME = process.env.DEMO_COMPANY_NAME || process.env.CLIENT_COMPANY_NAME || "Client Company";
+const IS_DEFAULT_TARGET = DEMO_COMPANY_SLUG === "client" && DEMO_EMAIL_DOMAIN === "test.com";
+// Seeds for deterministic ids get the slug mixed in, so two demo companies in
+// one database never derive the same _id.
+const DEMO_ID_PREFIX = IS_DEFAULT_TARGET ? "" : `${DEMO_COMPANY_SLUG}:`;
+const PARTNER_CODE_PREFIX = IS_DEFAULT_TARGET ? "" : `${DEMO_COMPANY_SLUG.toUpperCase()}-`;
+// Rows below are written with @test.com keys; this maps them to the real login.
+const demoEmail = (email) => String(email).replace(/@test\.com$/i, `@${DEMO_EMAIL_DOMAIN}`);
+
 const parseMongoTarget = (mongoUri) => {
   try {
     const parsed = new URL(String(mongoUri || "").replace(/^mongodb(\+srv)?:\/\//i, "http://"));
@@ -73,7 +95,13 @@ const assertLocalTarget = () => {
   );
   const allowShared = parseBooleanEnv(process.env.FEED_LOCAL_DEMO_DATA_ALLOW_SHARED);
 
-  if ((!isLoopback || target.port === "27018") && !allowShared) {
+  const isShared = !isLoopback || target.port === "27018";
+  if (isShared && allowShared && IS_DEFAULT_TARGET) {
+    throw new Error(
+      "A shared database needs its own demo company: set DEMO_COMPANY_SLUG and DEMO_EMAIL_DOMAIN to non-default values.",
+    );
+  }
+  if (isShared && !allowShared) {
     throw new Error(
       [
         "Refusing to feed demo data into a non-local or tunneled Mongo target.",
@@ -85,7 +113,9 @@ const assertLocalTarget = () => {
 };
 
 const oid = (seed) =>
-  new mongoose.Types.ObjectId(crypto.createHash("md5").update(String(seed)).digest("hex").slice(0, 24));
+  new mongoose.Types.ObjectId(
+    crypto.createHash("md5").update(`${DEMO_ID_PREFIX}${seed}`).digest("hex").slice(0, 24),
+  );
 
 const now = new Date();
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -122,18 +152,31 @@ const setCounter = async (Model, filter, seq) => {
 // Company, users, role permissions
 // ---------------------------------------------------------------------------
 const seedCompanyAndUsers = async () => {
-  const existingAdmin = await User.findOne({ email: "admin@test.com" });
+  const existingAdmin = await User.findOne({ email: demoEmail("admin@test.com") });
   const existingCompany = await Company.findOne({
-    $or: [{ subdomain: "client" }, ...(existingAdmin?.companyId ? [{ _id: existingAdmin.companyId }] : [])],
+    $or: [{ subdomain: DEMO_COMPANY_SLUG }, ...(existingAdmin?.companyId ? [{ _id: existingAdmin.companyId }] : [])],
   });
+
+  // On anything but the default local target, refuse to adopt a company this
+  // seeder did not create - the slug could belong to a real tenant.
+  if (!IS_DEFAULT_TARGET && existingCompany) {
+    const ownedByDemo = existingAdmin
+      ? String(existingCompany._id) === String(existingAdmin.companyId)
+      : String(existingCompany.ownerUserId || "") === String(oid("user-admin"));
+    if (!ownedByDemo) {
+      throw new Error(
+        `Company "${DEMO_COMPANY_SLUG}" already exists and was not created by this seeder. Pick another DEMO_COMPANY_SLUG.`,
+      );
+    }
+  }
 
   const companyId = existingCompany?._id || existingAdmin?.companyId || oid("company-client");
   const adminId = existingAdmin?._id || oid("user-admin");
 
   await upsert(Company, { _id: companyId }, {
-    name: process.env.CLIENT_COMPANY_NAME || "Client Company",
-    legalName: "Client Company Realty Pvt Ltd",
-    subdomain: process.env.CLIENT_COMPANY_SLUG || "client",
+    name: DEMO_COMPANY_NAME,
+    legalName: IS_DEFAULT_TARGET ? "Client Company Realty Pvt Ltd" : `${DEMO_COMPANY_NAME} Pvt Ltd`,
+    subdomain: IS_DEFAULT_TARGET ? process.env.CLIENT_COMPANY_SLUG || "client" : DEMO_COMPANY_SLUG,
     status: "ACTIVE",
     ownerUserId: adminId,
     createdBy: adminId,
@@ -163,7 +206,7 @@ const seedCompanyAndUsers = async () => {
   ];
 
   const existingUsersByEmail = await User.find({
-    email: { $in: staffRows.map(([, email]) => email) },
+    email: { $in: staffRows.map(([, email]) => demoEmail(email)) },
   })
     .select("_id email")
     .lean();
@@ -171,7 +214,7 @@ const seedCompanyAndUsers = async () => {
     existingUsersByEmail.map((user) => [String(user.email || "").toLowerCase(), user._id]),
   );
 
-  const existingManager = await User.findOne({ email: "manager@test.com" });
+  const existingManager = await User.findOne({ email: demoEmail("manager@test.com") });
   const managerId = existingManager?._id || oid("user-manager");
 
   const users = {};
@@ -180,17 +223,14 @@ const seedCompanyAndUsers = async () => {
     const isAdmin = role === USER_ROLES.ADMIN;
     const isManager = role === USER_ROLES.MANAGER;
     const _id =
-      existingUserIdByEmail.get(String(email).toLowerCase())
+      existingUserIdByEmail.get(demoEmail(email).toLowerCase())
       || (isAdmin ? adminId : isManager ? managerId : oid(`user-${email}`));
-    const parentId = isAdmin
-      ? null
-      : isManager || role === USER_ROLES.COWORKING_ADMIN
-        ? adminId
-        : managerId;
+    // Every role except Admin reports to a Manager; the Manager reports to Admin.
+    const parentId = isAdmin ? null : isManager ? adminId : managerId;
 
     users[email] = await upsert(User, { _id }, {
       name,
-      email,
+      email: demoEmail(email),
       phone: `98100${String(10000 + index)}`,
       password: DEMO_PASSWORD,
       role,
@@ -203,7 +243,7 @@ const seedCompanyAndUsers = async () => {
       branch,
       shiftTiming: "10:00 - 19:00",
       monthlyTarget,
-      partnerCode: role === USER_ROLES.CHANNEL_PARTNER ? "CP-DEMO-001" : `DEMO-${index + 1}`,
+      partnerCode: `${PARTNER_CODE_PREFIX}${role === USER_ROLES.CHANNEL_PARTNER ? "CP-DEMO-001" : `DEMO-${index + 1}`}`,
       brokerageConfig: {
         mode: role === USER_ROLES.CHANNEL_PARTNER ? "PERCENTAGE" : "FLAT",
         value: role === USER_ROLES.CHANNEL_PARTNER ? 2 : 50000,
@@ -1157,8 +1197,8 @@ const seedCoworking = async ({ companyId, adminId, users }) => {
   const communityManager = users["community_manager@test.com"];
 
   const propertyRows = [
-    ["PROP-0001", "OOR Coworking Hub", "Golf Course Road", "Gurugram", "Haryana", "122002", coworkingAdmin._id],
-    ["PROP-0002", "OOR Workspace Noida", "Sector 62", "Noida", "Uttar Pradesh", "201301", communityManager._id],
+    ["PROP-0001", "Samvid Coworking Hub", "Golf Course Road", "Gurugram", "Haryana", "122002", coworkingAdmin._id],
+    ["PROP-0002", "Samvid Workspace Noida", "Sector 62", "Noida", "Uttar Pradesh", "201301", communityManager._id],
   ];
 
   const properties = {};
@@ -1469,6 +1509,19 @@ const main = async () => {
   await seedAttendance({ companyId, adminId, users });
   await seedCoworking({ companyId, adminId, users });
 
+  let extras = null;
+  if (process.env.DEMO_EXTRAS === undefined || parseBooleanEnv(process.env.DEMO_EXTRAS)) {
+    const { seedDemoExtras } = require("./demoDataExtras.cjs");
+    extras = await seedDemoExtras({
+      companyId,
+      adminId,
+      managerId,
+      users,
+      leads,
+      helpers: { upsert, setCounter, oid, days, atTime, dateKey, monthKey, demoEmail, now, DEMO_PASSWORD, PARTNER_CODE_PREFIX },
+    });
+  }
+
   const counts = {
     companies: await Company.countDocuments({ _id: companyId }),
     users: await User.countDocuments({ companyId }),
@@ -1494,9 +1547,10 @@ const main = async () => {
     coworkingExpenses: await CoworkingExpense.countDocuments({ companyId }),
   };
 
-  console.log("Local demo data feed complete.");
-  console.log(JSON.stringify(counts, null, 2));
-  console.log(`Every seeded account uses the password ${DEMO_PASSWORD} (admin@test.com, manager@test.com, executive@test.com, coworking_admin@test.com, ...).`);
+  console.log("Demo data feed complete.");
+  console.log(`Company: ${DEMO_COMPANY_NAME} (${DEMO_COMPANY_SLUG}) in database ${mongoose.connection.name}`);
+  console.log(JSON.stringify({ ...counts, ...(extras || {}) }, null, 2));
+  console.log(`Every seeded account uses the password ${DEMO_PASSWORD} (${["admin", "manager", "executive", "coworking_admin"].map((name) => demoEmail(`${name}@test.com`)).join(", ")}, ...).`);
 
   await mongoose.disconnect();
 };

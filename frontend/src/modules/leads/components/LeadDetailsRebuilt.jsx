@@ -1,4 +1,5 @@
 import BrokerPhoneHint from "./BrokerPhoneHint";
+import CoworkingRequirementFields from "./CoworkingRequirementFields";
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import { createInventoryShareLink } from "../../../services/inventoryService";
@@ -6,6 +7,7 @@ import { uploadFile } from "../../../services/uploadService";
 import {
   ArrowLeft,
   Building2,
+  Calendar,
   CalendarClock,
   Check,
   Copy,
@@ -33,8 +35,10 @@ import {
   updateTask as apiUpdateTask,
   deleteTask as apiDeleteTask,
 } from "../../../services/taskService";
+import { deleteOutcomeMessage, isDeleteApprovalPending } from "../../../services/deleteRequestService";
 import {
   FURNISHING_OPTIONS,
+  LEAD_SOURCE_CHANNELS,
   PLOT_LOCATION_OPTIONS,
   PLOT_OCCUPANCY_OPTIONS,
   PLOT_PURPOSE_OPTIONS,
@@ -217,12 +221,57 @@ const formatCurrencyInr = (value) => {
   return INR_CURRENCY_FORMATTER.format(amount);
 };
 
+const getInventoryListingType = (inventory) => {
+  const type = String(inventory?.type || "").trim().toUpperCase();
+  if (type === "RENT") return "RENT";
+  if (type === "BOTH") return "BOTH";
+  return "SALE";
+};
+
+// A rental property is priced by its monthly rent, not its sale price.
+const formatInventoryAmountInr = (inventory, format = formatCurrencyInr) => {
+  const listingType = getInventoryListingType(inventory);
+  if (listingType === "RENT") {
+    const rent = format(inventory?.rent);
+    return rent === "On request" ? rent : `${rent} / month`;
+  }
+  if (listingType === "BOTH") {
+    const price = format(inventory?.price);
+    const rent = format(inventory?.rent);
+    return `${price} · ${rent === "On request" ? rent : `${rent} / month`}`;
+  }
+  return format(inventory?.price);
+};
+
+const getInventoryAmountLabel = (inventory) => {
+  const listingType = getInventoryListingType(inventory);
+  if (listingType === "RENT") return "Rent";
+  if (listingType === "BOTH") return "Price / Rent";
+  return "Price";
+};
+
+const getInventoryListingLabel = (inventory) => {
+  const listingType = getInventoryListingType(inventory);
+  if (listingType === "RENT") return "Rental";
+  if (listingType === "BOTH") return "Sale & Rent";
+  return "For Sale";
+};
+
 const toTitleCaseLabel = (value) =>
   String(value || "")
     .trim()
     .toLowerCase()
     .replace(/_/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+
+// Client-facing name for a property: its ID and listing name only. Building,
+// tower (filled from the building name) and unit/office number stay internal.
+const getInventoryClientLabel = (inventory = {}) =>
+  [inventory?.propertyId, inventory?.projectName]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value, index, all) => all.indexOf(value) === index)
+    .join(" - ");
 
 const getInventoryLocationLabel = (inventory = {}) => {
   const parts = [inventory?.city, inventory?.area, inventory?.pincode]
@@ -473,6 +522,8 @@ const LeadDetailsRebuiltContent = ({
   linkingProperty,
   onLinkPropertyToLead,
   onOpenEditLeadForm,
+  canDeleteLead = false,
+  onDeleteLead,
   leadStatuses,
   nameDraft,
   setNameDraft,
@@ -674,10 +725,13 @@ const LeadDetailsRebuiltContent = ({
   };
 
   const handleDeleteLeadTask = async (taskId) => {
-    if (!window.confirm("Delete this task?")) return;
+    // A Manager's delete is a request an Admin approves.
+    const needsApproval = String(userRole || "").toUpperCase() === "MANAGER";
+    if (!window.confirm(needsApproval ? "Send a request to Admin to delete this task?" : "Delete this task?")) return;
     try {
-      setLeadTasks(prev => prev.filter(t => t._id !== taskId));
-      await apiDeleteTask(taskId);
+      if (!needsApproval) setLeadTasks(prev => prev.filter(t => t._id !== taskId));
+      const result = await apiDeleteTask(taskId);
+      if (isDeleteApprovalPending(result)) window.alert(deleteOutcomeMessage(result));
       fetchLeadTasks();
     } catch (err) {
       console.error("Failed to delete task", err);
@@ -759,9 +813,21 @@ const LeadDetailsRebuiltContent = ({
   const furnishingValue = furnishingOptions.some((option) => option.value === requirementsDraft?.furnishingStatus)
     ? requirementsDraft?.furnishingStatus
     : "";
+  const leadSourceChannel = String(selectedLead?.sourceChannel || "").trim().toUpperCase();
+  const leadSourceLabel = LEAD_SOURCE_CHANNELS.find((option) => option.value && option.value === leadSourceChannel)?.label
+    || (String(selectedLead?.source || "").trim().toUpperCase() === "META" ? "Meta" : "Not set");
+  const isCoworkingRequirement = normalizedRequirementInventoryType === "COWORKING";
   const isPlotRequirement = normalizedRequirementPropertySubtype === "PLOT";
-  const isFlatRequirement = normalizedRequirementPropertySubtype === "APARTMENT";
-  const budgetRangeOptions = getBudgetRangeOptions(requirementsDraft?.transactionType);
+  // Homes (not plots) are rented; shops and offices are leased; coworking is never bought.
+  const canRentRequirement = normalizedRequirementInventoryType === "RESIDENTIAL" && !isPlotRequirement;
+  const canPurchaseRequirement = !isCoworkingRequirement;
+  const rawTransactionType = String(requirementsDraft?.transactionType || "").trim().toUpperCase();
+  let transactionTypeValue = rawTransactionType;
+  if (rawTransactionType === "RENT" && !canRentRequirement) transactionTypeValue = "LEASE";
+  if (rawTransactionType === "SALE" && !canPurchaseRequirement) transactionTypeValue = "";
+  const budgetRangeOptions = isCoworkingRequirement
+    ? RENT_LEASE_BUDGET_RANGE_OPTIONS
+    : getBudgetRangeOptions(transactionTypeValue);
   const budgetRangeValue = getBudgetRangeOptionValue(
     requirementsDraft?.budgetMin,
     requirementsDraft?.budgetMax,
@@ -1023,6 +1089,8 @@ const LeadDetailsRebuiltContent = ({
           id: row.id,
           inventory: row.inventory,
           label: row.label || `Property ${row.id.slice(-6).toUpperCase()}`,
+          // What the client sees in proposals: never the building, tower or unit.
+          clientLabel: getInventoryClientLabel(row.inventory) || `Property ${row.id.slice(-6).toUpperCase()}`,
           statusLabel: row.statusLabel,
           imageUrls: row.imageUrls,
         })),
@@ -1270,8 +1338,9 @@ const LeadDetailsRebuiltContent = ({
         .filter((inventory) => toInventoryApiStatus(inventory?.status) === "Available")
         .filter((inventory) => {
           const inventoryType = String(inventory?.type || "").trim().toUpperCase();
-          if (linkableInventoryTypeFilter === "SALE") return inventoryType === "SALE";
-          if (linkableInventoryTypeFilter === "RENT") return inventoryType === "RENT";
+          // A "Both" listing is offered for sale and for rent, so it shows under each.
+          if (linkableInventoryTypeFilter === "SALE") return inventoryType === "SALE" || inventoryType === "BOTH";
+          if (linkableInventoryTypeFilter === "RENT") return inventoryType === "RENT" || inventoryType === "BOTH";
           return true;
         })
         .sort((a, b) => {
@@ -1325,7 +1394,7 @@ const LeadDetailsRebuiltContent = ({
         property.imageUrls.slice(0, PROPOSAL_MAX_IMAGES_PER_PROPERTY).map((url, index) => ({
           url,
           propertyId: property.id,
-          propertyLabel: property.label,
+          propertyLabel: property.clientLabel,
           imageIndex: index + 1,
         })),
       ),
@@ -1341,7 +1410,7 @@ const LeadDetailsRebuiltContent = ({
       if (!selectedProposalProperties.length) return "";
       const lines = [];
       selectedProposalProperties.forEach((property, propertyIndex) => {
-        lines.push(`${propertyIndex + 1}. ${property.label}`);
+        lines.push(`${propertyIndex + 1}. ${property.clientLabel}`);
         if (!property.imageUrls.length) {
           lines.push("   - No images");
           lines.push("");
@@ -1375,13 +1444,13 @@ const LeadDetailsRebuiltContent = ({
     selectedProposalProperties.forEach((property, index) => {
       const inventory = property.inventory || {};
       lines.push("");
-      lines.push(`Property ${index + 1}: ${property.label}`);
+      lines.push(`Property ${index + 1}: ${property.clientLabel}`);
       lines.push(`Project: ${String(inventory?.projectName || selectedLead?.projectInterested || "-").trim() || "-"}`);
       lines.push(`Location: ${getInventoryLocationLabel(inventory) || String(selectedLead?.city || "-").trim() || "-"}`);
       lines.push(`Property Type: ${String(inventory?.type || "Sale").trim() || "-"}`);
       lines.push(`Inventory Category: ${toTitleCaseLabel(inventory?.inventoryType) || "-"}`);
       lines.push(`Category: ${String(inventory?.category || "Apartment").trim() || "-"}`);
-      lines.push(`Price: ${formatCurrencyInr(inventory?.price)}`);
+      lines.push(`${getInventoryAmountLabel(inventory)}: ${formatInventoryAmountInr(inventory)}`);
       if (shareLinks[property.id]) {
         lines.push(`Details Link: ${shareLinks[property.id]}`);
       }
@@ -1404,10 +1473,8 @@ const LeadDetailsRebuiltContent = ({
   }, [
     proposalSpecialNote,
     proposalValidityDays,
-    selectedLead?.assignedTo?.name,
     selectedLead?.city,
     selectedLead?.name,
-    selectedLead?.phone,
     selectedLead?.projectInterested,
     selectedPropertyCount,
     selectedProposalProperties,
@@ -1593,7 +1660,7 @@ const LeadDetailsRebuiltContent = ({
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
       doc.setTextColor(15, 118, 110); // Teal accent
-      doc.text(`PROPERTY ${i + 1}: ${property.label.toUpperCase()}`, 36, cursorY);
+      doc.text(`PROPERTY ${i + 1}: ${property.clientLabel.toUpperCase()}`, 36, cursorY);
 
       // Property card boundary box
       const cardStart = cursorY + 10;
@@ -1634,10 +1701,10 @@ const LeadDetailsRebuiltContent = ({
 
       doc.setFont("helvetica", "bold");
       doc.setTextColor(100, 116, 139);
-      doc.text("Asking Price:", 300, cardStart + 42);
+      doc.text(getInventoryListingType(inventory) === "RENT" ? "Rent:" : "Asking Price:", 300, cardStart + 42);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(16, 185, 129); // Emerald price tag
-      doc.text(formatCurrencyPdf(inventory?.price), 370, cardStart + 42);
+      doc.text(formatInventoryAmountInr(inventory, formatCurrencyPdf).replace("·", "|"), 370, cardStart + 42);
 
       // Clickable detail link inside PDF
       const shareUrl = shareLinks[property.id];
@@ -2126,6 +2193,14 @@ const LeadDetailsRebuiltContent = ({
               {savingUpdates ? <Loader size={12} className="animate-spin" /> : <Save size={12} />}
               {savingUpdates ? "Saving..." : "Save"}
             </button> : null}
+            {canDeleteLead && onDeleteLead ? <button
+              type="button"
+              onClick={onDeleteLead}
+              className={`inline-flex h-9 items-center gap-1 rounded-xl border px-3 text-[11px] font-semibold uppercase tracking-[0.1em] sm:px-3.5 sm:text-xs sm:tracking-[0.12em] ${isDark ? "border-rose-500/40 text-rose-300 hover:bg-rose-500/10" : "border-rose-200 text-rose-700 hover:bg-rose-50"}`}
+            >
+              <Trash2 size={12} />
+              Delete
+            </button> : null}
           </div>
         </div>
 
@@ -2146,6 +2221,12 @@ const LeadDetailsRebuiltContent = ({
             <p className={`text-[9px] uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-[0.12em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Primary Property</p>
             <p className={`mt-0.5 truncate text-[11px] font-semibold sm:mt-1 sm:text-xs ${isDark ? "text-slate-100" : "text-slate-800"}`}>
               {activePropertyLabel}
+            </p>
+          </div>
+          <div className={`rounded-2xl border px-2.5 py-2 sm:px-3 sm:py-2.5 ${card}`}>
+            <p className={`text-[9px] uppercase tracking-[0.1em] sm:text-[10px] sm:tracking-[0.12em] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Lead Source</p>
+            <p className={`mt-0.5 truncate text-[11px] font-semibold sm:mt-1 sm:text-xs ${isDark ? "text-slate-100" : "text-slate-800"}`}>
+              {leadSourceLabel}
             </p>
           </div>
         </div>
@@ -2243,6 +2324,19 @@ const LeadDetailsRebuiltContent = ({
               </div>
             ) : null}
             <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="space-y-1 sm:col-span-2">
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Work Profile
+                </span>
+                <input
+                  type="text"
+                  value={clientProfessionDraft}
+                  onChange={(event) => setClientProfessionDraft(event.target.value)}
+                  placeholder="e.g. Marketing, Lawyer, DSA"
+                  maxLength={120}
+                  className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                />
+              </label>
               <label className="space-y-1">
                 <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                   Inventory Type
@@ -2255,9 +2349,10 @@ const LeadDetailsRebuiltContent = ({
                   <option value="">Any</option>
                   <option value="COMMERCIAL">Commercial</option>
                   <option value="RESIDENTIAL">Residential</option>
+                  <option value="COWORKING">Coworking</option>
                 </select>
               </label>
-              {normalizedRequirementInventoryType ? (
+              {normalizedRequirementInventoryType && !isCoworkingRequirement ? (
                 <label className="space-y-1">
                   <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
                     {normalizedRequirementInventoryType === "COMMERCIAL" ? "Commercial Property Type" : "Residential Property Type"}
@@ -2279,13 +2374,13 @@ const LeadDetailsRebuiltContent = ({
                   Deal Type
                 </span>
                 <select
-                  value={requirementsDraft?.transactionType || ""}
+                  value={transactionTypeValue}
                   onChange={(event) => updateTransactionType(event.target.value)}
                   className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
                 >
                   <option value="">Any</option>
-                  <option value="SALE">Purchase</option>
-                  {isFlatRequirement ? <option value="RENT">Rent</option> : null}
+                  {canPurchaseRequirement ? <option value="SALE">Purchase</option> : null}
+                  {canRentRequirement ? <option value="RENT">Rent</option> : null}
                   <option value="LEASE">Lease</option>
                 </select>
               </label>
@@ -2318,18 +2413,6 @@ const LeadDetailsRebuiltContent = ({
                       value={projectInterestedDraft}
                       onChange={(event) => setProjectInterestedDraft(event.target.value)}
                       placeholder="Project Interested"
-                      className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
-                    />
-                  </label>
-                  <label className="space-y-1">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                      Client's Profession
-                    </span>
-                    <input
-                      type="text"
-                      value={clientProfessionDraft}
-                      onChange={(event) => setClientProfessionDraft(event.target.value)}
-                      placeholder="Client's Profession"
                       className={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
                     />
                   </label>
@@ -2381,7 +2464,7 @@ const LeadDetailsRebuiltContent = ({
                   ) : null}
                   <label className="space-y-1">
                     <span className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
-                      Location
+                      Plot Location
                     </span>
                     <select
                       value={plotLocationValue}
@@ -2483,6 +2566,22 @@ const LeadDetailsRebuiltContent = ({
               )}
             </div>
 
+            {isCoworkingRequirement ? (
+              <div className={`mt-3 rounded-xl border p-2.5 ${softCard}`}>
+                <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
+                  Coworking Requirement
+                </div>
+                <div className="mt-2">
+                  <CoworkingRequirementFields
+                    value={requirementsDraft?.coworking || {}}
+                    onChange={(next) => updateRequirementRootField("coworking", next)}
+                    inputClass={`h-9 w-full rounded-lg border px-2.5 text-sm ${input}`}
+                    labelClass={`mb-1 block text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}
+                  />
+                </div>
+              </div>
+            ) : null}
+
             {propertySubtypeConfig ? (
               <div className={`mt-3 rounded-xl border p-2.5 ${softCard}`}>
                 <div className={`text-[10px] font-bold uppercase tracking-wider ${isDark ? "text-slate-400" : "text-slate-500"}`}>
@@ -2517,7 +2616,8 @@ const LeadDetailsRebuiltContent = ({
                   const inventoryLocation = inventoryRow.location;
                   const inventoryQuickInfo = inventoryRow.quickInfo;
                   const inventoryStatusLabel = inventoryRow.statusLabel;
-                  const inventoryPriceLabel = formatCurrencyInr(inventoryRow?.inventory?.price);
+                  const inventoryPriceLabel = formatInventoryAmountInr(inventoryRow?.inventory);
+                  const inventoryAmountLabel = getInventoryAmountLabel(inventoryRow?.inventory);
                   const isActiveProperty = normalizedActiveInventoryId === inventoryId;
                   const isSelectingThisProperty = propertyActionType === "select" && String(propertyActionInventoryId || "") === String(inventoryId || "");
                   const isRemovingThisProperty = propertyActionType === "remove" && String(propertyActionInventoryId || "") === String(inventoryId || "");
@@ -2545,7 +2645,7 @@ const LeadDetailsRebuiltContent = ({
                               {inventoryQuickInfo}
                             </div>
                           ) : null}
-                          <div className={`mt-0.5 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>Price: {inventoryPriceLabel}</div>
+                          <div className={`mt-0.5 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>{inventoryAmountLabel}: {inventoryPriceLabel}</div>
                         </div>
                         {canManageLeadProperties && inventoryId ? (
                           <div className="flex items-center gap-1">
@@ -2627,11 +2727,9 @@ const LeadDetailsRebuiltContent = ({
                         || inventoryId;
                       const inventoryLocation = getInventoryLocationLabel(inventory);
                       const inventoryQuickInfo = getInventoryQuickInfo(inventory);
-                      const inventoryPriceLabel = formatCurrencyInr(inventory?.price);
-                      const inventoryTypeLabel =
-                        String(inventory?.type || "").trim().toUpperCase() === "RENT"
-                          ? "Rental"
-                          : "For Sale";
+                      const inventoryPriceLabel = formatInventoryAmountInr(inventory);
+                      const inventoryAmountLabel = getInventoryAmountLabel(inventory);
+                      const inventoryTypeLabel = getInventoryListingLabel(inventory);
 
                       return (
                         <option key={inventoryId} value={inventoryId}>
@@ -2640,7 +2738,7 @@ const LeadDetailsRebuiltContent = ({
                             inventoryLocation ? `(${inventoryLocation})` : "",
                             inventoryQuickInfo,
                             `Type: ${inventoryTypeLabel}`,
-                            `Price: ${inventoryPriceLabel}`,
+                            `${inventoryAmountLabel}: ${inventoryPriceLabel}`,
                           ]
                             .filter(Boolean)
                             .join(" ")}

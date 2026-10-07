@@ -2,42 +2,73 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Bell, CalendarDays, LogOut, Menu, MessageCircle, Moon, Search, Sun, User } from "lucide-react";
 import { PROFILE_ITEM, getAllVisibleMenuGroups, roleCanSeeItem } from "./workbenchNavigation";
-import { useIsMobileViewport } from "../../hooks/useIsMobileViewport";
+import AvatarFace from "../ui/AvatarFace";
+import { getMyProfile } from "../../services/userService";
 import "./AppTopCommandBar.css";
 
 const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogout, actions, user, userRole, unreadAlerts = 0, unreadChats = 0 }) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const isMobileViewport = useIsMobileViewport();
   const searchRef = useRef(null);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const isInventory = location.pathname === "/inventory";
   const role = userRole || user?.role;
+  const isFieldHome = role === "FIELD_EXECUTIVE" && ["/", "/dashboard"].includes(location.pathname);
   const menuItems = getAllVisibleMenuGroups(role, user).flatMap((group) => group.items);
   const items = [...new Map(menuItems.map((item) => [item.path, item])).values()];
   const canNotify = items.some((item) => item.path === "/admin/notifications");
   const canChat = items.some((item) => item.path === "/chat");
   const canProfile = roleCanSeeItem(PROFILE_ITEM, role, user);
   const currentItem = items.filter((item) => location.pathname === item.path || location.pathname.startsWith(item.path + "/")).sort((a, b) => b.path.length - a.path.length)[0];
-  const title = currentItem?.label || String(pageHeader?.title || "Workspace").replace(/\s+Command\s+Center$/i, "").replace(/\s+Dashboard$/i, "") || "Home";
+  const firstName = String(user?.name || user?.fullName || "there").trim().split(/\s+/)[0];
+  const title = isFieldHome
+    ? `Welcome back, ${firstName} 👋`
+    : currentItem?.label || String(pageHeader?.title || "Workspace").replace(/\s+Command\s+Center$/i, "").replace(/\s+Dashboard$/i, "") || "Home";
   const initials = String(user?.name || user?.fullName || "User").trim().split(/\s+/).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+  // The photo can change on the Profile page while this header stays mounted.
+  const [changedPhoto, setChangedPhoto] = useState(null);
+  const profilePhoto = changedPhoto ?? String(user?.profileImageUrl || "");
+  useEffect(() => {
+    const onPhotoChange = (event) => setChangedPhoto(String(event.detail?.profileImageUrl || ""));
+    window.addEventListener("crm:profile-image-changed", onPhotoChange);
+    return () => window.removeEventListener("crm:profile-image-changed", onPhotoChange);
+  }, []);
+  // The login copy of the user can be older than the photo (or predate the
+  // photo field), so read the current photo from the server once per session.
+  const userKey = String(user?._id || user?.id || user?.email || "");
+  useEffect(() => {
+    if (!userKey) return undefined;
+    let alive = true;
+    getMyProfile()
+      .then(({ profile }) => {
+        if (!alive || !profile) return;
+        const latest = String(profile.profileImageUrl || "");
+        setChangedPhoto(latest);
+        try {
+          const stored = JSON.parse(localStorage.getItem("user") || "null");
+          if (stored && stored.profileImageUrl !== latest) {
+            localStorage.setItem("user", JSON.stringify({ ...stored, profileImageUrl: latest }));
+          }
+        } catch {
+          // A bad cached user is not worth failing the header over.
+        }
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [userKey]);
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric" }).format(new Date());
   const results = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
 
   /*
-   * On a phone the floating messenger is not rendered at all - a draggable
-   * panel over a 360px screen covers the very thing it is meant to sit beside -
-   * so the icon opens the full chat page. On a desktop it still opens the
-   * messenger over whatever you were doing, which is the point of it.
+   * Two ways into chat, deliberately doing different things.
+   *
+   * This icon opens the full page, where the conversation list and the thread
+   * sit side by side - the view for actually working through messages. The
+   * floating button at the bottom right opens the panel over the current page,
+   * for answering something without leaving what you were doing.
    */
-  const openChat = () => {
-    if (isMobileViewport) {
-      navigate("/chat");
-      return;
-    }
-    window.dispatchEvent(new Event("crm:open-messenger"));
-  };
+  const openChat = () => navigate("/chat");
 
   useEffect(() => {
     const key = (event) => {
@@ -59,7 +90,7 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
   return (
     <header className="app-context-header">
       <button type="button" className="app-header-menu app-header-icon" aria-label="Open navigation" onClick={onMenuOpen}><Menu size={20} /></button>
-      <div className="app-header-heading"><h1>{title}</h1><p>{pageHeader?.subtitle || "Manage your workspace and daily activities."}</p></div>
+      <div className="app-header-heading"><h1>{title}</h1><p>{isFieldHome ? "Here's what's happening with your pipeline today." : pageHeader?.subtitle || "Manage your workspace and daily activities."}</p></div>
       <div className="app-header-search" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSearchOpen(false); }}>
         <Search size={18} />
         <input ref={searchRef} aria-label={isInventory ? "Search inventory" : "Search pages"} placeholder={isInventory ? "Search properties, projects, locations..." : "Search pages..."} value={query} onChange={(event) => search(event.target.value)} onFocus={() => setSearchOpen(true)} />
@@ -73,7 +104,7 @@ const AppTopCommandBar = ({ pageHeader, theme, onToggleTheme, onMenuOpen, onLogo
         {canNotify && <button type="button" className="app-header-icon" aria-label="Open notifications" title="Notifications" onClick={() => navigate("/admin/notifications")}><Bell size={21} />{unreadAlerts > 0 && <span className="app-header-unread">{unreadAlerts > 99 ? "99+" : unreadAlerts}</span>}</button>}
         {canChat && <button type="button" className="app-header-icon" aria-label="Open team chat" title="Chat" onClick={openChat}><MessageCircle size={21} />{unreadChats > 0 && <span className="app-header-unread">{unreadChats > 99 ? "99+" : unreadChats}</span>}</button>}
         <div className="app-header-date"><CalendarDays size={17} />{today}</div>
-        {canProfile && <button type="button" className="app-header-avatar" aria-label="Open profile" title={user?.name || "Profile"} onClick={() => navigate("/profile")}>{initials || <User size={18} />}</button>}
+        {canProfile && <button type="button" className="app-header-avatar" aria-label="Open profile" title={user?.name || "Profile"} onClick={() => navigate("/profile")}><AvatarFace src={profilePhoto} initials={initials} fallback={<User size={18} />} /></button>}
         <button type="button" className="app-header-icon" aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={onToggleTheme}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button>
         <button type="button" className="app-header-logout" onClick={onLogout} aria-label="Logout" title="Logout"><LogOut size={18} /><span>Logout</span></button>
       </div>

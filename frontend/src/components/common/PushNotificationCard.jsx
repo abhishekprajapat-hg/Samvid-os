@@ -92,7 +92,7 @@ const PushNotificationCard = () => {
   const active = permission === "granted" && subscribed;
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
+    <section className="profile-notification-card rounded-xl border border-slate-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <div className="flex flex-wrap items-center gap-3 border-b border-slate-100 px-5 py-3.5">
         <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-600">
           <Bell size={17} aria-hidden="true" />

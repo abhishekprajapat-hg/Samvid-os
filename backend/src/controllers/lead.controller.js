@@ -5,6 +5,9 @@ const LeadActivity = require("../models/leadActivity.model");
 const LeadDiary = require("../models/leadDiary.model");
 const LeadStatusRequest = require("../models/LeadStatusRequest");
 const logger = require("../config/logger");
+const { sendMongooseError } = require("../utils/mongooseError");
+const { createHttpError } = require("../utils/httpError");
+const { hasUnpaidPartialCollection, shouldClearTerminalFollowUp } = require("../utils/leadFollowUp");
 const { resolveAccessProfile } = require("../services/access.service");
 const CrmContact = require("../models/CrmContact");
 const { findBrokerByPhone, recordBlockedLead, normalizePhone } = require("../services/crmContact.service");
@@ -56,6 +59,7 @@ const LEAD_INVENTORY_SELECT_FIELDS = [
   "superBuiltUpArea",
   "areaUnit",
   "price",
+  "rent",
   "deposit",
   "type",
   "category",
@@ -73,19 +77,19 @@ const LEAD_INVENTORY_SELECT_FIELDS = [
 ].join(" ");
 
 const LEAD_POPULATE_FIELDS = [
-  { path: "assignedTo", select: "name role" },
-  { path: "assignedManager", select: "name role" },
-  { path: "assignedExecutive", select: "name role" },
-  { path: "assignedFieldExecutive", select: "name role" },
-  { path: "assignmentHistory.fromUser", select: "name role" },
-  { path: "assignmentHistory.toUser", select: "name role" },
-  { path: "assignmentHistory.createdBy", select: "name role" },
-  { path: "qualifiedBy", select: "name role" },
-  { path: "createdBy", select: "name role partnerCode brokerageConfig" },
-  { path: "dealPayment.approvalRequestedBy", select: "name role" },
-  { path: "dealPayment.approvalReviewedBy", select: "name role" },
-  { path: "brokerageClosedBy", select: "name role" },
-  { path: "closureDocuments.uploadedBy", select: "name role" },
+  { path: "assignedTo", select: "name role profileImageUrl" },
+  { path: "assignedManager", select: "name role profileImageUrl" },
+  { path: "assignedExecutive", select: "name role profileImageUrl" },
+  { path: "assignedFieldExecutive", select: "name role profileImageUrl" },
+  { path: "assignmentHistory.fromUser", select: "name role profileImageUrl" },
+  { path: "assignmentHistory.toUser", select: "name role profileImageUrl" },
+  { path: "assignmentHistory.createdBy", select: "name role profileImageUrl" },
+  { path: "qualifiedBy", select: "name role profileImageUrl" },
+  { path: "createdBy", select: "name role partnerCode brokerageConfig profileImageUrl" },
+  { path: "dealPayment.approvalRequestedBy", select: "name role profileImageUrl" },
+  { path: "dealPayment.approvalReviewedBy", select: "name role profileImageUrl" },
+  { path: "brokerageClosedBy", select: "name role profileImageUrl" },
+  { path: "closureDocuments.uploadedBy", select: "name role profileImageUrl" },
   {
     path: "inventoryId",
     select: LEAD_INVENTORY_SELECT_FIELDS,
@@ -97,15 +101,15 @@ const LEAD_POPULATE_FIELDS = [
 ];
 
 const LEAD_PAYMENT_REQUEST_POPULATE_FIELDS = [
-  { path: "assignedTo", select: "name role phone email" },
-  { path: "assignedManager", select: "name role phone email" },
-  { path: "assignedExecutive", select: "name role phone email" },
-  { path: "assignedFieldExecutive", select: "name role phone email" },
-  { path: "createdBy", select: "name role phone email partnerCode brokerageConfig" },
-  { path: "dealPayment.approvalRequestedBy", select: "name role phone email" },
-  { path: "dealPayment.approvalReviewedBy", select: "name role phone email" },
-  { path: "brokerageClosedBy", select: "name role phone email" },
-  { path: "closureDocuments.uploadedBy", select: "name role phone email" },
+  { path: "assignedTo", select: "name role phone email profileImageUrl" },
+  { path: "assignedManager", select: "name role phone email profileImageUrl" },
+  { path: "assignedExecutive", select: "name role phone email profileImageUrl" },
+  { path: "assignedFieldExecutive", select: "name role phone email profileImageUrl" },
+  { path: "createdBy", select: "name role phone email partnerCode brokerageConfig profileImageUrl" },
+  { path: "dealPayment.approvalRequestedBy", select: "name role phone email profileImageUrl" },
+  { path: "dealPayment.approvalReviewedBy", select: "name role phone email profileImageUrl" },
+  { path: "brokerageClosedBy", select: "name role phone email profileImageUrl" },
+  { path: "closureDocuments.uploadedBy", select: "name role phone email profileImageUrl" },
   {
     path: "inventoryId",
     select: LEAD_INVENTORY_SELECT_FIELDS,
@@ -143,7 +147,11 @@ const LEAD_SELECTABLE_FIELDS = [
   "assignedExecutive",
   "assignedFieldExecutive",
   "assignmentHistory",
+  "company",
+  "sourceChannel",
   "hotClient",
+  "temperature",
+  "followUpPurpose",
   "brokerContactId",
   "qualifiedBy",
   "qualifiedAt",
@@ -175,7 +183,7 @@ const FIELD_EXECUTIVE_ROLE = USER_ROLES.FIELD_EXECUTIVE;
 const SITE_VISIT_STATUS = "SITE_VISIT";
 const SITE_VISIT_REQUIRED_STATUS = "SITE_VISIT_REQUIRED";
 const QUALIFIED_LEAD_STATUS = "QUALIFIED_LEAD";
-const ROLE_TYPE_VALUES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "BOTH"]);
+const ROLE_TYPE_VALUES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"]);
 const REQUESTED_STATUS = "REQUESTED";
 const CLOSED_STATUS = "CLOSED";
 const LEAD_STATUS_VALUES = Object.freeze([
@@ -229,7 +237,14 @@ const MAX_BROKERAGE_TEXT_LENGTH = 180;
 const BROKERAGE_AMOUNT_TOLERANCE = 0.01;
 const MAX_LEAD_STATUS_REQUEST_NOTE_LENGTH = 500;
 const MAX_BULK_LEAD_UPLOAD_ROWS = 5000;
-const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTIAL"]);
+// Kept in step with the sourceChannel enum on the Lead model.
+const LEAD_SOURCE_CHANNELS = Object.freeze([
+  "META", "JUSTDIAL", "OLX", "MYBRICKS", "99ACRES", "WEBSITE",
+  "REFERENCE", "BROKER", "DIRECT_CALL", "DIRECT_VISIT",
+]);
+// Kept in step with the temperature enum on the Lead model.
+const LEAD_TEMPERATURES = Object.freeze(["COLD", "WARM", "HOT"]);
+const LEAD_REQUIREMENT_INVENTORY_TYPES = Object.freeze(["COMMERCIAL", "RESIDENTIAL", "COWORKING"]);
 const LEAD_REQUIREMENT_TRANSACTION_TYPES = Object.freeze(["SALE", "LEASE", "RENT"]);
 const LEAD_REQUIREMENT_AREA_UNITS = Object.freeze(["SQ_FT", "SQ_M"]);
 const CRM_ASSIGNABLE_ROLES = Object.freeze([
@@ -356,6 +371,16 @@ const getUserRoleType = (user) => normalizeRoleType(user?.roleType);
 const buildLeadTypeClause = (roleType) => {
   if (roleType === "RESIDENTIAL") {
     return { "requirements.inventoryType": "RESIDENTIAL" };
+  }
+
+  /*
+   * Coworking staff have no real-estate pipeline; they work the coworking
+   * module. Matched on their own category rather than allowed to fall through,
+   * because the fallback below treats everything that is not RESIDENTIAL as
+   * commercial - which would have handed them the entire commercial pipeline.
+   */
+  if (roleType === "COWORKING") {
+    return { "requirements.inventoryType": "COWORKING" };
   }
 
   return {
@@ -485,6 +510,26 @@ const normalizeLeadRequirementNumber = (value, fallback = null, { round = false 
   const parsed = toFiniteNumber(value);
   if (parsed === null || parsed < 0) return fallback;
   return round ? Math.round(parsed) : parsed;
+};
+
+/*
+ * `temperature` and `hotClient` describe the same thing at different
+ * resolutions, so every write goes through here: whichever the caller sent,
+ * both come out agreeing. A client that only knows the old flag keeps working,
+ * and one that sets WARM does not leave a stale flame behind.
+ */
+const applyLeadTemperature = (lead, body) => {
+  const raw = String(body?.temperature || "").trim().toUpperCase();
+  if (LEAD_TEMPERATURES.includes(raw)) {
+    lead.temperature = raw;
+    lead.hotClient = raw === "HOT";
+    return;
+  }
+  if (body?.hotClient !== undefined) {
+    lead.hotClient = Boolean(body.hotClient);
+    if (body.hotClient) lead.temperature = "HOT";
+    else if (String(lead.temperature || "") === "HOT") lead.temperature = "WARM";
+  }
 };
 
 const createLeadRequirementValidationError = (message) => {
@@ -641,6 +686,45 @@ const buildLeadRequirementsFromInventory = (inventory) => {
   };
 };
 
+/*
+ * A coworking enquiry's own numbers.
+ *
+ * Cabins arrive as a list of seat counts, one per cabin, because a client can
+ * take several of different sizes. The list is capped and each entry bounded,
+ * so a malformed payload cannot store an enquiry for nine thousand cabins.
+ */
+const MAX_COWORKING_CABINS = 50;
+const normalizeCoworkingRequirements = (raw = {}) => {
+  const cabins = (Array.isArray(raw?.cabins) ? raw.cabins : [])
+    .slice(0, MAX_COWORKING_CABINS)
+    .map((row) => Math.round(Number(row?.seats ?? row)))
+    .filter((seats) => Number.isFinite(seats) && seats >= 1 && seats <= 100)
+    .map((seats) => ({ seats }));
+
+  /*
+   * An empty box is not a zero. The form sends null for a field nobody filled
+   * in, and Number(null) and Number("") are both 0 - so a blank deposit was
+   * saved as a nought-month deposit and a blank rent as an agreed 0. Those
+   * read as terms that were negotiated, which is a different claim from
+   * "not answered yet", so they are held apart here.
+   */
+  const positive = (value, max) => {
+    if (value === null || value === undefined) return null;
+    if (typeof value === "string" && value.trim() === "") return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 && parsed <= max ? parsed : null;
+  };
+
+  return {
+    cabins,
+    workstations: positive(raw?.workstations, 100000),
+    depositMonths: positive(raw?.depositMonths, 60),
+    agreedRent: positive(raw?.agreedRent, 1e9),
+    noticePeriodMonths: positive(raw?.noticePeriodMonths, 60),
+    lockInMonths: positive(raw?.lockInMonths, 120),
+  };
+};
+
 const normalizeLeadRequirements = ({ rawRequirements, inventory }) => {
   const base = buildLeadRequirementsFromInventory(inventory);
 
@@ -717,6 +801,7 @@ const normalizeLeadRequirements = ({ rawRequirements, inventory }) => {
       )
       || base.areaUnit
       || "SQ_FT",
+    coworking: normalizeCoworkingRequirements(rawRequirements?.coworking),
     commercial: {
       seats: normalizeLeadRequirementNumber(
         commercialInput?.seats,
@@ -926,10 +1011,44 @@ const addLeadAndClause = (query, clause) => {
   query.$and = [...(Array.isArray(query.$and) ? query.$and : []), clause];
 };
 
+/*
+ * sortBy was accepted and then ignored - ascending, descending and the default
+ * all came back in the same order. Only these columns can be sorted on; a "-"
+ * prefix reverses, and anything else is refused rather than silently dropped.
+ */
+const SORTABLE_LEAD_FIELDS = new Set([
+  "createdAt", "updatedAt", "name", "phone", "city", "status", "nextFollowUp", "budget",
+]);
+
+const parseLeadSort = (rawSortBy) => {
+  const raw = typeof rawSortBy === "string" ? rawSortBy.trim() : "";
+  if (!raw) return null;
+
+  const descending = raw.startsWith("-");
+  const field = descending ? raw.slice(1) : raw;
+  if (!SORTABLE_LEAD_FIELDS.has(field)) {
+    throw createHttpError(400, `Cannot sort by "${field}". Sortable fields: ${[...SORTABLE_LEAD_FIELDS].join(", ")}`);
+  }
+  // _id breaks ties so paging stays stable across requests.
+  return { [field]: descending ? -1 : 1, _id: -1 };
+};
+
 const applyLeadListFilters = (query, rawQuery = {}) => {
   require("../utils/leadAdvancedFilters").applyLeadAdvancedFilters(query, rawQuery);
   if (rawQuery.status === "TRANSFER") addLeadAndClause(query, { "assignmentHistory.action": "MANUAL_TRANSFER" });
+
+  /*
+   * An unrecognised filter used to be dropped in silence, so ?status=TYPO
+   * answered 200 with the whole unfiltered list - a saved view with a typo
+   * quietly returned more than it should. Say so instead.
+   */
+  const rawStatus = typeof rawQuery.status === "string" ? rawQuery.status.trim() : "";
   const status = normalizeLeadStatusValue(rawQuery.status);
+  if (rawStatus
+    && !["ALL", "TRANSFER"].includes(rawStatus.toUpperCase())
+    && !LEAD_STATUS_VALUES.includes(status)) {
+    throw createHttpError(400, `Invalid status filter. Expected one of: ${LEAD_STATUS_VALUES.join(", ")}`);
+  }
   if (status && LEAD_STATUS_VALUES.includes(status)) {
     query.status = status;
   }
@@ -948,14 +1067,15 @@ const applyLeadListFilters = (query, rawQuery = {}) => {
     }
   }
 
-  const dateFrom = normalizeDateBoundary(
-    rawQuery.dateFrom || rawQuery.startDate,
-    "start",
-  );
-  const dateTo = normalizeDateBoundary(
-    rawQuery.dateTo || rawQuery.endDate,
-    "end",
-  );
+  const rawDateFrom = rawQuery.dateFrom || rawQuery.startDate;
+  const rawDateTo = rawQuery.dateTo || rawQuery.endDate;
+  const dateFrom = normalizeDateBoundary(rawDateFrom, "start");
+  const dateTo = normalizeDateBoundary(rawDateTo, "end");
+  if (rawDateFrom && !dateFrom) throw createHttpError(400, "Invalid start date filter");
+  if (rawDateTo && !dateTo) throw createHttpError(400, "Invalid end date filter");
+  if (dateFrom && dateTo && dateFrom > dateTo) {
+    throw createHttpError(400, "Start date cannot be after end date");
+  }
   if (dateFrom || dateTo) {
     query.createdAt = {
       ...(dateFrom ? { $gte: dateFrom } : {}),
@@ -1241,6 +1361,7 @@ const emitAdminPaymentRequestCreated = ({
         _id: requestedBy._id || null,
         name: requestedBy.name || "",
         role: requestedBy.role || "",
+        profileImageUrl: requestedBy.profileImageUrl || "",
       }
       : null,
   };
@@ -1439,6 +1560,7 @@ const emitAdminLeadDealClosed = ({
         _id: closedBy._id || null,
         name: closedBy.name || "",
         role: closedBy.role || "",
+        profileImageUrl: closedBy.profileImageUrl || "",
       }
       : null,
   };
@@ -1498,6 +1620,7 @@ const emitAdminRemainingPaymentCollected = ({
         _id: collectedBy._id || null,
         name: collectedBy.name || "",
         role: collectedBy.role || "",
+        profileImageUrl: collectedBy.profileImageUrl || "",
       }
       : null,
   };
@@ -1868,17 +1991,16 @@ const applyLeadQueryOptions = ({
   queryBuilder,
   selectedFields,
   pagination,
+  sort,
 }) => {
   if (selectedFields) {
     queryBuilder.select(selectedFields);
   }
 
   queryBuilder.populate(LEAD_POPULATE_FIELDS);
-  queryBuilder.sort({ createdAt: -1 });
+  queryBuilder.sort(sort || { createdAt: -1 });
 
-  if (pagination.enabled) {
-    queryBuilder.skip(pagination.skip).limit(pagination.limit);
-  }
+  queryBuilder.skip(pagination.skip).limit(pagination.limit);
 
   return queryBuilder.lean();
 };
@@ -1976,6 +2098,73 @@ const buildCreatorLeadAssignment = async (user) => {
   return assignment;
 };
 
+/*
+ * Lead intake validation.
+ *
+ * "   " is truthy, so a whitespace-only name and phone passed the old
+ * `if (!name)` guard and Mongoose's trim then stored an empty string - the
+ * audit found real rows with name "   " and phone "   ". Everything is trimmed
+ * first and checked on the trimmed value.
+ */
+const MAX_LEAD_NAME_LENGTH = 120;
+const MAX_LEAD_TEXT_LENGTH = 500;
+const LEAD_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+const MIN_LEAD_PHONE_DIGITS = 10;
+const LEAD_PHONE_ERROR = "Enter a valid phone number: a 10-digit mobile, or country code + number";
+
+/**
+ * The form a lead phone is stored in: 10 digits for Indian numbers (+91, 0091
+ * and 0 prefixes dropped, spaces removed) and "+<digits>" for other countries.
+ * Returns "" when the number is too short or too long.
+ */
+const toLeadStoragePhone = (value) => {
+  const key = normalizePhone(value);
+  if (!key || key.length < MIN_LEAD_PHONE_DIGITS) return "";
+  return key.length === 10 ? key : `+${key}`;
+};
+
+/** Matches a stored phone however it was typed: spaces, dashes, +91 / 0091 / 0 prefix. */
+const buildLeadPhoneRegex = (value) => {
+  const key = normalizePhone(value);
+  if (!key) return null;
+  const separator = "[\\s().-]*";
+  const body = key.split("").join(separator);
+  const prefix = key.length === 10
+    ? `(?:\\+?(?:00)?91${separator}|0${separator})?`
+    : `(?:\\+|00)?${separator}`;
+  return new RegExp(`^${separator}${prefix}${body}${separator}$`);
+};
+
+const validateLeadContact = ({ name, phone, email }) => {
+  if (typeof name !== "string" || typeof phone !== "string") {
+    return "Name and phone must be text";
+  }
+
+  const trimmedName = name.trim();
+  const trimmedPhone = phone.trim();
+
+  if (!trimmedName) return "Name is required";
+  if (trimmedName.length > MAX_LEAD_NAME_LENGTH) {
+    return `Name must be at most ${MAX_LEAD_NAME_LENGTH} characters`;
+  }
+
+  if (!trimmedPhone) return "Phone is required";
+  // Digits, allowing +, spaces, dashes, dots and brackets as typed.
+  if (!/^[0-9+().\-\s]+$/.test(trimmedPhone) || !toLeadStoragePhone(trimmedPhone)) {
+    return LEAD_PHONE_ERROR;
+  }
+
+  if (email !== undefined && email !== null && String(email).trim()) {
+    const trimmedEmail = String(email).trim();
+    if (trimmedEmail.length > MAX_LEAD_TEXT_LENGTH || !LEAD_EMAIL_PATTERN.test(trimmedEmail)) {
+      return "Email is not a valid address";
+    }
+  }
+
+  return null;
+};
+
 exports.createLead = async (req, res) => {
   try {
     const {
@@ -1986,6 +2175,10 @@ exports.createLead = async (req, res) => {
       preferredLocations,
       projectInterested,
       clientProfession,
+      company,
+      sourceChannel,
+      temperature: rawTemperature,
+      followUpPurpose: rawFollowUpPurpose,
       inventoryId: rawInventoryId,
       relatedInventoryIds: rawRelatedInventoryIds,
       siteLocation: rawSiteLocation,
@@ -1997,9 +2190,16 @@ exports.createLead = async (req, res) => {
       return res.status(403).json({ message: "Company context is required" });
     }
 
-    const existing = await Lead.findOne({ phone, companyId }).select("_id").lean();
+    const contactError = validateLeadContact({ name, phone, email });
+    if (contactError) {
+      return res.status(400).json({ message: contactError });
+    }
+
+    // "+91 98765 43210", "098765-43210" and "9876543210" are the same lead.
+    const storedPhone = toLeadStoragePhone(phone);
+    const existing = await Lead.findOne({ phone: buildLeadPhoneRegex(storedPhone), companyId }).select("_id").lean();
     if (existing) {
-      return res.status(400).json({ message: "Lead already exists" });
+      return res.status(400).json({ message: "A lead with this phone number already exists" });
     }
 
     // A number in the Broker Database is a broker, not an enquiry. Refuse it
@@ -2074,18 +2274,28 @@ exports.createLead = async (req, res) => {
 
     const createPayload = {
       name,
-      phone,
+      phone: storedPhone,
       email,
       city: resolvedCity,
       preferredLocations: normalizePreferredLocations(preferredLocations),
       projectInterested: resolvedProjectInterested,
       clientProfession: String(clientProfession || "").trim(),
+      company: String(company || "").trim().slice(0, 200),
       requirements: normalizeLeadRequirements({
         rawRequirements,
         inventory,
       }),
       companyId,
       source: "MANUAL",
+      // Where the enquiry came from, as distinct from how it reached the CRM.
+      sourceChannel: LEAD_SOURCE_CHANNELS.includes(String(sourceChannel || "").toUpperCase())
+        ? String(sourceChannel).toUpperCase()
+        : "",
+      temperature: LEAD_TEMPERATURES.includes(String(rawTemperature || "").toUpperCase())
+        ? String(rawTemperature).toUpperCase()
+        : "",
+      hotClient: String(rawTemperature || "").toUpperCase() === "HOT",
+      followUpPurpose: String(rawFollowUpPurpose || "").trim().slice(0, 200),
       createdBy: req.user._id,
       ...(await buildCreatorLeadAssignment(req.user)),
     };
@@ -2141,6 +2351,28 @@ exports.createLead = async (req, res) => {
   }
 };
 
+/**
+ * Amount a closed deal is recorded at. Rentals (a "For Rent" property, or a
+ * rent/lease lead on a "Sale & Rent" property) use the monthly rent; sales use
+ * the sale price. A rental used to demand a sale price, so it could not be closed.
+ */
+const resolveDealAmountForInventory = ({ lead, inventory }) => {
+  const listingType = String(inventory?.type || "").trim().toLowerCase();
+  const leadDealType = normalizeEnumValue(lead?.requirements?.transactionType);
+  const isRentalDeal = listingType === "rent"
+    || (listingType === "both" && ["RENT", "LEASE"].includes(leadDealType));
+  const amount = isRentalDeal ? toFiniteNumber(inventory?.rent) : toFiniteNumber(inventory?.price);
+  if (amount === null || amount <= 0) {
+    return {
+      isRentalDeal,
+      error: isRentalDeal
+        ? "Selected property has no rent. Add the monthly rent to the property before closing the deal"
+        : "Selected property has no sale price. Add the price to the property before closing the deal",
+    };
+  }
+  return { isRentalDeal, amount };
+};
+
 const syncSelectedInventoryAsSoldForLeadClosure = async ({
   lead,
   user,
@@ -2191,11 +2423,12 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
   const remainingAmount = toFiniteNumber(lead?.dealPayment?.remainingAmount);
   const paymentReference = String(lead?.dealPayment?.paymentReference || "").trim();
   const paymentNote = String(lead?.dealPayment?.note || "").trim();
-  const totalAmount = toFiniteNumber(inventory?.price);
+  const dealAmount = resolveDealAmountForInventory({ lead, inventory });
+  const totalAmount = dealAmount.amount ?? null;
 
   if (!paymentMode || !paymentType) {
     return {
-      error: "Payment mode and payment type are required to close and sell selected property",
+      error: "Select the payment mode and payment type to close the deal",
     };
   }
 
@@ -2213,7 +2446,7 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
 
   if (paymentMode !== "CASH" && !paymentReference) {
     return {
-      error: "Payment reference is required for non-cash sold payments",
+      error: "Enter the payment reference (UTR / transaction / cheque no.) for a non-cash payment",
     };
   }
 
@@ -2223,9 +2456,9 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
     };
   }
 
-  if (totalAmount === null || totalAmount <= 0) {
+  if (dealAmount.error) {
     return {
-      error: "Selected property price is invalid. Update inventory price before closing deal",
+      error: dealAmount.error,
     };
   }
 
@@ -2238,7 +2471,9 @@ const syncSelectedInventoryAsSoldForLeadClosure = async ({
     totalAmount,
     remainingAmount: paymentType === "PARTIAL" ? (remainingAmount || 0) : 0,
     paymentReference: paymentMode === "CASH" ? "" : paymentReference,
-    note: paymentNote,
+    note: dealAmount.isRentalDeal
+      ? ["Rental deal - amount is the monthly rent", paymentNote].filter(Boolean).join(". ")
+      : paymentNote,
     soldAt: inventory?.saleDetails?.soldAt || new Date(),
   };
 
@@ -2286,6 +2521,15 @@ const syncSelectedInventoryAsReservedForCloseRequest = async ({
   if (inventoryStatus === "blocked" && reservedLeadId && reservedLeadId !== leadId) {
     return {
       error: "Selected property is already reserved for another lead",
+    };
+  }
+
+  // Refuse the request now rather than at approval when the property has no
+  // price (sale) or rent (rental) to close the deal at.
+  const dealAmount = resolveDealAmountForInventory({ lead, inventory });
+  if (dealAmount.error) {
+    return {
+      error: dealAmount.error,
     };
   }
 
@@ -2400,13 +2644,22 @@ exports.bulkUploadLeads = async (req, res) => {
       });
     }
 
+    // Store every sheet phone in one canonical form so duplicates are caught
+    // whatever the formatting; invalid numbers are rejected row by row below.
+    rows.forEach((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row)) return;
+      const storedRowPhone = toLeadStoragePhone(row.phone);
+      if (storedRowPhone) row.phone = storedRowPhone;
+    });
+
     const payloadPhones = [
       ...new Set(
         rows
           .map((row) => String(row?.phone || "").trim())
-          .filter(Boolean),
+          .filter((value) => toLeadStoragePhone(value)),
       ),
     ];
+    const payloadPhoneMatchers = payloadPhones.map((value) => buildLeadPhoneRegex(value)).filter(Boolean);
 
     const payloadInventoryIds = [
       ...new Set(
@@ -2434,7 +2687,7 @@ exports.bulkUploadLeads = async (req, res) => {
       payloadPhones.length
         ? Lead.find({
           companyId,
-          phone: { $in: payloadPhones },
+          phone: { $in: payloadPhoneMatchers },
         })
           .select("phone")
           .lean()
@@ -2443,10 +2696,10 @@ exports.bulkUploadLeads = async (req, res) => {
         ? Lead.find({
           $and: [
             accessibleLeadQuery,
-            { phone: { $in: payloadPhones } },
+            { phone: { $in: payloadPhoneMatchers } },
           ],
         })
-          .select("phone")
+          .select("phone status")
           .lean()
         : [],
       payloadInventoryIds.length
@@ -2462,11 +2715,19 @@ exports.bulkUploadLeads = async (req, res) => {
         : [],
     ]);
 
+    const toPhoneSetKey = (value) => toLeadStoragePhone(value) || String(value || "").trim();
     const companyPhoneSet = new Set(
-      companyExistingRows.map((row) => String(row?.phone || "").trim()).filter(Boolean),
+      companyExistingRows.map((row) => toPhoneSetKey(row?.phone)).filter(Boolean),
     );
     const accessiblePhoneSet = new Set(
-      accessibleExistingRows.map((row) => String(row?.phone || "").trim()).filter(Boolean),
+      accessibleExistingRows.map((row) => toPhoneSetKey(row?.phone)).filter(Boolean),
+    );
+    // Older leads may be stored as "+91 98765 43210"; updates must target that exact value.
+    const storedPhoneByKey = new Map(
+      accessibleExistingRows.map((row) => [toPhoneSetKey(row?.phone), String(row?.phone || "").trim()]),
+    );
+    const existingStatusByKey = new Map(
+      accessibleExistingRows.map((row) => [toPhoneSetKey(row?.phone), normalizeLeadStatusValue(row?.status)]),
     );
     const seenPhones = new Set(companyPhoneSet);
     const uploadedPhoneSet = new Set();
@@ -2534,6 +2795,9 @@ exports.bulkUploadLeads = async (req, res) => {
         if (!phone) {
           throw new Error("phone is required");
         }
+        if (!toLeadStoragePhone(phone)) {
+          throw new Error(LEAD_PHONE_ERROR);
+        }
         if (uploadedPhoneSet.has(phone)) {
           throw new Error("Duplicate phone in uploaded sheet");
         }
@@ -2599,6 +2863,8 @@ exports.bulkUploadLeads = async (req, res) => {
           city: city || resolveInventoryLeadCity(inventory),
           projectInterested:
             projectInterested || buildInventoryLeadProjectLabel(inventory),
+          // Work Profile column of an imported sheet (free text).
+          clientProfession: String(row?.clientProfession || "").trim().slice(0, 120),
           requirements: normalizeLeadRequirements({
             rawRequirements: row?.requirements,
             inventory,
@@ -2643,14 +2909,40 @@ exports.bulkUploadLeads = async (req, res) => {
         seenPhones.add(phone);
         uploadedPhoneSet.add(phone);
         if (isExistingLead) {
-          const updatePayload = { ...writePayload };
-          delete updatePayload.phone;
-          delete updatePayload.companyId;
-          delete updatePayload.createdBy;
+          // Re-uploading a sheet must not wipe what the team already recorded:
+          // only the columns this row actually fills are written onto the
+          // existing lead, and a closed deal is never reopened from a sheet.
+          const existingStatus = existingStatusByKey.get(phone) || "";
+          const rowHasStatus = Boolean(String(row.status || "").trim())
+            && LEAD_STATUS_VALUES.includes(normalizedRowStatus);
+          if (rowHasStatus && existingStatus === CLOSED_STATUS && status !== CLOSED_STATUS) {
+            throw new Error("This lead has a closed deal, so its status cannot be changed from a bulk upload");
+          }
+          if (rowHasStatus && status === CLOSED_STATUS && existingStatus !== CLOSED_STATUS) {
+            throw new Error("Close a deal from the lead page so the property and payment are recorded");
+          }
+
+          const updatePayload = { name };
+          if (email) updatePayload.email = email;
+          if (writePayload.city) updatePayload.city = writePayload.city;
+          if (writePayload.projectInterested) {
+            updatePayload.projectInterested = writePayload.projectInterested;
+          }
+          if ((row?.requirements !== undefined || inventory) && writePayload.requirements) {
+            updatePayload.requirements = writePayload.requirements;
+          }
+          if (String(row.source || "").trim()) updatePayload.source = source;
+          if (rowHasStatus) updatePayload.status = status;
+          if (writePayload.nextFollowUp) updatePayload.nextFollowUp = writePayload.nextFollowUp;
+          if (writePayload.lastContactedAt) updatePayload.lastContactedAt = writePayload.lastContactedAt;
+          if (inventory) updatePayload.inventoryId = inventory._id;
+          if (parsedSiteLocation.provided) updatePayload.siteLocation = writePayload.siteLocation;
+
           pendingUpdates.push({
             row: rowNumber,
-            phone,
+            phone: storedPhoneByKey.get(phone) || phone,
             payload: updatePayload,
+            addToSet: inventory ? { relatedInventoryIds: inventory._id } : null,
           });
         } else {
           pendingCreates.push({
@@ -2715,6 +3007,7 @@ exports.bulkUploadLeads = async (req, res) => {
               },
               update: {
                 $set: item.payload,
+                ...(item.addToSet ? { $addToSet: item.addToSet } : {}),
               },
             },
           })),
@@ -2781,6 +3074,17 @@ exports.bulkUploadLeads = async (req, res) => {
       });
     }
 
+    try {
+      await require("../services/crmContact.service").syncContactsForLeads({
+        companyId,
+        leadIds: createdIds,
+        phones: updatedPhones,
+        actor: req.user?._id,
+      });
+    } catch (contactError) {
+      logger.error({ requestId: req.requestId || null, error: contactError.message, message: "Bulk lead owner/broker sync failed" });
+    }
+
     return res.status(201).json({
       message: "Bulk lead upload processed",
       createdCount: createdIds.length,
@@ -2824,16 +3128,8 @@ exports.getAllLeads = async (req, res) => {
       queryBuilder: Lead.find(query),
       selectedFields,
       pagination,
+      sort: parseLeadSort(req.query?.sortBy),
     });
-
-    if (!pagination.enabled) {
-      const [leadRows, roleCounts] = await Promise.all([
-        leadsQuery,
-        getLeadRoleCounts(query),
-      ]);
-      const leads = leadRows.map((lead) => toLeadView(lead));
-      return res.json({ leads, roleCounts });
-    }
 
     const [leadRows, totalCount, roleCounts] = await Promise.all([
       leadsQuery,
@@ -2860,6 +3156,232 @@ exports.getAllLeads = async (req, res) => {
     return res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Server error" });
   }
 };
+
+/*
+ * Dashboard summary. Dashboards used to count whatever GET /leads returned,
+ * which is one page (50 rows), so an employee with 380 leads saw 50. This
+ * counts over exactly the same scope and filters as the lead list, in the
+ * database, so a dashboard figure always matches the Leads page.
+ */
+const LEAD_TERMINAL_STATUSES = ["CLOSED", "LOST", "INVALID"];
+const LEAD_TRANSFER_ACTIONS = ["MANUAL_TRANSFER", "REASSIGNED"];
+const SUMMARY_MONTHS = 12;
+const DEFAULT_TZ_OFFSET_MINUTES = -330; // India (UTC+05:30), as Date#getTimezoneOffset reports it
+
+const parseTzOffsetMinutes = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || Math.abs(parsed) > 14 * 60) return DEFAULT_TZ_OFFSET_MINUTES;
+  return parsed;
+};
+
+const toMongoTimezone = (tzOffsetMinutes) => {
+  const east = -tzOffsetMinutes;
+  const sign = east >= 0 ? "+" : "-";
+  const abs = Math.abs(east);
+  return `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+};
+
+// Boundaries of "today" and of the last SUMMARY_MONTHS months in the viewer's timezone.
+const buildSummaryClock = (tzOffsetMinutes, now = new Date()) => {
+  const offsetMs = -tzOffsetMinutes * 60 * 1000;
+  const local = new Date(now.getTime() + offsetMs);
+  const year = local.getUTCFullYear();
+  const month = local.getUTCMonth();
+  const todayStart = new Date(Date.UTC(year, month, local.getUTCDate()) - offsetMs);
+  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000 - 1);
+  const months = [];
+  for (let back = SUMMARY_MONTHS - 1; back >= 0; back -= 1) {
+    const first = new Date(Date.UTC(year, month - back, 1));
+    months.push({
+      key: `${first.getUTCFullYear()}-${String(first.getUTCMonth() + 1).padStart(2, "0")}`,
+      label: first.toLocaleString("en-US", { month: "short", timeZone: "UTC" }),
+      year: first.getUTCFullYear(),
+    });
+  }
+  const firstMonth = months[0];
+  const [firstYear, firstMonthNumber] = firstMonth.key.split("-").map(Number);
+  const since = new Date(Date.UTC(firstYear, firstMonthNumber - 1, 1) - offsetMs);
+  return { now, todayStart, todayEnd, months, since, timezone: toMongoTimezone(tzOffsetMinutes) };
+};
+
+const isDateExpr = (field) => ({ $eq: [{ $type: field }, "date"] });
+const isOpenLeadExpr = { $not: [{ $in: [{ $ifNull: ["$status", ""] }, LEAD_TERMINAL_STATUSES] }] };
+
+const buildLeadSummaryPipeline = (match, clock) => [
+  { $match: match },
+  {
+    $facet: {
+      byStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+      totals: [
+        {
+          $group: {
+            _id: null,
+            total: { $sum: 1 },
+            pendingFirstCalls: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      { $in: [{ $ifNull: ["$status", ""] }, ["NEW", ""]] },
+                      { $not: [isDateExpr("$lastContactedAt")] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            followUpsDue: {
+              $sum: {
+                $cond: [
+                  { $and: [isDateExpr("$nextFollowUp"), { $lte: ["$nextFollowUp", clock.now] }, isOpenLeadExpr] },
+                  1,
+                  0,
+                ],
+              },
+            },
+            followUpsToday: {
+              $sum: {
+                $cond: [
+                  {
+                    $and: [
+                      isDateExpr("$nextFollowUp"),
+                      { $gte: ["$nextFollowUp", clock.todayStart] },
+                      { $lte: ["$nextFollowUp", clock.todayEnd] },
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
+            },
+            overdueFollowUps: {
+              $sum: {
+                $cond: [
+                  { $and: [isDateExpr("$nextFollowUp"), { $lt: ["$nextFollowUp", clock.todayStart] }, isOpenLeadExpr] },
+                  1,
+                  0,
+                ],
+              },
+            },
+            closedRevenue: {
+              $sum: {
+                $cond: [{ $eq: ["$status", "CLOSED"] }, { $ifNull: ["$brokerageReceived", 0] }, 0],
+              },
+            },
+          },
+        },
+      ],
+      createdByMonth: [
+        { $match: { createdAt: { $gte: clock.since } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m", date: "$createdAt", timezone: clock.timezone } },
+            count: { $sum: 1 },
+          },
+        },
+      ],
+      closedByMonth: [
+        { $match: { status: "CLOSED" } },
+        { $addFields: { closedOn: { $ifNull: ["$brokerageClosedAt", "$updatedAt"] } } },
+        { $match: { closedOn: { $gte: clock.since } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m", date: "$closedOn", timezone: clock.timezone } },
+            count: { $sum: 1 },
+            revenue: { $sum: { $ifNull: ["$brokerageReceived", 0] } },
+          },
+        },
+      ],
+    },
+  },
+];
+
+const shapeLeadSummary = (facetRow = {}, clock, transferredOut = 0) => {
+  const byStatus = Object.fromEntries(LEAD_STATUS_VALUES.map((status) => [status, 0]));
+  (facetRow.byStatus || []).forEach((row) => {
+    const key = String(row?._id || "NEW");
+    byStatus[key] = (byStatus[key] || 0) + Number(row?.count || 0);
+  });
+  const totals = facetRow.totals?.[0] || {};
+  const total = Number(totals.total || 0);
+  const closed = byStatus.CLOSED || 0;
+  const lost = byStatus.LOST || 0;
+  const invalid = byStatus.INVALID || 0;
+  const createdMap = new Map((facetRow.createdByMonth || []).map((row) => [row._id, row]));
+  const closedMap = new Map((facetRow.closedByMonth || []).map((row) => [row._id, row]));
+
+  return {
+    total,
+    open: Math.max(total - closed - lost - invalid, 0),
+    closed,
+    lost,
+    byStatus,
+    pendingFirstCalls: Number(totals.pendingFirstCalls || 0),
+    followUpsDue: Number(totals.followUpsDue || 0),
+    followUpsToday: Number(totals.followUpsToday || 0),
+    overdueFollowUps: Number(totals.overdueFollowUps || 0),
+    closedRevenue: Number(totals.closedRevenue || 0),
+    transferredOut: Number(transferredOut || 0),
+    monthly: clock.months.map((month) => ({
+      month: month.key,
+      label: month.label,
+      year: month.year,
+      newLeads: Number(createdMap.get(month.key)?.count || 0),
+      closed: Number(closedMap.get(month.key)?.count || 0),
+      revenue: Number(closedMap.get(month.key)?.revenue || 0),
+    })),
+    generatedAt: clock.now.toISOString(),
+  };
+};
+
+exports.getLeadSummary = async (req, res) => {
+  try {
+    const query = await buildLeadQueryForUser(req.user);
+    if (!query) {
+      return res.status(403).json({ message: "Access denied" });
+    }
+    applyLeadListFilters(query, req.query || {});
+
+    const clock = buildSummaryClock(parseTzOffsetMinutes(req.query?.tzOffsetMinutes));
+    // aggregate() does not cast like find() does; cast so string ids still match.
+    const match = Lead.find(query).cast(Lead);
+
+    // Leads this person handed on are no longer theirs, so they sit outside the
+    // scope above; count them across the company. Only management may ask
+    // about someone else.
+    const requestedUser = String(req.query?.assignedTo || "").trim();
+    const canViewOthers = req.user.role === USER_ROLES.ADMIN || isManagementRole(req.user.role);
+    const transferUserId = canViewOthers && isValidObjectId(requestedUser) ? requestedUser : req.user._id;
+
+    const [facetRows, transferredOut] = await Promise.all([
+      Lead.aggregate(buildLeadSummaryPipeline(match, clock)),
+      Lead.countDocuments({
+        companyId: req.user.companyId,
+        assignmentHistory: {
+          $elemMatch: {
+            action: { $in: LEAD_TRANSFER_ACTIONS },
+            fromUser: transferUserId,
+            toUser: { $nin: [null, transferUserId] },
+          },
+        },
+      }),
+    ]);
+
+    return res.json({ summary: shapeLeadSummary(facetRows?.[0], clock, transferredOut) });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "getLeadSummary failed",
+    });
+    return res.status(error.statusCode || 500).json({ message: error.statusCode ? error.message : "Server error" });
+  }
+};
+
+exports.buildSummaryClock = buildSummaryClock;
+exports.buildLeadSummaryPipeline = buildLeadSummaryPipeline;
+exports.shapeLeadSummary = shapeLeadSummary;
 
 exports.getLeadById = async (req, res) => {
   try {
@@ -2901,7 +3423,7 @@ exports.getCompanyPerformanceOverview = async (req, res) => {
     }
 
     const companyUsers = await User.find({ companyId: req.user.companyId })
-      .select("_id name role isActive")
+      .select("_id name role isActive profileImageUrl")
       .lean();
 
     const companyUserIds = companyUsers
@@ -2923,7 +3445,7 @@ exports.getCompanyPerformanceOverview = async (req, res) => {
 
     const leadRows = await Lead.find(leadScopeQuery)
       .select("_id status createdAt updatedAt assignedTo")
-      .populate({ path: "assignedTo", select: "name role" })
+      .populate({ path: "assignedTo", select: "name role profileImageUrl" })
       .lean();
 
     const scopedLeads = leadRows.filter((lead) => {
@@ -3520,9 +4042,17 @@ exports.updateLeadStatus = async (req, res) => {
       dealPayment: rawDealPayment,
       closureDocuments: rawClosureDocuments,
       requirements: rawRequirements,
+      company,
+      sourceChannel,
     } = req.body;
     const requestedStatus = normalizeLeadStatusValue(rawStatus);
     if (req.body.hotClient !== undefined && typeof req.body.hotClient !== "boolean") return res.status(400).json({ message: "hotClient must be boolean" });
+    if (
+      req.body.temperature !== undefined
+      && !LEAD_TEMPERATURES.includes(String(req.body.temperature || "").trim().toUpperCase())
+    ) {
+      return res.status(400).json({ message: "temperature must be COLD, WARM or HOT" });
+    }
 
     if (!requestedStatus) {
       return res.status(400).json({ message: "Status is required" });
@@ -3536,8 +4066,12 @@ exports.updateLeadStatus = async (req, res) => {
     const hasProjectInterestedField = Object.prototype.hasOwnProperty.call(req.body || {}, "projectInterested");
     const hasClientProfessionField = Object.prototype.hasOwnProperty.call(req.body || {}, "clientProfession");
     const hasRequirementsField = Object.prototype.hasOwnProperty.call(req.body || {}, "requirements");
+    const hasCompanyField = Object.prototype.hasOwnProperty.call(req.body || {}, "company");
+    const hasSourceChannelField = Object.prototype.hasOwnProperty.call(req.body || {}, "sourceChannel");
     const normalizedName = hasNameField ? String(name || "").trim() : "";
-    const normalizedPhone = hasPhoneField ? String(phone || "").trim() : "";
+    const normalizedPhone = hasPhoneField
+      ? toLeadStoragePhone(phone) || String(phone || "").trim()
+      : "";
     const normalizedEmail = hasEmailField ? String(email || "").trim() : "";
     const normalizedCity = hasCityField ? String(city || "").trim() : "";
     const normalizedPreferredLocations = hasPreferredLocationsField
@@ -3608,14 +4142,14 @@ exports.updateLeadStatus = async (req, res) => {
     if (hasPhoneField) {
       const existingPhone = String(lead?.phone || "").trim();
       if (normalizedPhone !== existingPhone) {
-        if (!normalizedPhone || !/^\d{8,15}$/.test(normalizedPhone)) {
-          return res.status(400).json({ message: "Phone must be 8 to 15 digits" });
+        if (!normalizedPhone || !toLeadStoragePhone(normalizedPhone)) {
+          return res.status(400).json({ message: LEAD_PHONE_ERROR });
         }
 
         const existingLeadWithPhone = await Lead.findOne({
           _id: { $ne: lead._id },
           companyId: req.user.companyId,
-          phone: normalizedPhone,
+          phone: buildLeadPhoneRegex(normalizedPhone),
         })
           .select("_id")
           .lean();
@@ -3665,6 +4199,26 @@ exports.updateLeadStatus = async (req, res) => {
       if (normalizedClientProfession !== existingClientProfession) {
         lead.clientProfession = normalizedClientProfession;
         updatedProfileFields.push("clientProfession");
+      }
+    }
+
+    if (hasCompanyField) {
+      const nextCompany = String(company || "").trim().slice(0, 200);
+      if (nextCompany !== String(lead?.company || "")) {
+        lead.company = nextCompany;
+        updatedProfileFields.push("company");
+      }
+    }
+
+    if (hasSourceChannelField) {
+      // An unrecognised channel clears the field rather than being written
+      // through, which is what the create path does with the same input.
+      const nextSourceChannel = LEAD_SOURCE_CHANNELS.includes(String(sourceChannel || "").toUpperCase())
+        ? String(sourceChannel).toUpperCase()
+        : "";
+      if (nextSourceChannel !== String(lead?.sourceChannel || "")) {
+        lead.sourceChannel = nextSourceChannel;
+        updatedProfileFields.push("sourceChannel");
       }
     }
 
@@ -4048,6 +4602,7 @@ exports.updateLeadStatus = async (req, res) => {
       && normalizedPaymentType === "PARTIAL"
       && normalizedRemainingAmount !== null
       && normalizedRemainingAmount > 0;
+    const clearTerminalFollowUp = shouldClearTerminalFollowUp(nextLeadStatus, lead);
     const hasCollectionFollowUp =
       hasNextFollowUpInput
       || (!clearNextFollowUp && hasExistingFollowUp);
@@ -4101,7 +4656,9 @@ exports.updateLeadStatus = async (req, res) => {
       lead.brokerageClosedBy = lead.brokerageClosedBy || req.user._id;
     }
 
-    if (hasNextFollowUpInput) {
+    if (clearTerminalFollowUp) {
+      lead.nextFollowUp = null;
+    } else if (hasNextFollowUpInput) {
       lead.nextFollowUp = parsedNextFollowUp;
     } else if (clearNextFollowUp) {
       lead.nextFollowUp = null;
@@ -4137,7 +4694,10 @@ exports.updateLeadStatus = async (req, res) => {
       releasedInventory = releaseResult?.inventory || null;
     }
 
-    if (req.body.hotClient !== undefined) lead.hotClient = req.body.hotClient;
+    applyLeadTemperature(lead, req.body);
+    if (req.body.followUpPurpose !== undefined) {
+      lead.followUpPurpose = String(req.body.followUpPurpose || "").trim().slice(0, 200);
+    }
     await lead.save();
 
     const didTransitionToClosed =
@@ -4187,6 +4747,9 @@ exports.updateLeadStatus = async (req, res) => {
         ? `Status changed to ${nextLeadStatus} (${Math.round(siteVisitDistanceMeters)}m from site)`
         : `Status changed to ${nextLeadStatus}`,
     ];
+    if (clearTerminalFollowUp && hasExistingFollowUp) {
+      activityActions.push("Follow-up cleared after terminal status");
+    }
 
     if (paymentRequestAction) {
       activityActions.push(paymentRequestAction);
@@ -4264,6 +4827,44 @@ exports.updateLeadStatus = async (req, res) => {
       error: error.message,
       message: "updateLeadStatus failed",
     });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.completeLeadFollowUp = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    if (!isValidObjectId(leadId)) {
+      return res.status(400).json({ message: "Invalid lead id" });
+    }
+    const accessibleLead = await findAccessibleLeadById({ leadId, user: req.user });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+    const lead = await Lead.findOne({ _id: leadId, companyId: req.user.companyId });
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+    if (hasUnpaidPartialCollection(lead)) {
+      return res.status(409).json({ message: "Record the remaining payment or reschedule its collection follow-up before marking it done" });
+    }
+    if (!lead.nextFollowUp) {
+      return res.json({ message: "Follow-up already completed", lead: await getLeadViewById(leadId, req.user.companyId, req.user) });
+    }
+
+    lead.nextFollowUp = null;
+    await lead.save();
+    await LeadActivity.create({
+      lead: lead._id,
+      action: "Follow-up completed",
+      performedBy: req.user._id,
+    });
+    return res.json({
+      message: "Follow-up completed",
+      lead: await getLeadViewById(leadId, req.user.companyId, req.user),
+    });
+  } catch (error) {
+    logger.error({ requestId: req.requestId || null, error: error.message, message: "completeLeadFollowUp failed" });
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -4359,7 +4960,7 @@ exports.requestLeadStatusChange = async (req, res) => {
     });
 
     const request = await LeadStatusRequest.findById(created._id)
-      .populate("requestedBy", "name role")
+      .populate("requestedBy", "name role profileImageUrl")
       .populate("lead", "name status nextFollowUp")
       .lean();
 
@@ -4444,8 +5045,8 @@ exports.getLeadStatusRequests = async (req, res) => {
     }
 
     const requests = await LeadStatusRequest.find(query)
-      .populate("requestedBy", "name role")
-      .populate("reviewedBy", "name role")
+      .populate("requestedBy", "name role profileImageUrl")
+      .populate("reviewedBy", "name role profileImageUrl")
       .populate("lead", "name status nextFollowUp")
       .sort({ createdAt: -1 })
       .limit(200)
@@ -4477,7 +5078,7 @@ exports.getPendingLeadStatusRequests = async (req, res) => {
     }
 
     const requests = await LeadStatusRequest.find(query)
-      .populate("requestedBy", "name role")
+      .populate("requestedBy", "name role profileImageUrl")
       .populate("lead", "name status nextFollowUp")
       .sort({ createdAt: -1 })
       .limit(Number.parseInt(process.env.LEAD_STATUS_REQUEST_PAGE_MAX_LIMIT, 10) || 200)
@@ -4594,6 +5195,9 @@ exports.approveLeadStatusRequest = async (req, res) => {
         markClosed: true,
       });
     }
+    if (shouldClearTerminalFollowUp(request.proposedStatus, lead)) {
+      lead.nextFollowUp = null;
+    }
     if (Array.isArray(request.closureDocuments) && request.closureDocuments.length) {
       lead.closureDocuments = request.closureDocuments.map((row) => ({
         url: String(row?.url || "").trim(),
@@ -4666,8 +5270,8 @@ exports.approveLeadStatusRequest = async (req, res) => {
 
     const populatedLead = await getLeadViewById(lead._id, req.user.companyId, req.user);
     const populatedRequest = await LeadStatusRequest.findById(request._id)
-      .populate("requestedBy", "name role")
-      .populate("reviewedBy", "name role")
+      .populate("requestedBy", "name role profileImageUrl")
+      .populate("reviewedBy", "name role profileImageUrl")
       .populate("lead", "name status nextFollowUp")
       .lean();
 
@@ -4743,8 +5347,8 @@ exports.rejectLeadStatusRequest = async (req, res) => {
     });
 
     const populatedRequest = await LeadStatusRequest.findById(request._id)
-      .populate("requestedBy", "name role")
-      .populate("reviewedBy", "name role")
+      .populate("requestedBy", "name role profileImageUrl")
+      .populate("reviewedBy", "name role profileImageUrl")
       .populate("lead", "name status nextFollowUp")
       .lean();
 
@@ -4784,7 +5388,7 @@ exports.getLeadActivity = async (req, res) => {
     );
 
     const queryBuilder = LeadActivity.find({ lead: leadId })
-      .populate("performedBy", "name role")
+      .populate("performedBy", "name role profileImageUrl")
       .sort({ createdAt: -1 });
 
     if (selectedFields) {
@@ -4852,7 +5456,7 @@ exports.getTodayFollowUps = async (req, res) => {
     );
 
     const queryBuilder = Lead.find(query)
-      .populate("assignedTo", "name role")
+      .populate("assignedTo", "name role profileImageUrl")
       .sort({ nextFollowUp: 1 });
 
     if (selectedFields) {
@@ -4918,7 +5522,7 @@ exports.getLeadDiary = async (req, res) => {
     );
 
     const queryBuilder = LeadDiary.find({ lead: leadId })
-      .populate("createdBy", "name role")
+      .populate("createdBy", "name role profileImageUrl")
       .sort({ createdAt: -1 });
 
     if (selectedFields) {
@@ -4998,7 +5602,7 @@ exports.addLeadDiaryEntry = async (req, res) => {
     });
 
     const populatedEntry = await LeadDiary.findById(entry._id)
-      .populate("createdBy", "name role")
+      .populate("createdBy", "name role profileImageUrl")
       .lean();
 
     return res.status(201).json({
@@ -5098,6 +5702,90 @@ exports.updateLeadDiaryEntry = async (req, res) => {
       requestId: req.requestId || null,
       error: error.message,
       message: "updateLeadDiaryEntry failed",
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+/*
+ * DELETE /leads/:leadId
+ * An Admin deletes directly; a Manager's call becomes a delete request that an
+ * Admin approves from Alerts (requireAdminApprovalForDelete on the route), and
+ * this handler then runs with the Admin as the actor.
+ *
+ * Meant for junk, test and duplicate enquiries. A lead with a closed deal or
+ * money attached is refused so finance and sale records keep their lead -
+ * mark such a lead Lost instead.
+ */
+exports.deleteLead = async (req, res) => {
+  try {
+    const { leadId } = req.params;
+    if (!isValidObjectId(leadId)) {
+      return res.status(400).json({ message: "Invalid lead id" });
+    }
+
+    const accessibleLead = await findAccessibleLeadById({ leadId, user: req.user });
+    if (!accessibleLead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const lead = await Lead.findOne({ _id: leadId, companyId: req.user.companyId });
+    if (!lead) {
+      return res.status(404).json({ message: "Lead not found" });
+    }
+
+    const CoworkingInvoice = require("../models/CoworkingInvoice");
+    const CoworkingPayment = require("../models/CoworkingPayment");
+    const [soldInventory, invoiceCount, paymentCount] = await Promise.all([
+      Inventory.findOne({ companyId: lead.companyId, "saleDetails.leadId": lead._id }).select("_id propertyId").lean(),
+      CoworkingInvoice.countDocuments({ companyId: lead.companyId, leadId: lead._id }),
+      CoworkingPayment.countDocuments({ companyId: lead.companyId, leadId: lead._id }),
+    ]);
+    const hasDealMoney = normalizeEnumValue(lead.status) === "CLOSED"
+      || ["PENDING", "APPROVED"].includes(normalizeEnumValue(lead?.dealPayment?.approvalStatus))
+      || Boolean(soldInventory)
+      || invoiceCount > 0
+      || paymentCount > 0;
+    if (hasDealMoney) {
+      return res.status(409).json({
+        message: "This lead has a closed deal or payments, so it cannot be deleted. Mark it Lost instead.",
+      });
+    }
+
+    // Free any property still held for this lead.
+    await Inventory.updateMany(
+      { companyId: lead.companyId, status: "Blocked", reservationLeadId: lead._id },
+      { $set: { status: "Available", reservationLeadId: null, reservationReason: "", updatedBy: req.user._id } },
+    );
+
+    const Task = require("../models/Task");
+    await Promise.all([
+      LeadStatusRequest.deleteMany({ lead: lead._id }),
+      LeadActivity.deleteMany({ lead: lead._id }),
+      LeadDiary.deleteMany({ lead: lead._id }),
+      Task.updateMany({ leadId: lead._id }, { $set: { leadId: null } }),
+      CrmContact.updateMany({ companyId: lead.companyId, leadIds: lead._id }, { $pull: { leadIds: lead._id } }),
+    ]);
+
+    await Lead.deleteOne({ _id: lead._id });
+
+    const { writeAuditLog } = require("../services/auditLog.service");
+    await writeAuditLog({
+      companyId: lead.companyId,
+      actor: req.user,
+      action: "LEAD_DELETED",
+      entityType: "Lead",
+      entityId: lead._id,
+      metadata: { name: lead.name, phone: lead.phone, status: lead.status },
+      req,
+    });
+
+    return res.json({ message: "Lead deleted", leadId: String(lead._id) });
+  } catch (error) {
+    logger.error({
+      requestId: req.requestId || null,
+      error: error.message,
+      message: "deleteLead failed",
     });
     return res.status(500).json({ message: "Server error" });
   }

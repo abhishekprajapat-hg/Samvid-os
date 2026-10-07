@@ -1,12 +1,82 @@
 const mongoose = require("mongoose");
+const { sendMongooseError } = require("../utils/mongooseError");
 const Task = require("../models/Task");
 const User = require("../models/User");
 const Lead = require("../models/Lead");
 const { USER_ROLES, PRODUCTION_ROLES } = require("../constants/role.constants");
 const { notify } = require("../services/push.service");
+const {
+  TASK_PRIORITIES,
+  TASK_STATUSES,
+  effectiveSubtaskStatus,
+  isSubtaskComplete,
+  normalizeAndValidateSubtasks,
+  normalizeSubtask,
+  referenceId,
+} = require("../utils/taskSubtasks");
 
 const isProductionTaskRole = (user) => PRODUCTION_ROLES.includes(user?.role);
-const referenceId = (value) => String(value?._id || value || "");
+
+/*
+ * A task is overdue once its due date has passed and it is not completed.
+ * Due dates are picked as a calendar date and stored as that date at 00:00 UTC,
+ * so "passed" means before today's date in the office timezone - a task due
+ * today is not overdue yet. The list filter, the counts and the roster all use
+ * this one cutoff so the number on a card always matches the list it opens.
+ */
+const TASK_TIMEZONE = process.env.TASK_TIMEZONE || process.env.ATTENDANCE_TIMEZONE || "Asia/Kolkata";
+const OVERDUE_STATUS_FILTER = "OVERDUE";
+const getOverdueCutoff = (now = new Date()) => {
+  let todayKey;
+  try {
+    todayKey = new Intl.DateTimeFormat("en-CA", { timeZone: TASK_TIMEZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+  } catch {
+    todayKey = now.toISOString().slice(0, 10);
+  }
+  return new Date(`${todayKey}T00:00:00.000Z`);
+};
+const populateTask = (query) => query
+  .populate("assignedTo", "name email role profileImageUrl")
+  .populate("createdBy", "name role profileImageUrl")
+  .populate("leadId", "name phone email status")
+  .populate("subtasks.assignedTo", "name email role profileImageUrl");
+
+const canManageTask = (task, user) => {
+  if (String(task.companyId) !== String(user.companyId)) return false;
+  const isCreator = referenceId(task.createdBy) === referenceId(user);
+  const isParentReceiver = referenceId(task.assignedTo) === referenceId(user) && !isCreator;
+  if (isParentReceiver) return false;
+  return isCreator || [USER_ROLES.ADMIN, USER_ROLES.MANAGER].includes(user.role);
+};
+
+const subtaskAssigneeIds = (subtasks = []) => [
+  ...new Set(subtasks.map((subtask) => referenceId(subtask.assignedTo)).filter(Boolean)),
+];
+
+const validateActiveAssignees = async ({ assignedTo, subtasks = [], companyId }) => {
+  const ids = [...new Set([referenceId(assignedTo), ...subtaskAssigneeIds(subtasks)].filter(Boolean))];
+  for (const userId of ids) {
+    if (!mongoose.Types.ObjectId.isValid(userId)) return `Invalid assignee ID: ${userId}`;
+    const user = await User.findOne({ _id: userId, companyId, isActive: true });
+    if (!user) return "Every assignee must be an active user in your company";
+  }
+  return "";
+};
+
+const emitTaskAssignment = ({ req, task, recipientId, message, eventName = "task:updated" }) => {
+  const recipient = referenceId(recipientId);
+  if (!recipient || recipient === referenceId(req.user)) return;
+  const io = req.app.get("io");
+  if (io) {
+    io.to(`user:${recipient}`).emit(eventName, {
+      actorId: referenceId(req.user),
+      eventId: `${eventName}:${task._id}:${recipient}:${task.updatedAt || task.createdAt || Date.now()}`,
+      task,
+      message,
+    });
+  }
+  notify(recipient, { title: "Task assignment", body: message, url: "/tasks", tag: `task:${task._id}:${recipient}` });
+};
 
 // Helper to check access permissions
 const checkTaskAccess = (task, user) => {
@@ -19,7 +89,9 @@ const checkTaskAccess = (task, user) => {
   }
   
   // Executives/Field Executives can only access tasks assigned to or created by them
-  return referenceId(task.assignedTo) === referenceId(user) || referenceId(task.createdBy) === referenceId(user);
+  return referenceId(task.assignedTo) === referenceId(user)
+    || referenceId(task.createdBy) === referenceId(user)
+    || (task.subtasks || []).some((subtask) => referenceId(subtask.assignedTo) === referenceId(user));
 };
 
 // Create a new task
@@ -27,25 +99,37 @@ exports.createTask = async (req, res) => {
   try {
     const { title, description, status, priority, dueDate, assignedTo, leadId, subtasks, tags } = req.body;
     const companyId = req.user.companyId;
+    const cleanTitle = String(title || "").trim();
+    const cleanDescription = String(description || "").trim();
+    const nextStatus = String(status || "TODO").trim().toUpperCase();
+    const nextPriority = String(priority || "MEDIUM").trim().toUpperCase();
 
-    if (!title) {
+    if (!cleanTitle) {
       return res.status(400).json({ message: "Task title is required" });
     }
+    if (cleanTitle.length > 180) return res.status(400).json({ message: "Task title cannot exceed 180 characters" });
+    if (cleanDescription.length > 10000) return res.status(400).json({ message: "Task description cannot exceed 10000 characters" });
+    if (!assignedTo) return res.status(400).json({ message: "Task assignee is required" });
+    if (!dueDate) return res.status(400).json({ message: "Task due date is required" });
+    if (Number.isNaN(new Date(dueDate).getTime())) return res.status(400).json({ message: "Task due date is invalid" });
+    if (!TASK_STATUSES.includes(nextStatus)) return res.status(400).json({ message: "Invalid task status" });
+    if (!TASK_PRIORITIES.includes(nextPriority)) return res.status(400).json({ message: "Invalid task priority" });
 
     if (isProductionTaskRole(req.user) && leadId) {
       return res.status(403).json({ message: "Production role tasks cannot be linked to leads" });
     }
 
-    // Validation: Assigned User must be in the same company
-    if (assignedTo) {
-      if (!mongoose.Types.ObjectId.isValid(assignedTo)) {
-        return res.status(400).json({ message: "Invalid assignee ID" });
-      }
-      const assignedUser = await User.findOne({ _id: assignedTo, companyId });
-      if (!assignedUser) {
-        return res.status(400).json({ message: "Assignee does not belong to your company" });
-      }
+    const normalizedResult = normalizeAndValidateSubtasks(subtasks || [], {
+      assignedTo,
+      dueDate,
+      priority: nextPriority,
+    });
+    if (normalizedResult.error) return res.status(400).json({ message: normalizedResult.error });
+    if (nextStatus === "COMPLETED" && normalizedResult.subtasks.some((subtask) => !isSubtaskComplete(subtask))) {
+      return res.status(409).json({ message: "Complete every subtask before completing the parent task" });
     }
+    const assigneeError = await validateActiveAssignees({ assignedTo, subtasks: normalizedResult.subtasks, companyId });
+    if (assigneeError) return res.status(400).json({ message: assigneeError });
 
     // Validation: Lead must be in the same company
     if (leadId) {
@@ -59,15 +143,15 @@ exports.createTask = async (req, res) => {
     }
 
     const newTask = new Task({
-      title,
-      description,
-      status,
-      priority,
-      dueDate: dueDate || null,
-      assignedTo: assignedTo || null,
+      title: cleanTitle,
+      description: cleanDescription,
+      status: nextStatus,
+      priority: nextPriority,
+      dueDate,
+      assignedTo,
       leadId: leadId || null,
-      subtasks: Array.isArray(subtasks) ? subtasks.map(s => ({ title: String(s.title || "").trim(), isCompleted: Boolean(s.isCompleted), description: String(s.description || "").trim().slice(0, 5000), dueDate: s.dueDate || null })).filter(s => s.title) : [],
-      tags: Array.isArray(tags) ? tags.map(t => String(t || "").trim()).filter(Boolean) : [],
+      subtasks: normalizedResult.subtasks,
+      tags: Array.isArray(tags) ? [...new Set(tags.map(t => String(t || "").trim()).filter(Boolean))].slice(0, 20) : [],
       companyId,
       createdBy: req.user._id,
       assignmentHistory: [{ fromUser: null, toUser: assignedTo || null, actor: req.user._id }],
@@ -76,31 +160,23 @@ exports.createTask = async (req, res) => {
     const savedTask = await newTask.save();
     
     // Populate assignee, creator, and lead information before returning
-    const populatedTask = await Task.findById(savedTask._id)
-      .populate("assignedTo", "name email role profileImageUrl")
-      .populate("createdBy", "name role")
-      .populate("leadId", "name phone email status");
+    const populatedTask = await populateTask(Task.findById(savedTask._id));
 
     // Real-time notification via Socket.io
-    const io = req.app.get("io");
-    if (assignedTo && referenceId(assignedTo) !== referenceId(req.user)) {
-      const message = `You have been assigned a new task: "${title}" by ${req.user.name}`;
-      if (io) {
-        io.to(`user:${assignedTo}`).emit("task:created", {
-          actorId: referenceId(req.user),
-          eventId: `task:created:${savedTask._id}:${savedTask.createdAt || Date.now()}`,
-          task: populatedTask,
-          message,
-        });
-      }
-      // The socket only reaches an open tab; this reaches the phone.
-      notify(assignedTo, { title: "New task assigned", body: message, url: "/tasks", tag: `task:${savedTask._id}` });
-    }
+    const recipients = [referenceId(assignedTo)];
+    recipients.forEach((recipient) => emitTaskAssignment({
+      req,
+      task: populatedTask,
+      recipientId: recipient,
+      eventName: "task:created",
+      message: `You have been assigned a new task: "${cleanTitle}" by ${req.user.name}`,
+    }));
 
     res.status(201).json(populatedTask);
   } catch (error) {
+    if (sendMongooseError(res, error)) return;
     req.log?.error(error);
-    res.status(500).json({ message: "Failed to create task", error: error.message });
+    res.status(500).json({ message: "Failed to create task" });
   }
 };
 
@@ -110,25 +186,40 @@ exports.getTasks = async (req, res) => {
     const companyId = req.user.companyId;
     const { status, priority, leadId, assignedTo, search, dueDateStart, dueDateEnd, tag, scope } = req.query;
 
-    const query = { companyId };
+    const query = { companyId, $and: [] };
 
     // Role-based restrictions
     if (req.user.role !== USER_ROLES.ADMIN &&
         req.user.role !== USER_ROLES.MANAGER) {
       // Executives can only see their own tasks (assigned to or created by)
-      query.$or = [
-        { assignedTo: req.user._id },
-        { createdBy: req.user._id }
-      ];
+      query.$and.push({
+        $or: [
+          { assignedTo: req.user._id },
+          { createdBy: req.user._id },
+          { "subtasks.assignedTo": req.user._id },
+        ],
+      });
     }
 
     // Apply filters
-    if (status) query.status = status;
-    if (priority) query.priority = priority;
+    const wantsOverdue = String(status || "").toUpperCase() === OVERDUE_STATUS_FILTER;
+    if (wantsOverdue) {
+      const cutoff = getOverdueCutoff();
+      query.$and.push({
+        $or: [
+          { status: { $ne: "COMPLETED" }, dueDate: { $ne: null, $lt: cutoff } },
+          { subtasks: { $elemMatch: { status: { $ne: "COMPLETED" }, isCompleted: { $ne: true }, dueDate: { $ne: null, $lt: cutoff } } } },
+        ],
+      });
+    } else if (status) {
+      query.$and.push({ $or: [{ status }, { "subtasks.status": status }] });
+    }
+    if (priority) query.$and.push({ $or: [{ priority }, { "subtasks.priority": priority }] });
     if (leadId && !isProductionTaskRole(req.user)) query.leadId = leadId;
-    if (assignedTo) query.assignedTo = assignedTo;
+    if (assignedTo) query.$and.push({ $or: [{ assignedTo }, { "subtasks.assignedTo": assignedTo }] });
     if (scope === "assigned") {
-      query.$and = [...(query.$and || []), { assignedTo: req.user._id }, { createdBy: { $ne: req.user._id } }];
+      query.$and.push({ $or: [{ assignedTo: req.user._id }, { "subtasks.assignedTo": req.user._id }] });
+      query.$and.push({ createdBy: { $ne: req.user._id } });
     }
     if (scope === "mine") query.createdBy = req.user._id;
     if (tag) query.tags = tag;
@@ -138,22 +229,23 @@ exports.getTasks = async (req, res) => {
       query.$and.push({
         $or: [
           { title: { $regex: search, $options: "i" } },
-          { description: { $regex: search, $options: "i" } }
+          { description: { $regex: search, $options: "i" } },
+          { "subtasks.title": { $regex: search, $options: "i" } },
+          { "subtasks.description": { $regex: search, $options: "i" } },
         ]
       });
     }
 
     if (dueDateStart || dueDateEnd) {
-      query.dueDate = {};
-      if (dueDateStart) query.dueDate.$gte = new Date(dueDateStart);
-      if (dueDateEnd) query.dueDate.$lte = new Date(dueDateEnd);
+      const dateRange = {};
+      if (dueDateStart) dateRange.$gte = new Date(dueDateStart);
+      if (dueDateEnd) dateRange.$lte = new Date(dueDateEnd);
+      query.$and.push({ $or: [{ dueDate: dateRange }, { "subtasks.dueDate": dateRange }] });
     }
 
-    const tasks = await Task.find(query)
-      .populate("assignedTo", "name email role profileImageUrl")
-      .populate("createdBy", "name role")
-      .populate("leadId", "name phone email status")
-      .sort({ createdAt: -1 });
+    if (!query.$and.length) delete query.$and;
+
+    const tasks = await populateTask(Task.find(query)).sort({ createdAt: -1 });
 
     res.status(200).json(tasks);
   } catch (error) {
@@ -171,10 +263,7 @@ exports.getTaskById = async (req, res) => {
       return res.status(400).json({ message: "Invalid task ID" });
     }
 
-    const task = await Task.findById(taskId)
-      .populate("assignedTo", "name email role profileImageUrl")
-      .populate("createdBy", "name role")
-      .populate("leadId", "name phone email status");
+    const task = await populateTask(Task.findById(taskId));
 
     if (!task) {
       return res.status(404).json({ message: "Task not found" });
@@ -221,18 +310,36 @@ exports.updateTask = async (req, res) => {
     if (isReceiver && Object.keys(req.body).some((field) => field !== "status")) {
       return res.status(403).json({ message: "Task receivers can only change the status" });
     }
-    if (status !== undefined && !["TODO", "IN_PROGRESS", "COMPLETED", "BACKLOG"].includes(status)) {
+    const nextStatus = status === undefined ? undefined : String(status).trim().toUpperCase();
+    const nextPriority = priority === undefined ? undefined : String(priority).trim().toUpperCase();
+    if (nextStatus !== undefined && !TASK_STATUSES.includes(nextStatus)) {
       return res.status(400).json({ message: "Invalid task status" });
     }
-
+    if (nextPriority !== undefined && !TASK_PRIORITIES.includes(nextPriority)) {
+      return res.status(400).json({ message: "Invalid task priority" });
+    }
+    if (title !== undefined && (!String(title).trim() || String(title).trim().length > 180)) {
+      return res.status(400).json({ message: "Task title is required and cannot exceed 180 characters" });
+    }
+    if (description !== undefined && String(description).trim().length > 10000) {
+      return res.status(400).json({ message: "Task description cannot exceed 10000 characters" });
+    }
+    if (dueDate !== undefined && (!dueDate || Number.isNaN(new Date(dueDate).getTime()))) {
+      return res.status(400).json({ message: "Task due date is required and must be valid" });
+    }
+    if (assignedTo !== undefined && !assignedTo) {
+      return res.status(400).json({ message: "Task assignee is required" });
+    }
+    const effectiveAssignee = assignedTo !== undefined ? assignedTo : task.assignedTo;
+    if (!effectiveAssignee) return res.status(400).json({ message: "Task assignee is required" });
     // Validate updates if changed
     if (assignedTo && String(assignedTo) !== String(task.assignedTo)) {
       if (!mongoose.Types.ObjectId.isValid(assignedTo)) {
         return res.status(400).json({ message: "Invalid assignee ID" });
       }
-      const assignedUser = await User.findOne({ _id: assignedTo, companyId });
+      const assignedUser = await User.findOne({ _id: assignedTo, companyId, isActive: true });
       if (!assignedUser) {
-        return res.status(400).json({ message: "Assignee does not belong to your company" });
+        return res.status(400).json({ message: "Assignee must be an active user in your company" });
       }
     }
 
@@ -248,20 +355,39 @@ exports.updateTask = async (req, res) => {
 
     const originalStatus = task.status;
     const originalAssignee = task.assignedTo;
+    let normalizedSubtasks = null;
+
+    // Re-normalize on parent reassignment as well, so every existing subtask
+    // follows the new owner in the same atomic save.
+    if (subtasks !== undefined || assignedTo !== undefined) {
+      const result = normalizeAndValidateSubtasks(subtasks !== undefined ? subtasks : (task.subtasks || []), {
+        assignedTo: effectiveAssignee,
+        dueDate: dueDate !== undefined ? dueDate : task.dueDate,
+        priority: priority !== undefined ? priority : task.priority,
+      });
+      if (result.error) return res.status(400).json({ message: result.error });
+      const assigneeError = await validateActiveAssignees({
+        assignedTo: effectiveAssignee,
+        subtasks: result.subtasks,
+        companyId,
+      });
+      if (assigneeError) return res.status(400).json({ message: assigneeError });
+      normalizedSubtasks = result.subtasks;
+    }
+    const completionSubtasks = normalizedSubtasks || task.subtasks || [];
+    if (nextStatus === "COMPLETED" && completionSubtasks.some((subtask) => !isSubtaskComplete(subtask))) {
+      return res.status(409).json({ message: "Complete every subtask before completing the parent task" });
+    }
 
     // Apply updates
-    if (title !== undefined) task.title = title;
-    if (description !== undefined) task.description = description;
-    if (status !== undefined) task.status = status;
-    if (priority !== undefined) task.priority = priority;
+    if (title !== undefined) task.title = String(title).trim();
+    if (description !== undefined) task.description = String(description).trim();
+    if (nextStatus !== undefined) task.status = nextStatus;
+    if (nextPriority !== undefined) task.priority = nextPriority;
     if (dueDate !== undefined) task.dueDate = dueDate || null;
     if (assignedTo !== undefined) task.assignedTo = assignedTo || null;
     if (leadId !== undefined) task.leadId = leadId || null;
-    if (subtasks !== undefined) {
-      task.subtasks = Array.isArray(subtasks)
-        ? subtasks.map(s => ({ title: String(s.title || "").trim(), isCompleted: Boolean(s.isCompleted), description: String(s.description || "").trim().slice(0, 5000), dueDate: s.dueDate || null })).filter(s => s.title)
-        : [];
-    }
+    if (normalizedSubtasks) task.subtasks = normalizedSubtasks;
     if (tags !== undefined) {
       task.tags = Array.isArray(tags)
         ? tags.map(t => String(t || "").trim()).filter(Boolean)
@@ -273,14 +399,11 @@ exports.updateTask = async (req, res) => {
     }
     const updatedTask = await task.save();
 
-    const populatedTask = await Task.findById(updatedTask._id)
-      .populate("assignedTo", "name email role profileImageUrl")
-      .populate("createdBy", "name role")
-      .populate("leadId", "name phone email status");
+    const populatedTask = await populateTask(Task.findById(updatedTask._id));
 
     // Employee changes go to company admins; admin changes go to the assignee.
     const io = req.app.get("io");
-    const statusChanged = status !== undefined && status !== originalStatus;
+    const statusChanged = nextStatus !== undefined && nextStatus !== originalStatus;
     const assignmentChanged = assignedTo !== undefined && referenceId(assignedTo) !== referenceId(originalAssignee);
     const hasDetailChanges = Object.keys(req.body).some(field => field !== "status");
     if (io && (statusChanged || assignmentChanged || hasDetailChanges)) {
@@ -290,7 +413,7 @@ exports.updateTask = async (req, res) => {
         eventId: `task:updated:${task._id}:${updatedTask.updatedAt || Date.now()}`,
         task: populatedTask,
         message: statusChanged
-          ? `${req.user.name} changed "${task.title}" to ${status.replaceAll("_", " ")}`
+          ? `${req.user.name} changed "${task.title}" to ${nextStatus.replaceAll("_", " ")}`
           : `Task updated by ${req.user.name}: "${task.title}"`,
       };
       if (req.user.role !== USER_ROLES.ADMIN && statusChanged) {
@@ -316,7 +439,110 @@ exports.updateTask = async (req, res) => {
     res.status(200).json(populatedTask);
   } catch (error) {
     req.log?.error(error);
-    res.status(500).json({ message: "Failed to update task", error: error.message });
+    res.status(500).json({ message: "Failed to update task" });
+  }
+};
+
+const findSubtaskIndex = (task, subtaskId) =>
+  (task.subtasks || []).findIndex((subtask) => referenceId(subtask) === String(subtaskId));
+
+exports.addSubtask = async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(taskId)) return res.status(400).json({ message: "Invalid task ID" });
+    const task = await Task.findById(taskId);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!canManageTask(task, req.user)) return res.status(403).json({ message: "Only the task creator or a task manager can add subtasks" });
+
+    const subtask = normalizeSubtask(req.body, task);
+    const result = normalizeAndValidateSubtasks([subtask], task);
+    if (result.error) return res.status(400).json({ message: result.error });
+    const assigneeError = await validateActiveAssignees({ assignedTo: task.assignedTo, subtasks: result.subtasks, companyId: req.user.companyId });
+    if (assigneeError) return res.status(400).json({ message: assigneeError });
+
+    task.subtasks.push(result.subtasks[0]);
+    await task.save();
+    const populatedTask = await populateTask(Task.findById(task._id));
+    emitTaskAssignment({
+      req,
+      task: populatedTask,
+      recipientId: result.subtasks[0].assignedTo,
+      message: `You have been assigned a subtask in "${task.title}" by ${req.user.name}`,
+    });
+    return res.status(201).json(populatedTask);
+  } catch (error) {
+    if (sendMongooseError(res, error)) return;
+    req.log?.error(error);
+    return res.status(500).json({ message: "Failed to add subtask" });
+  }
+};
+
+exports.updateSubtask = async (req, res) => {
+  try {
+    const { taskId, subtaskId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(taskId) || !mongoose.Types.ObjectId.isValid(subtaskId)) {
+      return res.status(400).json({ message: "Invalid task or subtask ID" });
+    }
+    const task = await Task.findById(taskId);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (String(task.companyId) !== String(req.user.companyId)) return res.status(403).json({ message: "Access denied" });
+    const index = findSubtaskIndex(task, subtaskId);
+    if (index < 0) return res.status(404).json({ message: "Subtask not found" });
+
+    const current = task.subtasks[index];
+    const mayManage = canManageTask(task, req.user);
+    const isReceiver = referenceId(task.assignedTo) === referenceId(req.user);
+    if (!mayManage && !isReceiver) return res.status(403).json({ message: "Access denied" });
+    const fields = Object.keys(req.body || {});
+    if (!mayManage && fields.some((field) => !["status", "isCompleted"].includes(field))) {
+      return res.status(403).json({ message: "Subtask receivers can only change the status" });
+    }
+
+    const raw = current.toObject ? current.toObject() : { ...current };
+    const requestedStatus = req.body.status !== undefined
+      ? String(req.body.status).trim().toUpperCase()
+      : req.body.isCompleted !== undefined
+        ? (req.body.isCompleted ? "COMPLETED" : "TODO")
+        : effectiveSubtaskStatus(current);
+    const next = normalizeSubtask({ ...raw, ...req.body, status: requestedStatus }, task);
+    const result = normalizeAndValidateSubtasks([next], task);
+    if (result.error) return res.status(400).json({ message: result.error });
+    if (task.status === "COMPLETED" && result.subtasks[0].status !== "COMPLETED") {
+      return res.status(409).json({ message: "Reopen the parent task before reopening a subtask" });
+    }
+    const assigneeError = await validateActiveAssignees({ assignedTo: task.assignedTo, subtasks: result.subtasks, companyId: req.user.companyId });
+    if (assigneeError) return res.status(400).json({ message: assigneeError });
+
+    if (current.set) current.set(result.subtasks[0]);
+    else task.subtasks[index] = { ...current, ...result.subtasks[0] };
+    await task.save();
+    const populatedTask = await populateTask(Task.findById(task._id));
+    return res.status(200).json(populatedTask);
+  } catch (error) {
+    if (sendMongooseError(res, error)) return;
+    req.log?.error(error);
+    return res.status(500).json({ message: "Failed to update subtask" });
+  }
+};
+
+exports.deleteSubtask = async (req, res) => {
+  try {
+    const { taskId, subtaskId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(taskId) || !mongoose.Types.ObjectId.isValid(subtaskId)) {
+      return res.status(400).json({ message: "Invalid task or subtask ID" });
+    }
+    const task = await Task.findById(taskId);
+    if (!task) return res.status(404).json({ message: "Task not found" });
+    if (!canManageTask(task, req.user)) return res.status(403).json({ message: "Only the task creator or a task manager can remove subtasks" });
+    const index = findSubtaskIndex(task, subtaskId);
+    if (index < 0) return res.status(404).json({ message: "Subtask not found" });
+    task.subtasks.splice(index, 1);
+    await task.save();
+    const populatedTask = await populateTask(Task.findById(task._id));
+    return res.status(200).json(populatedTask);
+  } catch (error) {
+    req.log?.error(error);
+    return res.status(500).json({ message: "Failed to remove subtask" });
   }
 };
 
@@ -363,7 +589,7 @@ exports.deleteTask = async (req, res) => {
     res.status(200).json({ message: "Task successfully deleted", taskId });
   } catch (error) {
     req.log?.error(error);
-    res.status(500).json({ message: "Failed to delete task", error: error.message });
+    res.status(500).json({ message: "Failed to delete task" });
   }
 };
 
@@ -371,22 +597,30 @@ exports.deleteTask = async (req, res) => {
 exports.getTaskStats = async (req, res) => {
   try {
     const companyId = req.user.companyId;
-    const query = { companyId };
-    if (req.query.scope === "assigned") query.$and = [{ assignedTo: req.user._id }, { createdBy: { $ne: req.user._id } }];
+    const query = { companyId, $and: [] };
+    if (req.query.scope === "assigned") query.$and.push(
+      { $or: [{ assignedTo: req.user._id }, { "subtasks.assignedTo": req.user._id }] },
+      { createdBy: { $ne: req.user._id } },
+    );
     if (req.query.scope === "mine") query.createdBy = req.user._id;
     if (req.query.assignedTo) {
       if (!mongoose.Types.ObjectId.isValid(req.query.assignedTo)) return res.status(400).json({ message: "Invalid assignee ID" });
-      query.assignedTo = new mongoose.Types.ObjectId(req.query.assignedTo);
+      const assigneeId = new mongoose.Types.ObjectId(req.query.assignedTo);
+      query.$and.push({ $or: [{ assignedTo: assigneeId }, { "subtasks.assignedTo": assigneeId }] });
     }
 
     // Apply role filter (Executives only see their tasks)
     if (req.user.role !== USER_ROLES.ADMIN &&
         req.user.role !== USER_ROLES.MANAGER) {
-      query.$or = [
-        { assignedTo: req.user._id },
-        { createdBy: req.user._id }
-      ];
+      query.$and.push({
+        $or: [
+          { assignedTo: req.user._id },
+          { createdBy: req.user._id },
+          { "subtasks.assignedTo": req.user._id },
+        ],
+      });
     }
+    if (!query.$and.length) delete query.$and;
 
     const now = new Date();
 
@@ -403,11 +637,39 @@ exports.getTaskStats = async (req, res) => {
           overdueCount: [
             {
               $match: {
-                status: { $ne: "COMPLETED" },
-                dueDate: { $lt: now }
+                $or: [
+                  { status: { $ne: "COMPLETED" }, dueDate: { $ne: null, $lt: getOverdueCutoff(now) } },
+                  { subtasks: { $elemMatch: { status: { $ne: "COMPLETED" }, isCompleted: { $ne: true }, dueDate: { $ne: null, $lt: getOverdueCutoff(now) } } } },
+                ],
               }
             },
             { $count: "count" }
+          ],
+          subtaskCounts: [
+            { $unwind: "$subtasks" },
+            {
+              $group: {
+                _id: {
+                  $cond: [
+                    { $eq: ["$subtasks.isCompleted", true] },
+                    "COMPLETED",
+                    { $ifNull: ["$subtasks.status", "TODO"] },
+                  ],
+                },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+          subtaskOverdueCount: [
+            { $unwind: "$subtasks" },
+            {
+              $match: {
+                "subtasks.status": { $ne: "COMPLETED" },
+                "subtasks.isCompleted": { $ne: true },
+                "subtasks.dueDate": { $ne: null, $lt: getOverdueCutoff(now) },
+              },
+            },
+            { $count: "count" },
           ]
         }
       }
@@ -423,7 +685,12 @@ exports.getTaskStats = async (req, res) => {
       overdue: 0,
       LOW: 0,
       MEDIUM: 0,
-      HIGH: 0
+      HIGH: 0,
+      subtaskTotal: 0,
+      subtaskCompleted: 0,
+      subtaskPending: 0,
+      subtaskOverdue: 0,
+      workItemsTotal: 0,
     };
 
     if (stats && stats.length > 0) {
@@ -447,6 +714,13 @@ exports.getTaskStats = async (req, res) => {
       if (result.overdueCount && result.overdueCount.length > 0) {
         formattedStats.overdue = result.overdueCount[0].count;
       }
+      (result.subtaskCounts || []).forEach((item) => {
+        formattedStats.subtaskTotal += Number(item.count || 0);
+        if (item._id === "COMPLETED") formattedStats.subtaskCompleted += Number(item.count || 0);
+      });
+      formattedStats.subtaskPending = formattedStats.subtaskTotal - formattedStats.subtaskCompleted;
+      formattedStats.subtaskOverdue = Number(result.subtaskOverdueCount?.[0]?.count || 0);
+      formattedStats.workItemsTotal = formattedStats.total + formattedStats.subtaskTotal;
     }
 
     res.status(200).json(formattedStats);
@@ -467,23 +741,51 @@ exports.getTaskStatsByUser = async (req, res) => {
     const now = new Date();
 
     const rows = await Task.aggregate([
-      { $match: { companyId, assignedTo: { $ne: null } } },
+      { $match: { companyId } },
+      {
+        $project: {
+          workItems: {
+            $concatArrays: [
+              [{ assignedTo: "$assignedTo", status: "$status", dueDate: "$dueDate" }],
+              {
+                $map: {
+                  input: { $ifNull: ["$subtasks", []] },
+                  as: "subtask",
+                  in: {
+                    assignedTo: { $ifNull: ["$$subtask.assignedTo", "$assignedTo"] },
+                    status: {
+                      $cond: [
+                        { $eq: ["$$subtask.isCompleted", true] },
+                        "COMPLETED",
+                        { $ifNull: ["$$subtask.status", "TODO"] },
+                      ],
+                    },
+                    dueDate: "$$subtask.dueDate",
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+      { $unwind: "$workItems" },
+      { $match: { "workItems.assignedTo": { $ne: null } } },
       {
         $group: {
-          _id: "$assignedTo",
+          _id: "$workItems.assignedTo",
           total: { $sum: 1 },
-          TODO: { $sum: { $cond: [{ $eq: ["$status", "TODO"] }, 1, 0] } },
-          IN_PROGRESS: { $sum: { $cond: [{ $eq: ["$status", "IN_PROGRESS"] }, 1, 0] } },
-          COMPLETED: { $sum: { $cond: [{ $eq: ["$status", "COMPLETED"] }, 1, 0] } },
-          BACKLOG: { $sum: { $cond: [{ $eq: ["$status", "BACKLOG"] }, 1, 0] } },
+          TODO: { $sum: { $cond: [{ $eq: ["$workItems.status", "TODO"] }, 1, 0] } },
+          IN_PROGRESS: { $sum: { $cond: [{ $eq: ["$workItems.status", "IN_PROGRESS"] }, 1, 0] } },
+          COMPLETED: { $sum: { $cond: [{ $eq: ["$workItems.status", "COMPLETED"] }, 1, 0] } },
+          BACKLOG: { $sum: { $cond: [{ $eq: ["$workItems.status", "BACKLOG"] }, 1, 0] } },
           overdue: {
             $sum: {
               $cond: [
                 {
                   $and: [
-                    { $ne: ["$status", "COMPLETED"] },
-                    { $ne: ["$dueDate", null] },
-                    { $lt: ["$dueDate", now] }
+                    { $ne: ["$workItems.status", "COMPLETED"] },
+                    { $eq: [{ $type: "$workItems.dueDate" }, "date"] },
+                    { $lt: ["$workItems.dueDate", getOverdueCutoff(now)] }
                   ]
                 },
                 1,
@@ -522,3 +824,5 @@ exports.getAssignees = async (req, res) => {
     res.json({ users });
   } catch (error) { req.log?.error(error); res.status(500).json({ message: "Failed to load assignees" }); }
 };
+
+module.exports.getOverdueCutoff = getOverdueCutoff;

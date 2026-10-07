@@ -96,7 +96,7 @@ const authenticateSocket = async (socket, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id)
-      .select("_id name role parentId companyId isActive")
+      .select("_id name role parentId companyId isActive profileImageUrl")
       .lean();
 
     if (!user || !user.isActive) {

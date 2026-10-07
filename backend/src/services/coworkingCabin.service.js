@@ -31,7 +31,7 @@ const generateCabinCode = async (companyId) => {
   const counter = await CoworkingIdCounter.findOneAndUpdate(
     { companyId, category: "CABIN" },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   return `CAB-${String(counter.seq).padStart(3, "0")}`;
 };

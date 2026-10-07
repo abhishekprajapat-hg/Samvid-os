@@ -29,6 +29,9 @@ const userSchema = new mongoose.Schema(
     // action-aware shape { pageKey, actions }, so existing employee grants
     // keep working while new grants can restrict create/edit/delete/etc.
     pageAccessOverride: { type: [mongoose.Schema.Types.Mixed], default: null },
+    // The company-defined role this user was given, if any. Their role,
+    // roleType and pageAccessOverride are copied from it on assignment.
+    customRoleId: { type: mongoose.Schema.Types.ObjectId, ref: "CustomRole", default: null },
     name: {
       type: String,
       required: true,
@@ -52,7 +55,7 @@ const userSchema = new mongoose.Schema(
     // key off these three values.
     roleType: {
       type: String,
-      enum: ["COMMERCIAL", "RESIDENTIAL", "BOTH"],
+      enum: ["COMMERCIAL", "RESIDENTIAL", "BOTH", "COWORKING"],
       default: "COMMERCIAL",
     },
 
@@ -113,6 +116,64 @@ const userSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
+    },
+
+    /*
+     * The company's own payroll number for this person, shown on the team
+     * screens. Free text rather than a generated code: it has to match
+     * whatever the company already prints on a contract. Blank falls back to
+     * the derived EMP-XXXXXX in the profile view, so nobody has to fill it in.
+     */
+    employeeId: {
+      type: String,
+      trim: true,
+      default: "",
+      maxlength: 40,
+    },
+
+    joiningDate: {
+      type: Date,
+      default: null,
+    },
+
+    /*
+     * Invitation state. An account exists from the moment it is created - the
+     * password is set then - so these two only record whether the person has
+     * been told about it and whether they have signed in since. That is what
+     * the team list's "Invited" chip and its pending-invites count read.
+     */
+    invitedAt: {
+      type: Date,
+      default: null,
+    },
+
+    inviteAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // Set when an account is created with a temporary password.
+    mustChangePassword: {
+      type: Boolean,
+      default: false,
+    },
+
+    /*
+     * How much work this person is meant to be carrying. The member screen
+     * draws the load against these, so they are a target to compare with and
+     * not a limit anything enforces - a lead router that refused to assign
+     * past them would strand leads.
+     */
+    leadCapacity: {
+      type: Number,
+      min: 0,
+      default: 25,
+    },
+
+    taskCapacity: {
+      type: Number,
+      min: 0,
+      default: 10,
     },
 
     department: {

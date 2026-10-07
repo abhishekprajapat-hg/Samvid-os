@@ -1,12 +1,15 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Image, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppInput } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
-import { uploadChatFile } from "../../services/chatService";
+import { uploadFile, toAbsoluteUrl } from "../../services/uploadService";
 import { getMyProfile, updateMyProfile } from "../../services/userService";
+import { PushNotificationCard } from "../../components/common/PushNotificationCard";
+import { ProfileAttendanceSection } from "./ProfileAttendanceSection";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles } from "../../theme/themedStyles";
 
 const formatDateTime = (value?: string | null) => {
   if (!value) return "-";
@@ -28,6 +31,50 @@ const prettifyLabel = (value: string) =>
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (char) => char.toUpperCase());
+
+/*
+ * The role-specific cards web's UserProfile shows (toSummaryCards), in web's
+ * order and wording. The profile route returns more counters than any one role
+ * needs; web picks these, so the phone does too.
+ */
+const MANAGEMENT_ROLES = ["MANAGER"];
+const toSummaryCards = (role: string, summary: Record<string, number> = {}) => {
+  if (role === "ADMIN") {
+    return [
+      { key: "users", label: "Active Users", value: summary.users ?? 0 },
+      { key: "managers", label: "Managers", value: summary.managers ?? 0 },
+      { key: "executives", label: "Executives", value: summary.executives ?? 0 },
+      { key: "fieldExecutives", label: "Field Executives", value: summary.fieldExecutives ?? 0 },
+      { key: "leads", label: "Leads", value: summary.leads ?? 0 },
+      { key: "inventory", label: "Inventory", value: summary.inventory ?? 0 },
+    ];
+  }
+  if (MANAGEMENT_ROLES.includes(role)) {
+    return [
+      { key: "teamMembers", label: "Team Members", value: summary.teamMembers ?? 0 },
+      { key: "executives", label: "Executives", value: summary.executives ?? 0 },
+      { key: "fieldExecutives", label: "Field Team", value: summary.fieldExecutives ?? 0 },
+      { key: "channelPartners", label: "Channel Partners", value: summary.channelPartners ?? 0 },
+      { key: "teamLeads", label: "Team Leads", value: summary.teamLeads ?? 0 },
+      { key: "dueFollowUpsToday", label: "Follow-ups Today", value: summary.dueFollowUpsToday ?? 0 },
+    ];
+  }
+  if (role === "EXECUTIVE" || role === "FIELD_EXECUTIVE") {
+    return [
+      { key: "assignedLeads", label: "Assigned Leads", value: summary.assignedLeads ?? 0 },
+      { key: "openLeads", label: "Open Leads", value: summary.openLeads ?? 0 },
+      { key: "closedLeads", label: "Closed Leads", value: summary.closedLeads ?? 0 },
+      { key: "dueFollowUpsToday", label: "Follow-ups Today", value: summary.dueFollowUpsToday ?? 0 },
+    ];
+  }
+  if (role === "CHANNEL_PARTNER") {
+    return [
+      { key: "createdLeads", label: "Created Leads", value: summary.createdLeads ?? 0 },
+      { key: "closedLeads", label: "Closed Leads", value: summary.closedLeads ?? 0 },
+    ];
+  }
+  return [];
+};
 
 const initials = (name: string) =>
   String(name || "")
@@ -82,13 +129,20 @@ export const ProfileScreen = () => {
     return () => clearTimeout(timer);
   }, [success]);
 
-  const summaryRows = useMemo(
-    () =>
-      Object.entries(summary || {})
-        .filter(([, value]) => typeof value === "number")
-        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
-    [summary],
-  );
+  const summaryRows = useMemo(() => {
+    const cards = toSummaryCards(String(profile?.role || ""), summary || {});
+    if (cards.length) return cards.map((card) => [card.label, card.value] as [string, number]);
+    // A role web has no cards for: show what the server sent rather than nothing.
+    return Object.entries(summary || {})
+      .filter(([, value]) => typeof value === "number")
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+      .map(([key, value]) => [prettifyLabel(key), value] as [string, number]);
+  }, [profile?.role, summary]);
+
+  const showMessage = useCallback((text: string, isError?: boolean) => {
+    if (isError) setError(text);
+    else setSuccess(text);
+  }, []);
 
   const saveProfile = async () => {
     try {
@@ -136,12 +190,18 @@ export const ProfileScreen = () => {
       const uri = String(file.uri || "");
       if (!uri) return;
 
-      const uploaded = await uploadChatFile({
-        uri,
-        name: file.fileName || `profile-${Date.now()}.jpg`,
-        mimeType: file.mimeType || "image/jpeg",
-      });
-      const url = String(uploaded?.fileUrl || "").trim();
+      // The same upload category web uses, so the file lands under the same
+      // access rules as a photo set from the desktop.
+      const uploaded = await uploadFile(
+        {
+          uri,
+          name: file.fileName || `profile-${Date.now()}.jpg`,
+          mimeType: file.mimeType || "image/jpeg",
+          size: Number(file.fileSize || 0),
+        },
+        "profile-images",
+      );
+      const url = String(uploaded?.url || "").trim();
       if (!url) {
         setError("Upload failed");
         return;
@@ -207,7 +267,7 @@ export const ProfileScreen = () => {
               disabled={!profile?.profileImageUrl}
             >
               {profile?.profileImageUrl ? (
-                <Image source={{ uri: String(profile.profileImageUrl) }} style={styles.avatar} />
+                <Image source={{ uri: toAbsoluteUrl(String(profile.profileImageUrl)) }} style={styles.avatar} />
               ) : (
                 <View style={styles.avatarFallback}>
                   <Text style={styles.avatarFallbackText}>{initials(name || profile?.name || "User")}</Text>
@@ -263,6 +323,9 @@ export const ProfileScreen = () => {
           </View>
         </AppCard>
 
+        <PushNotificationCard />
+        {profile ? <ProfileAttendanceSection role={profile.role} onMessage={showMessage} /> : null}
+
         <View style={styles.twoCol}>
           <AppCard style={styles.metaCard as object}>
             <Text style={styles.cardTitle}>Reporting</Text>
@@ -294,7 +357,7 @@ export const ProfileScreen = () => {
           ) : (
             summaryRows.map(([key, value]) => (
               <View key={key} style={styles.tile}>
-                <Text style={styles.tileLabel}>{prettifyLabel(key)}</Text>
+                <Text style={styles.tileLabel}>{key}</Text>
                 <Text style={styles.tileValue}>{Number(value || 0).toLocaleString("en-IN")}</Text>
               </View>
             ))
@@ -311,7 +374,7 @@ export const ProfileScreen = () => {
         <Pressable style={styles.previewBackdrop} onPress={() => setImagePreviewOpen(false)}>
           <View style={styles.previewCard}>
             {profile?.profileImageUrl ? (
-              <Image source={{ uri: String(profile.profileImageUrl) }} style={styles.previewImage} resizeMode="contain" />
+              <Image source={{ uri: toAbsoluteUrl(String(profile.profileImageUrl)) }} style={styles.previewImage} resizeMode="contain" />
             ) : null}
           </View>
         </Pressable>
@@ -320,24 +383,24 @@ export const ProfileScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   error: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   profileCard: {
     marginBottom: 10,
@@ -353,20 +416,20 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 32,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
   },
   avatarFallback: {
     width: 64,
     height: 64,
     borderRadius: 32,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#f1f5f9",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surfaceMuted,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarFallbackText: {
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "700",
     fontSize: 20,
   },
@@ -384,23 +447,23 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   label: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
     textTransform: "uppercase",
     marginBottom: 4,
   },
   readonly: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     minHeight: 46,
     justifyContent: "center",
     paddingHorizontal: 12,
     marginBottom: 8,
   },
   readonlyText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 13,
     fontWeight: "600",
   },
@@ -416,7 +479,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   cardTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 12,
     fontWeight: "700",
     marginBottom: 6,
@@ -424,7 +487,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   meta: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
     marginTop: 3,
   },
@@ -437,20 +500,20 @@ const styles = StyleSheet.create({
   tile: {
     width: "48%",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   tileLabel: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 1,
   },
   tileValue: {
     marginTop: 4,
-    color: "#0f172a",
+    color: c.text,
     fontSize: 22,
     fontWeight: "700",
   },
@@ -469,10 +532,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#0b1220",
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: c.slate[700],
   },
   previewImage: {
     width: "100%",
     height: "100%",
   },
-});
+}));

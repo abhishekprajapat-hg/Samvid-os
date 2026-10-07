@@ -43,10 +43,12 @@ import {
   getLeaveBalanceForAdmin,
   getUserAttendanceForAdmin,
 } from "../../services/attendanceService";
+import { getCustomRoles } from "../../services/roleService";
 import { getTasks } from "../../services/taskService";
 import { getProjectsWithMeta } from "../../services/projectService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const REPORTING_PARENT_ROLES = {
   MANAGER: ["ADMIN"],
@@ -55,7 +57,8 @@ const REPORTING_PARENT_ROLES = {
   PRODUCTION_EXECUTIVE: ["MANAGER"],
   COMMUNITY_MANAGER: ["MANAGER"],
   CHANNEL_PARTNER: ["MANAGER"],
-  COWORKING_ADMIN: ["ADMIN"],
+  // Every role except Admin reports to a Manager.
+  COWORKING_ADMIN: ["MANAGER"],
 };
 
 const ROLE_LABELS = {
@@ -327,6 +330,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [profile, setProfile] = useState(null);
+  const [customRoles, setCustomRoles] = useState([]);
   const [performance, setPerformance] = useState(null);
   const [users, setUsers] = useState([]);
   const [showAttendanceDetail, setShowAttendanceDetail] = useState(false);
@@ -376,13 +380,17 @@ const UserDetailsEditor = ({ theme = "light" }) => {
       setLoading(true);
       setError("");
 
-      const [profileData, usersData] = await Promise.all([
+      const [profileData, usersData, rolesData] = await Promise.all([
         getUserProfileById(userId),
         getUsers(),
+        // A company with no named roles is the normal case, not a failure, so
+        // this never takes the page down with it.
+        getCustomRoles().catch(() => ({ roles: [] })),
       ]);
 
       const resolvedProfile = profileData?.profile || null;
       const rows = Array.isArray(usersData?.users) ? usersData.users : [];
+      setCustomRoles(Array.isArray(rolesData?.roles) ? rolesData.roles : []);
 
       if (!resolvedProfile) {
         setProfile(null);
@@ -399,6 +407,12 @@ const UserDetailsEditor = ({ theme = "light" }) => {
         phone: resolvedProfile.phone || "",
         roleType: resolvedProfile.roleType || "COMMERCIAL",
         role: resolvedProfile.role || "MANAGER",
+        /*
+         * Held apart from role rather than folded into it. Everything below
+         * branches on the built-in role - reporting, the channel partner
+         * fields - and a "custom:..." value in that field would break all of it.
+         */
+        customRoleId: getEntityId(resolvedProfile.customRoleId),
         reportingToId: getEntityId(resolvedProfile.parentId),
         isActive: Boolean(resolvedProfile.isActive),
         canViewInventory: Boolean(resolvedProfile.canViewInventory),
@@ -597,6 +611,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
     return [
       { label: "Present / Working", value: Number(summary.presentDays || 0), tone: "emerald" },
       { label: "Late", value: Number(summary.lateDays || 0), tone: "rose" },
+      { label: "On time", value: `${Number(summary.punctualityPercent || 0)}%`, tone: "emerald" },
       { label: "Half Day", value: Number(summary.halfDays || 0), tone: "blue" },
       { label: "Absent", value: Number(summary.absentDays || 0), tone: "rose" },
       { label: "Leave", value: Number(summary.leaveDays || 0), tone: "teal" },
@@ -612,11 +627,17 @@ const UserDetailsEditor = ({ theme = "light" }) => {
     const absentDays = Number(summary.absentDays || 0);
     const lateDays = Number(summary.lateDays || 0);
     const totalWorkedHours = Number(summary.totalWorkedHours || 0);
-    const workingDaysInMonth = calendarDays.filter((day) => day.dateKey && !day.isSunday).length;
+    // The server counts working days elapsed (weekly offs, future days and
+    // days before joining excluded) and the percentage from the records.
+    const workingDaysInMonth = Number.isFinite(Number(summary.workingDays))
+      ? Number(summary.workingDays)
+      : calendarDays.filter((day) => day.dateKey && !day.isSunday).length;
     const attendedDays = presentDays + halfDays * 0.5;
-    const attendancePercent = workingDaysInMonth
-      ? Math.min(100, Math.round((attendedDays / workingDaysInMonth) * 100))
-      : 0;
+    const attendancePercent = Number.isFinite(Number(summary.attendancePercent))
+      ? Number(summary.attendancePercent)
+      : workingDaysInMonth
+        ? Math.min(100, Math.round((attendedDays / workingDaysInMonth) * 100))
+        : 0;
 
     const donutData = [
       { name: "Present", value: presentDays, color: CHART_COLORS.emerald },
@@ -806,8 +827,47 @@ const UserDetailsEditor = ({ theme = "light" }) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleRoleChange = (role) => {
-    setFormData((prev) => ({ ...prev, role, reportingToId: "", canViewInventory: role === "CHANNEL_PARTNER" ? prev.canViewInventory : false }));
+  /*
+   * One flat list of roles: the ones the CRM ships and the ones this company
+   * named. Which is which is not a distinction anyone is choosing by, and
+   * leaving the named ones out meant a role you had just created could not be
+   * given to anybody from here.
+   */
+  const roleOptions = useMemo(() => [
+    ...Object.entries(ROLE_LABELS)
+      .filter(([role]) => role !== "ADMIN" || profile?.role === "ADMIN")
+      .map(([value, label]) => ({ value, label })),
+    ...customRoles.map((row) => ({
+      value: `custom:${row._id}`,
+      label: row.name,
+      baseRole: row.baseRole,
+      businessCategory: row.businessCategory,
+    })),
+  ], [customRoles, profile?.role]);
+
+  const selectedRoleValue = formData.customRoleId ? `custom:${formData.customRoleId}` : formData.role;
+  const selectedCustomRole = formData.customRoleId
+    ? customRoles.find((row) => String(row._id) === String(formData.customRoleId)) || null
+    : null;
+
+  const handleRoleChange = (value) => {
+    /*
+     * A named role carries its own base role and category; picking a built-in
+     * one by hand means the person comes off the named role entirely. Keyed on
+     * the "custom:" prefix rather than on the option carrying a base role, so a
+     * role saved without one cannot land "custom:..." in the role field.
+     */
+    const isNamedRole = String(value).startsWith("custom:");
+    const picked = isNamedRole ? roleOptions.find((option) => option.value === value) : null;
+    const role = isNamedRole ? picked?.baseRole || "EXECUTIVE" : value;
+    setFormData((prev) => ({
+      ...prev,
+      role,
+      customRoleId: isNamedRole ? String(value).slice("custom:".length) : "",
+      roleType: picked?.businessCategory || prev.roleType,
+      reportingToId: "",
+      canViewInventory: role === "CHANNEL_PARTNER" ? prev.canViewInventory : false,
+    }));
   };
 
   const scrollToSection = (ref) => {
@@ -855,6 +915,9 @@ const UserDetailsEditor = ({ theme = "light" }) => {
       phone: String(formData.phone || "").trim(),
       roleType: formData.roleType,
       role: formData.role,
+      // Sent explicitly either way: blank is how the server is told the person
+      // came off a named role, and leaving it out would keep the old one.
+      customRoleId: formData.customRoleId || null,
       reportingToId: needsReporting ? formData.reportingToId : null,
       isActive: Boolean(formData.isActive),
       canViewInventory:
@@ -1005,7 +1068,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
         <section className={`lg:col-span-4 rounded-xl border p-4 ${isDarkTheme ? "border-slate-700 bg-slate-900/75" : "border-slate-200 bg-white"}`}>
           <div className="flex items-center gap-3">
             <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-lg font-bold ${isDarkTheme ? "bg-cyan-500/10 text-cyan-300" : "bg-cyan-50 text-cyan-700"}`}>
-              {initials || <UserCircle2 size={26} />}
+              <AvatarFace user={profile} initials={initials} fallback={<UserCircle2 size={26} />} />
             </div>
             <div className="min-w-0">
               <h2 className={`truncate text-base font-bold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>
@@ -1065,13 +1128,13 @@ const UserDetailsEditor = ({ theme = "light" }) => {
             <label className="space-y-0.5">
               <span className={`text-[10px] font-semibold ${isDarkTheme ? "text-slate-400" : "text-slate-500"}`}>Role</span>
               <select
-                value={formData.role}
+                value={selectedRoleValue}
                 onChange={(event) => handleRoleChange(event.target.value)}
                 disabled={isEditingSelf}
                 className={`w-full rounded-lg border px-2.5 py-1.5 text-xs ${isDarkTheme ? "border-slate-700 bg-slate-950 text-slate-100" : "border-slate-300 bg-white text-slate-800"} disabled:opacity-60`}
               >
-                {Object.entries(ROLE_LABELS).filter(([role]) => role !== "ADMIN" || profile.role === "ADMIN").map(([value, label]) => (
-                  <option key={value} value={value}>{label}</option>
+                {roleOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
             </label>
@@ -1080,13 +1143,20 @@ const UserDetailsEditor = ({ theme = "light" }) => {
               <select
                 value={formData.roleType}
                 onChange={(event) => handleChange("roleType", event.target.value)}
-                disabled={isEditingSelf}
+                /* A named role carries its own category, and the server writes
+                   that one on save. Left editable the box would appear to work
+                   and then revert. */
+                disabled={isEditingSelf || Boolean(selectedCustomRole)}
                 className={`w-full rounded-lg border px-2.5 py-1.5 text-xs ${isDarkTheme ? "border-slate-700 bg-slate-950 text-slate-100" : "border-slate-300 bg-white text-slate-800"} disabled:opacity-60`}
               >
                 <option value="COMMERCIAL">Commercial</option>
                 <option value="RESIDENTIAL">Residential</option>
-                <option value="BOTH">Both</option>
+                <option value="COWORKING">Coworking</option>
+                <option value="BOTH">All categories</option>
               </select>
+              {selectedCustomRole ? (
+                <span className="block text-[10px] text-slate-400">Set by the {selectedCustomRole.name} role.</span>
+              ) : null}
             </label>
 
             <label className="space-y-0.5">
@@ -1654,7 +1724,7 @@ const UserDetailsEditor = ({ theme = "light" }) => {
               </button>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-6">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-7">
               {attendanceSummaryCards.map((card) => (
                 <StatTile key={card.label} label={card.label} value={card.value} isDarkTheme={isDarkTheme} />
               ))}

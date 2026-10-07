@@ -27,7 +27,7 @@ const generateBookingCode = async (companyId) => {
   const counter = await CoworkingIdCounter.findOneAndUpdate(
     { companyId, category: "BOOKING" },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   return `BKG-${String(counter.seq).padStart(5, "0")}`;
 };

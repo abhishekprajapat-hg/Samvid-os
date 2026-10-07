@@ -11,7 +11,7 @@ const LEVEL_TONES = {
 const readable = (value) => String(value || "").replaceAll("_", " ").toLowerCase();
 
 const LevelPill = ({ level }) => (
-  <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ${LEVEL_TONES[level] || LEVEL_TONES.RECORDED}`}>
+  <span className={`inline-flex rounded-full px-2 py-0.5 text-[12px] font-semibold capitalize ${LEVEL_TONES[level] || LEVEL_TONES.RECORDED}`}>
     {readable(level)}
   </span>
 );
@@ -56,12 +56,12 @@ export default function AttendanceViolations({ month, canReview }) {
         </span>
         <div className="min-w-0 flex-1">
           <h4 className="text-[14px] font-semibold leading-tight text-slate-900">Monthly Attendance Violations &mdash; {month}</h4>
-          <p className="mt-0.5 text-[12px] text-slate-500">Track policy violations and attendance insights</p>
+          <p className="mt-0.5 text-[13px] text-slate-500">Track policy violations and attendance insights</p>
         </div>
       </div>
 
       <div className="space-y-4 p-5">
-        <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11.5px] leading-relaxed text-amber-900">
+        <p className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[12.5px] leading-relaxed text-amber-900">
           <AlertTriangle size={14} className="mt-px shrink-0" aria-hidden="true" />
           <span>
             Rejected-leave absence: first two recorded without warning; third and fourth warning;
@@ -70,21 +70,21 @@ export default function AttendanceViolations({ month, canReview }) {
           </span>
         </p>
 
-        {error ? <p role="alert" className="text-sm text-rose-600">{error}</p> : null}
+        {error ? <p role="alert" className="text-[15px] text-rose-600">{error}</p> : null}
 
         {!data ? (
-          <p className="text-sm text-slate-500">Loading…</p>
+          <p className="text-[15px] text-slate-500">Loading…</p>
         ) : (
           <>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {data.summaries.map((row) => (
                 <div key={row.userId} className="rounded-lg border border-slate-200 p-3">
-                  <strong className="block truncate text-[13px] text-slate-900">{row.name}</strong>
-                  <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11.5px] text-slate-500">
+                  <strong className="block truncate text-[14px] text-slate-900">{row.name}</strong>
+                  <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[12.5px] text-slate-500">
                     Rejected leave: <span className="font-mono font-semibold text-slate-800">{row.rejectedLeave}</span>
                     <LevelPill level={row.rejectedLevel} />
                   </p>
-                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[11.5px] text-slate-500">
+                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[12.5px] text-slate-500">
                     Uninformed: <span className="font-mono font-semibold text-slate-800">{row.uninformed}</span>
                     <LevelPill level={row.uninformedLevel} />
                   </p>
@@ -93,16 +93,16 @@ export default function AttendanceViolations({ month, canReview }) {
             </div>
 
             <details className="rounded-lg border border-slate-200 p-3">
-              <summary className="cursor-pointer text-[12.5px] font-semibold text-slate-700">
+              <summary className="cursor-pointer text-[13.5px] font-semibold text-slate-700">
                 Occurrences and audit history ({data.violations.length})
               </summary>
               {data.violations.map((row) => (
-                <article key={row._id} className="mt-2 border-t border-slate-100 pt-2 text-[11.5px]">
+                <article key={row._id} className="mt-2 border-t border-slate-100 pt-2 text-[12.5px]">
                   <div className="flex flex-wrap items-center gap-2">
                     <strong className="text-slate-900">{row.userName}</strong>
                     <span className="font-mono text-slate-500">{row.date}</span>
                     <span className="capitalize text-slate-600">{readable(row.kind)} #{row.ordinal}</span>
-                    {row.active ? <LevelPill level={row.level} /> : <span className="text-slate-400">Resolved / excused</span>}
+                    {row.active ? <LevelPill level={row.level} /> : <span className="text-slate-500">Resolved / excused</span>}
                   </div>
                   {row.history.map((event, index) => (
                     <p key={index} className="mt-1 text-slate-500">
@@ -126,18 +126,18 @@ export default function AttendanceViolations({ month, canReview }) {
               ))}
             </details>
 
-            <p className="text-[11.5px] text-slate-500">{data.policyNote}</p>
+            <p className="text-[12.5px] text-slate-500">{data.policyNote}</p>
           </>
         )}
 
         {selected ? (
           <form onSubmit={save} className="space-y-2 rounded-lg border border-slate-200 p-3">
-            <h5 className="text-[13px] font-semibold text-slate-900">Review {selected.userName} &mdash; {selected.date}</h5>
+            <h5 className="text-[14px] font-semibold text-slate-900">Review {selected.userName} &mdash; {selected.date}</h5>
             <select
               aria-label="Review action"
               value={action}
               onChange={(event) => setAction(event.target.value)}
-              className="h-9 w-full rounded-lg border border-slate-300 px-2 text-[13px] outline-none"
+              className="h-9 w-full rounded-lg border border-slate-300 px-2 text-[14px] outline-none"
             >
               {selected.level !== "RECORDED" ? <option value="WARNING_ISSUED">Warning issued</option> : null}
               <option value="MANAGEMENT_REVIEW">Management review</option>
@@ -150,14 +150,14 @@ export default function AttendanceViolations({ month, canReview }) {
               rows={3}
               value={note}
               onChange={(event) => setNote(event.target.value)}
-              className="w-full resize-y rounded-lg border border-slate-300 p-2 text-[13px] outline-none"
+              className="w-full resize-y rounded-lg border border-slate-300 p-2 text-[14px] outline-none"
               placeholder="Approved wording, action taken, or reason for exemption"
             />
             <div className="flex gap-2">
-              <button disabled={busy} className="h-9 rounded-lg bg-blue-600 px-3 text-[13px] font-semibold text-white disabled:opacity-60">
+              <button disabled={busy} className="h-9 rounded-lg bg-blue-600 px-3 text-[14px] font-semibold text-white disabled:opacity-60">
                 {busy ? "Saving…" : "Save review"}
               </button>
-              <button type="button" onClick={() => setSelected(null)} className="h-9 rounded-lg border border-slate-300 px-3 text-[13px] font-semibold text-slate-600">
+              <button type="button" onClick={() => setSelected(null)} className="h-9 rounded-lg border border-slate-300 px-3 text-[14px] font-semibold text-slate-600">
                 Cancel
               </button>
             </div>

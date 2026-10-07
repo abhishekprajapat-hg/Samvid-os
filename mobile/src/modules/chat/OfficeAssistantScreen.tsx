@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppInput } from "../../components/common/ui";
 import { askOfficeAssistant } from "../../services/officeAssistantService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 type BotMessage = {
   id: string;
@@ -206,7 +207,7 @@ export const OfficeAssistantScreen = () => {
               onPress={toggleVoice}
               disabled={!isMicSupported || loading}
             >
-              <Ionicons name={isListening ? "mic" : "mic-outline"} size={18} color="#0f172a" />
+              <Icon name={isListening ? "mic" : "mic-outline"} size={18} color={themeColor("#161c24")} />
             </Pressable>
           </View>
 
@@ -217,7 +218,7 @@ export const OfficeAssistantScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   card: {
     flex: 1,
     minHeight: 0,
@@ -248,30 +249,30 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   userBubble: {
-    backgroundColor: "#0f172a",
+    backgroundColor: c.text,
   },
   botBubble: {
-    backgroundColor: "#f1f5f9",
+    backgroundColor: c.surfaceMuted,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
   },
   bubbleText: {
     fontSize: 12,
     lineHeight: 18,
   },
   userBubbleText: {
-    color: "#f8fafc",
+    color: c.bg,
   },
   botBubbleText: {
-    color: "#0f172a",
+    color: c.text,
   },
   composer: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
     padding: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   inputRow: {
     flexDirection: "row",
@@ -290,12 +291,12 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   voiceBtnDisabled: {
     opacity: 0.45,
   },
-});
+}));

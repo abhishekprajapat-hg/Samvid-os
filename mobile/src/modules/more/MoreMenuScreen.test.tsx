@@ -1,26 +1,53 @@
 import React from "react";
 import { fireEvent, render } from "@testing-library/react-native";
-import { MoreMenuScreen, getMoreMenuItemsForRole } from "./MoreMenuScreen";
-import { supportedRoles } from "../../test/fixtures";
+import { MoreMenuScreen } from "./MoreMenuScreen";
 import type { UserRole } from "../../types";
 
 let mockRole: UserRole | null = "ADMIN";
 const mockNavigate = jest.fn();
 const mockParentNavigate = jest.fn();
 const mockMarkAllChatRead = jest.fn();
+const mockLogout = jest.fn();
 
 jest.mock("../../context/AuthContext", () => ({
   useAuth: () => ({
     role: mockRole,
+    user: { name: "Demo User", canViewInventory: true },
+    logout: mockLogout,
   }),
+}));
+
+jest.mock("../../context/PermissionContext", () => ({
+  usePermissions: () => ({ permissions: null, enforcePageAccess: false }),
 }));
 
 jest.mock("../../context/RealtimeAlertsContext", () => ({
   useRealtimeAlerts: () => ({
     chatUnreadTotal: 4,
+    notificationUnreadTotal: 0,
     markAllChatRead: mockMarkAllChatRead,
   }),
 }));
+
+// RoleTabs pulls in every screen; the menu only needs these two exports.
+jest.mock("../../navigation/RoleTabs", () => ({
+  isScreenBuilt: () => true,
+  MORE_EXCLUDED_SCREENS: ["Dashboard", "Leads", "Inventory", "Chat"],
+}));
+
+jest.mock("../../theme/ThemeContext", () => ({
+  useTheme: () => ({ mode: "light", setMode: jest.fn() }),
+}));
+
+const renderMenu = () =>
+  render(
+    <MoreMenuScreen
+      navigation={{
+        navigate: mockNavigate,
+        getParent: () => ({ navigate: mockParentNavigate }),
+      }}
+    />,
+  );
 
 describe("MoreMenuScreen", () => {
   beforeEach(() => {
@@ -28,65 +55,38 @@ describe("MoreMenuScreen", () => {
     mockNavigate.mockReset();
     mockParentNavigate.mockReset();
     mockMarkAllChatRead.mockReset();
+    mockLogout.mockReset();
   });
 
-  it.each(supportedRoles)("returns deterministic More menu items for %s", (role) => {
-    const labels = getMoreMenuItemsForRole(role).map((item) => item.label);
-
-    expect(labels).toContain("Samvid Assistant");
-    expect(labels).toContain("Profile");
-    expect(labels).toContain("Tasks");
-    expect(labels).toContain("Leaderboard");
-    expect(labels).toContain("Targets");
-    expect(labels).toContain("Calendar");
-
-    if (role === "ADMIN" || role === "SUPER_ADMIN" || role === "MANAGER") {
-      expect(labels).toContain("Users");
-      expect(labels).toContain("Reports");
-      expect(labels).toContain("Settings");
-      expect(labels).toContain("Meta Ads");
-    } else {
-      expect(labels).not.toContain("Users");
-      expect(labels).not.toContain("Reports");
-      expect(labels).not.toContain("Settings");
-      expect(labels).not.toContain("Meta Ads");
-    }
-
-    if (role === "CHANNEL_PARTNER") {
-      expect(labels).not.toContain("Attendance");
-      expect(labels).not.toContain("Finance");
-    } else {
-      expect(labels).toContain("Attendance");
-      expect(labels).toContain("Finance");
+  it("keeps the Samvid Assistant and account rows for every role", () => {
+    for (const role of ["SUPER_ADMIN", "ADMIN", "MANAGER", "EXECUTIVE", "CHANNEL_PARTNER"] as UserRole[]) {
+      mockRole = role;
+      const screen = renderMenu();
+      expect(screen.getByTestId("more-menu-samvid-assistant")).toBeTruthy();
+      expect(screen.getByText("Privacy Policy")).toBeTruthy();
+      expect(screen.getByText("Log out")).toBeTruthy();
+      screen.unmount();
     }
   });
 
-  it("renders the production executive menu without falling back to channel-partner restrictions", () => {
-    mockRole = "PRODUCTION_EXECUTIVE";
-
-    const screen = render(<MoreMenuScreen navigation={{ navigate: mockNavigate }} />);
-
-    expect(screen.getByText("Attendance")).toBeTruthy();
-    expect(screen.getByText("Finance")).toBeTruthy();
-    expect(screen.queryByText("Users")).toBeNull();
-    expect(screen.queryByText("Chat")).toBeNull();
-  });
-
-  it("opens Chat through the parent navigator and marks messages read", () => {
+  it("gives a Super Admin the same management rows as an Admin", () => {
     mockRole = "ADMIN";
-    const screen = render(
-      <MoreMenuScreen
-        navigation={{
-          navigate: mockNavigate,
-          getParent: () => ({ navigate: mockParentNavigate }),
-        }}
-      />,
-    );
+    const adminRows = renderMenu().queryAllByRole("button").length;
+    mockRole = "SUPER_ADMIN";
+    const superAdminRows = renderMenu().queryAllByRole("button").length;
+    expect(superAdminRows).toBe(adminRows);
+  });
 
-    fireEvent.press(screen.getByTestId("more-menu-chat"));
-
-    expect(mockMarkAllChatRead).toHaveBeenCalledTimes(1);
-    expect(mockParentNavigate).toHaveBeenCalledWith("Chat");
+  it("opens the assistant through the parent navigator", () => {
+    const screen = renderMenu();
+    fireEvent.press(screen.getByTestId("more-menu-samvid-assistant"));
+    expect(mockParentNavigate).toHaveBeenCalledWith("Office Assistant");
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("logs out from the account section", () => {
+    const screen = renderMenu();
+    fireEvent.press(screen.getByText("Log out"));
+    expect(mockLogout).toHaveBeenCalledTimes(1);
   });
 });

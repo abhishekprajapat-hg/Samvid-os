@@ -64,6 +64,11 @@ const normalizeMessage = (row: any): ChatMessage => {
           avatarUrl: String(row.sender.avatarUrl || row.sender.profileImageUrl || ""),
         }
       : undefined,
+    deliveredTo: Array.isArray(row?.deliveredTo) ? row.deliveredTo : [],
+    seenBy: Array.isArray(row?.seenBy) ? row.seenBy : [],
+    room: row?.room ? String(row.room?._id || row.room) : undefined,
+    conversation: row?.conversation ? String(row.conversation?._id || row.conversation) : undefined,
+    sharedProperty: row?.sharedProperty && typeof row.sharedProperty === "object" ? row.sharedProperty : null,
   };
 };
 
@@ -258,10 +263,13 @@ export const sendDirectMessage = async ({
   conversationId,
   recipientId,
   attachment,
+  sharedProperty,
 }: {
   text?: string;
   conversationId?: string;
   recipientId?: string;
+  /* A property card, as web's InventoryDetails "Share to chat" sends it. */
+  sharedProperty?: Record<string, unknown> | null;
   attachment?: {
     fileName?: string;
     fileUrl?: string;
@@ -286,6 +294,7 @@ export const sendDirectMessage = async ({
   if (typeof text === "string") payload.text = text;
   if (conversationId) payload.conversationId = conversationId;
   if (recipientId) payload.recipientId = recipientId;
+  if (sharedProperty) (payload as any).sharedProperty = sharedProperty;
   if (attachment) {
     payload.attachment = attachment;
     (payload as any).mediaAttachments = [
@@ -462,4 +471,62 @@ export const updateCallLog = async ({
     }
     throw error;
   }
+};
+
+/* ------------------------------------------------ room and message state -- */
+/*
+ * The six calls web's TeamChat makes that mobile did not: open a direct room
+ * before the first message, read receipts both ways, and delete / clear. Each
+ * also has a socket event, which the conversation screen prefers; these are the
+ * HTTP fallbacks web uses when the socket is down.
+ */
+
+export const normalizeChatMessage = normalizeMessage;
+
+export const createDirectRoom = async ({ recipientId }: { recipientId?: string } = {}) => {
+  const id = String(recipientId || "").trim();
+  if (!id) return null;
+  const res = await api.post("/chat/rooms/direct", { recipientId: id });
+  return res.data?.room || null;
+};
+
+export const markConversationRead = async (conversationId: string) => {
+  const id = String(conversationId || "").trim();
+  if (!id) return null;
+  const res = await api.patch(`/chat/rooms/${id}/read`);
+  return res.data?.room || null;
+};
+
+export const markMessageDelivered = async (messageId: string) => {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+  const res = await api.patch(`/chat/messages/${id}/delivered`);
+  return res.data?.message ? normalizeMessage(res.data.message) : null;
+};
+
+export const markMessageSeen = async (messageId: string) => {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+  const res = await api.patch(`/chat/messages/${id}/seen`);
+  return res.data?.message ? normalizeMessage(res.data.message) : null;
+};
+
+export const deleteConversationMessage = async ({
+  messageId,
+  scope = "self",
+}: {
+  messageId: string;
+  scope?: "self" | "everyone";
+}) => {
+  const id = String(messageId || "").trim();
+  if (!id) return null;
+  const res = await api.patch(`/chat/messages/${id}/delete`, { scope: scope === "everyone" ? "everyone" : "self" });
+  return res.data || null;
+};
+
+export const clearConversationMessages = async (conversationId: string) => {
+  const id = String(conversationId || "").trim();
+  if (!id) return null;
+  const res = await api.patch(`/chat/rooms/${id}/clear`);
+  return res.data || null;
 };

@@ -18,31 +18,30 @@ const Login = ({ onLogin, portal = "GENERAL", portalLabel = portal }) => {
     setIsLoading(true);
     setError("");
 
+    /*
+     * The shared sign-in page sends no portal at all.
+     *
+     * It used to send portal:"GENERAL", which the API refuses for an Admin
+     * ("Admin must login via admin portal"), and the page then silently retried
+     * as "ADMIN". So every Admin sign-in cost a 403 before it succeeded - a
+     * console error, a 403 in the server logs that looks like a failed
+     * authentication, and, because authLimiter only skips responses under 400,
+     * a slot out of the 8-per-15-minutes budget. Eight ordinary sign-ins from
+     * one IP locked the Admin out with "Too many failed auth attempts" without
+     * a single wrong password.
+     *
+     * Dropping the parameter makes it one request. /login/admin still sends
+     * portal:"ADMIN", so that entrance keeps refusing non-admins.
+     */
     const submitLogin = (loginPortal) =>
       api.post("/auth/login", {
         email,
         password: passcode,
-        portal: loginPortal,
+        ...(loginPortal && loginPortal !== "GENERAL" ? { portal: loginPortal } : {}),
       });
 
     try {
-      let res;
-
-      try {
-        res = await submitLogin(portal);
-      } catch (err) {
-        const errorMessage = toErrorMessage(err, "Login failed");
-        const shouldRetryAsAdmin =
-          portal === "GENERAL"
-          && err?.response?.status === 403
-          && /admin must login via admin portal/i.test(errorMessage);
-
-        if (!shouldRetryAsAdmin) {
-          throw err;
-        }
-
-        res = await submitLogin("ADMIN");
-      }
+      const res = await submitLogin(portal);
 
       const { token, refreshToken, user, tenant } = res.data;
 
@@ -99,7 +98,9 @@ const Login = ({ onLogin, portal = "GENERAL", portalLabel = portal }) => {
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
+          <label htmlFor="login-email" className="sr-only">Email</label>
           <input
+            id="login-email"
             type="email"
             placeholder="Email"
             autoComplete="username"
@@ -114,7 +115,9 @@ const Login = ({ onLogin, portal = "GENERAL", portalLabel = portal }) => {
               size={14}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             />
+            <label htmlFor="login-password" className="sr-only">Password</label>
             <input
+              id="login-password"
               type="password"
               required
               autoComplete="current-password"

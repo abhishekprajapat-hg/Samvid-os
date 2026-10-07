@@ -702,7 +702,7 @@ const applyMetaIntegrationPatch = async ({
   const updated = await Company.findByIdAndUpdate(
     companyId,
     { $set: { metadata } },
-    { new: true },
+    { returnDocument: "after" },
   )
     .select("_id name subdomain status metadata")
     .lean();
@@ -1076,7 +1076,7 @@ exports.updateCompany = async (req, res) => {
     const updated = await Company.findByIdAndUpdate(
       companyId,
       { $set: patch },
-      { new: true },
+      { returnDocument: "after" },
     ).lean();
     if (!updated) {
       return res.status(404).json({ message: "Company not found" });
@@ -1532,7 +1532,7 @@ exports.updatePlan = async (req, res) => {
     const updated = await SubscriptionPlan.findByIdAndUpdate(
       planId,
       { $set: patch },
-      { new: true },
+      { returnDocument: "after" },
     ).lean();
     if (!updated) {
       return res.status(404).json({ message: "Plan not found" });
@@ -1894,7 +1894,7 @@ exports.updateMyTenantSettings = async (req, res) => {
     const updated = await Company.findByIdAndUpdate(
       req.user.companyId,
       { $set: patch },
-      { new: true },
+      { returnDocument: "after" },
     ).lean();
     if (!updated) return res.status(404).json({ message: "Company not found" });
 

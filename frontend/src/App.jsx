@@ -1,5 +1,5 @@
 import React, { useState, lazy, Suspense, useMemo, useEffect, useRef, useCallback } from "react";
-import { Routes, Route, useLocation, useNavigate, Navigate } from "react-router-dom";
+import { Routes, Route, useLocation, useNavigate, Navigate, Link } from "react-router-dom";
 import api from "./services/api";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ChatNotificationProvider } from "./context/chatNotificationProvider";
@@ -56,7 +56,7 @@ const ServiceTermsNotice = lazy(() => import("./modules/legal/ServiceTermsNotice
 const Performance = lazy(() => import("./modules/reports/Performance"));
 const UserProfile = lazy(() => import("./modules/profile/UserProfile"));
 const SharedInventoryView = lazy(() => import("./modules/inventory/SharedInventoryView"));
-const TaskManager = lazy(() => import("./modules/tasks/TaskManager"));
+const TaskManager = lazy(() => import("./modules/tasks/TaskWorkspace"));
 
 // TEMPORARY: Phase 4 component review surface. Removed in Phase 14.
 const KitchenSink = lazy(() => import("./modules/dev/KitchenSink"));
@@ -100,6 +100,25 @@ const ROLE_LABELS = {
   CHANNEL_PARTNER: "Channel Partner",
   COWORKING_ADMIN: "Coworking admin",
 };
+
+const NotFound = () => (
+  <div className="flex min-h-[60vh] flex-col items-center justify-center px-6 text-center">
+    <p className="text-[64px] font-semibold leading-none text-slate-300 dark:text-slate-700">404</p>
+    <h1 className="mt-4 text-[20px] font-semibold text-slate-900 dark:text-slate-100">
+      This page does not exist
+    </h1>
+    <p className="mt-2 max-w-md text-[14px] text-slate-500 dark:text-slate-400">
+      The link may be out of date, or the page may have moved. Check the address, or head back to
+      your dashboard.
+    </p>
+    <Link
+      to="/dashboard"
+      className="mt-6 rounded-lg bg-blue-600 px-4 py-2 text-[14px] font-medium text-white hover:bg-blue-700"
+    >
+      Back to dashboard
+    </Link>
+  </div>
+);
 
 const isProductionRole = (role) => PRODUCTION_ROLES.includes(role);
 
@@ -202,9 +221,9 @@ const resolvePageHeader = (pathname, userRole) => {
 
   if (pathname.startsWith("/calendar")) {
     return {
-      title: "Schedule Command Center",
-      subtitle: "Meetings, reminders and execution timeline visibility",
-      scopeLabel: "Schedule",
+      title: "Calendar",
+      subtitle: "Follow-ups, tasks and meetings in one place",
+      scopeLabel: "Calendar",
     };
   }
 
@@ -344,6 +363,9 @@ export default function App() {
     } catch {
       return {};
     }
+    // localStorage is not reactive, so these are not "unused" dependencies:
+    // they are the signal to re-read the stored user when the session changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoggedIn, userRole]);
 
   const isPublicPage = PUBLIC_ROUTE_PREFIXES.some((prefix) =>
@@ -751,7 +773,7 @@ export default function App() {
           withPageAccess(
             "tasks",
             <TaskManager theme={theme} />,
-            ["ADMIN", ...MANAGEMENT_ROLES, "EXECUTIVE", "FIELD_EXECUTIVE", ...PRODUCTION_ROLES],
+            ["ADMIN", ...MANAGEMENT_ROLES, "INSIDE_EXECUTIVE", "EXECUTIVE", "FIELD_EXECUTIVE", ...PRODUCTION_ROLES, "CHANNEL_PARTNER", "COWORKING_ADMIN"],
           )
         }
       />
@@ -844,6 +866,12 @@ export default function App() {
       <Route path="/service-terms" element={<ServiceTermsNotice />} />
       <Route path="/shared/inventory/:shareToken" element={<SharedInventoryView />} />
       <Route path="/portal/*" element={<Navigate to="/" replace />} />
+      {/*
+        * Catch-all. Without it an unknown path rendered the app shell around an
+        * empty content area - the sidebar and header were there, the page was
+        * simply blank, with nothing to tell the user the URL was wrong.
+        */}
+      <Route path="*" element={<NotFound />} />
     </Routes>
   ), [
     DashboardByRole,

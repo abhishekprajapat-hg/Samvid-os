@@ -6,29 +6,34 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#000000"
+      "backgroundColor": "#f5f7fa",
+      "dark": {
+        "image": "./assets/splash-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0d1219"
+      }
     },
     "ios": {
       "bundleIdentifier": "com.samvidos.crm",
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "This app uses the camera for video calls.",
-        "NSMicrophoneUsageDescription": "This app uses the microphone for voice and video calls.",
-        "NSPhotoLibraryUsageDescription": "This app uses the photo library to upload profile, chat, lead, and inventory media.",
+        "NSCameraUsageDescription": "Take photos of properties and documents to attach to leads, inventory and chats, and for video calls with your team.",
+        "NSMicrophoneUsageDescription": "Record audio for voice and video calls with your team.",
+        "NSPhotoLibraryUsageDescription": "Attach photos from your library to leads, inventory records and chats.",
         "NSPhotoLibraryAddUsageDescription": "This app saves generated or downloaded documents when you choose to export them.",
-        "NSLocationWhenInUseUsageDescription": "This app uses your location for attendance and field visit verification.",
+        "NSLocationWhenInUseUsageDescription": "Confirm you are at the office when you check in or out, and share your position with your manager during field visits.",
         "NSUserNotificationUsageDescription": "This app uses notifications for chat, call, approval, and task alerts."
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#f5f7fa"
       },
       "permissions": [
         "CAMERA",
@@ -51,7 +56,13 @@
       "@react-native-community/datetimepicker",
       "expo-font",
       "expo-mail-composer",
-      "expo-speech-recognition"
+      "expo-speech-recognition",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Confirm you are at the office when you check in or out."
+        }
+      ]
     ],
     "extra": {
       "eas": {

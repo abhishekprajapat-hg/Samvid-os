@@ -1,8 +1,11 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
-import { getCurrentUser, loginUser } from "../services/authService";
+import { getCurrentUser, loginUser, logoutUser } from "../services/authService";
 import { setUnauthorizedHandler } from "../services/api";
+import { cancelAllScheduledReminders, removeNotificationRegistration } from "../services/pushNotifications";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { sessionStorage } from "../storage/sessionStorage";
+import { resetBoardStore } from "../modules/coworking/boardStore";
 import type { User, UserRole } from "../types";
 import { getSessionTimeoutMs, readSystemSettings } from "../utils/systemSettings";
 
@@ -160,7 +163,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const logout = async () => {
+    /*
+     * Deregister the device first. A shared phone that a second person signs in
+     * on would otherwise keep delivering the first person's alerts, which is the
+     * same reason the server keys subscriptions on the device rather than the
+     * user. Best-effort: a failure here must not block signing out.
+     */
+    await removeNotificationRegistration().catch(() => {});
+    /*
+     * Then revoke the refresh token server-side, as web does. Bounded, because
+     * a phone with no signal must still be able to sign out: the local session
+     * is cleared either way, and the token expires on its own if this call
+     * never lands.
+     */
+    const refreshToken = await sessionStorage.getRefreshToken().catch(() => null);
+    await Promise.race([
+      logoutUser(refreshToken).catch(() => {}),
+      new Promise((resolve) => setTimeout(resolve, 5000)),
+    ]);
     await sessionStorage.clearSession();
+    resetBoardStore();
+    await cancelAllScheduledReminders();
+    AsyncStorage.removeItem("followUpReminderScheduled:v1").catch(() => {});
     setToken(null);
     setUser(null);
   };

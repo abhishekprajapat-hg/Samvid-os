@@ -87,14 +87,18 @@ const CRM_PAGES = Object.freeze([
     label: "Finance",
     group: "Business",
     path: "/finance",
-    actions: [PAGE_ACTIONS.VIEW, PAGE_ACTIONS.EXPORT],
+    // CREATE and EDIT arrived with the mobile Add Entry screen, which records
+    // an income or an expense against the shared ledger.
+    actions: [PAGE_ACTIONS.VIEW, PAGE_ACTIONS.CREATE, PAGE_ACTIONS.EDIT, PAGE_ACTIONS.EXPORT],
   },
   {
     key: "reports",
     label: "Reports",
     group: "Business",
     path: "/reports",
-    actions: [PAGE_ACTIONS.VIEW, PAGE_ACTIONS.EXPORT],
+    // CREATE and DELETE arrived with the custom report builder, which records a
+    // run in the history and can keep its settings as a template.
+    actions: [PAGE_ACTIONS.VIEW, PAGE_ACTIONS.CREATE, PAGE_ACTIONS.DELETE, PAGE_ACTIONS.EXPORT],
   },
   {
     key: "leaderboard",

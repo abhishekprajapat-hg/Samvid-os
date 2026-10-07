@@ -164,7 +164,9 @@ const CabinDetailPanel = ({ cabin, onClose, onAction, onOnboard, onHold, onTrans
             </div>
 
             <dl className="mt-3">
-              <Row label="Contact" value={cabin.client.contactPerson} />
+              <Row label={cabin.client.kind === "company" || !cabin.client.kind ? "Signing authority 1" : "Contact"} value={cabin.client.contactPerson} />
+              {cabin.client.signingAuthority2 ? <Row label="Signing authority 2" value={cabin.client.signingAuthority2} /> : null}
+              {cabin.client.secondPersonName ? <Row label="Person 2" value={cabin.client.secondPersonName} /> : null}
               <Row label="Phone" value={cabin.client.phone} icon={Phone} mono />
               <Row label="Email" value={cabin.client.email} icon={Mail} />
               <Row label="GSTIN" value={cabin.client.gstin} mono />
@@ -215,11 +217,14 @@ const CabinDetailPanel = ({ cabin, onClose, onAction, onOnboard, onHold, onTrans
 
             <dl className="mt-2">
               <Row label="Monthly rent" value={formatCurrency(contract.monthlyRent)} />
-              <Row label="Deposit" value={formatCurrency(contract.deposit)} />
+              <Row
+                label="Deposit"
+                value={`${formatCurrency(contract.deposit)}${contract.depositMode === "custom" ? " (custom)" : contract.depositMonths ? ` (${contract.depositMonths} ${contract.depositMonths === 1 ? "month" : "months"})` : ""}`}
+              />
               <Row label="Token paid" value={formatCurrency(contract.tokenAmount || 0)} />
               <Row label="Notice period" value={`${contract.noticePeriodDays ?? 30} days`} />
               <Row label="Date of birth" value={formatDate(clientDateOfBirth) || "-"} />
-              <div className="mt-3 border-t pt-2"><h4 className="text-xs font-semibold">Security Cheque</h4><Row label="Cheque number" value={contract.securityCheque?.number} /><Row label="Bank" value={contract.securityCheque?.bank} /><Row label="Amount" value={formatCurrency(contract.securityCheque?.amount || 0)} /><Row label="Cheque date" value={contract.securityCheque?.date} /></div>
+              <div className="mt-3 border-t pt-2"><h4 className="text-xs font-semibold">Security Cheque</h4><Row label="Cheque number" value={contract.securityCheque?.number} /><Row label="Bank" value={contract.securityCheque?.bank} /><Row label="Amount" value={formatCurrency(contract.securityCheque?.amount || 0)} /><Row label="Cheque date" value={contract.securityCheque?.date} />{contract.securityCheque?.file?.url ? <Row label="Cheque copy" value={<a href={contract.securityCheque.file.url} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 hover:underline dark:text-blue-400">View {contract.securityCheque.file.fileName || "cheque"}</a>} /> : <Row label="Cheque copy" value="Not uploaded" />}</div>
               <Row
                 label="Payment status"
                 value={

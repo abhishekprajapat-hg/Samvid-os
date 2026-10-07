@@ -1,6 +1,15 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
+import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
+import {
+  adminRequestContext,
+  adminRequestTarget,
+  adminRequestTitle,
+  type AdminRequestEvent,
+} from "../../context/realtimeEvents";
 import { Alert, Linking, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { Screen } from "../../components/common/Screen";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
 import { useAuth } from "../../context/AuthContext";
@@ -14,12 +23,14 @@ import {
   type LeadPaymentApprovalRequest,
   type LeadStatusRequest,
 } from "../../services/leadService";
+import { getAdminUserDeleteRequests, reviewUserDeleteRequest } from "../../services/userService";
 import {
   approveInventoryRequest,
   getPendingInventoryRequests,
   rejectInventoryRequest,
 } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 type InventoryRequest = {
   _id: string;
@@ -33,18 +44,77 @@ type InventoryRequest = {
   proposedData?: Record<string, unknown>;
 };
 
+type UserDeleteRequest = {
+  _id: string;
+  status?: string;
+  reason?: string;
+  createdAt?: string;
+  requestedBy?: { _id?: string; name?: string; role?: string };
+  targetUser?: { _id?: string; name?: string; role?: string; email?: string } | null;
+  user?: { _id?: string; name?: string; role?: string; email?: string } | null;
+};
+
 type NotificationItem =
   | { kind: "LEAD"; id: string; createdAt: string; request: LeadStatusRequest }
+  | { kind: "USER_DELETE"; id: string; createdAt: string; request: UserDeleteRequest }
   | { kind: "INVENTORY"; id: string; createdAt: string; request: InventoryRequest }
   | { kind: "PAYMENT"; id: string; createdAt: string; request: LeadPaymentApprovalRequest };
 
 type NotificationFilter = "ALL" | NotificationItem["kind"];
 
-const FILTERS: Array<{ value: NotificationFilter; label: string }> = [
+/*
+ * Web's inbox keeps a read / unread state per item, remembered in the browser,
+ * with "Mark all read" and an Unread tab; and it lists the approval events heard
+ * live as alerts that open their record. The phone keeps the same state on the
+ * device, under web's storage key.
+ */
+const READ_STORAGE_KEY = "adminNotificationsReadIds";
+
+const DATE_FILTERS = [
+  { value: "ALL", label: "All Dates" },
+  { value: "TODAY", label: "Today" },
+  { value: "WEEK", label: "Last 7 days" },
+  { value: "MONTH", label: "Last 30 days" },
+] as const;
+type DateFilter = (typeof DATE_FILTERS)[number]["value"];
+
+const withinDateFilter = (value: string | undefined, filter: DateFilter) => {
+  if (filter === "ALL") return true;
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  const now = new Date();
+  if (filter === "TODAY") return date.toDateString() === now.toDateString();
+  const days = filter === "WEEK" ? 7 : 30;
+  return now.getTime() - date.getTime() <= days * 24 * 60 * 60 * 1000;
+};
+
+const alertSearchText = (alert: AdminRequestEvent) => {
+  const payload = alert.payload || {};
+  return [
+    alert.preview,
+    alert.source,
+    alert.requestType,
+    payload?.lead?.name,
+    payload?.lead?.phone,
+    payload?.requestId,
+    payload?.inventoryRequestType,
+    payload?.type,
+    payload?.inventory?.projectName,
+    payload?.inventory?.unitNumber,
+  ]
+    .join(" ")
+    .toLowerCase();
+};
+
+const FILTERS: Array<{ value: NotificationFilter | "UNREAD" | "ALERT"; label: string }> = [
   { value: "ALL", label: "All" },
+  { value: "UNREAD", label: "Unread" },
+  { value: "ALERT", label: "Alerts" },
   { value: "LEAD", label: "Lead" },
   { value: "PAYMENT", label: "Payment" },
   { value: "INVENTORY", label: "Inventory" },
+  { value: "USER_DELETE", label: "User" },
 ];
 
 const asDate = (value?: string) => {
@@ -67,8 +137,11 @@ const formatDate = (value?: string) => {
 
 const isRouteMissingError = (error: unknown) => /route not found|404|not found/i.test(toErrorMessage(error, ""));
 
+const targetUserOf = (request: UserDeleteRequest) => request.targetUser || request.user || null;
+
 const getRequestTitle = (item: NotificationItem) => {
   if (item.kind === "LEAD") return item.request.lead?.name || "Lead status request";
+  if (item.kind === "USER_DELETE") return targetUserOf(item.request)?.name || "User deletion";
   if (item.kind === "PAYMENT") return String(item.request.name || "Lead payment approval");
   const inventory = item.request.inventoryId;
   return [inventory?.projectName, inventory?.towerName, inventory?.unitNumber].filter(Boolean).join(" - ") || "Inventory request";
@@ -76,12 +149,15 @@ const getRequestTitle = (item: NotificationItem) => {
 
 const getRequestTypeLabel = (kind: NotificationItem["kind"]) => {
   if (kind === "LEAD") return "Lead Status";
+  if (kind === "USER_DELETE") return "User Deletion";
   if (kind === "PAYMENT") return "Payment";
   return "Inventory";
 };
 
 const getRequester = (item: NotificationItem) => {
-  const source = item.kind === "PAYMENT" ? item.request?.dealPayment?.approvalRequestedBy : item.request?.requestedBy;
+  const source = item.kind === "PAYMENT"
+    ? item.request?.dealPayment?.approvalRequestedBy
+    : item.request?.requestedBy;
   return {
     name: String(source?.name || "User"),
     role: String(source?.role || "-"),
@@ -103,6 +179,10 @@ const getAgeLabel = (value?: string) => {
 
 const buildSearchText = (item: NotificationItem) => {
   const requester = getRequester(item);
+  if (item.kind === "USER_DELETE") {
+    const target = targetUserOf(item.request);
+    return [item.kind, requester.name, requester.role, target?.name, target?.role, target?.email, item.request.reason].join(" ");
+  }
   if (item.kind === "LEAD") {
     return [
       item.kind,
@@ -142,6 +222,39 @@ const buildSearchText = (item: NotificationItem) => {
 export const NotificationsScreen = () => {
   const { role } = useAuth();
   const isAdmin = role === "ADMIN" || role === "SUPER_ADMIN";
+  const navigation = useNavigation<any>();
+  const { recentAdminRequests, markNotificationsRead } = useRealtimeAlerts();
+  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [dateFilter, setDateFilter] = useState<DateFilter>("ALL");
+
+  React.useEffect(() => {
+    AsyncStorage.getItem(READ_STORAGE_KEY)
+      .then((raw) => {
+        const parsed = raw ? JSON.parse(raw) : [];
+        setReadIds(new Set(Array.isArray(parsed) ? parsed : []));
+      })
+      .catch(() => {});
+    // Opening the inbox is reading it, as far as the bell badge goes.
+    markNotificationsRead();
+  }, [markNotificationsRead]);
+
+  const persistReadIds = useCallback((next: Set<string>) => {
+    setReadIds(next);
+    AsyncStorage.setItem(READ_STORAGE_KEY, JSON.stringify([...next].slice(-1000))).catch(() => {});
+  }, []);
+
+  const markRead = useCallback((key: string) => {
+    setReadIds((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      AsyncStorage.setItem(READ_STORAGE_KEY, JSON.stringify([...next].slice(-1000))).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const itemKey = (item: { kind: string; id: string }) => `${item.kind}:${item.id}`;
+  const alertKey = (alert: AdminRequestEvent) => `ALERT:${alert.eventId}`;
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -149,8 +262,9 @@ export const NotificationsScreen = () => {
   const [success, setSuccess] = useState("");
   const [actionLoadingId, setActionLoadingId] = useState("");
   const [query, setQuery] = useState("");
-  const [kindFilter, setKindFilter] = useState<NotificationFilter>("ALL");
+  const [kindFilter, setKindFilter] = useState<NotificationFilter | "UNREAD" | "ALERT">("ALL");
 
+  const [userDeleteRequests, setUserDeleteRequests] = useState<UserDeleteRequest[]>([]);
   const [leadRequests, setLeadRequests] = useState<LeadStatusRequest[]>([]);
   const [leadRequestHistory, setLeadRequestHistory] = useState<LeadStatusRequest[]>([]);
   const [inventoryRequests, setInventoryRequests] = useState<InventoryRequest[]>([]);
@@ -204,7 +318,7 @@ export const NotificationsScreen = () => {
       else setLoading(true);
       setError("");
 
-      const [leadRows, leadApprovedRows, leadRejectedRows, inventoryRows, paymentRows] = await Promise.all([
+      const [leadRows, leadApprovedRows, leadRejectedRows, inventoryRows, paymentRows, userDeleteRows] = await Promise.all([
         getPendingLeadStatusRequests().catch((err) => {
           if (!isRouteMissingError(err)) throw err;
           return [];
@@ -225,8 +339,19 @@ export const NotificationsScreen = () => {
           if (!isRouteMissingError(err)) throw err;
           return [];
         }),
+        /*
+         * Deleting a person goes through approval the same way inventory does:
+         * a manager raises the request from Team Manager, an admin reviews it
+         * here. Without this the request could be raised and never answered
+         * from the app.
+         */
+        getAdminUserDeleteRequests({ status: "PENDING" }).catch((err) => {
+          if (!isRouteMissingError(err)) throw err;
+          return [];
+        }),
       ]);
 
+      setUserDeleteRequests(Array.isArray(userDeleteRows) ? (userDeleteRows as UserDeleteRequest[]) : []);
       setLeadRequests(Array.isArray(leadRows) ? leadRows : []);
       const historyMap = new Map<string, LeadStatusRequest>();
       const mergedRows = [
@@ -288,21 +413,60 @@ export const NotificationsScreen = () => {
       createdAt: String((row as any)?.dealPayment?.approvalRequestedAt || row.updatedAt || row.createdAt || ""),
       request: row,
     }));
-    return [...leadItems, ...inventoryItems, ...paymentItems].sort((a, b) => {
+    const userDeleteItems: NotificationItem[] = userDeleteRequests.map((row) => ({
+      kind: "USER_DELETE",
+      id: String(row._id || ""),
+      createdAt: String(row.createdAt || ""),
+      request: row,
+    }));
+    return [...leadItems, ...inventoryItems, ...paymentItems, ...userDeleteItems].sort((a, b) => {
       const ta = asDate(a.createdAt)?.getTime() || 0;
       const tb = asDate(b.createdAt)?.getTime() || 0;
       return tb - ta;
     });
-  }, [leadRequests, inventoryRequests, paymentRequests]);
+  }, [leadRequests, inventoryRequests, paymentRequests, userDeleteRequests]);
 
   const filteredItems = useMemo(() => {
     const q = query.trim().toLowerCase();
+    if (kindFilter === "ALERT") return [];
     return items.filter((item) => {
-      if (kindFilter !== "ALL" && item.kind !== kindFilter) return false;
+      if (!withinDateFilter(item.createdAt, dateFilter)) return false;
+      if (kindFilter === "UNREAD" && readIds.has(itemKey(item))) return false;
+      if (kindFilter !== "ALL" && kindFilter !== "UNREAD" && item.kind !== kindFilter) return false;
       if (!q) return true;
       return buildSearchText(item).toLowerCase().includes(q);
     });
-  }, [items, kindFilter, query]);
+  }, [dateFilter, items, kindFilter, query, readIds]);
+
+  const filteredAlerts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!["ALL", "UNREAD", "ALERT"].includes(kindFilter)) return [];
+    return recentAdminRequests.filter((alert) => {
+      if (!withinDateFilter(alert.createdAt, dateFilter)) return false;
+      if (kindFilter === "UNREAD" && readIds.has(alertKey(alert))) return false;
+      return !q || alertSearchText(alert).includes(q);
+    });
+  }, [dateFilter, kindFilter, query, readIds, recentAdminRequests]);
+
+  const unreadCount = useMemo(
+    () =>
+      items.filter((item) => !readIds.has(itemKey(item))).length
+      + recentAdminRequests.filter((alert) => !readIds.has(alertKey(alert))).length,
+    [items, readIds, recentAdminRequests],
+  );
+
+  const markAllRead = () => {
+    persistReadIds(new Set([...readIds, ...items.map(itemKey), ...recentAdminRequests.map(alertKey)]));
+    markNotificationsRead();
+    setSuccess("All notifications marked as read");
+  };
+
+  const openAlert = (alert: AdminRequestEvent) => {
+    markRead(alertKey(alert));
+    const target = adminRequestTarget(alert);
+    if (target.screen === "Notifications") return;
+    navigation.navigate(target.screen, target.params);
+  };
 
   const urgentCount = useMemo(
     () => items.filter((item) => getAgeHours(item.createdAt) >= 24).length,
@@ -325,6 +489,10 @@ export const NotificationsScreen = () => {
           status: currentStatus,
           approvalStatus: "APPROVED",
         });
+      } else if (item.kind === "USER_DELETE") {
+        // Approving this actually removes the person, so it is the one action
+        // here that cannot be undone from the app.
+        await reviewUserDeleteRequest(item.id, { status: "APPROVED" });
       } else {
         await approveInventoryRequest(item.id);
       }
@@ -358,6 +526,8 @@ export const NotificationsScreen = () => {
           approvalStatus: "REJECTED",
           approvalNote: reason,
         });
+      } else if (item.kind === "USER_DELETE") {
+        await reviewUserDeleteRequest(item.id, { status: "REJECTED", reviewNote: reason });
       } else {
         await rejectInventoryRequest(item.id, reason);
       }
@@ -380,7 +550,7 @@ export const NotificationsScreen = () => {
       <AppCard style={styles.heroCard as object}>
         <View style={styles.heroTopRow}>
           <View style={styles.heroIcon}>
-            <Ionicons name="notifications" size={22} color="#ffffff" />
+            <Icon name="notifications" size={22} color={themeColor("#ffffff")} />
           </View>
           <View style={styles.heroCopy}>
             <Text style={styles.heroEyebrow}>Approval Command Center</Text>
@@ -390,7 +560,7 @@ export const NotificationsScreen = () => {
             </Text>
           </View>
           <Pressable style={styles.refreshBtn} onPress={() => load(true)} disabled={refreshing}>
-            <Ionicons name={refreshing ? "sync" : "refresh"} size={18} color="#0f172a" />
+            <Icon name={refreshing ? "sync" : "refresh"} size={18} color={themeColor("#161c24")} />
           </Pressable>
         </View>
         <View style={styles.summaryRow}>
@@ -419,7 +589,7 @@ export const NotificationsScreen = () => {
 
       <AppCard style={styles.controlCard as object}>
         <View style={styles.searchRow}>
-          <Ionicons name="search" size={15} color="#64748b" />
+          <Icon name="search" size={15} color={themeColor("#6c7789")} />
           <AppInput
             value={query}
             onChangeText={setQuery}
@@ -428,7 +598,7 @@ export const NotificationsScreen = () => {
           />
           {query ? (
             <Pressable style={styles.clearSearchBtn} onPress={() => setQuery("")}>
-              <Ionicons name="close" size={14} color="#64748b" />
+              <Icon name="close" size={14} color={themeColor("#6c7789")} />
             </Pressable>
           ) : null}
         </View>
@@ -436,12 +606,26 @@ export const NotificationsScreen = () => {
           {FILTERS.map((filter) => (
             <AppChip
               key={filter.value}
-              label={filter.label}
+              label={filter.value === "UNREAD" ? `Unread (${unreadCount})` : filter.label}
               active={kindFilter === filter.value}
               onPress={() => setKindFilter(filter.value)}
             />
           ))}
         </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
+          {DATE_FILTERS.map((filter) => (
+            <AppChip
+              key={filter.value}
+              label={filter.label}
+              active={dateFilter === filter.value}
+              onPress={() => setDateFilter(filter.value)}
+            />
+          ))}
+        </ScrollView>
+        <View style={styles.markAllRow}>
+          <Text style={styles.meta}>{unreadCount} unread</Text>
+          <AppButton title="Mark all read" variant="ghost" onPress={markAllRead} disabled={!unreadCount} />
+        </View>
       </AppCard>
 
       {!isAdmin ? (
@@ -454,10 +638,36 @@ export const NotificationsScreen = () => {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
       >
-        {filteredItems.length === 0 ? (
+        {filteredAlerts.map((alert) => {
+          const unread = !readIds.has(alertKey(alert));
+          return (
+            <AppCard key={alertKey(alert)} style={styles.requestCard as object}>
+              <View style={styles.rowBetween}>
+                <View style={styles.requestHeading}>
+                  <View style={[styles.kindIcon, styles.kindIconBlue]}>
+                    <Icon name="notifications" size={15} color={themeColor("#ffffff")} />
+                  </View>
+                  <View style={styles.requestTitleWrap}>
+                    <Text style={styles.requestType}>{alert.preview || "Realtime alert"}</Text>
+                    <Text style={styles.requestSubtitle}>{adminRequestTitle(alert)}</Text>
+                  </View>
+                </View>
+                {unread ? <View style={styles.unreadDot} /> : null}
+              </View>
+              <Text style={styles.meta}>{adminRequestContext(alert)} | {formatDate(alert.createdAt)}</Text>
+              <View style={styles.actionRow}>
+                <AppButton title="Open" variant="ghost" onPress={() => openAlert(alert)} style={styles.actionBtn as object} />
+                {unread ? (
+                  <AppButton title="Mark read" variant="ghost" onPress={() => markRead(alertKey(alert))} style={styles.actionBtn as object} />
+                ) : null}
+              </View>
+            </AppCard>
+          );
+        })}
+        {filteredItems.length === 0 && filteredAlerts.length > 0 ? null : filteredItems.length === 0 ? (
           <AppCard style={styles.emptyCard as object}>
             <View style={styles.emptyIcon}>
-              <Ionicons name="checkmark-done" size={22} color="#0f766e" />
+              <Icon name="checkmark-done" size={22} color={themeColor("#0a6544")} />
             </View>
             <Text style={styles.emptyTitle}>{items.length === 0 ? "No pending approval requests" : "No request matches this view"}</Text>
             <Text style={styles.meta}>
@@ -473,11 +683,11 @@ export const NotificationsScreen = () => {
             <AppCard key={`${item.kind}-${item.id}`} style={styles.requestCard as object}>
               <View style={styles.rowBetween}>
                 <View style={styles.requestHeading}>
-                  <View style={[styles.kindIcon, item.kind === "PAYMENT" ? styles.kindIconGreen : item.kind === "INVENTORY" ? styles.kindIconViolet : styles.kindIconBlue]}>
-                    <Ionicons
-                      name={item.kind === "PAYMENT" ? "card" : item.kind === "INVENTORY" ? "business" : "person"}
+                  <View style={[styles.kindIcon, item.kind === "PAYMENT" ? styles.kindIconGreen : item.kind === "INVENTORY" ? styles.kindIconViolet : item.kind === "USER_DELETE" ? styles.kindIconRose : styles.kindIconBlue]}>
+                    <Icon
+                      name={item.kind === "PAYMENT" ? "card" : item.kind === "INVENTORY" ? "business" : item.kind === "USER_DELETE" ? "trash-outline" : "person"}
                       size={15}
-                      color="#ffffff"
+                      color={themeColor("#ffffff")}
                     />
                   </View>
                   <View style={styles.requestTitleWrap}>
@@ -485,7 +695,10 @@ export const NotificationsScreen = () => {
                     <Text style={styles.requestSubtitle}>{getRequestTypeLabel(item.kind)}</Text>
                   </View>
                 </View>
-                <Text style={[styles.badge, isAged && styles.badgeAged]}>{isAged ? "Needs Review" : "Pending"}</Text>
+                <View style={styles.badgeWrap}>
+                  {!readIds.has(itemKey(item)) ? <View style={styles.unreadDot} /> : null}
+                  <Text style={[styles.badge, isAged && styles.badgeAged]}>{isAged ? "Needs Review" : "Pending"}</Text>
+                </View>
               </View>
               <View style={styles.metaGrid}>
                 <Text style={styles.meta}>By: {requestedBy.name} ({requestedBy.role})</Text>
@@ -504,6 +717,13 @@ export const NotificationsScreen = () => {
                   <Text style={styles.meta}>Reference: {String(item.request?.dealPayment?.paymentReference || "-")}</Text>
                   <Text style={styles.noteLine}>Note: {String(item.request?.dealPayment?.note || "-")}</Text>
                 </>
+              ) : item.kind === "USER_DELETE" ? (
+                <>
+                  <Text style={styles.detailLine}>
+                    Remove: {targetUserOf(item.request)?.name || "-"} ({targetUserOf(item.request)?.role || "-"})
+                  </Text>
+                  <Text style={styles.noteLine}>Reason: {item.request.reason || "-"}</Text>
+                </>
               ) : (
                 <>
                   <Text style={styles.detailLine}>
@@ -514,12 +734,23 @@ export const NotificationsScreen = () => {
               )}
 
               <View style={styles.actionRow}>
-                <AppButton title="Preview" variant="ghost" onPress={() => setPreviewItem(item)} style={styles.actionBtn as object} />
+                <AppButton
+                  title="Preview"
+                  variant="ghost"
+                  onPress={() => {
+                    markRead(itemKey(item));
+                    setPreviewItem(item);
+                  }}
+                  style={styles.actionBtn as object}
+                />
                 {isAdmin ? (
                   <>
                     <AppButton
                       title={actionLoadingId === item.id ? "Approving..." : "Approve"}
-                      onPress={() => doApprove(item)}
+                      onPress={() => {
+                        markRead(itemKey(item));
+                        doApprove(item);
+                      }}
                       disabled={actionLoadingId === item.id}
                       style={styles.actionBtn as object}
                     />
@@ -709,6 +940,14 @@ export const NotificationsScreen = () => {
                     <Text style={styles.previewText}>Request Note: {String(previewItem.request?.dealPayment?.note || "-")}</Text>
                     <Text style={styles.previewText}>Requested By: {previewItem.request?.dealPayment?.approvalRequestedBy?.name || "-"}</Text>
                   </>
+                ) : previewItem.kind === "USER_DELETE" ? (
+                  <>
+                    <Text style={styles.previewText}>User: {targetUserOf(previewItem.request)?.name || "-"}</Text>
+                    <Text style={styles.previewText}>Role: {targetUserOf(previewItem.request)?.role || "-"}</Text>
+                    <Text style={styles.previewText}>Email: {targetUserOf(previewItem.request)?.email || "-"}</Text>
+                    <Text style={styles.previewText}>Reason: {previewItem.request.reason || "-"}</Text>
+                    <Text style={styles.previewText}>Requested By: {previewItem.request.requestedBy?.name || "-"}</Text>
+                  </>
                 ) : (
                   <>
                     <Text style={styles.previewText}>Request Type: {String(previewItem.request.type || "-").toUpperCase()}</Text>
@@ -764,32 +1003,35 @@ export const NotificationsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
+  markAllRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 6 },
+  unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: c.blue[500] },
+  badgeWrap: { flexDirection: "row", alignItems: "center", gap: 6 },
   error: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   summaryCard: {
     marginBottom: 10,
   },
   heroCard: {
     marginBottom: 10,
-    backgroundColor: "#eef6ff",
-    borderColor: "#bfdbfe",
+    backgroundColor: c.blue[50],
+    borderColor: c.blue[200],
   },
   heroTopRow: {
     flexDirection: "row",
@@ -803,13 +1045,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2563eb",
+    backgroundColor: c.primary,
   },
   heroCopy: {
     flex: 1,
   },
   heroEyebrow: {
-    color: "#1d4ed8",
+    color: c.accentStrong,
     fontSize: 10,
     fontWeight: "800",
     textTransform: "uppercase",
@@ -817,13 +1059,13 @@ const styles = StyleSheet.create({
   },
   heroTitle: {
     marginTop: 2,
-    color: "#0f172a",
+    color: c.text,
     fontSize: 20,
     fontWeight: "800",
   },
   heroMeta: {
     marginTop: 3,
-    color: "#475569",
+    color: c.slate[600],
     fontSize: 11,
     lineHeight: 15,
   },
@@ -834,11 +1076,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#ffffff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
   },
   summaryTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "700",
     fontSize: 13,
     marginBottom: 8,
@@ -851,42 +1093,42 @@ const styles = StyleSheet.create({
   summaryBox: {
     width: "31%",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   summaryBoxBlue: {
-    borderColor: "#bfdbfe",
-    backgroundColor: "#eff6ff",
+    borderColor: c.blue[200],
+    backgroundColor: c.blue[50],
   },
   summaryBoxSlate: {
-    borderColor: "#cbd5e1",
-    backgroundColor: "#f8fafc",
+    borderColor: c.borderStrong,
+    backgroundColor: c.bg,
   },
   summaryBoxViolet: {
-    borderColor: "#ddd6fe",
-    backgroundColor: "#f5f3ff",
+    borderColor: c.violet[200],
+    backgroundColor: c.violet[50],
   },
   summaryBoxGreen: {
-    borderColor: "#bbf7d0",
-    backgroundColor: "#ecfdf5",
+    borderColor: c.successBorder,
+    backgroundColor: c.successBg,
   },
   summaryBoxTeal: {
-    borderColor: "#99f6e4",
-    backgroundColor: "#ecfeff",
+    borderColor: c.successBorder,
+    backgroundColor: c.infoBg,
   },
   summaryBoxRed: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fef2f2",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
   },
   summaryLabel: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
   },
   summaryValue: {
     marginTop: 4,
-    color: "#0f172a",
+    color: c.text,
     fontSize: 22,
     fontWeight: "700",
   },
@@ -897,9 +1139,9 @@ const styles = StyleSheet.create({
   searchRow: {
     minHeight: 44,
     borderWidth: 1,
-    borderColor: "#dbe4f0",
+    borderColor: c.border,
     borderRadius: 14,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
@@ -920,7 +1162,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e2e8f0",
+    backgroundColor: c.border,
   },
   filterRow: {
     gap: 8,
@@ -935,17 +1177,17 @@ const styles = StyleSheet.create({
   },
   historyRow: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginTop: 8,
   },
   historyApproved: {
-    color: "#166534",
-    backgroundColor: "#f0fdf4",
+    color: c.emerald[800],
+    backgroundColor: c.successBg,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: c.emerald[300],
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -954,10 +1196,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   historyRejected: {
-    color: "#b91c1c",
-    backgroundColor: "#fef2f2",
+    color: c.rose[700],
+    backgroundColor: c.errorBg,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -976,20 +1218,20 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#ecfeff",
+    backgroundColor: c.infoBg,
     borderWidth: 1,
-    borderColor: "#99f6e4",
+    borderColor: c.successBorder,
     marginBottom: 8,
   },
   emptyTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 14,
     fontWeight: "800",
     marginBottom: 2,
   },
   requestCard: {
     marginBottom: 10,
-    borderColor: "#dbeafe",
+    borderColor: c.blue[100],
   },
   rowBetween: {
     flexDirection: "row",
@@ -1015,24 +1257,27 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2563eb",
+    backgroundColor: c.primary,
   },
   kindIconBlue: {
-    backgroundColor: "#2563eb",
+    backgroundColor: c.primary,
   },
   kindIconGreen: {
-    backgroundColor: "#059669",
+    backgroundColor: c.success,
   },
   kindIconViolet: {
-    backgroundColor: "#7c3aed",
+    backgroundColor: c.violet[600],
+  },
+  kindIconRose: {
+    backgroundColor: c.error,
   },
   requestType: {
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "800",
     fontSize: 13,
   },
   requestSubtitle: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 10,
     fontWeight: "700",
     textTransform: "uppercase",
@@ -1040,10 +1285,10 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   badge: {
-    color: "#0f766e",
-    backgroundColor: "#ecfeff",
+    color: c.emerald[700],
+    backgroundColor: c.infoBg,
     borderWidth: 1,
-    borderColor: "#99f6e4",
+    borderColor: c.successBorder,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -1052,33 +1297,33 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   badgeAged: {
-    color: "#b91c1c",
-    backgroundColor: "#fef2f2",
-    borderColor: "#fecaca",
+    color: c.rose[700],
+    backgroundColor: c.errorBg,
+    borderColor: c.errorBorder,
   },
   metaGrid: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     padding: 9,
     marginTop: 8,
     marginBottom: 6,
   },
   meta: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
     marginTop: 3,
   },
   detailLine: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
     marginTop: 4,
     lineHeight: 17,
   },
   noteLine: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
     marginTop: 4,
     lineHeight: 16,
@@ -1103,22 +1348,22 @@ const styles = StyleSheet.create({
     maxWidth: 560,
     maxHeight: "80%",
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     padding: 14,
   },
   rejectCard: {
     width: "100%",
     maxWidth: 460,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     padding: 14,
   },
   modalTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 15,
     fontWeight: "700",
     marginBottom: 10,
@@ -1128,16 +1373,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   previewText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     marginBottom: 6,
   },
   previewData: {
     fontSize: 11,
-    color: "#0f172a",
-    backgroundColor: "#f8fafc",
+    color: c.text,
+    backgroundColor: c.bg,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 8,
     padding: 8,
   },
@@ -1149,16 +1394,16 @@ const styles = StyleSheet.create({
   },
   fileBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 28,
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
   },
   fileBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "700",
   },
@@ -1173,4 +1418,4 @@ const styles = StyleSheet.create({
   rejectInput: {
     marginBottom: 8,
   },
-});
+}));

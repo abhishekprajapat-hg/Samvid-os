@@ -14,7 +14,7 @@ const generatePropertyCode = async (companyId) => {
   const counter = await CoworkingIdCounter.findOneAndUpdate(
     { companyId, category: "PROPERTY" },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   return `PROP-${String(counter.seq).padStart(4, "0")}`;
 };

@@ -18,6 +18,7 @@ import {
 } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
+import FittedImage from "../../components/ui/FittedImage";
 import { StatusBadge } from "../../components/crm";
 import { Badge, Button, Card, CardContent } from "../../components/ui";
 import InventorySpecTabs from "./components/InventorySpecTabs";
@@ -500,7 +501,7 @@ const InventoryDetails = () => {
           <Card className="inventory-detail-hero overflow-hidden xl:grid xl:grid-cols-[minmax(0,1fr)_520px]">
             <div className="relative grid h-[320px] max-h-[320px] overflow-hidden place-items-center bg-slate-100 text-slate-400 xl:order-2 dark:bg-slate-800 dark:text-slate-500">
               {activeImage ? (
-                <img src={activeImage} alt="" className="h-full w-full object-cover object-center" />
+                <FittedImage key={activeImage} src={activeImage} alt="Property photo" loading="eager" />
               ) : (
                 <Building2 aria-hidden="true" size={40} strokeWidth={1.2} />
               )}

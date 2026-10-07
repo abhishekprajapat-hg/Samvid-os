@@ -33,3 +33,26 @@ jest.mock("react-native-safe-area-context", () => {
     useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
   };
 });
+
+jest.mock("expo-av", () => {
+  const sound = { playAsync: jest.fn(), stopAsync: jest.fn(), unloadAsync: jest.fn(), setIsLoopingAsync: jest.fn() };
+  return {
+    Audio: {
+      setAudioModeAsync: jest.fn(() => Promise.resolve()),
+      requestPermissionsAsync: jest.fn(() => Promise.resolve({ granted: true })),
+      Sound: { createAsync: jest.fn(() => Promise.resolve({ sound })) },
+      Recording: { createAsync: jest.fn(() => Promise.resolve({ recording: { stopAndUnloadAsync: jest.fn(), getURI: jest.fn() } })) },
+      RecordingOptionsPresets: { HIGH_QUALITY: {} },
+    },
+  };
+});
+
+jest.mock("expo-speech-recognition", () => ({
+  ExpoSpeechRecognitionModule: {
+    requestPermissionsAsync: jest.fn(() => Promise.resolve({ granted: true })),
+    start: jest.fn(),
+    stop: jest.fn(),
+    abort: jest.fn(),
+  },
+  useSpeechRecognitionEvent: jest.fn(),
+}));

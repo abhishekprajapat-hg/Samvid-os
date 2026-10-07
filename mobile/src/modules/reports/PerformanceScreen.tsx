@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { useNavigation } from "@react-navigation/native";
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from "react-native-svg";
 import { Screen } from "../../components/common/Screen";
@@ -12,6 +12,7 @@ import { getUsers } from "../../services/userService";
 import { assignHierarchyTarget, getMyTargets } from "../../services/targetService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import type { Lead } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
 const DEFAULT_REVENUE_PER_CLOSED = 50000;
@@ -151,21 +152,21 @@ const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number;
     <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
       <Defs>
         <LinearGradient id="createdBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#38bdf8" stopOpacity="0.55" />
-          <Stop offset="1" stopColor="#38bdf8" stopOpacity="0.12" />
+          <Stop offset="0" stopColor={themeColor("#4c9dd3")} stopOpacity="0.55" />
+          <Stop offset="1" stopColor={themeColor("#4c9dd3")} stopOpacity="0.12" />
         </LinearGradient>
         <LinearGradient id="closedAreaGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#10b981" stopOpacity="0.35" />
-          <Stop offset="1" stopColor="#10b981" stopOpacity="0.05" />
+          <Stop offset="0" stopColor={themeColor("#12a06a")} stopOpacity="0.35" />
+          <Stop offset="1" stopColor={themeColor("#12a06a")} stopOpacity="0.05" />
         </LinearGradient>
       </Defs>
-      <Rect x={0} y={0} width={w} height={h} fill="#fff" rx={10} />
+      <Rect x={0} y={0} width={w} height={h} fill={themeColor("#ffffff")} rx={10} />
       {[0, 1, 2, 3, 4].map((idx) => {
         const y = p + (idx / 4) * (h - p * 2);
-        return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />;
+        return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke={themeColor("#e0e5ed")} strokeDasharray="4 4" />;
       })}
       {latestActiveIdx >= 0 ? (
-        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill="#22d3ee" opacity={0.09} rx={8} />
+        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill={themeColor("#4c9dd3")} opacity={0.09} rx={8} />
       ) : null}
       {preparedRows.map((row, idx) => {
         const x = p + idx * step;
@@ -179,27 +180,27 @@ const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number;
           fill="url(#closedAreaGrad)"
         />
       ) : null}
-      <Path d={createdPath} fill="none" stroke="#0284c7" strokeWidth={2.6} />
-      <Path d={closedPath} fill="none" stroke="#10b981" strokeWidth={3} />
-      <Path d={openPath} fill="none" stroke="#1d4ed8" strokeWidth={2.2} strokeDasharray="4 3" />
+      <Path d={createdPath} fill="none" stroke={themeColor("#1f6499")} strokeWidth={2.6} />
+      <Path d={closedPath} fill="none" stroke={themeColor("#12a06a")} strokeWidth={3} />
+      <Path d={openPath} fill="none" stroke={themeColor("#1c37ab")} strokeWidth={2.2} strokeDasharray="4 3" />
       {createdPoints.map((point, idx) => (
-        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill="#0284c7" />
+        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill={themeColor("#1f6499")} />
       ))}
       {closedPoints.map((point, idx) => (
-        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill="#10b981" />
+        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill={themeColor("#12a06a")} />
       ))}
       {openPoints.map((point, idx) => (
-        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill="#1d4ed8" />
+        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill={themeColor("#1c37ab")} />
       ))}
-      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill="#0284c7">Created</SvgText>
-      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill="#10b981">Closed</SvgText>
-      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill="#1d4ed8">Open</SvgText>
+      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill={themeColor("#1f6499")}>Created</SvgText>
+      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill={themeColor("#12a06a")}>Closed</SvgText>
+      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill={themeColor("#1c37ab")}>Open</SvgText>
       {preparedRows.map((row, idx) => {
         const x = p + idx * step;
         const showLabel = preparedRows.length <= 6 || idx === 0 || idx === preparedRows.length - 1 || idx % 2 === 0;
         if (!showLabel) return null;
         return (
-          <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill="#64748b">
+          <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill={themeColor("#6c7789")}>
             {row.label}
           </SvgText>
         );
@@ -217,12 +218,12 @@ const CircularScore = ({ percent }: { percent: number }) => {
   const offset = circumference - (safe / 100) * circumference;
   return (
     <Svg width={size} height={size}>
-      <Circle cx={size / 2} cy={size / 2} r={radius} stroke="#e2e8f0" strokeWidth={stroke} fill="none" />
+      <Circle cx={size / 2} cy={size / 2} r={radius} stroke={themeColor("#e0e5ed")} strokeWidth={stroke} fill="none" />
       <Circle
         cx={size / 2}
         cy={size / 2}
         r={radius}
-        stroke="#0ea5e9"
+        stroke={themeColor("#2b7fbf")}
         strokeWidth={stroke}
         strokeLinecap="round"
         fill="none"
@@ -230,7 +231,7 @@ const CircularScore = ({ percent }: { percent: number }) => {
         strokeDashoffset={offset}
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
       />
-      <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="700" fill="#0f172a">
+      <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="700" fill={themeColor("#161c24")}>
         {Math.round(safe)}%
       </SvgText>
     </Svg>
@@ -691,7 +692,7 @@ export const PerformanceScreen = () => {
             />
             <View style={{ flex: 1 }} />
             <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-              <Ionicons name="calendar-outline" size={14} color="#334155" />
+              <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
             </Pressable>
             <AppButton title={refreshing ? "Refreshing..." : "Refresh"} variant="ghost" onPress={() => load(true)} disabled={refreshing} />
           </View>
@@ -841,7 +842,7 @@ export const PerformanceScreen = () => {
                     ? `${selectedAssignee.name} (${selectedAssignee.roleLabel || selectedAssignee.role})`
                     : "Select user"}
                 </Text>
-                <Ionicons name="chevron-down-outline" size={16} color="#64748b" />
+                <Icon name="chevron-down-outline" size={16} color={themeColor("#6c7789")} />
               </Pressable>
               <AppInput value={assignForm.leadsTarget} onChangeText={(v) => setAssignForm((p) => ({ ...p, leadsTarget: v }))} placeholder="Lead target" keyboardType="phone-pad" style={styles.input as object} />
               <AppInput value={assignForm.siteVisitTarget} onChangeText={(v) => setAssignForm((p) => ({ ...p, siteVisitTarget: v }))} placeholder="Visit target" keyboardType="phone-pad" style={styles.input as object} />
@@ -1087,24 +1088,24 @@ const StatCard = ({
   </Pressable>
 );
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   error: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   filterRow: {
     flexDirection: "row",
@@ -1114,9 +1115,9 @@ const styles = StyleSheet.create({
   },
   calendarIconBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 9,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 36,
     width: 36,
     alignItems: "center",
@@ -1124,7 +1125,7 @@ const styles = StyleSheet.create({
   },
   periodText: {
     marginTop: 8,
-    color: "#475569",
+    color: c.slate[600],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -1136,13 +1137,13 @@ const styles = StyleSheet.create({
   customDateBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   customDateText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -1152,9 +1153,9 @@ const styles = StyleSheet.create({
   },
   statCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   sectionCard: {
@@ -1165,11 +1166,11 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 1,
     fontWeight: "700",
-    color: "#0f172a",
+    color: c.text,
   },
   sectionSubTitle: {
     marginTop: 2,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
     marginBottom: 8,
   },
@@ -1178,9 +1179,9 @@ const styles = StyleSheet.create({
   },
   velocityPanel: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
   },
   velocityScoreRow: {
@@ -1192,40 +1193,40 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   velocityPercent: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 20,
     fontWeight: "700",
   },
   chartPanel: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
   },
   metricLabel: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 10,
     textTransform: "uppercase",
   },
   statValue: {
     marginTop: 5,
-    color: "#0f172a",
+    color: c.text,
     fontSize: 24,
     fontWeight: "700",
   },
   meta: {
     marginTop: 3,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
   },
   leaderRow: {
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: c.blue[200],
     borderRadius: 12,
     padding: 10,
     marginBottom: 8,
-    backgroundColor: "#f8fbff",
+    backgroundColor: c.surface,
   },
   leaderTopRow: {
     flexDirection: "row",
@@ -1236,13 +1237,13 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: c.border,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 8,
   },
   leaderRankText: {
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "700",
     fontSize: 11,
   },
@@ -1250,7 +1251,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   leaderName: {
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "700",
     fontSize: 12,
   },
@@ -1261,12 +1262,12 @@ const styles = StyleSheet.create({
     marginTop: 6,
     height: 6,
     borderRadius: 999,
-    backgroundColor: "#dbeafe",
+    backgroundColor: c.blue[100],
     overflow: "hidden",
   },
   leaderFill: {
     height: "100%",
-    backgroundColor: "#0ea5e9",
+    backgroundColor: c.cyan[500],
   },
   targetGrid: {
     gap: 8,
@@ -1274,20 +1275,20 @@ const styles = StyleSheet.create({
   },
   targetCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
     padding: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   metricValue: {
     marginTop: 4,
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "700",
     fontSize: 13,
   },
   metricPercent: {
     marginTop: 4,
-    color: "#0f766e",
+    color: c.emerald[700],
     fontWeight: "700",
     fontSize: 11,
     textAlign: "right",
@@ -1297,28 +1298,28 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 999,
     overflow: "hidden",
-    backgroundColor: "#e2e8f0",
+    backgroundColor: c.border,
   },
   fill: {
     height: "100%",
-    backgroundColor: "#0ea5e9",
+    backgroundColor: c.cyan[500],
   },
   assignWrap: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
     marginBottom: 8,
   },
   label: {
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "700",
     fontSize: 12,
     marginBottom: 6,
   },
   assignToLabel: {
-    color: "#475569",
+    color: c.slate[600],
     fontSize: 11,
     marginBottom: 5,
     fontWeight: "600",
@@ -1326,9 +1327,9 @@ const styles = StyleSheet.create({
   dropdownBtn: {
     height: 46,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     marginBottom: 8,
     flexDirection: "row",
@@ -1336,7 +1337,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   dropdownText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 13,
     flex: 1,
     paddingRight: 8,
@@ -1349,21 +1350,21 @@ const styles = StyleSheet.create({
   },
   listPanel: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
   },
   targetRow: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 8,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     padding: 8,
     marginBottom: 8,
   },
   targetName: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -1378,9 +1379,9 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 420,
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     padding: 14,
   },
   dropdownModalCard: {
@@ -1388,23 +1389,23 @@ const styles = StyleSheet.create({
     maxWidth: 520,
     maxHeight: "72%",
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     padding: 14,
   },
   modalTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 14,
     fontWeight: "700",
     marginBottom: 10,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
-    color: "#0f172a",
+    backgroundColor: c.surface,
+    color: c.text,
     height: 44,
     paddingHorizontal: 12,
     marginBottom: 8,
@@ -1412,9 +1413,9 @@ const styles = StyleSheet.create({
   },
   webInputWrap: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 44,
     marginBottom: 8,
     justifyContent: "center",
@@ -1423,7 +1424,7 @@ const styles = StyleSheet.create({
   webDateInput: {
     height: 30,
     fontSize: 13,
-    color: "#0f172a",
+    color: c.text,
     backgroundColor: "transparent",
     borderWidth: 0,
     padding: 0,
@@ -1436,33 +1437,33 @@ const styles = StyleSheet.create({
   },
   modalCancelBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     minWidth: 90,
     height: 38,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   modalCancelText: {
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "600",
     fontSize: 12,
   },
   modalApplyBtn: {
     borderWidth: 1,
-    borderColor: "#0f172a",
+    borderColor: c.text,
     borderRadius: 10,
     minWidth: 90,
     height: 38,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 12,
-    backgroundColor: "#0f172a",
+    backgroundColor: c.text,
   },
   modalApplyText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
@@ -1472,23 +1473,23 @@ const styles = StyleSheet.create({
   },
   dropdownItem: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingVertical: 10,
     paddingHorizontal: 12,
     marginBottom: 8,
   },
   dropdownItemActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#f8fafc",
+    borderColor: c.text,
+    backgroundColor: c.bg,
   },
   dropdownItemText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 13,
     fontWeight: "600",
   },
   dropdownItemTextActive: {
-    color: "#0f172a",
+    color: c.text,
   },
-});
+}));

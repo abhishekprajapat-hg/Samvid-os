@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { ArrowRight, Users } from "lucide-react";
 import { EmptyState, Skeleton, cn } from "../../../components/ui";
+import AvatarFace from "../../../components/ui/AvatarFace";
 
 const initialsOf = (name) => {
   const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
@@ -25,6 +26,7 @@ const PipelineTeam = ({ leads = [], employees = [], loading = false, onOpenEmplo
         id,
         name: employee.name || employee.fullName || "Unnamed employee",
         role: employee.role,
+        profileImageUrl: employee.profileImageUrl || "",
         count: 0,
         statuses: new Map(),
       });
@@ -38,6 +40,7 @@ const PipelineTeam = ({ leads = [], employees = [], loading = false, onOpenEmplo
         id,
         name: assigned?.name || "Unnamed employee",
         role: assigned?.role,
+        profileImageUrl: assigned?.profileImageUrl || "",
         count: 0,
         statuses: new Map(),
       };
@@ -93,7 +96,7 @@ const PipelineTeam = ({ leads = [], employees = [], loading = false, onOpenEmplo
             <div className="flex items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-bold text-blue-700 dark:bg-blue-500/20 dark:text-blue-200">
-                  {initialsOf(employee.name)}
+                  <AvatarFace user={employee} initials={initialsOf(employee.name)} />
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-[14px] font-bold text-slate-900 dark:text-slate-100">{employee.name}</span>

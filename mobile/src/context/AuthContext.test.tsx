@@ -17,6 +17,7 @@ jest.mock("../services/api", () => ({
 jest.mock("../services/authService", () => ({
   getCurrentUser: jest.fn(),
   loginUser: jest.fn(),
+  logoutUser: jest.fn(() => Promise.resolve()),
 }));
 
 jest.mock("../utils/systemSettings", () => ({

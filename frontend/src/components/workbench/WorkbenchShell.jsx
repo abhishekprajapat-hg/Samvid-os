@@ -32,6 +32,19 @@ const WorkbenchShell = ({
     }),
     [user, permissions, enforcePageAccess, permissionsLoading],
   );
+  /*
+   * Resolved exactly as the header resolves it, falling back to the user's own
+   * role. The two used to differ: the header fell back, this did not, so a
+   * render where `userRole` had not arrived yet showed the chat icon while the
+   * floating messenger was not mounted at all - and the icon's click went
+   * nowhere.
+   */
+  const canUseChat = useMemo(
+    () => getAllVisibleMenuGroups(userRole || user?.role, userForNav)
+      .some((group) => group.items.some((item) => item.path === "/chat")),
+    [userRole, user, userForNav],
+  );
+
   const handleOpenMobileMenu = useCallback(() => setMobileMenuOpen(true), []);
   const handleCloseMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
 
@@ -77,7 +90,7 @@ const WorkbenchShell = ({
         and leaves the page under it unusable, so the header's chat icon goes
         to the full /chat page instead (see AppTopCommandBar).
       */}
-      {!isMobileViewport && !isChatPage && getAllVisibleMenuGroups(userRole, userForNav).some(group => group.items.some(item => item.path === "/chat")) && <FloatingMessenger theme={theme} unreadTotal={unreadTotal} />}
+      {!isMobileViewport && !isChatPage && canUseChat && <FloatingMessenger theme={theme} unreadTotal={unreadTotal} />}
     </div>
   );
 };

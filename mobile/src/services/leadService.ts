@@ -29,9 +29,55 @@ export type CompanyPerformanceOverview = {
   generatedAt?: string;
 };
 
-export const getAllLeads = async (): Promise<Lead[]> => {
-  const res = await api.get("/leads");
-  return res.data?.leads || [];
+/*
+ * The server always paginates, so a bare GET /leads returns the first page -
+ * not the whole table. Mobile used to make exactly that bare call, which meant
+ * every screen built on this (the pipeline, the dashboards, the sale-lead
+ * picker, tasks) silently showed only the first page of leads.
+ *
+ * This walks the pages the way frontend/src/services/leadService.js does, with
+ * the same page size and the same cap. The real fix on both sides is for those
+ * screens to ask for an aggregate rather than every lead.
+ */
+const LEAD_PAGE_SIZE = 200;
+const MAX_LEAD_PAGES = 25;
+
+export const getAllLeads = async (params: Record<string, unknown> = {}): Promise<Lead[]> => {
+  const first = await api.get("/leads", {
+    params: { limit: LEAD_PAGE_SIZE, page: 1, ...params },
+  });
+  const rows: Lead[] = first.data?.leads || [];
+
+  // An explicit page/limit from the caller means they are driving pagination
+  // themselves, so hand back exactly the page they asked for.
+  if (params.page !== undefined || params.limit !== undefined) return rows;
+
+  let pageInfo = first.data?.pagination;
+  let page = 1;
+  while (pageInfo?.hasNextPage && page < MAX_LEAD_PAGES) {
+    page += 1;
+    const next = await api.get("/leads", {
+      params: { limit: LEAD_PAGE_SIZE, page, ...params },
+    });
+    rows.push(...(next.data?.leads || []));
+    pageInfo = next.data?.pagination;
+  }
+
+  return rows;
+};
+
+/*
+ * One lead, by id. Mirrors getLeadById in the web service.
+ *
+ * The backend scopes this through findAccessibleLeadById and 404s a lead the
+ * caller is not entitled to - which is exactly why the detail screen must use
+ * it rather than filtering a full list client-side.
+ */
+export const getLeadById = async (leadId: string): Promise<Lead | null> => {
+  const id = String(leadId || "").trim();
+  if (!id) return null;
+  const res = await api.get(`/leads/${id}`);
+  return res.data?.lead || null;
 };
 
 export const getCompanyPerformanceOverview = async (
@@ -129,6 +175,28 @@ export const removeLeadRelatedProperty = async (leadId: string, inventoryId: str
 export const getLeadActivity = async (leadId: string): Promise<Array<{ _id: string; action: string; createdAt: string; performedBy?: { name?: string } }>> => {
   const res = await api.get(`/leads/${leadId}/activity`);
   return res.data?.activities || [];
+};
+
+/** Activity plus pagination meta. Mirrors getLeadActivityWithMeta on web. */
+export const getLeadActivityWithMeta = async (
+  leadId: string,
+  params: Record<string, unknown> = {},
+) => {
+  const res = await api.get(`/leads/${leadId}/activity`, { params });
+  return {
+    activities: Array.isArray(res.data?.activities) ? res.data.activities : [],
+    pagination: res.data?.pagination || null,
+  };
+};
+
+/*
+ * Bulk import. Web parses the spreadsheet with xlsx and posts rows; on mobile
+ * the file arrives through expo-document-picker, so the caller parses it and
+ * hands the rows here. The long timeout matches web - a large import is slow.
+ */
+export const bulkUploadLeads = async (rows: Record<string, unknown>[] = []) => {
+  const res = await api.post("/leads/bulk", { rows }, { timeout: 120000 });
+  return res.data || {};
 };
 
 export type LeadDiaryEntry = {

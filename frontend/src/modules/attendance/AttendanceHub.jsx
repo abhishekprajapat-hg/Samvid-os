@@ -38,6 +38,7 @@ import {
   getDailyAttendanceForAdmin,
   getAttendancePolicy,
   getMyLeaveRequests,
+  getMyLeaveBalance,
   getMyAttendance,
   manageUserBreak,
   reviewLeaveRequest,
@@ -48,6 +49,7 @@ import {
 import { toErrorMessage } from "../../utils/errorMessage";
 import ToastNotice from "../../components/ui/ToastNotice";
 import BreakCorrectionDialog from "./BreakCorrectionDialog";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const ADMIN_VIEW_ROLES = new Set([
   "ADMIN",
@@ -201,7 +203,7 @@ const SectionHeader = ({ icon, tone, title, subtitle, children }) => (
     <IconBox icon={icon} tone={tone} />
     <div className="min-w-0 flex-1">
       <h4 className="text-[14px] font-semibold leading-tight text-slate-900">{title}</h4>
-      {subtitle ? <p className="mt-0.5 text-[12px] text-slate-500">{subtitle}</p> : null}
+      {subtitle ? <p className="mt-0.5 text-[13px] text-slate-500">{subtitle}</p> : null}
     </div>
     {children}
   </div>
@@ -215,13 +217,15 @@ const STAT_META = {
   lateDays: { icon: Clock, tone: "amber" },
   onBreak: { icon: Clock, tone: "amber" },
   leaveDays: { icon: CalendarDays, tone: "rose" },
+  absentDays: { icon: CalendarDays, tone: "rose" },
+  punctuality: { icon: Clock, tone: "green" },
   leave: { icon: CalendarDays, tone: "rose" },
   averageHours: { icon: BarChart3, tone: "violet" },
 };
-const fieldClass = "h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
-const secondaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
-const primaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-lg border border-blue-700 bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
-const selectControlClass = "h-9 rounded-lg border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm outline-none";
+const fieldClass = "h-9 rounded-lg border border-slate-300 bg-white px-3 text-[13px] font-semibold text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100";
+const secondaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] font-semibold text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
+const primaryButtonClass = "inline-flex items-center justify-center gap-2 rounded-lg border border-blue-700 bg-blue-600 px-4 py-2 text-[15px] font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
+const selectControlClass = "h-9 rounded-lg border border-slate-300 bg-white px-2 text-[13px] font-semibold text-slate-700 shadow-sm outline-none";
 
 const statusBadgeClass = (status) =>
   STATUS_STYLES[status] || "bg-slate-100 text-slate-700 border-slate-200";
@@ -337,6 +341,7 @@ const AttendanceHub = () => {
   const [attendanceAction, setAttendanceAction] = useState("");
   const [myError, setMyError] = useState("");
   const [mySuccess, setMySuccess] = useState("");
+  const [myLeaveBalance, setMyLeaveBalance] = useState(null);
   const [myData, setMyData] = useState({
     timezone: "",
     today: null,
@@ -402,7 +407,11 @@ const AttendanceHub = () => {
     setMyError("");
 
     try {
-      const payload = await getMyAttendance({ month });
+      const [payload, leaveBalance] = await Promise.all([
+        getMyAttendance({ month }),
+        getMyLeaveBalance({ month }).catch(() => null),
+      ]);
+      setMyLeaveBalance(leaveBalance);
       setMyData({
         timezone: payload.timezone || "",
         today: payload.today || null,
@@ -876,41 +885,60 @@ const AttendanceHub = () => {
         )
       : todayWorkedMinutes;
 
+  // Every figure below comes from the server's summary of the actual records
+  // (a working day with no check-in counts as absent), not from rows on screen.
   const mySummaryCards = useMemo(() => {
     const summary = myData.summary || {};
-    const totalDays = Number(summary.totalDays || 0);
     const presentDays = Number(summary.presentDays || 0);
-    const workingDays = totalDays || Number(summary.workingDays || 0);
+    const workingDays = Number(summary.workingDays || 0);
+    const cutoff = Number(summary.lateCheckInCutoffMinutes || 0);
+    const cutoffLabel = cutoff
+      ? new Date(2000, 0, 1, Math.floor(cutoff / 60), cutoff % 60).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })
+      : "";
+    const targetHours = Number(myData.policy?.fullDayMinutes || 0) / 60;
     const averageHours = presentDays
       ? (Number(summary.totalWorkedHours || 0) / presentDays).toFixed(1)
       : "0.0";
+    const unrecorded = Number(summary.unrecordedAbsentDays || 0);
     return [
       {
         key: "presentDays",
         label: "Present",
         value: presentDays,
-        detail: `of ${workingDays || totalDays} working days`,
+        detail: `of ${workingDays} working days so far`,
+      },
+      {
+        key: "absentDays",
+        label: "Absent",
+        value: Number(summary.absentDays || 0),
+        detail: unrecorded ? `${unrecorded} with no check-in` : "Working days missed",
       },
       {
         key: "lateDays",
         label: "Late",
         value: Number(summary.lateDays || 0),
-        detail: "After 9:30 AM",
+        detail: cutoffLabel ? `Checked in after ${cutoffLabel}` : "Late check-ins",
+      },
+      {
+        key: "punctuality",
+        label: "On time",
+        value: `${Number(summary.punctualityPercent || 0)}%`,
+        detail: `${Number(summary.onTimeDays || 0)} on-time check-ins`,
       },
       {
         key: "leaveDays",
         label: "Leave taken",
         value: Number(summary.leaveDays || 0),
-        detail: `${Math.max(0, 10 - Number(summary.leaveDays || 0))} remaining`,
+        detail: myLeaveBalance ? `${myLeaveBalance.available} available` : "This month",
       },
       {
         key: "averageHours",
         label: "Avg. hours",
         value: averageHours,
-        detail: "Target 9.0",
+        detail: targetHours ? `Target ${targetHours.toFixed(1)}` : "Per present day",
       },
     ];
-  }, [myData.summary]);
+  }, [myData.policy?.fullDayMinutes, myData.summary, myLeaveBalance]);
 
   /*
    * Three readings of today's team, each a percentage so the bars are
@@ -949,6 +977,9 @@ const AttendanceHub = () => {
     const workedRows = adminData.attendance
       .map((row) => Number(row.attendance?.workedMinutes || 0))
       .filter((minutes) => minutes > 0);
+    const lateToday = adminData.attendance.filter(
+      (row) => row.attendance?.checkInAt && row.attendance?.isLateCheckIn,
+    ).length;
     const averageHours = workedRows.length
       ? (workedRows.reduce((sum, minutes) => sum + minutes, 0) / workedRows.length / 60).toFixed(1)
       : "0.0";
@@ -961,10 +992,10 @@ const AttendanceHub = () => {
         detail: `of ${totalUsers} users`,
       },
       {
-        key: "onBreak",
+        key: "late",
         label: "Late",
-        value: onBreak,
-        detail: "On break now",
+        value: lateToday,
+        detail: `${onBreak} on break now`,
       },
       {
         key: "leave",
@@ -997,13 +1028,13 @@ const AttendanceHub = () => {
       {/* The command bar above already carries the page title, so this row adds
           only what it does not: where you are, and whose view this is. */}
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[12px] text-slate-400">
+        <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-slate-500">
           <button type="button" onClick={() => navigate("/")} className="hover:text-slate-600">Home</button>
           <ChevronRight size={13} aria-hidden="true" />
           <span className="font-medium text-slate-600">Attendance</span>
         </nav>
         {isAdminViewer ? (
-          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-[12px] font-semibold text-violet-700">
+          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1.5 text-[13px] font-semibold text-violet-700">
             <Sparkles size={13} aria-hidden="true" />
             Admin View
           </span>
@@ -1011,7 +1042,7 @@ const AttendanceHub = () => {
       </div>
 
       {myLoading && canUsePersonalAttendance ? (
-        <div className={`${cardClass} flex h-40 items-center justify-center text-sm text-slate-500`}>
+        <div className={`${cardClass} flex h-40 items-center justify-center text-[15px] text-slate-500`}>
           <Loader2 size={18} className="mr-2 animate-spin" />
           Loading attendance...
         </div>
@@ -1026,12 +1057,12 @@ const AttendanceHub = () => {
                     <span className="text-[14px] font-semibold text-slate-900">
                       Today · {formatDateShort(todayDateKey)}
                     </span>
-                    <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-semibold ${statusBadgeClass(todayStatus)}`}>
+                    <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] font-semibold ${statusBadgeClass(todayStatus)}`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-current" />
                       {canUsePersonalAttendance ? formatAttendanceStatus(todayStatus) : "Admin view"}
                     </span>
                     {isOnBreak ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11.5px] font-semibold text-amber-700">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[12.5px] font-semibold text-amber-700">
                         <span className="h-1.5 w-1.5 rounded-full bg-current" />
                         On Break
                       </span>
@@ -1046,26 +1077,26 @@ const AttendanceHub = () => {
                     {canUsePersonalAttendance ? (
                       <>
                         <span className="flex items-center gap-2">
-                          <MapPin size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                          <MapPin size={15} className="shrink-0 text-slate-500" aria-hidden="true" />
                           <span className="leading-tight">
-                            <span className="block text-[11px] text-slate-400">Office radius</span>
-                            <strong className="font-mono text-[13px] text-slate-800">
+                            <span className="block text-[12px] text-slate-500">Office radius</span>
+                            <strong className="font-mono text-[14px] text-slate-800">
                               {formatDistance(todayAttendance?.checkInLocation?.distanceMeters)}
                             </strong>
                           </span>
                         </span>
                         <span className="flex items-center gap-2">
-                          <Timer size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                          <Timer size={15} className="shrink-0 text-slate-500" aria-hidden="true" />
                           <span className="leading-tight">
-                            <span className="block text-[11px] text-slate-400">Elapsed</span>
-                            <strong className="font-mono text-[13px] text-slate-800">{formatDuration(liveWorkedMinutes)}</strong>
+                            <span className="block text-[12px] text-slate-500">Elapsed</span>
+                            <strong className="font-mono text-[14px] text-slate-800">{formatDuration(liveWorkedMinutes)}</strong>
                           </span>
                         </span>
                       </>
                     ) : (
                       <span className="flex items-center gap-2">
-                        <Users size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
-                        <span className="text-[12px] text-slate-500">
+                        <Users size={15} className="shrink-0 text-slate-500" aria-hidden="true" />
+                        <span className="text-[13px] text-slate-500">
                           Team attendance · {Number(adminData.summary?.totalUsers || 0)} users
                         </span>
                       </span>
@@ -1148,14 +1179,14 @@ const AttendanceHub = () => {
                 <div className="flex items-center gap-2.5">
                   <IconBox icon={Clock} tone="blue" boxSize="h-8 w-8" iconSize={15} />
                   <div className="min-w-0">
-                    <p className="text-[11.5px] text-slate-500">Logged hours</p>
+                    <p className="text-[12.5px] text-slate-500">Logged hours</p>
                     <strong className="font-mono text-[15px] text-slate-900">{formatDuration(liveWorkedMinutes)}</strong>
                   </div>
                 </div>
                 <div className="flex items-center gap-2.5">
                   <IconBox icon={Coffee} tone="violet" boxSize="h-8 w-8" iconSize={15} />
                   <div className="min-w-0">
-                    <p className="text-[11.5px] text-slate-500">Daily breaks</p>
+                    <p className="text-[12.5px] text-slate-500">Daily breaks</p>
                     <strong className="font-mono text-[15px] text-slate-900">{todayBreakSessions.length}</strong>
                   </div>
                 </div>
@@ -1164,7 +1195,7 @@ const AttendanceHub = () => {
                     <span className="h-2 w-2 rounded-full bg-current" />
                   </span>
                   <div className="min-w-0">
-                    <p className="text-[11.5px] text-slate-500">Current status</p>
+                    <p className="text-[12.5px] text-slate-500">Current status</p>
                     <strong className="text-[14px] text-slate-900">
                       {activeBreak ? `On ${formatBreakType(activeBreak.breakType).toLowerCase()} break` : "Not on break"}
                     </strong>
@@ -1173,7 +1204,7 @@ const AttendanceHub = () => {
                 <div className="flex items-center gap-2.5">
                   <IconBox icon={Hourglass} tone={activeBreak?.expectedMinutes && activeBreakMinutes > activeBreak.expectedMinutes ? "rose" : "slate"} boxSize="h-8 w-8" iconSize={15} />
                   <div className="min-w-0">
-                    <p className="text-[11.5px] text-slate-500">Elapsed break</p>
+                    <p className="text-[12.5px] text-slate-500">Elapsed break</p>
                     <strong className={`font-mono text-[15px] ${activeBreak?.expectedMinutes && activeBreakMinutes > activeBreak.expectedMinutes ? "text-rose-700" : "text-slate-900"}`}>
                       {activeBreak ? `${activeBreakMinutes}m${activeBreak.expectedMinutes ? ` / ${activeBreak.expectedMinutes}m` : ""}` : "—"}
                     </strong>
@@ -1190,7 +1221,7 @@ const AttendanceHub = () => {
                   title="Break Sessions Today"
                   subtitle={`${todayBreakSessions.length} break${todayBreakSessions.length === 1 ? "" : "s"} · ${formatDuration(todayAttendance?.totalBreakMinutes || 0)} total`}
                 >
-                  <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1.5 text-[11.5px] font-semibold text-blue-700">
+                  <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1.5 text-[12.5px] font-semibold text-blue-700">
                     Total Break Time
                     <span className="font-mono">{formatDuration(todayAttendance?.totalBreakMinutes || 0)}</span>
                   </span>
@@ -1214,7 +1245,7 @@ const AttendanceHub = () => {
                             {/* A break a manager recorded should not read as one
                                 this person logged themselves. */}
                             {session.correctedByName ? (
-                              <span className="block text-[11px] font-normal text-slate-400">Recorded by {session.correctedByName}</span>
+                              <span className="block text-[12px] font-normal text-slate-500">Recorded by {session.correctedByName}</span>
                             ) : null}
                           </span>
                           <span className="font-mono text-slate-500">
@@ -1222,7 +1253,7 @@ const AttendanceHub = () => {
                           </span>
                           <span className={`ml-auto font-mono font-semibold tabular-nums ${overran ? "text-rose-700" : "text-slate-900"}`}>
                             {formatDuration(minutes)}
-                            {session.expectedMinutes ? <span className="font-normal text-slate-400"> / {session.expectedMinutes}m</span> : null}
+                            {session.expectedMinutes ? <span className="font-normal text-slate-500"> / {session.expectedMinutes}m</span> : null}
                           </span>
                         </li>
                       );
@@ -1239,7 +1270,7 @@ const AttendanceHub = () => {
                   <h4 className="text-[14px] font-semibold leading-tight text-slate-900">
                     {showPersonalHistory ? "Daily Attendance History" : "Team Daily Attendance History"}
                   </h4>
-                  <p className="mt-0.5 text-[12px] text-slate-500">
+                  <p className="mt-0.5 text-[13px] text-slate-500">
                     {showPersonalHistory ? "View your daily check-in and work hours" : "Check-in, hours and status for your team"}
                   </p>
                 </div>
@@ -1255,7 +1286,7 @@ const AttendanceHub = () => {
                       type="month"
                       value={month}
                       onChange={(event) => setMonth(event.target.value)}
-                      className="h-8 rounded-md border-0 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm outline-none"
+                      className="h-8 rounded-md border-0 bg-white px-3 text-[13px] font-semibold text-slate-700 shadow-sm outline-none"
                     />
                     <button
                       type="button"
@@ -1284,9 +1315,9 @@ const AttendanceHub = () => {
                 )}
               </div>
               <div className="overflow-x-auto">
-                <table className="min-w-full border-separate border-spacing-0 text-[13px]">
+                <table className="min-w-full border-separate border-spacing-0 text-[14px]">
                   <thead>
-                    <tr className="bg-slate-50 text-left text-[10.5px] font-bold uppercase tracking-[0.07em] text-slate-400">
+                    <tr className="bg-slate-50 text-left text-[11.5px] font-bold uppercase tracking-[0.07em] text-slate-500">
                       {showPersonalHistory ? (
                         <>
                           <th className="border-b border-slate-200 px-3 py-2.5">Date</th>
@@ -1312,7 +1343,7 @@ const AttendanceHub = () => {
                     {showPersonalHistory ? (
                       myData.attendance.length === 0 ? (
                         <tr>
-                          <td className="px-3 py-4 text-sm text-slate-500" colSpan={isAdminViewer ? 6 : 5}>No attendance records found for selected month.</td>
+                          <td className="px-3 py-4 text-[15px] text-slate-500" colSpan={isAdminViewer ? 6 : 5}>No attendance records found for selected month.</td>
                         </tr>
                       ) : (
                         myData.attendance.map((row) => (
@@ -1322,13 +1353,13 @@ const AttendanceHub = () => {
                             <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-500">{formatTimeOnly(row.checkOutAt)}</td>
                             <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-600">{formatDuration(row.workedMinutes)}</td>
                             <td className="border-b border-slate-100 px-3 py-2.5">
-                              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(row.status)}`}>
+                              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12.5px] font-semibold ${statusBadgeClass(row.status)}`}>
                                 <span className="h-1.5 w-1.5 rounded-full bg-current" />
                                 {formatAttendanceStatus(row.status)}
                               </span>
                             </td>
                             {isAdminViewer ? (
-                              <td className="border-b border-slate-100 px-3 py-2.5 text-xs text-slate-500">
+                              <td className="border-b border-slate-100 px-3 py-2.5 text-[13px] text-slate-500">
                                 In {formatDistance(row.checkInLocation?.distanceMeters)} · Out {formatDistance(row.checkOutLocation?.distanceMeters)}
                               </td>
                             ) : null}
@@ -1337,22 +1368,22 @@ const AttendanceHub = () => {
                       )
                     ) : adminLoading ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-slate-500" colSpan={6}>
+                        <td className="px-3 py-4 text-[15px] text-slate-500" colSpan={6}>
                           <Loader2 size={16} className="mr-2 inline animate-spin" />
                           Loading team attendance...
                         </td>
                       </tr>
                     ) : adminData.attendance.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-4 text-sm text-slate-500" colSpan={6}>No users found for selected filters.</td>
+                        <td className="px-3 py-4 text-[15px] text-slate-500" colSpan={6}>No users found for selected filters.</td>
                       </tr>
                     ) : (
                       adminData.attendance.map((row) => (
                         <tr key={String(row.user?._id || "")} className="transition hover:bg-slate-50">
                           <td className="border-b border-slate-100 px-3 py-2.5">
                             <div className="flex items-center gap-2.5">
-                              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[11.5px] font-bold text-white ${avatarTone(row.user?.name)}`}>
-                                {getInitials(row.user?.name)}
+                              <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-[12.5px] font-bold text-white ${avatarTone(row.user?.name)}`}>
+                                <AvatarFace user={row.user} initials={getInitials(row.user?.name)} />
                               </span>
                               <div className="min-w-0">
                                 <button type="button" onClick={() => openUserProfile(row.user?._id)} className="block max-w-[170px] truncate text-left font-semibold text-slate-900 transition hover:text-blue-700">
@@ -1361,7 +1392,7 @@ const AttendanceHub = () => {
                                 {/* Role reads as a label under the name; it used to be
                                     the placeholder of the status select, where a long
                                     one truncated to "PRODUCT". */}
-                                <span className="block max-w-[170px] truncate text-[11px] capitalize text-slate-400">
+                                <span className="block max-w-[170px] truncate text-[12px] capitalize text-slate-500">
                                   {String(row.user?.role || "").replaceAll("_", " ").toLowerCase() || "-"}
                                 </span>
                               </div>
@@ -1371,7 +1402,7 @@ const AttendanceHub = () => {
                           <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-500">{formatTimeOnly(row.attendance?.checkOutAt)}</td>
                           <td className="border-b border-slate-100 px-3 py-2.5 font-mono text-slate-600">{formatDuration(row.attendance?.workedMinutes || 0)}</td>
                           <td className="border-b border-slate-100 px-3 py-2.5">
-                            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(row.attendance?.status)}`}>
+                            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12.5px] font-semibold ${statusBadgeClass(row.attendance?.status)}`}>
                               <span className="h-1.5 w-1.5 rounded-full bg-current" />
                               {formatAttendanceStatus(row.attendance?.status)}
                             </span>
@@ -1386,7 +1417,7 @@ const AttendanceHub = () => {
                                     value={MANUAL_ATTENDANCE_STATUS_OPTIONS.some((option) => option.value === row.attendance?.status) ? row.attendance?.status : ""}
                                     onChange={(event) => handleManualStatusChange(row, event.target.value)}
                                     disabled={rowBusy(row)}
-                                    className="h-8 appearance-none rounded-lg border border-blue-600 bg-blue-600 pl-3 pr-7 text-xs font-semibold text-white outline-none disabled:opacity-60"
+                                    className="h-8 appearance-none rounded-lg border border-blue-600 bg-blue-600 pl-3 pr-7 text-[13px] font-semibold text-white outline-none disabled:opacity-60"
                                     title="Set attendance manually"
                                   >
                                     <option value="">Set Status</option>
@@ -1401,7 +1432,7 @@ const AttendanceHub = () => {
                                   type="button"
                                   onClick={() => handleManualStatusChange(row, "PRESENT")}
                                   disabled={rowBusy(row)}
-                                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-[13px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
                                   title="Mark this employee present for the day"
                                 >
                                   {rowBusy(row) ? <Loader2 size={12} className="animate-spin" /> : null}
@@ -1427,7 +1458,7 @@ const AttendanceHub = () => {
                                     <button type="button" aria-label="Close menu" className="fixed inset-0 z-10 cursor-default" onClick={() => setOpenRowMenu("")} />
                                     <div className="absolute right-0 top-9 z-20 w-56 rounded-xl border border-slate-200 bg-white p-2 text-left shadow-lg">
                                       {!row.attendance?.checkInAt ? (
-                                        <p className="px-2 py-1.5 text-[11.5px] text-slate-400">Not checked in today.</p>
+                                        <p className="px-2 py-1.5 text-[12.5px] text-slate-500">Not checked in today.</p>
                                       ) : null}
 
                                       {row.attendance?.checkInAt && !row.attendance?.checkOutAt ? (
@@ -1436,37 +1467,37 @@ const AttendanceHub = () => {
                                             type="button"
                                             onClick={() => { setOpenRowMenu(""); handleTeamBreak(row, "END"); }}
                                             disabled={teamBreakAction === String(row.user?._id || "")}
-                                            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                            className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[13.5px] font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
                                           >
                                             <PlayCircle size={14} />
                                             End break
-                                            <span className="ml-auto font-mono text-[11.5px] font-normal tabular-nums text-slate-400">
+                                            <span className="ml-auto font-mono text-[12.5px] font-normal tabular-nums text-slate-500">
                                               {minutesBetween(row.attendance?.activeBreakStartedAt, liveNow)}m
                                             </span>
                                           </button>
                                         ) : (
                                           <div className="px-2 py-1.5">
-                                            <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400">Start a break</span>
+                                            <span className="mb-1 block text-[12px] font-semibold uppercase tracking-wide text-slate-500">Start a break</span>
                                             <div className="flex items-center gap-1.5">
                                               <span className="relative inline-flex flex-1">
                                                 <select
                                                   aria-label={`Break type for ${row.user?.name || "employee"}`}
                                                   value={teamBreakTypes[String(row.user?._id || "")] || "UTILITY"}
                                                   onChange={(event) => setTeamBreakTypes((value) => ({ ...value, [String(row.user?._id || "")]: event.target.value }))}
-                                                  className="h-8 w-full appearance-none rounded-lg border border-slate-300 bg-white pl-2 pr-6 text-xs font-semibold text-slate-700 outline-none"
+                                                  className="h-8 w-full appearance-none rounded-lg border border-slate-300 bg-white pl-2 pr-6 text-[13px] font-semibold text-slate-700 outline-none"
                                                 >
                                                   <option value="UTILITY">Utility</option>
                                                   <option value="LUNCH">Lunch</option>
                                                   <option value="TEA">Tea</option>
                                                   <option value="COFFEE">Coffee</option>
                                                 </select>
-                                                <ChevronDown aria-hidden="true" size={12} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                                                <ChevronDown aria-hidden="true" size={12} className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500" />
                                               </span>
                                               <button
                                                 type="button"
                                                 onClick={() => { setOpenRowMenu(""); handleTeamBreak(row, "START"); }}
                                                 disabled={teamBreakAction === String(row.user?._id || "")}
-                                                className="inline-flex h-8 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-xs font-semibold text-amber-800 disabled:opacity-60"
+                                                className="inline-flex h-8 items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 text-[13px] font-semibold text-amber-800 disabled:opacity-60"
                                               >
                                                 <PauseCircle size={13} />
                                                 Start
@@ -1480,9 +1511,9 @@ const AttendanceHub = () => {
                                         <button
                                           type="button"
                                           onClick={() => { setOpenRowMenu(""); setBreakCorrectionRow(row); }}
-                                          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                                          className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[13.5px] font-semibold text-slate-700 hover:bg-slate-50"
                                         >
-                                          <Timer size={14} className="text-slate-400" />
+                                          <Timer size={14} className="text-slate-500" />
                                           Manage breaks
                                         </button>
                                       ) : null}
@@ -1490,9 +1521,9 @@ const AttendanceHub = () => {
                                       <button
                                         type="button"
                                         onClick={() => { setOpenRowMenu(""); openUserProfile(row.user?._id); }}
-                                        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-slate-700 hover:bg-slate-50"
+                                        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[13.5px] font-semibold text-slate-700 hover:bg-slate-50"
                                       >
-                                        <Users size={14} className="text-slate-400" />
+                                        <Users size={14} className="text-slate-500" />
                                         Open profile
                                       </button>
                                     </div>
@@ -1535,9 +1566,9 @@ const AttendanceHub = () => {
                   <div key={card.key} className={`${statCardClass} flex items-start gap-3`}>
                     <IconBox icon={meta.icon} tone={meta.tone} boxSize="h-10 w-10" iconSize={18} />
                     <div className="min-w-0">
-                      <div className="text-[12px] font-semibold text-slate-500">{card.label}</div>
+                      <div className="text-[13px] font-semibold text-slate-500">{card.label}</div>
                       <div className="mt-1 font-mono text-[24px] font-semibold leading-none tracking-normal text-slate-950">{card.value}</div>
-                      <div className="mt-1.5 truncate text-[11.5px] text-slate-400">{card.detail}</div>
+                      <div className="mt-1.5 truncate text-[12.5px] text-slate-500">{card.detail}</div>
                     </div>
                   </div>
                 );
@@ -1552,7 +1583,7 @@ const AttendanceHub = () => {
                   title="Leave Requests"
                   subtitle="Apply for leave or view your recent requests"
                 >
-                  <button type="button" onClick={loadLeaveRequestsData} disabled={leaveLoading} className="ml-auto text-xs font-semibold text-blue-600 transition hover:text-blue-800 disabled:opacity-60">
+                  <button type="button" onClick={loadLeaveRequestsData} disabled={leaveLoading} className="ml-auto text-[13px] font-semibold text-blue-600 transition hover:text-blue-800 disabled:opacity-60">
                     {leaveLoading ? "Loading" : "New request"}
                   </button>
                 </SectionHeader>
@@ -1568,7 +1599,7 @@ const AttendanceHub = () => {
                       onChange={(event) => setLeaveForm((prev) => ({ ...prev, reason: event.target.value }))}
                       rows={2}
                       placeholder="Reason"
-                      className="sm:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                      className="sm:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-[13px] font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                     />
                     <button type="submit" disabled={leaveSubmitting} className={`${primaryButtonClass} sm:col-span-2`}>
                       {leaveSubmitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
@@ -1584,9 +1615,9 @@ const AttendanceHub = () => {
                         <div key={String(row._id)} className="flex items-center gap-3 py-2">
                           <div className="min-w-0">
                             <b className="block truncate text-[12.8px] font-semibold text-slate-900">{String(row.leaveType || "CASUAL").replaceAll("_", " ")} · {formatDateShort(row.fromDate)}</b>
-                            <div className="truncate text-[11.5px] text-slate-500">{row.reason || "-"}</div>
+                            <div className="truncate text-[12.5px] text-slate-500">{row.reason || "-"}</div>
                           </div>
-                          <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(row.status)}`}>
+                          <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12.5px] font-semibold ${statusBadgeClass(row.status)}`}>
                             <span className="h-1.5 w-1.5 rounded-full bg-current" />
                             {String(row.status || "PENDING").replaceAll("_", " ")}
                           </span>
@@ -1611,13 +1642,13 @@ const AttendanceHub = () => {
                         type="button"
                         aria-pressed={adminLeaveStatusFilter === value}
                         onClick={() => setAdminLeaveStatusFilter(value)}
-                        className={`rounded-md px-3 py-1 text-[12px] font-semibold transition ${
+                        className={`rounded-md px-3 py-1 text-[13px] font-semibold transition ${
                           adminLeaveStatusFilter === value ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"
                         }`}
                       >
                         {label}
                         {value === "PENDING" && pendingAdminLeaveRequests.length ? (
-                          <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-[10.5px] text-amber-700">{pendingAdminLeaveRequests.length}</span>
+                          <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-[11.5px] text-amber-700">{pendingAdminLeaveRequests.length}</span>
                         ) : null}
                       </button>
                     ))}
@@ -1629,29 +1660,29 @@ const AttendanceHub = () => {
                       <div className="py-2 text-[12.8px] text-slate-500"><Loader2 size={16} className="mr-2 inline animate-spin" />Loading approvals...</div>
                     ) : visibleAdminLeaveRequests.length === 0 ? (
                       <div className="flex flex-col items-center gap-2 py-8 text-center">
-                        <span className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-slate-400">
+                        <span className="grid h-12 w-12 place-items-center rounded-xl bg-slate-100 text-slate-500">
                           <FileText size={22} aria-hidden="true" />
                         </span>
                         <p className="text-[12.8px] font-semibold text-slate-600">No leave requests found.</p>
-                        <p className="text-[11.5px] text-slate-400">
-                          {adminLeaveStatusFilter === "PENDING" ? "All team members are in office today." : "Nothing in the history for this filter."}
+                        <p className="text-[12.5px] text-slate-500">
+                          {adminLeaveStatusFilter === "PENDING" ? "No pending leave requests." : "Nothing in the history for this filter."}
                         </p>
                       </div>
                     ) : (
                       visibleAdminLeaveRequests.map((row) => (
                         <div key={String(row._id)} className="flex flex-wrap items-center gap-3 py-2">
-                          <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-100 text-[9px] font-bold text-blue-700">{getInitials(row.user?.name)}</div>
+                          <div className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700"><AvatarFace user={row.user} initials={getInitials(row.user?.name)} /></div>
                           <div className="min-w-[120px] flex-1">
-                            <b className="block text-[12.5px] font-semibold text-slate-900">{row.user?.name || "-"}</b>
-                            <div className="text-[11.5px] text-slate-500">{String(row.leaveType || "CASUAL").replaceAll("_", " ")} · {formatDateShort(row.fromDate)}</div>
+                            <b className="block text-[13.5px] font-semibold text-slate-900">{row.user?.name || "-"}</b>
+                            <div className="text-[12.5px] text-slate-500">{String(row.leaveType || "CASUAL").replaceAll("_", " ")} · {formatDateShort(row.fromDate)}</div>
                           </div>
                           {row.status === "PENDING" ? (
                             <div className="ml-auto flex gap-1.5">
-                              <button type="button" onClick={() => handleReviewLeave(row._id, "APPROVED")} disabled={Boolean(reviewAction)} className="rounded-lg border border-blue-700 bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60">Approve</button>
-                              <button type="button" onClick={() => handleReviewLeave(row._id, "REJECTED")} disabled={Boolean(reviewAction)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-700 disabled:opacity-60">Reject</button>
+                              <button type="button" onClick={() => handleReviewLeave(row._id, "APPROVED")} disabled={Boolean(reviewAction)} className="rounded-lg border border-blue-700 bg-blue-600 px-3 py-1.5 text-[13px] font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60">Approve</button>
+                              <button type="button" onClick={() => handleReviewLeave(row._id, "REJECTED")} disabled={Boolean(reviewAction)} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[13px] font-semibold text-slate-700 transition hover:border-rose-300 hover:text-rose-700 disabled:opacity-60">Reject</button>
                             </div>
                           ) : (
-                            <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[11.5px] font-semibold ${statusBadgeClass(row.status)}`}>
+                            <span className={`ml-auto inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12.5px] font-semibold ${statusBadgeClass(row.status)}`}>
                               <span className="h-1.5 w-1.5 rounded-full bg-current" />
                               {String(row.status || "PENDING").replaceAll("_", " ")}
                             </span>
@@ -1669,7 +1700,7 @@ const AttendanceHub = () => {
                 <form onSubmit={handleSaveAttendancePolicy}>
                   <div className={cardHeaderClass}>
                     <h4 className="flex-1 text-[14px] font-semibold text-slate-900">Attendance Policy</h4>
-                    <label className="inline-flex items-center gap-2 text-[12px] font-semibold text-slate-600">
+                    <label className="inline-flex items-center gap-2 text-[13px] font-semibold text-slate-600">
                       <input type="checkbox" checked={Boolean(policyForm.geofenceEnabled)} onChange={(event) => setPolicyForm((prev) => ({ ...prev, geofenceEnabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                       Geofence
                     </label>
@@ -1678,16 +1709,16 @@ const AttendanceHub = () => {
                     <ToastNotice message={policyError} type="error" />
                     <div className="grid grid-cols-2 gap-3">
                       <label className="block">
-                        <span className="mb-1 block text-[11.5px] text-slate-500">Office Latitude</span>
+                        <span className="mb-1 block text-[12.5px] text-slate-500">Office Latitude</span>
                         <input type="number" step="any" value={policyForm.officeLatitude} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeLatitude: event.target.value }))} className={fieldClass} aria-label="Office latitude" />
                       </label>
                       <label className="block">
-                        <span className="mb-1 block text-[11.5px] text-slate-500">Office Longitude</span>
+                        <span className="mb-1 block text-[12.5px] text-slate-500">Office Longitude</span>
                         <input type="number" step="any" value={policyForm.officeLongitude} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeLongitude: event.target.value }))} className={fieldClass} aria-label="Office longitude" />
                       </label>
                     </div>
                     <label className="block">
-                      <span className="mb-1 block text-[11.5px] text-slate-500">Allowed Radius (meters)</span>
+                      <span className="mb-1 block text-[12.5px] text-slate-500">Allowed Radius (meters)</span>
                       <input type="number" min="10" max="5000" value={policyForm.officeRadiusMeters} onChange={(event) => setPolicyForm((prev) => ({ ...prev, officeRadiusMeters: event.target.value }))} className={fieldClass} aria-label="Office radius" />
                     </label>
                     <div className="flex gap-2">
@@ -1714,11 +1745,11 @@ const AttendanceHub = () => {
                 <div className={`${cardBodyClass} space-y-3`}>
                   {todayInsights.map((insight) => (
                     <div key={insight.label} className="flex items-center gap-3">
-                      <span className="min-w-0 flex-1 truncate text-[12.5px] text-slate-600">{insight.label}</span>
+                      <span className="min-w-0 flex-1 truncate text-[13.5px] text-slate-600">{insight.label}</span>
                       <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
                         <span className={`block h-full rounded-full ${insight.tone}`} style={{ width: `${insight.percent}%` }} />
                       </span>
-                      <span className="w-12 shrink-0 text-right font-mono text-[12px] font-semibold text-slate-800">{insight.value}</span>
+                      <span className="w-12 shrink-0 text-right font-mono text-[13px] font-semibold text-slate-800">{insight.value}</span>
                     </div>
                   ))}
                 </div>
@@ -1729,7 +1760,7 @@ const AttendanceHub = () => {
       )}
 
       {isAdminViewer ? (
-        <p className="mt-4 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3.5 text-[12.5px] text-blue-900">
+        <p className="mt-4 flex items-start gap-2 rounded-xl border border-blue-200 bg-blue-50 p-3.5 text-[13.5px] text-blue-900">
           <Info size={15} className="mt-px shrink-0" aria-hidden="true" />
           <span>
             Tip: team members can only check in within the allowed office radius.

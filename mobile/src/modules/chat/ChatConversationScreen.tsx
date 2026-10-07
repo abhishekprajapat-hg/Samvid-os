@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  AppState,
   Dimensions,
   FlatList,
   Image,
@@ -19,7 +21,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import { Audio } from "expo-av";
-import { Ionicons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
+import { AppSheet } from "../../components/ui/Overlay";
+import { Icon } from "../../components/ui/Icon";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
@@ -32,10 +36,30 @@ import {
   createMobileCallSession,
   updateCallLog,
   uploadChatFile,
+  createDirectRoom,
+  markConversationRead,
+  markMessageDelivered,
+  markMessageSeen,
+  deleteConversationMessage,
+  clearConversationMessages,
 } from "../../services/chatService";
+import {
+  REMOTE_TYPING_TIMEOUT_MS,
+  ROOM_READ_EMIT_THROTTLE_MS,
+  TYPING_IDLE_TIMEOUT_MS,
+  applyRoomReadToMessages,
+  getOutgoingMessageStatus,
+  hasUserAck,
+  isMessageForConversation,
+  matchesMessageSearch,
+  senderIdOf,
+  toId,
+} from "./chatReceipts";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import type { ChatCallLog, ChatContact, ChatConversation, ChatMessage } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
+import { toAbsoluteUrl } from "../../services/uploadService";
 
 const mergeMessages = (prev: ChatMessage[], incoming: ChatMessage[]) => {
   const map = new Map<string, ChatMessage>();
@@ -104,12 +128,12 @@ const formatDayLabel = (dateInput: string | Date) => {
 
 const renderAvatar = (name: string, avatarUrl: string, size = 32) => {
   if (avatarUrl) {
-    return <Image source={{ uri: avatarUrl }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+    return <Image source={{ uri: toAbsoluteUrl(avatarUrl) }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
   }
 
   return (
-    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: "#dbeafe", alignItems: "center", justifyContent: "center" }}>
-      <Text style={{ color: "#1e3a8a", fontSize: 10, fontWeight: "700" }}>{initials(name)}</Text>
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: themeColor("#dde6ff"), alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ color: themeColor("#182a6d"), fontSize: 10, fontWeight: "700" }}>{initials(name)}</Text>
     </View>
   );
 };
@@ -159,11 +183,16 @@ const normalizeIncomingMessage = (row: any): ChatMessage | null => {
     createdAt: String(row.createdAt || new Date().toISOString()),
     sender: row.sender
       ? {
-          _id: String(row.sender._id || ""),
+          _id: String(typeof row.sender === "string" ? row.sender : row.sender._id || ""),
           name: String(row.sender.name || ""),
           avatarUrl: String(row.sender.avatarUrl || row.sender.profileImageUrl || ""),
         }
       : undefined,
+    deliveredTo: Array.isArray(row.deliveredTo) ? row.deliveredTo : [],
+    seenBy: Array.isArray(row.seenBy) ? row.seenBy : [],
+    room: row.room ? String(row.room?._id || row.room) : undefined,
+    conversation: row.conversation ? String(row.conversation?._id || row.conversation) : undefined,
+    sharedProperty: row.sharedProperty && typeof row.sharedProperty === "object" ? row.sharedProperty : null,
   };
 };
 
@@ -218,6 +247,51 @@ export const ChatConversationScreen = () => {
   const socketRef = useRef<ReturnType<typeof createChatSocket> | null>(null);
   const filePickerLockRef = useRef(false);
   const soundRef = useRef<Audio.Sound | null>(null);
+
+  /*
+   * Receipts, typing, delete and clear - the parts of web's TeamChat this
+   * screen did not have. Refs hold what the socket handlers read, so a handler
+   * registered once still sees the conversation that is open now.
+   */
+  const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
+  /* A property handed over from inventory, sent with the next message. */
+  const [queuedShare, setQueuedShare] = useState<Record<string, unknown> | null>(() => {
+    const share = params.shareProperty;
+    return share && typeof share === "object" && share.inventoryId ? share : null;
+  });
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [messageSearch, setMessageSearch] = useState("");
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [actionMessage, setActionMessage] = useState<ChatMessage | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [appActiveTick, setAppActiveTick] = useState(0);
+  const conversationIdRef = useRef(conversationId);
+  const typingStateRef = useRef({ roomId: "", isTyping: false });
+  const typingStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remoteTypingTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const deliveredIdsRef = useRef(new Set<string>());
+  const seenIdsRef = useRef(new Set<string>());
+  const roomReadAtRef = useRef(0);
+
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+    setTypingUserIds([]);
+  }, [conversationId]);
+
+  // Opening a contact with no conversation yet: web creates the direct room
+  // first, so calls, receipts and typing have a room to belong to.
+  useEffect(() => {
+    if (conversationId || !contactId) return undefined;
+    let active = true;
+    createDirectRoom({ recipientId: contactId })
+      .then((room: any) => {
+        if (active && room?._id) setConversationId(String(room._id));
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [contactId, conversationId]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -327,6 +401,119 @@ export const ChatConversationScreen = () => {
   }, []);
 
   const myUserId = useMemo(() => String(user?._id || user?.id || ""), [user]);
+  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN";
+
+  /* Tell the room I have read it - over the socket, falling back to HTTP. */
+  const emitRoomRead = useCallback(async (roomId: string, force = false) => {
+    const id = toId(roomId);
+    if (!id || AppState.currentState !== "active") return;
+    const now = Date.now();
+    if (!force && now - roomReadAtRef.current < ROOM_READ_EMIT_THROTTLE_MS) return;
+    roomReadAtRef.current = now;
+    const socket = socketRef.current;
+    if (socket?.connected) {
+      const ack: any = await new Promise((resolve) =>
+        socket.emit("chat:room:read", { roomId: id }, (response: unknown) => resolve(response || {})),
+      );
+      if (ack?.ok) return;
+    }
+    await markConversationRead(id).catch(() => null);
+  }, []);
+
+  const applyReceipts = useCallback((updated: ChatMessage | null) => {
+    if (!updated?._id || !isMessageForConversation(updated, conversationIdRef.current)) return;
+    setMessages((prev) =>
+      prev.map((row) =>
+        row._id === updated._id ? { ...row, deliveredTo: updated.deliveredTo, seenBy: updated.seenBy } : row,
+      ),
+    );
+  }, []);
+
+  /* One receipt per message per mode, as web caches them. */
+  const emitReceipt = useCallback(async (messageId: string, mode: "delivered" | "seen") => {
+    const id = toId(messageId);
+    if (!id) return;
+    const cache = mode === "seen" ? seenIdsRef.current : deliveredIdsRef.current;
+    if (cache.has(id)) return;
+    cache.add(id);
+    try {
+      const socket = socketRef.current;
+      if (socket?.connected) {
+        const eventName = mode === "seen" ? "chat:message:seen" : "chat:message:delivered";
+        const ack: any = await new Promise((resolve) =>
+          socket.emit(eventName, { messageId: id }, (response: unknown) => resolve(response || {})),
+        );
+        if (!ack?.ok) throw new Error(ack?.error || "Receipt failed");
+        applyReceipts(ack.message ? normalizeIncomingMessage(ack.message) : null);
+        return;
+      }
+      applyReceipts(mode === "seen" ? await markMessageSeen(id) : await markMessageDelivered(id));
+    } catch {
+      cache.delete(id);
+    }
+  }, [applyReceipts]);
+
+  /* My own typing state, sent only when it changes. */
+  const emitTyping = useCallback((isTyping: boolean) => {
+    const roomId = toId(conversationIdRef.current);
+    const socket = socketRef.current;
+    if (!roomId || !socket?.connected) return;
+    const current = typingStateRef.current;
+    if (current.roomId === roomId && current.isTyping === isTyping) return;
+    typingStateRef.current = { roomId, isTyping };
+    socket.emit("chat:typing", { roomId, isTyping });
+  }, []);
+
+  const stopTyping = useCallback(() => {
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = null;
+    emitTyping(false);
+  }, [emitTyping]);
+
+  const handleDraftChange = useCallback((value: string) => {
+    setDraft(value);
+    if (!value.trim()) {
+      stopTyping();
+      return;
+    }
+    emitTyping(true);
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    typingStopTimerRef.current = setTimeout(() => emitTyping(false), TYPING_IDLE_TIMEOUT_MS);
+  }, [emitTyping, stopTyping]);
+
+  // Coming back to the app is when unread messages actually get seen.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      setAppActiveTick((value) => value + 1);
+      if (conversationIdRef.current) void emitRoomRead(conversationIdRef.current, true);
+    });
+    return () => sub.remove();
+  }, [emitRoomRead]);
+
+  // Every message from the other side is acknowledged once: seen while the
+  // app is in front, delivered otherwise.
+  useEffect(() => {
+    if (!conversationId || !messages.length || !myUserId) return;
+    const visible = AppState.currentState === "active";
+    messages.forEach((message) => {
+      const id = toId(message._id);
+      const sender = senderIdOf(message);
+      if (!id || !sender || sender === myUserId) return;
+      if (!isMessageForConversation(message, conversationId)) return;
+      if (visible) {
+        if (!hasUserAck(message.seenBy, myUserId)) void emitReceipt(id, "seen");
+      } else if (!hasUserAck(message.deliveredTo, myUserId)) {
+        void emitReceipt(id, "delivered");
+      }
+    });
+  }, [appActiveTick, conversationId, emitReceipt, messages, myUserId]);
+
+  useEffect(() => () => {
+    if (typingStopTimerRef.current) clearTimeout(typingStopTimerRef.current);
+    remoteTypingTimersRef.current.forEach((timer) => clearTimeout(timer));
+    remoteTypingTimersRef.current.clear();
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -347,6 +534,11 @@ export const ChatConversationScreen = () => {
 
       if (String(resolvedConversation._id) === String(conversationId || params.conversationId || "")) {
         setMessages((prev) => mergeMessages(prev, [normalizedMessage]));
+        const senderId = senderIdOf(normalizedMessage);
+        if (senderId && senderId !== myUserId) {
+          setTypingUserIds((prev) => prev.filter((id) => id !== senderId));
+          void emitRoomRead(String(resolvedConversation._id));
+        }
       }
     };
 
@@ -396,25 +588,90 @@ export const ChatConversationScreen = () => {
     socket.on("chat:call:rejected", (payload: any) => handleCallUpdate({ ...payload, status: "REJECTED" }));
     socket.on("chat:call:ended", (payload: any) => handleCallUpdate({ ...payload, status: "ENDED" }));
 
+    // Receipts, typing, delete and clear are room events, so the socket joins
+    // the room first - web does the same by announcing the read on connect.
+    const joinRoom = () => {
+      const roomId = toId(conversationId);
+      if (!roomId) return;
+      socket.emit("chat:room:join", { roomId });
+      void emitRoomRead(roomId, true);
+    };
+    socket.on("connect", joinRoom);
+    if (socket.connected) joinRoom();
+
+    const onReceipt = (payload: any) => {
+      applyReceipts(payload?.message ? normalizeIncomingMessage(payload.message) : null);
+    };
+    socket.on("chat:message:delivered", onReceipt);
+    socket.on("chat:message:seen", onReceipt);
+
+    socket.on("chat:room:read", (payload: any) => {
+      const roomId = toId(payload?.roomId);
+      const reader = toId(payload?.userId);
+      if (!roomId || !reader || roomId !== toId(conversationIdRef.current)) return;
+      setMessages((prev) => applyRoomReadToMessages({ rows: prev, roomId, readerUserId: reader, currentUserId: myUserId }));
+    });
+
+    socket.on("chat:message:deleted", (payload: any) => {
+      const roomId = toId(payload?.roomId || payload?.room?._id || conversationIdRef.current);
+      const messageId = toId(payload?.messageId);
+      if (!messageId || roomId !== toId(conversationIdRef.current)) return;
+      setMessages((prev) => prev.filter((row) => row._id !== messageId));
+    });
+
+    socket.on("chat:room:cleared", (payload: any) => {
+      const roomId = toId(payload?.roomId || payload?.room?._id);
+      const userId = toId(payload?.userId);
+      if (!roomId || (userId && userId !== myUserId)) return;
+      if (roomId === toId(conversationIdRef.current)) setMessages([]);
+    });
+
+    socket.on("chat:typing", (payload: any) => {
+      const roomId = toId(payload?.roomId || payload?.conversationId);
+      const userId = toId(payload?.userId);
+      if (!roomId || !userId || userId === myUserId || roomId !== toId(conversationIdRef.current)) return;
+      const isTyping = payload?.isTyping !== false;
+      const timers = remoteTypingTimersRef.current;
+      const existing = timers.get(userId);
+      if (existing) {
+        clearTimeout(existing);
+        timers.delete(userId);
+      }
+      setTypingUserIds((prev) =>
+        isTyping ? (prev.includes(userId) ? prev : [...prev, userId]) : prev.filter((id) => id !== userId),
+      );
+      if (!isTyping) return;
+      timers.set(
+        userId,
+        setTimeout(() => {
+          setTypingUserIds((prev) => prev.filter((id) => id !== userId));
+          timers.delete(userId);
+        }, REMOTE_TYPING_TIMEOUT_MS),
+      );
+    });
+
     return () => {
+      typingStateRef.current = { roomId: "", isTyping: false };
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [token, conversationId, contactId, params.conversationId, contactName, loadCallLogs]);
+  }, [token, conversationId, contactId, params.conversationId, contactName, loadCallLogs, myUserId, emitRoomRead, applyReceipts]);
 
   const dispatchMessage = async ({
     textInput = "",
     attachment = null,
     overrideConversationId,
     overrideRecipientId,
+    sharedProperty,
   }: {
     textInput?: string;
     attachment?: ForwardPayload["attachment"];
     overrideConversationId?: string;
     overrideRecipientId?: string;
+    sharedProperty?: Record<string, unknown> | null;
   }) => {
     const text = textInput.trim();
-    if (!text && !attachment) return;
+    if (!text && !attachment && !sharedProperty) return;
 
     const targetConversationId = overrideConversationId || conversationId;
     const targetRecipientId = overrideRecipientId || contactId;
@@ -427,9 +684,10 @@ export const ChatConversationScreen = () => {
         }
       : null;
 
-    const payload = targetConversationId
+    const base = targetConversationId
       ? { conversationId: targetConversationId, text, attachment, mediaAttachments: mediaAttachment ? [mediaAttachment] : [] }
       : { recipientId: targetRecipientId, text, attachment, mediaAttachments: mediaAttachment ? [mediaAttachment] : [] };
+    const payload = sharedProperty ? { ...base, sharedProperty } : base;
 
     if (!overrideConversationId && !overrideRecipientId) {
       const socket = socketRef.current;
@@ -602,7 +860,9 @@ export const ChatConversationScreen = () => {
 
     const text = draft.trim();
     const attachments = [...pendingAttachments];
-    if (!text && attachments.length === 0) return;
+    const share = queuedShare;
+    if (!text && attachments.length === 0 && !share) return;
+    stopTyping();
 
     setSending(true);
     setError("");
@@ -610,7 +870,10 @@ export const ChatConversationScreen = () => {
     setPendingAttachments([]);
 
     try {
-      if (text) await dispatchMessage({ textInput: text });
+      if (text || share) {
+        await dispatchMessage({ textInput: text, sharedProperty: share });
+        setQueuedShare(null);
+      }
 
       for (const file of attachments) {
         const mime = String(file.mimeType || "").toLowerCase();
@@ -869,12 +1132,15 @@ export const ChatConversationScreen = () => {
     }
   };
 
+  const searching = Boolean(messageSearch.trim());
+
   const chatItems = useMemo<ChatListItem[]>(() => {
     const baseItems: Array<{ kind: "message" | "image-group"; key: string; createdAt: string; message?: ChatMessage; messages?: ChatMessage[] }> = [];
     let index = 0;
 
-    while (index < messages.length) {
-      const current = messages[index];
+    const source = searching ? messages.filter((row) => matchesMessageSearch(row, messageSearch)) : messages;
+    while (index < source.length) {
+      const current = source[index];
       if (!isImageMessage(current)) {
         baseItems.push({ kind: "message", key: `message:${current._id}`, message: current, createdAt: current.createdAt });
         index += 1;
@@ -885,8 +1151,8 @@ export const ChatConversationScreen = () => {
       let nextIndex = index + 1;
       let previousTime = new Date(current.createdAt).getTime();
 
-      while (nextIndex < messages.length) {
-        const nextMessage = messages[nextIndex];
+      while (nextIndex < source.length) {
+        const nextMessage = source[nextIndex];
         if (!isImageMessage(nextMessage)) break;
         if (getSenderId(nextMessage) !== getSenderId(current)) break;
         const nextTime = new Date(nextMessage.createdAt).getTime();
@@ -920,9 +1186,101 @@ export const ChatConversationScreen = () => {
     });
 
     return rows;
-  }, [messages]);
+  }, [messages, messageSearch, searching]);
 
   const messageCountText = useMemo(() => `${messages.length} messages`, [messages.length]);
+
+  /*
+   * Delete, as web offers it: anyone can delete a message for themselves; only
+   * an admin can delete their own message for everyone (the server refuses
+   * anything else), so that option only shows where it can succeed.
+   */
+  const deleteMessage = async (message: ChatMessage, scope: "self" | "everyone") => {
+    const messageId = toId(message._id);
+    if (!messageId || actionBusy) return;
+    const run = async () => {
+      setActionBusy(true);
+      try {
+        await deleteConversationMessage({ messageId, scope });
+        setMessages((prev) => prev.filter((row) => row._id !== messageId));
+        setActionMessage(null);
+        setError("");
+      } catch (e) {
+        setError(toErrorMessage(e, "Failed to delete message"));
+      } finally {
+        setActionBusy(false);
+      }
+    };
+    if (scope === "everyone") {
+      Alert.alert("Delete for everyone?", "This removes the message for everyone in the chat.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: () => void run() },
+      ]);
+      return;
+    }
+    await run();
+  };
+
+  const clearConversation = () => {
+    const roomId = toId(conversationIdRef.current);
+    setMenuVisible(false);
+    if (!roomId) return;
+    Alert.alert(`Clear chat with ${contactName}?`, "This clears only for your account.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Clear",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await clearConversationMessages(roomId);
+            setMessages([]);
+            setMessageSearch("");
+            markConversationRead(roomId).catch(() => null);
+            setError("");
+          } catch (e) {
+            setError(toErrorMessage(e, "Failed to clear chat"));
+          }
+        },
+      },
+    ]);
+  };
+
+  const openSharedProperty = (inventoryId?: string) => {
+    const id = toId(inventoryId);
+    if (id) navigation.navigate("InventoryDetails", { assetId: id });
+  };
+
+  const renderTicks = (message: ChatMessage, mine: boolean) => {
+    if (!mine) return null;
+    const status = getOutgoingMessageStatus(message, myUserId);
+    return (
+      <Icon
+        name={status === "sent" ? "checkmark" : "checkmark-done"}
+        size={12}
+        color={status === "seen" ? "#064e3b" : "#ffffff"}
+      />
+    );
+  };
+
+  const renderSharedProperty = (message: ChatMessage, mine: boolean) => {
+    const shared = message.sharedProperty;
+    if (!shared) return null;
+    return (
+      <Pressable style={styles.sharedCard} onPress={() => openSharedProperty(shared.inventoryId)}>
+        {shared.image ? <Image source={{ uri: shared.image }} style={styles.sharedImage} resizeMode="cover" /> : null}
+        <View style={styles.sharedBody}>
+          <Text style={styles.sharedTitle} numberOfLines={1}>{shared.title || "Shared Property"}</Text>
+          <Text style={styles.sharedMeta} numberOfLines={1}>{shared.location || "Location unavailable"}</Text>
+          <Text style={styles.sharedMeta}>
+            {Number.isFinite(Number(shared.price)) ? `₹${Number(shared.price).toLocaleString("en-IN")}` : "-"}
+            {shared.status ? ` | ${shared.status}` : ""}
+          </Text>
+          <Text style={[styles.sharedOpen, mine && styles.sharedOpenMine]}>Open Property</Text>
+        </View>
+      </Pressable>
+    );
+  };
+
 
   return (
     <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
@@ -933,29 +1291,59 @@ export const ChatConversationScreen = () => {
       >
         <View style={styles.header}>
           <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={18} color="#334155" />
+            <Icon name="arrow-back" size={18} color={themeColor("#39424f")} />
           </Pressable>
           {renderAvatar(contactName, contactAvatar, 32)}
           <View style={styles.titleWrap}>
             <Text style={styles.title} numberOfLines={1}>{contactName}</Text>
-            <Text style={styles.subTitle}>{contactRole || "Member"}</Text>
+            <Text style={[styles.subTitle, typingUserIds.length > 0 && styles.typingText]}>
+              {typingUserIds.length > 0 ? "typing…" : contactRole || "Member"}
+            </Text>
           </View>
           <Pressable style={styles.headerIconBtn} onPress={() => startCall("VOICE")}>
-            <Ionicons name="call-outline" size={16} color="#334155" />
+            <Icon name="call-outline" size={16} color={themeColor("#39424f")} />
           </Pressable>
           <Pressable style={styles.headerIconBtn} onPress={() => startCall("VIDEO")}>
-            <Ionicons name="videocam-outline" size={16} color="#334155" />
+            <Icon name="videocam-outline" size={16} color={themeColor("#39424f")} />
           </Pressable>
-          <Pressable style={styles.headerIconBtn} onPress={() => setCallLogsVisible(true)}>
-            <Ionicons name="time-outline" size={16} color="#334155" />
+          <Pressable
+            style={styles.headerIconBtn}
+            onPress={() => {
+              setSearchOpen((value) => !value);
+              if (searchOpen) setMessageSearch("");
+            }}
+            accessibilityLabel="Search messages"
+          >
+            <Icon name="search" size={16} color={themeColor("#39424f")} />
           </Pressable>
-          <Text style={styles.messageCount}>{messageCountText}</Text>
+          <Pressable style={styles.headerIconBtn} onPress={() => setMenuVisible(true)} accessibilityLabel="Chat options">
+            <Icon name="ellipsis-vertical" size={16} color={themeColor("#39424f")} />
+          </Pressable>
         </View>
+
+        {searchOpen ? (
+          <View style={styles.searchBar}>
+            <Icon name="search" size={14} color={themeColor("#6c7789")} />
+            <TextInput
+              style={styles.searchInput}
+              value={messageSearch}
+              onChangeText={setMessageSearch}
+              placeholder="Search messages..."
+              placeholderTextColor={themeColor("#98a3b5")}
+              autoFocus
+            />
+            {messageSearch ? (
+              <Pressable onPress={() => setMessageSearch("")} accessibilityLabel="Clear message search">
+                <Icon name="close" size={14} color={themeColor("#6c7789")} />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         {loading ? (
-          <View style={styles.loadingWrap}><ActivityIndicator color="#0f172a" /></View>
+          <View style={styles.loadingWrap}><ActivityIndicator color={themeColor("#161c24")} /></View>
         ) : (
           <View style={styles.chatArea}>
             <FlatList
@@ -963,7 +1351,11 @@ export const ChatConversationScreen = () => {
               keyExtractor={(item) => item.key}
               contentContainerStyle={styles.messagesContent}
               keyboardShouldPersistTaps="handled"
-              ListEmptyComponent={<Text style={styles.empty}>No messages yet</Text>}
+              ListEmptyComponent={
+                <Text style={styles.empty}>
+                  {searching && messages.length ? `No messages match "${messageSearch.trim()}".` : "No messages yet"}
+                </Text>
+              }
               onScroll={(event) => {
                 if (event.nativeEvent.contentOffset.y <= 40) {
                   loadOlderMessages();
@@ -973,7 +1365,7 @@ export const ChatConversationScreen = () => {
               ListHeaderComponent={
                 loadingHistory ? (
                   <View style={styles.historyLoader}>
-                    <ActivityIndicator size="small" color="#64748b" />
+                    <ActivityIndicator size="small" color={themeColor("#6c7789")} />
                     <Text style={styles.historyLoaderText}>Loading older messages...</Text>
                   </View>
                 ) : null
@@ -998,12 +1390,16 @@ export const ChatConversationScreen = () => {
                         style={styles.forwardBtn}
                         onPress={() => openForwardPicker(item.messages.map((row) => ({ textInput: row.text || "", attachment: row.attachment || null })))}
                       >
-                        <Ionicons name="arrow-redo-outline" size={15} color="#475569" />
+                        <Icon name="arrow-redo-outline" size={15} color={themeColor("#4e5867")} />
                       </Pressable>
 
                       <View style={[styles.messageBubble, mine && styles.messageBubbleMine]}>
                         <Text style={[styles.messageAuthor, mine && styles.messageTextMine]}>{mine ? "You" : contactName}</Text>
-                        <Pressable onPress={() => openImageViewer(urls, 0)} style={styles.groupedImageWrap}>
+                        <Pressable
+                          onPress={() => openImageViewer(urls, 0)}
+                          onLongPress={() => setActionMessage(lastMessage)}
+                          style={styles.groupedImageWrap}
+                        >
                           <View style={[styles.groupedGrid, compactGrid && styles.groupedGridCompact]}>
                             {previewUrls.map((url, previewIndex) => {
                               const showOverlay = extraCount > 0 && previewIndex === previewUrls.length - 1;
@@ -1018,7 +1414,10 @@ export const ChatConversationScreen = () => {
                             })}
                           </View>
                         </Pressable>
-                        <Text style={[styles.messageTime, mine && styles.messageTextMine]}>{formatDateTime(lastMessage.createdAt)}</Text>
+                        <View style={styles.timeRow}>
+                          <Text style={[styles.messageTime, mine && styles.messageTextMine]}>{formatDateTime(lastMessage.createdAt)}</Text>
+                          {renderTicks(lastMessage, mine)}
+                        </View>
                       </View>
                     </View>
                   );
@@ -1044,12 +1443,17 @@ export const ChatConversationScreen = () => {
                       style={styles.forwardBtn}
                       onPress={() => openForwardPicker([{ textInput: message.text || "", attachment: message.attachment || null }])}
                     >
-                      <Ionicons name="arrow-redo-outline" size={15} color="#475569" />
+                      <Icon name="arrow-redo-outline" size={15} color={themeColor("#4e5867")} />
                     </Pressable>
 
-                    <View style={[styles.messageBubble, mine && styles.messageBubbleMine]}>
+                    <Pressable
+                      style={[styles.messageBubble, mine && styles.messageBubbleMine]}
+                      onLongPress={() => setActionMessage(message)}
+                      delayLongPress={300}
+                    >
                       <Text style={[styles.messageAuthor, mine && styles.messageTextMine]}>{mine ? "You" : contactName}</Text>
-                      {!hasAttachment ? (
+                      {renderSharedProperty(message, mine)}
+                      {message.sharedProperty && !hasAttachment ? null : !hasAttachment ? (
                         <Text style={[styles.messageText, mine && styles.messageTextMine]}>{message.text}</Text>
                       ) : isImageAttachment ? (
                         <Pressable onPress={() => openImageViewer([pickUriString(message.attachment?.fileUrl || "")], 0)}>
@@ -1060,10 +1464,10 @@ export const ChatConversationScreen = () => {
                           style={[styles.audioCard, mine && styles.audioCardMine]}
                           onPress={() => playAudioAttachment(message._id, pickUriString(message.attachment?.fileUrl || ""))}
                         >
-                          <Ionicons
+                          <Icon
                             name={playingMessageId === message._id ? "pause" : "play"}
                             size={16}
-                            color={mine ? "#ffffff" : "#0f172a"}
+                            color={mine ? themeColor("#ffffff") : themeColor("#161c24")}
                           />
                           <Text style={[styles.audioText, mine && styles.messageTextMine]}>
                             {playingMessageId === message._id ? "Playing..." : "Voice note"}
@@ -1071,7 +1475,7 @@ export const ChatConversationScreen = () => {
                         </Pressable>
                       ) : isPdfAttachment ? (
                         <Pressable style={[styles.pdfCard, mine && styles.pdfCardMine]} onPress={() => openAttachmentUrl(message.attachment?.fileUrl || "")}>
-                          <Ionicons name="document-text-outline" size={16} color={mine ? "#ffffff" : "#1e293b"} />
+                          <Icon name="document-text-outline" size={16} color={mine ? themeColor("#ffffff") : themeColor("#242b35")} />
                           <Text style={[styles.pdfText, mine && styles.messageTextMine]} numberOfLines={1}>{message.attachment?.fileName || "Open PDF"}</Text>
                         </Pressable>
                       ) : (
@@ -1082,8 +1486,11 @@ export const ChatConversationScreen = () => {
                       {hasAttachment && hasText && !isImageAttachment && !isAudioAttachment ? (
                         <Text style={[styles.messageText, mine && styles.messageTextMine]}>{message.text}</Text>
                       ) : null}
-                      <Text style={[styles.messageTime, mine && styles.messageTextMine]}>{formatDateTime(message.createdAt)}</Text>
-                    </View>
+                      <View style={styles.timeRow}>
+                        <Text style={[styles.messageTime, mine && styles.messageTextMine]}>{formatDateTime(message.createdAt)}</Text>
+                        {renderTicks(message, mine)}
+                      </View>
+                    </Pressable>
                   </View>
                 );
               }}
@@ -1109,17 +1516,17 @@ export const ChatConversationScreen = () => {
                               playAudioAttachment(key, file.uri);
                             }}
                           >
-                            <Ionicons name={playingMessageId === `pending-${index}` ? "pause" : "play"} size={15} color="#334155" />
+                            <Icon name={playingMessageId === `pending-${index}` ? "pause" : "play"} size={15} color={themeColor("#39424f")} />
                             <Text style={styles.pendingAudioPreviewText}>
                               {playingMessageId === `pending-${index}` ? "Stop" : "Preview"}
                             </Text>
                           </Pressable>
                         ) : (
-                          <View style={styles.pendingIconWrap}><Ionicons name="document-text-outline" size={16} color="#334155" /></View>
+                          <View style={styles.pendingIconWrap}><Icon name="document-text-outline" size={16} color={themeColor("#39424f")} /></View>
                         )}
                         <Text numberOfLines={1} style={styles.pendingName}>{file.name}</Text>
                         <Pressable style={styles.pendingRemove} onPress={() => removePendingAttachment(index)}>
-                          <Ionicons name="close-circle" size={16} color="#ef4444" />
+                          <Icon name="close-circle" size={16} color={themeColor("#d64545")} />
                         </Pressable>
                       </View>
                     );
@@ -1128,21 +1535,38 @@ export const ChatConversationScreen = () => {
               </View>
             ) : null}
 
+            {queuedShare ? (
+              <View style={styles.queuedShare}>
+                {queuedShare.image ? (
+                  <Image source={{ uri: String(queuedShare.image) }} style={styles.sharedImage} resizeMode="cover" />
+                ) : null}
+                <View style={styles.sharedBody}>
+                  <Text style={styles.sharedTitle} numberOfLines={1}>{String(queuedShare.title || "Property selected")}</Text>
+                  <Text style={styles.sharedMeta} numberOfLines={1}>{String(queuedShare.location || "")}</Text>
+                  <Text style={styles.sharedMeta}>Sends with your next message</Text>
+                </View>
+                <Pressable onPress={() => setQueuedShare(null)} hitSlop={8} accessibilityLabel="Remove shared property">
+                  <Icon name="close-circle" size={18} color={themeColor("#d64545")} />
+                </Pressable>
+              </View>
+            ) : null}
+
             <View style={styles.composer}>
               <Pressable style={styles.attachBtn} onPress={sendFile} disabled={sending || pickingFile || isRecording}>
-                <Ionicons name="attach" size={16} color="#475569" />
+                <Icon name="attach" size={16} color={themeColor("#4e5867")} />
               </Pressable>
               <Pressable style={styles.attachBtn} onPress={sendCameraPhoto} disabled={sending || pickingFile || isRecording}>
-                <Ionicons name="camera-outline" size={16} color="#475569" />
+                <Icon name="camera-outline" size={16} color={themeColor("#4e5867")} />
               </Pressable>
               <Pressable style={[styles.micBtn, isRecording && styles.micBtnActive]} onPress={isRecording ? stopAudioRecording : startAudioRecording} disabled={sending || pickingFile}>
-                <Ionicons name={isRecording ? "stop" : "mic"} size={16} color={isRecording ? "#fff" : "#475569"} />
+                <Icon name={isRecording ? "stop" : "mic"} size={16} color={isRecording ? themeColor("#ffffff") : themeColor("#4e5867")} />
               </Pressable>
               <TextInput
                 style={styles.input}
                 placeholder={isRecording ? "Recording voice note..." : `Message ${contactName}...`}
                 value={draft}
-                onChangeText={setDraft}
+                onChangeText={handleDraftChange}
+                onBlur={stopTyping}
                 multiline
                 blurOnSubmit={false}
                 onKeyPress={onComposerKeyPress}
@@ -1151,9 +1575,9 @@ export const ChatConversationScreen = () => {
               <Pressable
                 style={styles.sendBtn}
                 onPress={sendQueuedMessage}
-                disabled={(!draft.trim() && pendingAttachments.length === 0) || pickingFile || isRecording}
+                disabled={(!draft.trim() && pendingAttachments.length === 0 && !queuedShare) || pickingFile || isRecording}
               >
-                {sending ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="paper-plane" size={15} color="#fff" />}
+                {sending ? <ActivityIndicator color={themeColor("#ffffff")} size="small" /> : <Icon name="paper-plane" size={15} color={themeColor("#ffffff")} />}
               </Pressable>
             </View>
           </View>
@@ -1163,7 +1587,7 @@ export const ChatConversationScreen = () => {
           <View style={styles.viewerBackdrop}>
             <View style={styles.viewerHeader}>
               <Text style={styles.viewerTitle}>{viewerUrls.length > 0 ? `${viewerIndex + 1}/${viewerUrls.length}` : "Image"}</Text>
-              <Pressable onPress={closeImageViewer} style={styles.viewerClose}><Ionicons name="close" size={18} color="#ffffff" /></Pressable>
+              <Pressable onPress={closeImageViewer} style={styles.viewerClose}><Icon name="close" size={18} color={themeColor("#ffffff")} /></Pressable>
             </View>
             <FlatList
               data={viewerUrls}
@@ -1204,7 +1628,7 @@ export const ChatConversationScreen = () => {
                       <Text style={styles.forwardName}>{item.name}</Text>
                       <Text style={styles.forwardRole}>{item.role}</Text>
                     </View>
-                    {forwarding ? <ActivityIndicator size="small" color="#0f172a" /> : null}
+                    {forwarding ? <ActivityIndicator size="small" color={themeColor("#161c24")} /> : null}
                   </Pressable>
                 )}
                 ListEmptyComponent={<Text style={styles.empty}>No contacts</Text>}
@@ -1219,7 +1643,7 @@ export const ChatConversationScreen = () => {
         <Modal visible={Boolean(activeCall)} transparent animationType="fade" onRequestClose={endActiveCall}>
           <View style={styles.callBackdrop}>
             <View style={styles.callCard}>
-              <Ionicons name={activeCall?.callType === "VIDEO" ? "videocam" : "call"} size={24} color="#0f172a" />
+              <Icon name={activeCall?.callType === "VIDEO" ? "videocam" : "call"} size={24} color={themeColor("#161c24")} />
               <Text style={styles.callTitle}>
                 {activeCall?.status === "INCOMING" ? "Incoming Call" : activeCall?.status === "OUTGOING" ? "Calling..." : "In Call"}
               </Text>
@@ -1265,10 +1689,10 @@ export const ChatConversationScreen = () => {
                   const peerName = mine ? "You" : (callerName || contactName || "Unknown");
                   return (
                     <View style={styles.callLogRow}>
-                      <Ionicons
+                      <Icon
                         name={item.callType === "VIDEO" ? "videocam-outline" : "call-outline"}
                         size={16}
-                        color="#334155"
+                        color={themeColor("#39424f")}
                       />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.forwardName}>{peerName}</Text>
@@ -1286,68 +1710,181 @@ export const ChatConversationScreen = () => {
             </View>
           </View>
         </Modal>
+        <AppSheet visible={menuVisible} onClose={() => setMenuVisible(false)} title={contactName} subtitle={messageCountText}>
+          <Pressable
+            style={styles.menuRow}
+            onPress={() => {
+              setMenuVisible(false);
+              setSearchOpen(true);
+            }}
+          >
+            <Icon name="search" size={16} color={themeColor("#39424f")} />
+            <Text style={styles.menuText}>Search messages</Text>
+          </Pressable>
+          <Pressable
+            style={styles.menuRow}
+            onPress={() => {
+              setMenuVisible(false);
+              setCallLogsVisible(true);
+            }}
+          >
+            <Icon name="time-outline" size={16} color={themeColor("#39424f")} />
+            <Text style={styles.menuText}>Call history</Text>
+          </Pressable>
+          <Pressable style={styles.menuRow} onPress={clearConversation} disabled={!conversationId}>
+            <Icon name="trash-outline" size={16} color={themeColor("#d64545")} />
+            <Text style={[styles.menuText, styles.menuDanger]}>Clear chat</Text>
+          </Pressable>
+        </AppSheet>
+
+        <AppSheet visible={Boolean(actionMessage)} onClose={() => setActionMessage(null)} title="Message">
+          {actionMessage ? (
+            <>
+              <Pressable
+                style={styles.menuRow}
+                onPress={() => {
+                  const target = actionMessage;
+                  setActionMessage(null);
+                  openForwardPicker([{ textInput: target.text || "", attachment: target.attachment || null }]);
+                }}
+              >
+                <Icon name="arrow-redo-outline" size={16} color={themeColor("#39424f")} />
+                <Text style={styles.menuText}>Forward</Text>
+              </Pressable>
+              {String(actionMessage.text || "").trim() ? (
+                <Pressable
+                  style={styles.menuRow}
+                  onPress={async () => {
+                    await Clipboard.setStringAsync(String(actionMessage.text || ""));
+                    setActionMessage(null);
+                  }}
+                >
+                  <Icon name="copy-outline" size={16} color={themeColor("#39424f")} />
+                  <Text style={styles.menuText}>Copy text</Text>
+                </Pressable>
+              ) : null}
+              <Pressable style={styles.menuRow} onPress={() => deleteMessage(actionMessage, "self")} disabled={actionBusy}>
+                <Icon name="trash-outline" size={16} color={themeColor("#39424f")} />
+                <Text style={styles.menuText}>Delete for me</Text>
+              </Pressable>
+              {isAdmin && senderIdOf(actionMessage) === myUserId ? (
+                <Pressable style={styles.menuRow} onPress={() => deleteMessage(actionMessage, "everyone")} disabled={actionBusy}>
+                  <Icon name="trash-outline" size={16} color={themeColor("#d64545")} />
+                  <Text style={[styles.menuText, styles.menuDanger]}>Delete for everyone</Text>
+                </Pressable>
+              ) : null}
+            </>
+          ) : null}
+        </AppSheet>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f1f5f9" },
-  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, backgroundColor: "#ffffff", borderBottomWidth: 1, borderBottomColor: "#e2e8f0", gap: 6 },
+const styles = themedStyles((c) => StyleSheet.create({
+  typingText: { color: c.emerald[600], fontStyle: "italic" },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 12,
+    marginTop: 8,
+    paddingHorizontal: 10,
+    height: 38,
+    borderWidth: 1,
+    borderColor: c.border,
+    borderRadius: 10,
+    backgroundColor: c.surface,
+  },
+  searchInput: { flex: 1, fontSize: 13, color: c.text, paddingVertical: 0 },
+  timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 4 },
+  menuRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.border },
+  menuText: { fontSize: 14, fontWeight: "600", color: c.text },
+  menuDanger: { color: c.rose[600] },
+  queuedShare: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginHorizontal: 12,
+    marginBottom: 6,
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: c.emerald[200],
+    backgroundColor: c.emerald[50],
+  },
+  sharedCard: {
+    flexDirection: "row",
+    gap: 10,
+    padding: 8,
+    marginVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: c.border,
+    backgroundColor: c.surface,
+  },
+  sharedImage: { width: 64, height: 56, borderRadius: 8, backgroundColor: c.surfaceMuted },
+  sharedBody: { flex: 1, minWidth: 0 },
+  sharedTitle: { fontSize: 12, fontWeight: "700", color: c.text },
+  sharedMeta: { marginTop: 2, fontSize: 11, color: c.textMuted },
+  sharedOpen: { marginTop: 4, fontSize: 11, fontWeight: "700", color: c.emerald[700] },
+  sharedOpenMine: { color: c.emerald[700] },
+  root: { flex: 1, backgroundColor: c.surfaceMuted },
+  header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 10, backgroundColor: c.surface, borderBottomWidth: 1, borderBottomColor: c.border, gap: 6 },
   backBtn: { width: 30, height: 30, borderRadius: 999, alignItems: "center", justifyContent: "center" },
   titleWrap: { flex: 1, marginLeft: 6 },
-  title: { color: "#0f172a", fontSize: 14, fontWeight: "700" },
-  subTitle: { marginTop: 1, color: "#64748b", fontSize: 11 },
-  messageCount: { color: "#94a3b8", fontSize: 11 },
+  title: { color: c.text, fontSize: 14, fontWeight: "700" },
+  subTitle: { marginTop: 1, color: c.textMuted, fontSize: 11 },
+  messageCount: { color: c.textTertiary, fontSize: 11 },
   headerIconBtn: {
     width: 30,
     height: 30,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 999,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
   },
-  error: { marginHorizontal: 12, marginTop: 8, borderWidth: 1, borderColor: "#fecaca", backgroundColor: "#fef2f2", color: "#b91c1c", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12 },
+  error: { marginHorizontal: 12, marginTop: 8, borderWidth: 1, borderColor: c.errorBorder, backgroundColor: c.errorBg, color: c.rose[700], borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7, fontSize: 12 },
   loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
   chatArea: { flex: 1 },
   messagesContent: { padding: 12, paddingBottom: 18, gap: 8 },
-  dayWrap: { alignSelf: "center", backgroundColor: "#e2e8f0", borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginVertical: 6 },
-  dayText: { color: "#334155", fontSize: 11, fontWeight: "700" },
+  dayWrap: { alignSelf: "center", backgroundColor: c.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginVertical: 6 },
+  dayText: { color: c.slate[700], fontSize: 11, fontWeight: "700" },
   messageWrap: { alignItems: "flex-start", flexDirection: "row", gap: 6 },
   messageWrapMine: { alignItems: "flex-end", alignSelf: "flex-end" },
-  forwardBtn: { width: 24, height: 24, borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center", backgroundColor: "#fff", marginTop: 18 },
-  messageBubble: { maxWidth: "84%", backgroundColor: "#ffffff", borderRadius: 14, borderWidth: 1, borderColor: "#dbe3ee", paddingHorizontal: 10, paddingVertical: 8 },
+  forwardBtn: { width: 24, height: 24, borderRadius: 999, borderWidth: 1, borderColor: c.borderStrong, alignItems: "center", justifyContent: "center", backgroundColor: c.surface, marginTop: 18 },
+  messageBubble: { maxWidth: "84%", backgroundColor: c.surface, borderRadius: 14, borderWidth: 1, borderColor: c.border, paddingHorizontal: 10, paddingVertical: 8 },
   messageBubbleMine: { backgroundColor: "#67c3d6", borderColor: "#67c3d6" },
-  messageAuthor: { color: "#0f172a", fontSize: 11, fontWeight: "700" },
-  messageText: { color: "#0f172a", fontSize: 14, marginTop: 2 },
-  messageTime: { color: "#64748b", fontSize: 10, marginTop: 4 },
-  messageTextMine: { color: "#ffffff" },
-  fileText: { marginTop: 3, color: "#0f172a", fontSize: 13, textDecorationLine: "underline" },
-  attachmentImage: { marginTop: 6, width: 180, height: 180, borderRadius: 10, backgroundColor: "#e2e8f0" },
+  messageAuthor: { color: c.text, fontSize: 11, fontWeight: "700" },
+  messageText: { color: c.text, fontSize: 14, marginTop: 2 },
+  messageTime: { color: c.textMuted, fontSize: 10, marginTop: 4 },
+  messageTextMine: { color: c.surface },
+  fileText: { marginTop: 3, color: c.text, fontSize: 13, textDecorationLine: "underline" },
+  attachmentImage: { marginTop: 6, width: 180, height: 180, borderRadius: 10, backgroundColor: c.border },
   groupedImageWrap: { marginTop: 2 },
-  groupedGrid: { marginTop: 6, width: 180, height: 180, borderRadius: 10, overflow: "hidden", flexDirection: "row", flexWrap: "wrap", gap: 4, backgroundColor: "#dbe3ee" },
+  groupedGrid: { marginTop: 6, width: 180, height: 180, borderRadius: 10, overflow: "hidden", flexDirection: "row", flexWrap: "wrap", gap: 4, backgroundColor: c.border },
   groupedGridCompact: { height: 88 },
-  groupedTile: { width: 88, height: 88, backgroundColor: "#e2e8f0" },
+  groupedTile: { width: 88, height: 88, backgroundColor: c.border },
   groupedTileCompact: { flex: 1 },
   groupedTileImage: { width: "100%", height: "100%" },
   groupedTileOverlay: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(15,23,42,0.55)" },
-  groupedOverlayText: { color: "#ffffff", fontSize: 18, fontWeight: "700" },
-  pdfCard: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: "#f8fafc", maxWidth: 220 },
+  groupedOverlayText: { color: c.surface, fontSize: 18, fontWeight: "700" },
+  pdfCard: { marginTop: 6, flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: c.bg, maxWidth: 220 },
   pdfCardMine: { borderColor: "rgba(255,255,255,0.45)", backgroundColor: "rgba(255,255,255,0.2)" },
-  pdfText: { flex: 1, color: "#0f172a", fontSize: 12, fontWeight: "600" },
+  pdfText: { flex: 1, color: c.text, fontSize: 12, fontWeight: "600" },
   audioCard: {
     marginTop: 6,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     maxWidth: 220,
   },
   audioCardMine: {
@@ -1355,66 +1892,66 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.2)",
   },
   audioText: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 12,
     fontWeight: "600",
   },
-  pendingWrap: { borderTopWidth: 1, borderTopColor: "#e2e8f0", backgroundColor: "#ffffff", paddingTop: 8, paddingBottom: 6, paddingHorizontal: 12 },
-  pendingLabel: { fontSize: 11, fontWeight: "700", color: "#64748b", marginBottom: 6 },
+  pendingWrap: { borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface, paddingTop: 8, paddingBottom: 6, paddingHorizontal: 12 },
+  pendingLabel: { fontSize: 11, fontWeight: "700", color: c.textMuted, marginBottom: 6 },
   pendingList: { paddingRight: 6, gap: 8 },
-  pendingItem: { width: 120, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#fff", padding: 6 },
-  pendingThumb: { width: "100%", height: 60, borderRadius: 8, backgroundColor: "#e2e8f0" },
-  pendingIconWrap: { height: 60, borderRadius: 8, backgroundColor: "#f1f5f9", alignItems: "center", justifyContent: "center" },
+  pendingItem: { width: 120, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, backgroundColor: c.surface, padding: 6 },
+  pendingThumb: { width: "100%", height: 60, borderRadius: 8, backgroundColor: c.border },
+  pendingIconWrap: { height: 60, borderRadius: 8, backgroundColor: c.surfaceMuted, alignItems: "center", justifyContent: "center" },
   pendingAudioPreview: {
     height: 60,
     borderRadius: 8,
-    backgroundColor: "#f1f5f9",
+    backgroundColor: c.surfaceMuted,
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
     borderWidth: 1,
-    borderColor: "#dbe3ee",
+    borderColor: c.border,
   },
-  pendingAudioPreviewText: { fontSize: 10, color: "#334155", fontWeight: "700" },
-  pendingName: { marginTop: 6, fontSize: 11, color: "#334155" },
+  pendingAudioPreviewText: { fontSize: 10, color: c.slate[700], fontWeight: "700" },
+  pendingName: { marginTop: 6, fontSize: 11, color: c.slate[700] },
   pendingRemove: { position: "absolute", top: 4, right: 4 },
-  composer: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 20, borderTopWidth: 1, borderTopColor: "#e2e8f0", backgroundColor: "#ffffff" },
-  attachBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  micBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: "#cbd5e1", alignItems: "center", justifyContent: "center", backgroundColor: "#fff" },
-  micBtnActive: { backgroundColor: "#ef4444", borderColor: "#ef4444" },
-  input: { flex: 1, minHeight: 40, maxHeight: 120, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, color: "#0f172a", backgroundColor: "#fff", textAlignVertical: "top" },
+  composer: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 20, borderTopWidth: 1, borderTopColor: c.border, backgroundColor: c.surface },
+  attachBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: c.borderStrong, alignItems: "center", justifyContent: "center", backgroundColor: c.surface },
+  micBtn: { width: 34, height: 34, borderRadius: 999, borderWidth: 1, borderColor: c.borderStrong, alignItems: "center", justifyContent: "center", backgroundColor: c.surface },
+  micBtnActive: { backgroundColor: c.rose[500], borderColor: c.rose[500] },
+  input: { flex: 1, minHeight: 40, maxHeight: 120, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 13, color: c.text, backgroundColor: c.surface, textAlignVertical: "top" },
   sendBtn: { width: 38, height: 38, borderRadius: 999, backgroundColor: "#67c3d6", alignItems: "center", justifyContent: "center" },
   sendDisabled: { opacity: 0.55 },
   viewerBackdrop: { flex: 1, backgroundColor: "rgba(2,6,23,0.95)" },
   viewerHeader: { paddingTop: 42, paddingHorizontal: 12, paddingBottom: 10, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  viewerTitle: { color: "#ffffff", fontSize: 14, fontWeight: "700" },
+  viewerTitle: { color: c.surface, fontSize: 14, fontWeight: "700" },
   viewerClose: { width: 32, height: 32, borderRadius: 999, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(148,163,184,0.25)" },
   viewerSlide: { width: Dimensions.get("window").width, alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
   viewerImage: { width: "100%", height: "82%" },
   forwardBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 16 },
-  forwardCard: { maxHeight: "72%", backgroundColor: "#fff", borderRadius: 14, padding: 12 },
-  forwardTitle: { color: "#0f172a", fontSize: 16, fontWeight: "700" },
-  forwardInput: { marginTop: 10, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, height: 40, paddingHorizontal: 12, color: "#0f172a", backgroundColor: "#fff" },
+  forwardCard: { maxHeight: "72%", backgroundColor: c.surface, borderRadius: 14, padding: 12 },
+  forwardTitle: { color: c.text, fontSize: 16, fontWeight: "700" },
+  forwardInput: { marginTop: 10, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, height: 40, paddingHorizontal: 12, color: c.text, backgroundColor: c.surface },
   forwardList: { marginTop: 10 },
-  forwardRow: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: "#e2e8f0", borderRadius: 10, padding: 8, marginBottom: 6 },
-  forwardName: { color: "#0f172a", fontSize: 13, fontWeight: "700" },
-  forwardRole: { color: "#64748b", fontSize: 11, marginTop: 1 },
-  forwardCancel: { marginTop: 8, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, height: 38, alignItems: "center", justifyContent: "center" },
-  forwardCancelText: { color: "#334155", fontWeight: "700", fontSize: 12 },
-  empty: { textAlign: "center", color: "#94a3b8", marginTop: 14, fontSize: 12 },
+  forwardRow: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1, borderColor: c.border, borderRadius: 10, padding: 8, marginBottom: 6 },
+  forwardName: { color: c.text, fontSize: 13, fontWeight: "700" },
+  forwardRole: { color: c.textMuted, fontSize: 11, marginTop: 1 },
+  forwardCancel: { marginTop: 8, borderWidth: 1, borderColor: c.borderStrong, borderRadius: 10, height: 38, alignItems: "center", justifyContent: "center" },
+  forwardCancelText: { color: c.slate[700], fontWeight: "700", fontSize: 12 },
+  empty: { textAlign: "center", color: c.textTertiary, marginTop: 14, fontSize: 12 },
   callBackdrop: { flex: 1, backgroundColor: "rgba(15,23,42,0.45)", justifyContent: "center", padding: 16 },
   callCard: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     alignItems: "center",
     padding: 16,
     gap: 8,
   },
-  callTitle: { fontSize: 18, fontWeight: "700", color: "#0f172a" },
-  callPeer: { fontSize: 14, fontWeight: "600", color: "#334155" },
-  callSub: { fontSize: 12, color: "#64748b" },
+  callTitle: { fontSize: 18, fontWeight: "700", color: c.text },
+  callPeer: { fontSize: 14, fontWeight: "600", color: c.slate[700] },
+  callSub: { fontSize: 12, color: c.textMuted },
   callActions: { marginTop: 8, flexDirection: "row", gap: 10 },
   callBtn: {
     minWidth: 110,
@@ -1425,17 +1962,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 12,
   },
-  callRejectBtn: { borderColor: "#fecaca", backgroundColor: "#fff1f2" },
-  callAcceptBtn: { borderColor: "#86efac", backgroundColor: "#dcfce7" },
-  callEndBtn: { borderColor: "#fecaca", backgroundColor: "#fee2e2", marginTop: 8 },
-  callBtnText: { color: "#991b1b", fontSize: 13, fontWeight: "700" },
-  callAcceptText: { color: "#166534" },
+  callRejectBtn: { borderColor: c.errorBorder, backgroundColor: c.errorBg },
+  callAcceptBtn: { borderColor: c.emerald[300], backgroundColor: c.emerald[100] },
+  callEndBtn: { borderColor: c.errorBorder, backgroundColor: c.rose[100], marginTop: 8 },
+  callBtnText: { color: c.rose[800], fontSize: 13, fontWeight: "700" },
+  callAcceptText: { color: c.emerald[800] },
   callLogRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
     padding: 8,
     marginBottom: 6,
@@ -1448,8 +1985,8 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   historyLoaderText: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
     fontWeight: "600",
   },
-});
+}));

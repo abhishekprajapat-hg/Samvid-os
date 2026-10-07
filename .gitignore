@@ -21,6 +21,7 @@ frontend/playwright-report/
 frontend/test-results/
 frontend/e2e/.auth/
 mobile/coverage/
+backend/.local-db-backups/
 backend/uploads/*
 !backend/uploads/.gitkeep
 

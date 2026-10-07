@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Badge, Button, EmptyState, Skeleton } from "../../../components/ui";
+import FittedImage from "../../../components/ui/FittedImage";
 import { DataTableShell, MetricCard } from "../../../components/crm";
 import { toApiInventoryStatus } from "./propertyWorkspaceUtils";
 import InventoryCard from "./InventoryCard";
@@ -131,13 +132,7 @@ export const PropertyCard = React.memo(({
         aria-label={`View ${getAssetTitle(asset)}`}
       >
         {image ? (
-          <img
-            src={image}
-            alt={getAssetTitle(asset)}
-            loading="lazy"
-            decoding="async"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
+          <FittedImage src={image} alt={getAssetTitle(asset)} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-slate-300">
             <ImageIcon size={34} />

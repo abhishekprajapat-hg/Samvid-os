@@ -20,6 +20,11 @@ const coworkingExpenseSchema = new mongoose.Schema(
     companyId: { type: mongoose.Schema.Types.ObjectId, required: true, ref: "Company", index: true },
     expenseCode: { type: String, required: true, trim: true },
     propertyId: { type: mongoose.Schema.Types.ObjectId, ref: "CoworkingProperty", default: null },
+    // The CRM counterparts of propertyId, for spend that is not coworking's.
+    inventoryId: { type: mongoose.Schema.Types.ObjectId, ref: "Inventory", default: null, index: true },
+    leadId: { type: mongoose.Schema.Types.ObjectId, ref: "Lead", default: null, index: true },
+    contactId: { type: mongoose.Schema.Types.ObjectId, ref: "CrmContact", default: null, index: true },
+    referenceNumber: { type: String, trim: true, default: "", maxlength: 120 },
     category: { type: String, enum: EXPENSE_CATEGORIES, required: true },
     description: { type: String, trim: true, required: true, maxlength: 500 },
     amount: { type: Number, required: true, min: 0.01 },

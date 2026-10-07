@@ -163,6 +163,27 @@ const normalizeAdminRequestEvent = (payload = {}) => {
     };
   }
 
+  // A Manager asked to delete a task, project, contact, role... (Admin only).
+  if (source === "record-delete") {
+    const requestId = String(payload.requestId || "").trim();
+    if (!requestId) return null;
+    const requestedByName = String(payload.requestedBy?.name || "").trim();
+    const what = String(payload.entityLabel || "record").trim().toLowerCase();
+    const name = String(payload.entityName || "").trim();
+    const createdAt = payload.createdAt || new Date().toISOString();
+    return {
+      eventId: String(payload.eventId || "").trim() || `record-delete:${requestId}`,
+      source: "record-delete",
+      requestType: "RECORD_DELETE",
+      createdAt,
+      preview: `${requestedByName || "A Manager"} wants to delete ${name ? `${what} "${name}"` : `a ${what}`}`,
+      leadId: "",
+      requestId,
+      inventoryId: "",
+      payload,
+    };
+  }
+
   if (source === "user-delete") {
     const requestId = String(payload.requestId || "").trim();
     if (!requestId) return null;

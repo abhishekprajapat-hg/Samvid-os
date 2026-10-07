@@ -294,6 +294,125 @@ const buildDateKeysInRange = (fromDateKey, toDateKey) => {
   return rows;
 };
 
+/*
+ * Attendance summary built from the actual records for a date range.
+ *
+ * A working day with no attendance record and no approved leave is an absent
+ * day - the daily board already shows it that way - so it is added as an
+ * ABSENT row here too. Before this, only days that happened to have an ABSENT
+ * record were counted, and a day nobody checked in at all went uncounted.
+ * Weekly offs, today (not over yet) and days before the person joined are
+ * never marked absent.
+ */
+const PRESENT_LIKE_STATUSES = [
+  ATTENDANCE_STATUS.PRESENT,
+  ATTENDANCE_STATUS.LATE,
+  ATTENDANCE_STATUS.MISSED_CHECK_OUT,
+  LIVE_ATTENDANCE_STATUS.WORKING,
+  LIVE_ATTENDANCE_STATUS.BREAK,
+];
+
+const isWeeklyOffDateKey = (dateKey, policy) =>
+  (policy?.weeklyOffDays || DEFAULT_POLICY.weeklyOffDays)
+    .includes(new Date(toUtcMsFromDateKey(dateKey)).getUTCDay());
+
+const buildAttendanceSummary = ({
+  attendanceMap,
+  range,
+  policy,
+  joinedOn = null,
+  now = new Date(),
+  idPrefix = "absent",
+}) => {
+  const timezone = policy?.timezone || DEFAULT_TIMEZONE;
+  const todayKey = toDateKeyInTimezone(now, timezone);
+  // Start counting from the joining date - but never after the first day the
+  // person actually has a record (account dates can be later than real joining,
+  // e.g. when older attendance was imported).
+  const recordKeys = [...attendanceMap.keys()].filter(Boolean).sort();
+  let joinedKey = joinedOn ? toDateKeyInTimezone(joinedOn, timezone) : "";
+  if (joinedKey && recordKeys.length && recordKeys[0] < joinedKey) joinedKey = recordKeys[0];
+  const firstKey = joinedKey && joinedKey > range.from ? joinedKey : range.from;
+  const lastKey = range.to < todayKey ? range.to : todayKey;
+
+  let workingDaysElapsed = 0;
+  if (firstKey <= lastKey) {
+    buildDateKeysInRange(firstKey, lastKey).forEach((dateKey) => {
+      if (isWeeklyOffDateKey(dateKey, policy)) return;
+      if (dateKey === todayKey) {
+        // Today is not over: it counts as a working day only once there is a record.
+        if (attendanceMap.has(dateKey)) workingDaysElapsed += 1;
+        return;
+      }
+      workingDaysElapsed += 1;
+      if (attendanceMap.has(dateKey)) return;
+      attendanceMap.set(dateKey, {
+        _id: `${idPrefix}:${dateKey}`,
+        attendanceDate: dateKey,
+        checkInAt: null,
+        checkOutAt: null,
+        workedMinutes: 0,
+        workedHours: 0,
+        totalBreakMinutes: 0,
+        totalBreakHours: 0,
+        breakSessions: [],
+        activeBreakStartedAt: null,
+        isOnBreak: false,
+        isLateCheckIn: false,
+        status: ATTENDANCE_STATUS.ABSENT,
+        source: "NO_RECORD",
+        checkInNote: "",
+        checkOutNote: "",
+        createdAt: null,
+        updatedAt: null,
+      });
+    });
+  }
+
+  const attendance = [...attendanceMap.values()].sort((left, right) =>
+    String(right.attendanceDate || "").localeCompare(String(left.attendanceDate || "")));
+
+  const countWhere = (predicate) => attendance.filter(predicate).length;
+  const isLate = (row) => Boolean(row.isLateCheckIn) || row.status === ATTENDANCE_STATUS.LATE;
+  const presentDays = countWhere((row) => PRESENT_LIKE_STATUSES.includes(row.status));
+  const halfDays = countWhere((row) => row.status === ATTENDANCE_STATUS.HALF_DAY);
+  const absentDays = countWhere((row) => row.status === ATTENDANCE_STATUS.ABSENT);
+  const unrecordedAbsentDays = countWhere((row) => row.source === "NO_RECORD");
+  const leaveDays = countWhere((row) => row.status === ATTENDANCE_STATUS.LEAVE);
+  const pendingDays = countWhere((row) => row.status === ATTENDANCE_STATUS.PENDING);
+  const lateDays = countWhere(isLate);
+  const checkedInDays = countWhere((row) => Boolean(row.checkInAt));
+  const onTimeDays = countWhere((row) => Boolean(row.checkInAt) && !isLate(row));
+  const totalWorkedMinutes = attendance.reduce((sum, row) => sum + Number(row.workedMinutes || 0), 0);
+  const totalBreakMinutes = attendance.reduce((sum, row) => sum + Number(row.totalBreakMinutes || 0), 0);
+  const attendedDays = presentDays + halfDays * 0.5;
+
+  return {
+    attendance,
+    summary: {
+      totalDays: attendance.length,
+      workingDays: workingDaysElapsed,
+      presentDays,
+      lateDays,
+      onTimeDays,
+      halfDays,
+      absentDays,
+      unrecordedAbsentDays,
+      leaveDays,
+      pendingDays,
+      attendancePercent: workingDaysElapsed
+        ? Math.min(100, Math.round((attendedDays / workingDaysElapsed) * 100))
+        : 0,
+      punctualityPercent: checkedInDays ? Math.round((onTimeDays / checkedInDays) * 100) : 0,
+      lateCheckInCutoffMinutes: LATE_CHECK_IN_CUTOFF_MINUTES,
+      totalWorkedMinutes,
+      totalWorkedHours: Math.round((totalWorkedMinutes / 60) * 100) / 100,
+      totalBreakMinutes,
+      totalBreakHours: Math.round((totalBreakMinutes / 60) * 100) / 100,
+    },
+  };
+};
+
 const resolveMonthRange = (monthKey) => {
   if (!MONTH_KEY_PATTERN.test(monthKey)) return null;
   const [yearRaw, monthRaw] = monthKey.split("-");
@@ -856,6 +975,7 @@ const toUserView = (user) => ({
   name: user.name || "",
   email: user.email || "",
   role: user.role || "",
+  profileImageUrl: user.profileImageUrl || "",
 });
 
 const toLeaveView = (row) => ({
@@ -900,7 +1020,7 @@ const getScopedUsersForAttendanceViewer = async (viewer) => {
       isActive: true,
       role: { $ne: USER_ROLES.ADMIN },
     })
-      .select("_id name email role")
+      .select("_id name email role profileImageUrl")
       .sort({ name: 1 })
       .lean();
   }
@@ -910,13 +1030,14 @@ const getScopedUsersForAttendanceViewer = async (viewer) => {
       rootUserId: viewer._id,
       companyId: viewer.companyId,
       includeInactive: false,
-      select: "_id name email role parentId isActive",
+      select: "_id name email role parentId isActive profileImageUrl",
     });
     const rows = descendants.map((row) => ({
       _id: row._id,
       name: row.name || "",
       email: row.email || "",
       role: row.role || "",
+      profileImageUrl: row.profileImageUrl || "",
     }));
 
     const me = await User.findOne({
@@ -924,7 +1045,7 @@ const getScopedUsersForAttendanceViewer = async (viewer) => {
       companyId: viewer.companyId,
       isActive: true,
     })
-      .select("_id name email role")
+      .select("_id name email role profileImageUrl")
       .lean();
 
     return me
@@ -1122,7 +1243,7 @@ exports.upsertAttendancePolicy = async (req, res) => {
     const updated = await AttendancePolicy.findOneAndUpdate(
       { companyId: req.user.companyId },
       { $set: payload },
-      { upsert: true, setDefaultsOnInsert: true, new: true },
+      { upsert: true, setDefaultsOnInsert: true, returnDocument: "after" },
     ).lean();
 
     return res.json({
@@ -1763,8 +1884,8 @@ exports.getAdminLeaveRequests = async (req, res) => {
     const rows = await LeaveRequest.find(query)
       .sort({ createdAt: -1 })
       .limit(300)
-      .populate("userId", "_id name email role")
-      .populate("reviewedBy", "_id name email role")
+      .populate("userId", "_id name email role profileImageUrl")
+      .populate("reviewedBy", "_id name email role profileImageUrl")
       .lean();
 
     return res.json({
@@ -1970,8 +2091,8 @@ exports.getAdminRegularizations = async (req, res) => {
     const rows = await AttendanceRegularization.find(query)
       .sort({ createdAt: -1 })
       .limit(300)
-      .populate("userId", "_id name email role")
-      .populate("reviewedBy", "_id name email role")
+      .populate("userId", "_id name email role profileImageUrl")
+      .populate("reviewedBy", "_id name email role profileImageUrl")
       .populate("resolvedAttendanceId", "_id attendanceDate status checkInAt checkOutAt workedMinutes")
       .lean();
 
@@ -2138,20 +2259,18 @@ exports.getMyAttendance = async (req, res) => {
       policy,
     });
 
+    // Every row in the range: the summary must count all of them, not one page.
     const rowsQuery = Attendance.find(query)
       .sort({ attendanceDate: -1, checkInAt: -1, createdAt: -1 });
-    if (pagination.enabled) {
-      rowsQuery.skip(pagination.skip).limit(pagination.limit);
-    }
 
-    const [rows, todayAttendance, totalCount, leaveMap] = await Promise.all([
+    const [rows, todayAttendance, joinedUser, leaveMap] = await Promise.all([
       rowsQuery.lean(),
       Attendance.findOne({
         companyId: req.user.companyId,
         userId: req.user._id,
         attendanceDate: toDateKeyInTimezone(new Date(), policy.timezone),
       }).lean(),
-      pagination.enabled ? Attendance.countDocuments(query) : Promise.resolve(0),
+      User.findById(req.user._id).select("joiningDate createdAt").lean(),
       getApprovedLeavesMap({
         companyId: req.user.companyId,
         userIds: [req.user._id],
@@ -2187,28 +2306,16 @@ exports.getMyAttendance = async (req, res) => {
       });
     });
 
-    const attendance = [...attendanceMap.values()].sort((left, right) =>
-      String(right.attendanceDate || "").localeCompare(String(left.attendanceDate || "")));
-
-    const presentDays = attendance.filter((row) =>
-      [
-        ATTENDANCE_STATUS.PRESENT,
-        LIVE_ATTENDANCE_STATUS.WORKING,
-        LIVE_ATTENDANCE_STATUS.BREAK,
-      ].includes(row.status)).length;
-    const lateDays = attendance.filter((row) => row.isLateCheckIn).length;
-    const halfDays = attendance.filter((row) => row.status === ATTENDANCE_STATUS.HALF_DAY).length;
-    const absentDays = attendance.filter((row) => row.status === ATTENDANCE_STATUS.ABSENT).length;
-    const leaveDays = attendance.filter((row) => row.status === ATTENDANCE_STATUS.LEAVE).length;
-    const pendingDays = attendance.filter((row) => row.status === ATTENDANCE_STATUS.PENDING).length;
-    const totalWorkedMinutes = attendance.reduce(
-      (sum, row) => sum + Number(row.workedMinutes || 0),
-      0,
-    );
-    const totalBreakMinutes = attendance.reduce(
-      (sum, row) => sum + Number(row.totalBreakMinutes || 0),
-      0,
-    );
+    const { attendance: allAttendance, summary } = buildAttendanceSummary({
+      attendanceMap,
+      range,
+      policy,
+      joinedOn: joinedUser?.joiningDate || joinedUser?.createdAt || null,
+    });
+    const totalCount = allAttendance.length;
+    const attendance = pagination.enabled
+      ? allAttendance.slice(pagination.skip, pagination.skip + pagination.limit)
+      : allAttendance;
 
     const payload = {
       timezone: policy.timezone,
@@ -2216,19 +2323,7 @@ exports.getMyAttendance = async (req, res) => {
       to: range.to,
       today: todayAttendance ? toAttendanceView(todayAttendance, policy) : null,
       policy,
-      summary: {
-        totalDays: attendance.length,
-        presentDays,
-        lateDays,
-        halfDays,
-        absentDays,
-        leaveDays,
-        pendingDays,
-        totalWorkedMinutes,
-        totalWorkedHours: Math.round((totalWorkedMinutes / 60) * 100) / 100,
-        totalBreakMinutes,
-        totalBreakHours: Math.round((totalBreakMinutes / 60) * 100) / 100,
-      },
+      summary,
       attendance,
     };
 
@@ -2277,7 +2372,7 @@ exports.getUserAttendanceForAdmin = async (req, res) => {
       _id: targetUserId,
       companyId: req.user.companyId,
     })
-      .select("_id name email role")
+      .select("_id name email role joiningDate createdAt profileImageUrl")
       .lean();
     if (!targetUser) {
       return res.status(404).json({ message: "User not found" });
@@ -2343,28 +2438,13 @@ exports.getUserAttendanceForAdmin = async (req, res) => {
       });
     });
 
-    const attendance = [...attendanceMap.values()].sort((left, right) =>
-      String(right.attendanceDate || "").localeCompare(String(left.attendanceDate || "")));
-
-    const presentDays = attendance.filter((row) =>
-      [
-        ATTENDANCE_STATUS.PRESENT,
-        LIVE_ATTENDANCE_STATUS.WORKING,
-        LIVE_ATTENDANCE_STATUS.BREAK,
-      ].includes(row.status)).length;
-    const lateDays = attendance.filter((row) => row.isLateCheckIn).length;
-    const halfDays = attendance.filter((row) => row.status === ATTENDANCE_STATUS.HALF_DAY).length;
-    const absentDays = attendance.filter((row) => row.status === ATTENDANCE_STATUS.ABSENT).length;
-    const leaveDays = attendance.filter((row) => row.status === ATTENDANCE_STATUS.LEAVE).length;
-    const pendingDays = attendance.filter((row) => row.status === ATTENDANCE_STATUS.PENDING).length;
-    const totalWorkedMinutes = attendance.reduce(
-      (sum, row) => sum + Number(row.workedMinutes || 0),
-      0,
-    );
-    const totalBreakMinutes = attendance.reduce(
-      (sum, row) => sum + Number(row.totalBreakMinutes || 0),
-      0,
-    );
+    const { attendance, summary } = buildAttendanceSummary({
+      attendanceMap,
+      range,
+      policy,
+      joinedOn: targetUser.joiningDate || targetUser.createdAt || null,
+      idPrefix: `absent:${targetUser._id}`,
+    });
 
     return res.json({
       timezone: policy.timezone,
@@ -2372,19 +2452,7 @@ exports.getUserAttendanceForAdmin = async (req, res) => {
       to: range.to,
       user: toUserView(targetUser),
       policy,
-      summary: {
-        totalDays: attendance.length,
-        presentDays,
-        lateDays,
-        halfDays,
-        absentDays,
-        leaveDays,
-        pendingDays,
-        totalWorkedMinutes,
-        totalWorkedHours: Math.round((totalWorkedMinutes / 60) * 100) / 100,
-        totalBreakMinutes,
-        totalBreakHours: Math.round((totalBreakMinutes / 60) * 100) / 100,
-      },
+      summary,
       attendance,
       count: attendance.length,
     });
@@ -2447,7 +2515,7 @@ exports.correctUserBreak = async (req, res) => {
         $push: { breakAudit: { actorId: req.user._id, actorName: req.user.name || "", actorRole: req.user.role, changedAt: now, reason, sessionIndex: index, before, after } },
         $inc: { __v: 1 },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     );
     if (!updated) return res.status(409).json({ message: "Attendance changed while saving. Refresh and try again." });
     return res.json({ message: before ? "Break corrected" : "Break added", attendance: toAttendanceView(updated.toObject(), policy) });
@@ -2481,7 +2549,7 @@ exports.manageUserBreak = async (req, res) => {
     if (!await ensureUserInScope({ actor: req.user, targetUserId })) {
       return res.status(403).json({ message: "User is outside your attendance scope" });
     }
-    const target = await User.findOne({ _id: targetUserId, companyId: req.user.companyId, isActive: true }).select("_id name role").lean();
+    const target = await User.findOne({ _id: targetUserId, companyId: req.user.companyId, isActive: true }).select("_id name role profileImageUrl").lean();
     if (!target || target.role === USER_ROLES.ADMIN) return res.status(403).json({ message: "Select an active employee in your company" });
 
     const action = String(req.body?.action || "").toUpperCase();
@@ -2545,7 +2613,7 @@ exports.manageUserBreak = async (req, res) => {
         $push: { breakAudit: { actorId: req.user._id, actorName: req.user.name || "", actorRole: req.user.role, changedAt: now, reason, sessionIndex, before, after } },
         $inc: { __v: 1 },
       },
-      { new: true, runValidators: true },
+      { returnDocument: "after", runValidators: true },
     );
     if (!updated) return res.status(409).json({ message: "Attendance changed while saving. Refresh and try again." });
 
@@ -2599,7 +2667,7 @@ exports.updateUserAttendanceStatus = async (req, res) => {
       companyId: req.user.companyId,
       isActive: true,
     })
-      .select("_id name email role")
+      .select("_id name email role profileImageUrl")
       .lean();
     if (!targetUser) {
       return res.status(404).json({ message: "User not found" });
@@ -2877,3 +2945,5 @@ exports.reviewViolation = async (req, res) => {
   await row.save(); res.json(row);
  } catch (error) { req.log?.error(error); res.status(error.name === "VersionError" ? 409 : 500).json({ message: "Unable to save review; refresh and try again" }); }
 };
+
+module.exports.buildAttendanceSummary = buildAttendanceSummary;

@@ -47,6 +47,7 @@ import { useIsMobileViewport } from "../../hooks/useIsMobileViewport";
 import {
   TeamChatSidebar,
 } from "./components/TeamChatPanels";
+import AvatarFace from "../../components/ui/AvatarFace";
 
 const roleBadgeClass = (role, isDark) => {
   if (role === "ADMIN") {
@@ -2634,7 +2635,7 @@ const TeamChat = ({ theme = "light", embedded = false, visible = true }) => {
             {activeContact ? (
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <div className="avatar chat-avatar">
-                  {getInitials(activeContact.name)}
+                  <AvatarFace user={activeContact} initials={getInitials(activeContact.name)} />
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-[13.5px] font-semibold">
@@ -2657,7 +2658,7 @@ const TeamChat = ({ theme = "light", embedded = false, visible = true }) => {
               <div className="avstack hidden md:flex">
                 {activeParticipants.slice(0, 4).map((participant) => (
                   <div className="avatar" key={participant._id || participant.id || participant.name}>
-                    {getInitials(participant.name)}
+                    <AvatarFace user={participant} initials={getInitials(participant.name)} />
                   </div>
                 ))}
               </div>

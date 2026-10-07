@@ -22,7 +22,7 @@ const generateClientCode = async (companyId) => {
   const counter = await CoworkingIdCounter.findOneAndUpdate(
     { companyId, category: "CLIENT" },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   return `CLI-${String(counter.seq).padStart(4, "0")}`;
 };

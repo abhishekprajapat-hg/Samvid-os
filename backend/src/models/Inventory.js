@@ -144,7 +144,7 @@ const residentialDetailsSchema = new mongoose.Schema(
   {
     propertyType: {
       type: String,
-      enum: ["FLAT", "HOUSE", "PLOT", "PG_HOSTEL", "OTHER", ""],
+      enum: ["FLAT", "HOUSE", "PLOT", "PG_HOSTEL", "BUNGALOW", "FARM_HOUSE", "OTHER", ""],
       default: "",
       trim: true,
     },
@@ -550,13 +550,13 @@ inventorySchema.pre("validate", function enforceStatusDetails() {
   if (enforceReasonCheck && this.status === "Blocked" && !cleanReason) {
     this.invalidate(
       "reservationReason",
-      "reservationReason is required when status is Reserved",
+      "Block reason is required when status is Blocked",
     );
   }
   if (enforceReasonCheck && this.status === "Blocked" && !reservationLeadId) {
     this.invalidate(
       "reservationLeadId",
-      "Lead is required when status is Reserved",
+      "Select the lead this property is blocked for",
     );
   }
 

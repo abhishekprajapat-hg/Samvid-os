@@ -79,7 +79,7 @@ router.put("/", writeLimiter, async (req, res) => {
         $inc: { version: 1 },
         $setOnInsert: { companyId: req.user.companyId },
       },
-      { upsert: !existing, new: true, runValidators: true },
+      { upsert: !existing, returnDocument: "after", runValidators: true },
     );
     if (!saved) {
       return res.status(409).json({ message: "The board changed while saving. Reload and try again." });

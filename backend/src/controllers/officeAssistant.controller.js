@@ -263,8 +263,8 @@ const queryInventory = async ({
       path: "saleMeta.leadId",
       select: "name phone assignedTo createdBy",
       populate: [
-        { path: "assignedTo", select: "name role" },
-        { path: "createdBy", select: "name role" },
+        { path: "assignedTo", select: "name role profileImageUrl" },
+        { path: "createdBy", select: "name role profileImageUrl" },
       ],
     })
     .sort({ updatedAt: -1 })
@@ -346,8 +346,8 @@ const queryLeads = async ({
   }
 
   const rows = await Lead.find(filter)
-    .populate("assignedTo", "name role")
-    .populate("createdBy", "name role")
+    .populate("assignedTo", "name role profileImageUrl")
+    .populate("createdBy", "name role profileImageUrl")
     .populate("inventoryId", "projectName towerName unitNumber status")
     .sort({ updatedAt: -1 })
     .limit(Math.max(1, Math.min(Number(limit || 12), 25)))
@@ -455,7 +455,7 @@ const queryBestPerformer = async ({ user, query }) => {
   const userMap = new Map(
     (
       await User.find({ _id: { $in: rows.map((row) => row._id) } })
-        .select("_id name role")
+        .select("_id name role profileImageUrl")
         .lean()
     ).map((row) => [String(row._id), row]),
   );
@@ -471,6 +471,7 @@ const queryBestPerformer = async ({ user, query }) => {
       userId: row._id,
       name: person?.name || "Unknown",
       role: person?.role || "-",
+      profileImageUrl: person?.profileImageUrl || "",
       totalLeads,
       closedLeads,
       interestedLeads: Number(row.interestedLeads || 0),
@@ -582,16 +583,16 @@ const querySalesInterestedSnapshot = async ({ user }) => {
         path: "saleMeta.leadId",
         select: "name phone assignedTo createdBy",
         populate: [
-          { path: "assignedTo", select: "name role" },
-          { path: "createdBy", select: "name role" },
+          { path: "assignedTo", select: "name role profileImageUrl" },
+          { path: "createdBy", select: "name role profileImageUrl" },
         ],
       })
       .sort({ updatedAt: -1 })
       .limit(10)
       .lean(),
     Lead.find({ ...leadScope, status: "INTERESTED" })
-      .populate("assignedTo", "name role")
-      .populate("createdBy", "name role")
+      .populate("assignedTo", "name role profileImageUrl")
+      .populate("createdBy", "name role profileImageUrl")
       .sort({ updatedAt: -1 })
       .limit(10)
       .lean(),

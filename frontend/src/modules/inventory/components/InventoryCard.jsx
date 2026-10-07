@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Armchair, ArrowRight, Building2, Heart, Image as ImageIcon, MoreHorizontal, Pencil, Ruler, Share2, Trash2 } from "lucide-react";
 import { IconButton, cn } from "../../../components/ui";
+import FittedImage from "../../../components/ui/FittedImage";
 import { StatusBadge } from "../../../components/crm";
 import { toApiInventoryStatus } from "./propertyWorkspaceUtils";
 
@@ -31,7 +32,16 @@ const areaOf = (asset) => {
 const floorOf = (asset) => {
   const floor = toNumber(asset?.floorNumber ?? asset?.floor);
   if (floor === null) return "-";
-  const suffix = floor % 100 > 10 && floor % 100 < 14 ? "th" : ["th", "st", "nd", "rd"][Math.min(floor % 10, 3)];
+  if (floor === 0) return "Ground floor";
+  if (floor < 0) return `Basement ${Math.abs(floor)}`;
+  const lastTwo = floor % 100;
+  const last = floor % 10;
+  let suffix = "th";
+  if (lastTwo < 11 || lastTwo > 13) {
+    if (last === 1) suffix = "st";
+    else if (last === 2) suffix = "nd";
+    else if (last === 3) suffix = "rd";
+  }
   return `${floor}${suffix} floor`;
 };
 
@@ -40,13 +50,14 @@ const InventoryCard = React.memo(({ asset, priceLabel, onView, onEdit, onShare, 
   const status = toApiInventoryStatus(asset?.status);
   const image = Array.isArray(asset?.images) ? asset.images[0] : "";
   const imageCount = Array.isArray(asset?.images) ? asset.images.length : 0;
-  const furnishing = formatEnum(asset?.furnishingStatus) || "Unfurnished";
+  // Plots, warehouses etc. have no furnishing; show a dash instead of guessing.
+  const furnishing = formatEnum(asset?.furnishingStatus) || "-";
 
   return (
     <article className="group flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_6px_24px_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_34px_rgba(37,99,235,0.14)]">
       <div className="relative h-[208px] shrink-0 overflow-hidden bg-slate-100">
         <button type="button" onClick={() => onView?.(asset?._id)} className="absolute inset-0 h-full w-full text-left" aria-label={`View ${asset?.projectName || asset?.propertyId || "property"}`}>
-          {image ? <img src={image} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" /> : <span className="grid h-full w-full place-items-center text-slate-400"><ImageIcon size={36} /></span>}
+          {image ? <FittedImage src={image} alt="" /> : <span className="grid h-full w-full place-items-center text-slate-400"><ImageIcon size={36} /></span>}
         </button>
         <span className="absolute left-3 top-3"><StatusBadge status={status} className="border border-emerald-200 bg-white/95 text-[12px] font-semibold text-emerald-700 shadow-sm" /></span>
         <button type="button" aria-label={favorite ? "Remove from favorites" : "Add to favorites"} onClick={() => setFavorite((value) => !value)} className={cn("absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-xl bg-white/95 shadow-sm transition", favorite ? "text-rose-500" : "text-slate-700 hover:text-rose-500")}><Heart size={19} fill={favorite ? "currentColor" : "none"} /></button>

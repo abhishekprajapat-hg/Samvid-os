@@ -33,6 +33,27 @@ const normalizeInventoryToAsset = (inventory: any): InventoryAsset | null => {
     gstApplicable: Boolean(inventory.gstApplicable),
     createdAt: inventory.createdAt,
     updatedAt: inventory.updatedAt,
+
+    /* Carried through so a list can show an area, a furnishing or a floor
+       without fetching each row again. */
+    propertyId: String(inventory.propertyId || ""),
+    projectName: String(inventory.projectName || ""),
+    towerName: String(inventory.towerName || ""),
+    inventoryType: String(inventory.inventoryType || ""),
+    furnishingStatus: String(inventory.furnishingStatus || ""),
+    buildingName: String(inventory.buildingName || ""),
+    floorNumber: inventory.floorNumber ?? null,
+    totalFloors: inventory.totalFloors ?? null,
+    carpetArea: inventory.carpetArea ?? null,
+    builtUpArea: inventory.builtUpArea ?? null,
+    totalArea: inventory.totalArea ?? null,
+    areaUnit: String(inventory.areaUnit || "SQ_FT"),
+    city: String(inventory.city || ""),
+    area: String(inventory.area || ""),
+    pincode: String(inventory.pincode || ""),
+    rent: inventory.rent ?? null,
+    maintenanceCharges: inventory.maintenanceCharges ?? null,
+    floorPlans: Array.isArray(inventory.floorPlans) ? inventory.floorPlans : [],
   };
 };
 
@@ -127,4 +148,68 @@ export const rejectInventoryRequest = async (requestId: string, rejectionReason:
     rejectionReason,
   });
   return res.data;
+};
+
+/* ------------------------------------------- request / review workflow -- */
+
+/*
+ * The half of inventory that goes through approval rather than writing
+ * directly. Non-privileged roles cannot create, edit or delete an asset - they
+ * raise a request and a manager approves it. Mirrors the same five functions in
+ * frontend/src/services/inventoryService.js.
+ */
+
+/** Propose a brand-new asset for approval instead of creating it outright. */
+export const createInventoryCreateRequest = async (payload: Record<string, unknown>) => {
+  const res = await api.post("/inventory-request", { proposedData: payload });
+  return res.data?.request || null;
+};
+
+/** Propose a deletion for approval. */
+export const requestInventoryDelete = async (assetId: string, requestNote = "") => {
+  const res = await api.post(`/inventory-request/delete/${assetId}`, {
+    requestNote: String(requestNote || "").trim(),
+  });
+  return res.data?.request || null;
+};
+
+/*
+ * Named to match web exactly. `requestInventoryUpdate` below is the original
+ * mobile spelling, kept as an alias so the screens already calling it keep
+ * working; prefer this name in new code.
+ */
+export const requestInventoryUpdateChange = async (
+  assetId: string,
+  proposedData: Record<string, unknown>,
+  requestNote = "",
+) => requestInventoryUpdate(assetId, proposedData, requestNote);
+
+/** The requests *this* user raised, with their current review state. */
+export const getMyInventoryRequests = async () => {
+  const res = await api.get("/inventory-request/my");
+  return Array.isArray(res.data?.requests) ? res.data.requests : [];
+};
+
+/** Assets plus pagination meta, for infinite scroll. */
+export const getInventoryAssetsWithMeta = async (params: Record<string, unknown> = {}) => {
+  const res = await api.get("/inventory", { params });
+  const rawAssets = Array.isArray(res.data?.assets) ? res.data.assets : [];
+  const rawInventory = Array.isArray(res.data?.inventory) ? res.data.inventory : [];
+  return {
+    assets: rawAssets,
+    inventory: rawInventory,
+    pagination: res.data?.pagination || null,
+  };
+};
+
+/*
+ * A public, time-limited share link for one asset. The token is consumed by
+ * SharedInventoryView, which is unauthenticated - Phase 5.
+ */
+export const createInventoryShareLink = async (inventoryId: string) => {
+  const res = await api.post(`/inventory/${inventoryId}/share`);
+  return {
+    shareToken: String(res.data?.shareToken || ""),
+    expiresAt: res.data?.expiresAt || null,
+  };
 };

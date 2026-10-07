@@ -15,7 +15,7 @@ const generatePaymentCode = async (companyId) => {
   const counter = await CoworkingIdCounter.findOneAndUpdate(
     { companyId, category: "PAYMENT" },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   return `PAY-${String(counter.seq).padStart(5, "0")}`;
 };

@@ -289,7 +289,7 @@ const generateProjectId = async ({ companyId, projectCategory }) => {
   const counter = await ProjectIdCounter.findOneAndUpdate(
     { companyId, category },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   const prefix = PROJECT_ID_PREFIX[category];
   return `${prefix}-PROJ-${String(counter.seq).padStart(4, "0")}`;

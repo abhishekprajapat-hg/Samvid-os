@@ -141,8 +141,38 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/*
+ * Uploaded-file URLs are stored on records, and older ones were saved with an
+ * absolute host baked in (the API origin, which differs from the app origin in
+ * development). An absolute URL makes the request cross-origin, so the browser
+ * withholds the httpOnly file-access cookie and every <img> 401s.
+ *
+ * Rewriting them to relative here - once, on the way in - keeps all of them
+ * same-origin without touching the ~25 components that render them. Any query
+ * string is preserved, so a signed ?t= link still works.
+ */
+const UPLOAD_URL_PATTERN = /https?:\/\/[^/"\s]+(\/api\/uploads\/files\/)/g;
+
+const toRelativeUploadUrls = (value) => {
+  if (typeof value === "string") {
+    return value.includes("/api/uploads/files/")
+      ? value.replace(UPLOAD_URL_PATTERN, "$1")
+      : value;
+  }
+  if (Array.isArray(value)) return value.map(toRelativeUploadUrls);
+  if (value && typeof value === "object") {
+    for (const key of Object.keys(value)) {
+      value[key] = toRelativeUploadUrls(value[key]);
+    }
+  }
+  return value;
+};
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (response?.data) response.data = toRelativeUploadUrls(response.data);
+    return response;
+  },
   async (error) => {
     const statusCode = error.response?.status;
     const originalRequest = error.config || {};

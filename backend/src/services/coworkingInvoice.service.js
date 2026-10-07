@@ -16,7 +16,7 @@ const generateInvoiceNumber = async (companyId) => {
   const counter = await CoworkingIdCounter.findOneAndUpdate(
     { companyId, category: "INVOICE" },
     { $inc: { seq: 1 } },
-    { new: true, upsert: true },
+    { returnDocument: "after", upsert: true },
   );
   const year = new Date().getFullYear();
   return `INV-${year}-${String(counter.seq).padStart(5, "0")}`;

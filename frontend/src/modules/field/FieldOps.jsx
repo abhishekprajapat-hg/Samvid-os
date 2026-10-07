@@ -12,8 +12,6 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { divIcon } from "leaflet";
-import "leaflet/dist/leaflet.css";
 import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssetsWithMeta } from "../../services/inventoryService";
 import { getFieldExecutiveLocations, getUsers } from "../../services/userService";
@@ -45,33 +43,6 @@ const CITY_COORDINATES = {
   jaipur: [26.9124, 75.7873],
   chandigarh: [30.7333, 76.7794],
 };
-
-const PROPERTY_MARKER_ICON = divIcon({
-  className: "property-map-marker",
-  iconSize: [34, 34],
-  iconAnchor: [17, 17],
-  popupAnchor: [0, -12],
-  html: `
-    <div style="
-      width:34px;
-      height:34px;
-      border-radius:12px;
-      background:linear-gradient(135deg,#f59e0b,#f97316);
-      border:3px solid #ffffff;
-      box-shadow:0 12px 26px rgba(15,23,42,0.22),0 0 0 1px rgba(180,83,9,0.24);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      transform:rotate(45deg);
-    ">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="transform:rotate(-45deg)">
-        <path d="M3 10.5L12 3l9 7.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        <path d="M6 9.5V20h12V9.5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        <path d="M10 20v-5h4v5" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-    </div>
-  `,
-});
 
 const toDate = (value) => {
   if (value === null || value === undefined || value === "") return null;
@@ -867,7 +838,6 @@ const FieldOps = () => {
             onExecutiveSelect={handleExecutiveFocus}
             onPropertySelect={handlePropertyFocus}
             onOpenDirections={openDirectionsForProperty}
-            propertyMarkerIcon={PROPERTY_MARKER_ICON}
             formatDateTime={formatDateTime}
           />
 

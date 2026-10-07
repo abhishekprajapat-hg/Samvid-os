@@ -43,7 +43,7 @@ const reconcileMonth = async ({ companyId, userIds, month, policy }) => {
    if (!previous || Object.entries(fields).some(([key, value]) => previous[key] !== value)) {
     const filter = { companyId, userId: user._id, date: day, ...(previous ? { updatedAt: previous.updatedAt } : {}) };
     try {
-     row = await Violation.findOneAndUpdate(filter, { $set: fields, $push: { history: { action: active ? level : "RECONCILED", note: active ? `${kind}: monthly occurrence ${ordinal}` : "Attendance/leave correction or management exemption", at: new Date() } } }, { upsert: !previous, new: true, runValidators: true }).lean();
+     row = await Violation.findOneAndUpdate(filter, { $set: fields, $push: { history: { action: active ? level : "RECONCILED", note: active ? `${kind}: monthly occurrence ${ordinal}` : "Attendance/leave correction or management exemption", at: new Date() } } }, { upsert: !previous, returnDocument: "after", runValidators: true }).lean();
     } catch (error) { if (error.code !== 11000) throw error; row = await Violation.findOne({ companyId, userId: user._id, date: day }).lean(); }
    }
    if (row) rows.push({ ...row, userName: user.name });

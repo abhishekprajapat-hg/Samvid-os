@@ -24,11 +24,13 @@ import {
   updateProject,
   deleteProject,
 } from "../../services/projectService";
+import { deleteOutcomeMessage, isDeleteApprovalPending } from "../../services/deleteRequestService";
 import { uploadFile } from "../../services/uploadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { usePermissions } from "../../context/usePermissions";
 import ToastNotice from "../../components/ui/ToastNotice";
+import FittedImage from "../../components/ui/FittedImage";
 import {
   PROJECT_CATEGORY_OPTIONS,
   PROJECT_TYPE_OPTIONS,
@@ -164,7 +166,8 @@ const SHOWROOM_FIELDS = [
 ];
 
 const PROJECT_MANAGE_ROLES = new Set(["ADMIN", "MANAGER"]);
-const PROJECT_DELETE_ROLES = new Set(["ADMIN"]);
+// A Manager's delete is a request an Admin approves.
+const PROJECT_DELETE_ROLES = new Set(["ADMIN", "MANAGER"]);
 const MOBILE_PATTERN = /^[0-9]{10}$/;
 const PAGE_LIMIT = 25;
 
@@ -556,13 +559,7 @@ const ProjectCard = ({ project, canManage, canDelete, onView, onEdit, onDelete }
         aria-label={`View ${project.projectName}`}
       >
         {image ? (
-          <img
-            src={image}
-            alt={project.projectName}
-            loading="lazy"
-            decoding="async"
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-          />
+          <FittedImage src={image} alt={project.projectName} />
         ) : (
           <div className="flex h-full flex-col items-center justify-center text-slate-300">
             <ImageIcon size={34} />
@@ -657,6 +654,7 @@ const ProjectsPage = () => {
     || (enforcePageAccess && canPageAction("projects", "create"));
   const canDelete = PROJECT_DELETE_ROLES.has(role)
     || (enforcePageAccess && canPageAction("projects", "delete"));
+  const deleteNeedsApproval = role === "MANAGER";
 
   const [projects, setProjects] = useState([]);
   const [pagination, setPagination] = useState(null);
@@ -1038,10 +1036,10 @@ const ProjectsPage = () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteProject(deleteTarget._id);
-      setSuccess("Project deleted");
+      const result = await deleteProject(deleteTarget._id);
+      setSuccess(deleteOutcomeMessage(result, "Project deleted"));
       setDeleteTarget(null);
-      await fetchProjects();
+      if (!isDeleteApprovalPending(result)) await fetchProjects();
     } catch (deleteError) {
       setError(toErrorMessage(deleteError, "Failed to delete project"));
     } finally {
@@ -1847,7 +1845,7 @@ const ProjectsPage = () => {
                         key={`${url}-${index}`}
                         className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg"
                       >
-                        <img src={url} className="h-full w-full object-cover" alt="project" />
+                        <FittedImage src={url} alt="project" backdrop={false} />
                         <button
                           type="button"
                           onClick={() => removeImage(url)}
@@ -1916,9 +1914,13 @@ const ProjectsPage = () => {
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
-            <h2 className="text-base font-extrabold text-slate-900">Delete Project?</h2>
+            <h2 className="text-base font-extrabold text-slate-900">{deleteNeedsApproval ? "Request project delete?" : "Delete Project?"}</h2>
             <p className="mt-2 text-sm text-slate-500">
-              Are you sure you want to delete <span className="font-bold text-slate-700">{deleteTarget.projectName}</span>? This action cannot be undone.
+              {deleteNeedsApproval ? (
+                <>An Admin has to approve deleting <span className="font-bold text-slate-700">{deleteTarget.projectName}</span>. It stays until they do.</>
+              ) : (
+                <>Are you sure you want to delete <span className="font-bold text-slate-700">{deleteTarget.projectName}</span>? This action cannot be undone.</>
+              )}
             </p>
             <div className="mt-5 flex gap-3">
               <button
@@ -1936,7 +1938,7 @@ const ProjectsPage = () => {
                   deleting ? "cursor-not-allowed bg-slate-400" : "bg-red-600 hover:bg-red-700"
                 }`}
               >
-                {deleting ? "Deleting..." : "Delete"}
+                {deleting ? (deleteNeedsApproval ? "Sending..." : "Deleting...") : (deleteNeedsApproval ? "Send request" : "Delete")}
               </button>
             </div>
           </div>

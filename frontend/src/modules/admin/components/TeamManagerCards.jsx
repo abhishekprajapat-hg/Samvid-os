@@ -12,6 +12,7 @@ import {
   Users,
   Users2,
 } from "lucide-react";
+import AvatarFace from "../../../components/ui/AvatarFace";
 
 const DEFAULT_BROKERAGE_VALUE = 50000;
 const DEFAULT_BROKERAGE_PERCENTAGE = 2;
@@ -56,11 +57,17 @@ const formatBrokerageSummary = (config = null) => {
     : `${formatCurrency(normalized.value)} per closed deal`;
 };
 
+// Kept in step with TeamManager's list: a category with no name here fell
+// through to "Commercial", which read as a wrong answer rather than a missing one.
+const ROLE_TYPE_LABELS = {
+  COMMERCIAL: "Commercial",
+  RESIDENTIAL: "Residential",
+  COWORKING: "Coworking",
+  BOTH: "All categories",
+};
+
 const formatRoleType = (value) =>
-  String(value || "").trim().toUpperCase() === "BOTH" ? "Both" :
-  String(value || "").trim().toUpperCase() === "RESIDENTIAL"
-    ? "Residential"
-    : "Commercial";
+  ROLE_TYPE_LABELS[String(value || "").trim().toUpperCase()] || "Commercial";
 
 const roleBadgeTone = (role, isDarkTheme) => {
   if (role === "MANAGER") {
@@ -342,7 +349,7 @@ const TeamUserCard = ({
               ? "border-cyan-400/30 bg-cyan-500/10 text-cyan-100"
               : "border-cyan-200 bg-cyan-50 text-cyan-700"
           }`}>
-            {initials}
+            <AvatarFace user={user} initials={initials} />
           </div>
           <div className="min-w-0">
             <div className={`truncate text-base font-semibold ${isDarkTheme ? "text-slate-100" : "text-slate-900"}`}>

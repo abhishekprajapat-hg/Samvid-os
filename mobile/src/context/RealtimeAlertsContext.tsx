@@ -13,12 +13,17 @@ import { createChatSocket } from "../services/chatSocket";
 import { getMessengerConversations, updateCallLog } from "../services/chatService";
 import { getLeadPaymentRequests, getPendingLeadStatusRequests } from "../services/leadService";
 import { getPendingInventoryRequests } from "../services/inventoryService";
-import { notifyChatMessage } from "../services/pushNotifications";
 import { useAuth } from "./AuthContext";
 import type { ChatConversation } from "../types";
-import { navigateFromAnywhere } from "../navigation/navigationRef";
+import { navigateFromAnywhere, navigationRef } from "../navigation/navigationRef";
+import {
+  buildChatPreview,
+  normalizeAdminRequestEvent,
+  normalizeTaskEvent,
+  type AdminRequestEvent,
+} from "./realtimeEvents";
 
-type PopupKind = "CHAT" | "CALL" | "NOTIFICATION";
+type PopupKind = "CHAT" | "CALL" | "NOTIFICATION" | "TASK" | "REQUEST";
 
 export type RealtimePopup = {
   id: string;
@@ -26,6 +31,10 @@ export type RealtimePopup = {
   title: string;
   message: string;
   createdAt: string;
+  /* Where tapping the alert goes. */
+  target?: { screen: string; params?: Record<string, unknown> };
+  /* An approval request, for the Approve / Reject actions web offers. */
+  request?: AdminRequestEvent;
   callMeta?: {
     callId: string;
     callType: "VOICE" | "VIDEO";
@@ -36,7 +45,12 @@ export type RealtimePopup = {
 };
 
 type RealtimeAlertsContextValue = {
+  /* Approval events heard on the socket this session - web's
+     recentAdminRequests, which its notification inbox lists as alerts. */
+  recentAdminRequests: AdminRequestEvent[];
   chatUnreadTotal: number;
+  /* Unread count per conversation id - the chat list's badges. */
+  chatUnreadByConversation: Record<string, number>;
   notificationUnreadTotal: number;
   popupItems: RealtimePopup[];
   setActiveChatConversation: (conversationId: string) => void;
@@ -54,7 +68,9 @@ type RealtimeAlertsContextValue = {
 const noop = () => {};
 
 const RealtimeAlertsContext = createContext<RealtimeAlertsContextValue>({
+  recentAdminRequests: [],
   chatUnreadTotal: 0,
+  chatUnreadByConversation: {},
   notificationUnreadTotal: 0,
   popupItems: [],
   setActiveChatConversation: noop,
@@ -70,6 +86,18 @@ const RealtimeAlertsContext = createContext<RealtimeAlertsContextValue>({
 });
 
 const MAX_POPUPS = 4;
+const MAX_RECENT_ADMIN_REQUESTS = 30;
+
+/* Web suppresses the chat toast while the chat page is open; these are the
+   mobile routes that are "the chat page". */
+const CHAT_ROUTES = new Set(["Chat", "ChatConversation", "CallScreen"]);
+const currentRouteName = () => {
+  try {
+    return navigationRef.isReady() ? String(navigationRef.getCurrentRoute()?.name || "") : "";
+  } catch {
+    return "";
+  }
+};
 
 const toConversationUnreadMap = (rows: ChatConversation[]) =>
   rows.reduce<Record<string, number>>((acc, row) => {
@@ -174,11 +202,15 @@ const getPendingNotificationCount = async () => {
 export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode }) => {
   const { isLoggedIn, token, user } = useAuth();
   const userId = useMemo(() => String(user?._id || user?.id || "").trim(), [user]);
+  const userRole = String(user?.role || "").toUpperCase();
+  const userRoleRef = useRef(userRole);
+  userRoleRef.current = userRole;
 
   const [unreadByConversation, setUnreadByConversation] = useState<Record<string, number>>({});
   const [chatSignalCount, setChatSignalCount] = useState(0);
   const [notificationUnreadTotal, setNotificationUnreadTotal] = useState(0);
   const [popupItems, setPopupItems] = useState<RealtimePopup[]>([]);
+  const [recentAdminRequests, setRecentAdminRequests] = useState<AdminRequestEvent[]>([]);
 
   const activeConversationIdRef = useRef("");
   const seenMessageIdsRef = useRef(new Set<string>());
@@ -327,6 +359,7 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
     setChatSignalCount(0);
     setNotificationUnreadTotal(0);
     setPopupItems([]);
+    setRecentAdminRequests([]);
     activeConversationIdRef.current = "";
     seenMessageIdsRef.current.clear();
     seenNotificationIdsRef.current.clear();
@@ -398,14 +431,34 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
 
       if (conversationId && activeConversationIdRef.current === conversationId) return;
 
-      void notifyChatMessage({
-        conversationId,
-        contactId: conversationContactId,
-        contactName: conversationContactName,
-        contactRole: conversationContactRole,
-        contactAvatar: conversationContactAvatar,
-        message: getMessagePreview(message),
-      }).catch(() => {});
+      /*
+       * No local notification here - the server already pushes chat messages,
+       * so raising one as well would ring twice. The in-app toast is web's
+       * ChatMessageAlertToast, and like web it stays quiet on the chat pages.
+       */
+      if (CHAT_ROUTES.has(currentRouteName())) return;
+      // One toast per conversation: a burst of messages replaces rather than stacks.
+      setPopupItems((prev) =>
+        prev.filter((row) => row.kind !== "CHAT" || row.target?.params?.conversationId !== conversationId));
+      pushPopup({
+        id: `chat-${messageId}`,
+        kind: "CHAT",
+        title: String(message?.sender?.name || "").trim() || conversationContactName,
+        message: buildChatPreview(message),
+        createdAt: String(message?.createdAt || new Date().toISOString()),
+        target: conversationId
+          ? {
+              screen: "ChatConversation",
+              params: {
+                conversationId,
+                contactId: conversationContactId,
+                contactName: conversationContactName,
+                contactRole: conversationContactRole,
+                contactAvatar: conversationContactAvatar,
+              },
+            }
+          : { screen: "Chat" },
+      });
     };
 
     const onRoomRead = (payload: any) => {
@@ -472,14 +525,57 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
       }
 
       setNotificationUnreadTotal((prev) => prev + 1);
-      // Notification center badge only; in-app popup is intentionally disabled for mobile UX.
     };
 
-    const onAdminRequest = (payload: any) => onNotification("admin:request:new", payload);
-    const onLeadPayment = (payload: any) => onNotification("lead:payment:request:created", payload);
-    const onLeadStatusRequest = (payload: any) => onNotification("lead:status:request:created", payload);
-    const onInventoryCreated = (payload: any) => onNotification("inventory:request:created", payload);
+    /*
+     * An approval request: the badge for everyone it reaches, and for an admin
+     * or manager web's AdminRequestAlertToast - which can approve or reject a
+     * payment or an inventory change without leaving the screen.
+     */
+    const onRequestEvent = (eventName: string, payload: any) => {
+      onNotification(eventName, payload);
+      if (!["ADMIN", "MANAGER"].includes(userRoleRef.current)) return;
+      const event = normalizeAdminRequestEvent(payload);
+      if (!event) return;
+      setRecentAdminRequests((prev) =>
+        [event, ...prev.filter((row) => row.eventId !== event.eventId)].slice(0, MAX_RECENT_ADMIN_REQUESTS));
+      pushPopup({
+        id: `request-${event.eventId}`,
+        kind: "REQUEST",
+        title: event.preview,
+        message: "",
+        createdAt: event.createdAt,
+        request: event,
+      });
+    };
+
+    const onTaskEvent = (eventType: string, payload: any) => {
+      const event = normalizeTaskEvent(payload, eventType);
+      if (!event || seenNotificationIdsRef.current.has(event.id)) return;
+      seenNotificationIdsRef.current.add(event.id);
+      pushPopup({
+        id: `task-${event.id}`,
+        kind: "TASK",
+        title: event.title,
+        message: event.preview,
+        createdAt: event.createdAt,
+        target: event.taskId && eventType !== "task:deleted"
+          ? { screen: "TaskDetails", params: { taskId: event.taskId } }
+          : { screen: "Tasks" },
+      });
+    };
+
+    const onAdminRequest = (payload: any) => onRequestEvent("admin:request:new", payload);
+    const onLeadPayment = (payload: any) => onRequestEvent("lead:payment:request:created", payload);
+    const onLeadStatusRequest = (payload: any) => onRequestEvent("lead:status:request:created", payload);
+    const onLeadDealClosed = (payload: any) => onRequestEvent("lead:deal:closed", payload);
+    const onLeadRemainingCollected = (payload: any) => onRequestEvent("lead:payment:remaining:collected", payload);
+    const onUserDeleteRequest = (payload: any) => onRequestEvent("user-delete:request:created", payload);
+    const onInventoryCreated = (payload: any) => onRequestEvent("inventory:request:created", payload);
     const onInventoryReviewed = (payload: any) => onNotification("inventory:request:reviewed", payload);
+    const onTaskCreated = (payload: any) => onTaskEvent("task:created", payload);
+    const onTaskUpdated = (payload: any) => onTaskEvent("task:updated", payload);
+    const onTaskDeleted = (payload: any) => onTaskEvent("task:deleted", payload);
     const onCallUpdate = (payload: any) => {
       const status = String(payload?.status || payload?.event || "").toUpperCase();
       const callId = String(payload?.callId || "").trim();
@@ -499,6 +595,12 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
     socket.on("lead:status:request:created", onLeadStatusRequest);
     socket.on("inventory:request:created", onInventoryCreated);
     socket.on("inventory:request:reviewed", onInventoryReviewed);
+    socket.on("lead:deal:closed", onLeadDealClosed);
+    socket.on("lead:payment:remaining:collected", onLeadRemainingCollected);
+    socket.on("user-delete:request:created", onUserDeleteRequest);
+    socket.on("task:created", onTaskCreated);
+    socket.on("task:updated", onTaskUpdated);
+    socket.on("task:deleted", onTaskDeleted);
     socket.on("messenger:call:update", onCallUpdate);
     socket.on("chat:call:accepted", onCallUpdate);
     socket.on("chat:call:rejected", onCallUpdate);
@@ -515,6 +617,12 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
       socket.off("lead:status:request:created", onLeadStatusRequest);
       socket.off("inventory:request:created", onInventoryCreated);
       socket.off("inventory:request:reviewed", onInventoryReviewed);
+      socket.off("lead:deal:closed", onLeadDealClosed);
+      socket.off("lead:payment:remaining:collected", onLeadRemainingCollected);
+      socket.off("user-delete:request:created", onUserDeleteRequest);
+      socket.off("task:created", onTaskCreated);
+      socket.off("task:updated", onTaskUpdated);
+      socket.off("task:deleted", onTaskDeleted);
       socket.off("messenger:call:update", onCallUpdate);
       socket.off("chat:call:accepted", onCallUpdate);
       socket.off("chat:call:rejected", onCallUpdate);
@@ -533,7 +641,9 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
 
   const contextValue = useMemo<RealtimeAlertsContextValue>(
     () => ({
+      recentAdminRequests,
       chatUnreadTotal,
+      chatUnreadByConversation: unreadByConversation,
       notificationUnreadTotal,
       popupItems,
       setActiveChatConversation,
@@ -549,6 +659,7 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
     }),
     [
       chatUnreadTotal,
+      unreadByConversation,
       clearPopups,
       acceptCallPopup,
       dismissPopup,
@@ -558,6 +669,7 @@ export const RealtimeAlertsProvider = ({ children }: { children: React.ReactNode
       markNotificationsRead,
       notificationUnreadTotal,
       popupItems,
+      recentAdminRequests,
       rejectCallPopup,
       setActiveChatConversation,
       syncChatUnreadFromConversations,

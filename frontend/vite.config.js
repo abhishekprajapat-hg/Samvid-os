@@ -47,6 +47,29 @@ export default defineConfig(({ mode }) => {
               return 'pdf'
             }
 
+            /*
+             * The heavy libraries the app deliberately loads on demand.
+             *
+             * manualChunks wins over how a module was imported, so the
+             * catch-all below was pulling these into `vendor` and undoing the
+             * dynamic import() at each call site - OCR and the PDF reader are
+             * only ever reached from the document-scan path, and the charts
+             * only from one admin screen, but every visitor downloaded all
+             * three before the first paint. Naming them keeps them in their
+             * own files, fetched when that code actually runs.
+             */
+            if (id.includes('tesseract.js')) {
+              return 'ocr'
+            }
+
+            if (id.includes('pdfjs-dist')) {
+              return 'pdf-reader'
+            }
+
+            if (id.includes('recharts') || id.includes('d3-') || id.includes('victory-vendor')) {
+              return 'charts'
+            }
+
             if (id.includes('socket.io-client')) {
               return 'realtime'
             }

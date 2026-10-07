@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Link, useNavigate } from "react-router-dom";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import {
+  Check,
   ChevronDown,
   MapPin,
   X,
@@ -14,6 +15,7 @@ import {
   getInventoryAssetsWithMeta,
   getInventoryAssetById,
   createInventoryAsset,
+  createInventoryCreateRequest,
   updateInventoryAsset,
   deleteInventoryAsset,
   requestInventoryDelete,
@@ -25,11 +27,21 @@ import {
   rejectInventoryRequest,
 } from "../../services/inventoryService";
 import { getAllLeads } from "../../services/leadService";
+import { deleteOutcomeMessage, isDeleteApprovalPending } from "../../services/deleteRequestService";
 import { uploadFile } from "../../services/uploadService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { useDebouncedValue } from "../../hooks/useDebouncedValue";
 import { usePermissions } from "../../context/usePermissions";
 import ToastNotice from "../../components/ui/ToastNotice";
+import FittedImage from "../../components/ui/FittedImage";
+import GoogleMapPicker from "../../components/common/GoogleMapPicker";
+import {
+  createPlacesAutocompleteSession,
+  fetchPlacePredictions,
+  geocodeAddress,
+  loadPlaces,
+  resolvePlaceSuggestion,
+} from "../../utils/googlePlaces";
 import {
   AssetVaultFilters,
   PendingInventoryRequestsPanel,
@@ -37,7 +49,7 @@ import {
 import {
   PropertyWorkspace,
 } from "./components/PropertyWorkspace";
-import InventoryToolbar from "./components/InventoryToolbar";
+import InventoryToolbar, { InventoryCategoryTabs } from "./components/InventoryToolbar";
 import {
   FURNISHING_OPTIONS,
   getInventorySubtypeConfig,
@@ -67,7 +79,7 @@ const FileThumbnail = ({ url, fallbackLabel }) => {
   const [pdfThumbnailFailed, setPdfThumbnailFailed] = useState(false);
 
   if (IMAGE_EXTENSION_PATTERN.test(url)) {
-    return <img src={url} className="w-full h-full object-cover" alt={fallbackLabel} />;
+    return <FittedImage src={url} alt={fallbackLabel} backdrop={false} />;
   }
 
   if (PDF_EXTENSION_PATTERN.test(url) && !pdfThumbnailFailed) {
@@ -75,7 +87,7 @@ const FileThumbnail = ({ url, fallbackLabel }) => {
       <a href={url} target="_blank" rel="noreferrer" className="block h-full w-full">
         <img
           src={url.replace(PDF_EXTENSION_PATTERN, ".jpg")}
-          className="w-full h-full object-cover"
+          className="w-full h-full bg-slate-100 object-contain"
           alt={fallbackLabel}
           onError={() => setPdfThumbnailFailed(true)}
         />
@@ -114,12 +126,7 @@ const ImageThumbnail = ({ url, alt }) => {
   }
 
   return (
-    <img
-      src={url}
-      className="w-full h-full object-cover"
-      alt={alt}
-      onError={() => setImageFailed(true)}
-    />
+    <FittedImage src={url} alt={alt} backdrop={false} onError={() => setImageFailed(true)} />
   );
 };
 
@@ -156,7 +163,34 @@ const STATUS_UPDATE_OPTIONS = [
   { label: "Blocked", value: "Blocked" },
   { label: "Sold", value: "Sold" },
 ];
-const INVENTORY_LIST_PAGE_LIMIT = 120;
+const INVENTORY_LIST_PAGE_LIMIT = 200;
+
+/*
+ * R13 (30 Sep 2026): the add / edit form as six short steps instead of one
+ * long page. Each step holds one kind of information, in the order a property
+ * is usually described. Every step stays mounted (only hidden), so moving
+ * between steps never loses what was typed, and Save works from any step.
+ */
+const INVENTORY_FORM_STEPS = [
+  { id: "basics", label: "Basics", hint: "Type, deal and status" },
+  { id: "details", label: "Property details", hint: "Size, layout and features" },
+  { id: "location", label: "Location", hint: "Address and map" },
+  { id: "pricing", label: "Price & terms", hint: "Price, rent and deal" },
+  { id: "owner", label: "Owner & contacts", hint: "Owner and key manager" },
+  { id: "media", label: "Photos & documents", hint: "Images, floor plans, papers" },
+];
+
+// Which step a validation message belongs to, so the form opens it for the user.
+const INVENTORY_ERROR_STEP_RULES = [
+  // A message naming several fields opens the first step that has one of them.
+  { step: "basics", pattern: /property name|project name|title/i },
+  { step: "owner", pattern: /owner|key manager/i },
+  { step: "media", pattern: /image|photo|floor ?plan|video|document|upload/i },
+  { step: "location", pattern: /location|city|locality|pincode|latitude|longitude|coordinate|address|map/i },
+  { step: "pricing", pattern: /price|rent|deposit|agreement|lock-?in|maintenance|deal/i },
+  { step: "basics", pattern: /block|sold|lead|payment|status|title|project name|property name|reason/i },
+  { step: "details", pattern: /area|floor|cabin|seat|bhk|bed|bath|property type|subtype|building|office|furnish|plot|width|length/i },
+];
 const INVENTORY_LIST_FIELDS = [
   "_id",
   "projectName",
@@ -211,65 +245,6 @@ const SOLD_PAYMENT_TYPE_OPTIONS = [
   { value: "FULL", label: "Full Payment" },
   { value: "PARTIAL", label: "Partial Payment" },
 ];
-const GEOCODING_SEARCH_ENDPOINT = "https://nominatim.openstreetmap.org/search";
-const LOCATION_SUGGESTION_LIMIT = 6;
-const GOOGLE_MAPS_SCRIPT_ID = "office-on-rent-google-maps-places-script";
-let googleMapsScriptPromise = null;
-
-const loadGoogleMapsPlacesScript = (apiKey) => {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("Google Maps is unavailable"));
-  }
-
-  if (window.google?.maps?.places) {
-    return Promise.resolve(window.google);
-  }
-
-  if (googleMapsScriptPromise) {
-    return googleMapsScriptPromise;
-  }
-
-  googleMapsScriptPromise = new Promise((resolve, reject) => {
-    const rejectWithReset = (message) => {
-      googleMapsScriptPromise = null;
-      reject(new Error(message));
-    };
-
-    const handleLoad = () => {
-      if (window.google?.maps?.places) {
-        resolve(window.google);
-      } else {
-        rejectWithReset("Google Maps Places library failed to load");
-      }
-    };
-
-    const existingScript = document.getElementById(GOOGLE_MAPS_SCRIPT_ID);
-    const script = existingScript || document.createElement("script");
-
-    script.addEventListener("load", handleLoad, { once: true });
-    script.addEventListener("error", () => rejectWithReset("Google Maps script failed to load"), {
-      once: true,
-    });
-
-    if (!existingScript) {
-      const params = new URLSearchParams({
-        key: apiKey,
-        libraries: "places",
-        v: "weekly",
-      });
-
-      script.id = GOOGLE_MAPS_SCRIPT_ID;
-      script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
-      script.async = true;
-      script.defer = true;
-      document.head.appendChild(script);
-    } else if (window.google?.maps) {
-      handleLoad();
-    }
-  });
-
-  return googleMapsScriptPromise;
-};
 
 const toApiStatus = (status) => {
   if (status === "Reserved") return "Blocked";
@@ -379,6 +354,7 @@ const DEFAULT_FORM = {
   residentialElectricityBackup: false,
   residentialGasPipeline: false,
   reservationReason: "",
+  reservationLeadId: "",
   saleLeadId: "",
   salePaymentMode: "",
   salePaymentType: "",
@@ -417,6 +393,12 @@ const getDefaultInventoryForm = () => {
 const getDefaultInventoryTypeFilter = () =>
   getStoredUserRole() === "ADMIN" || getStoredUserRoleType() === "BOTH" ? "all" : getStoredUserRoleType();
 
+/** Blank, or a 6-digit Indian PIN code not starting with 0 (same rule as the server). */
+const isValidPincode = (value) => {
+  const pincode = String(value || "").replace(/\s+/g, "");
+  return !pincode || /^[1-9][0-9]{5}$/.test(pincode);
+};
+
 const isInventoryPriceRequired = (type) => String(type || "").trim() !== "Rent";
 const isInventoryRentRequired = (type) => ["Rent", "Both"].includes(String(type || "").trim());
 
@@ -442,7 +424,16 @@ const normalizeInventoryCategory = (value, inventoryType = "COMMERCIAL") => {
   const normalized = String(value || "").trim().toLowerCase();
   if (String(inventoryType || "").trim().toUpperCase() === "RESIDENTIAL") {
     if (["apartment", "apartments", "flat", "flats"].includes(normalized)) return "Flat";
-    if (["house", "houses", "villa", "villas", "builder floor", "builder_floor"].includes(normalized)) {
+    if ([
+      "house",
+      "houses",
+      "independent house",
+      "independent_house",
+      "villa",
+      "villas",
+      "builder floor",
+      "builder_floor",
+    ].includes(normalized)) {
       return "House";
     }
     if (["pg", "hostel", "pg / hostel", "pg_hostel"].includes(normalized)) return "PG / Hostel";
@@ -480,22 +471,76 @@ const toSubtypeDataNumber = (subtypeData = {}, ...keys) => {
 const getSubtypeCheckbox = (subtypeData = {}, ...keys) =>
   keys.some((key) => Boolean(subtypeData?.[key]));
 
-const getInventorySubtypeValue = (formDataLike = {}) =>
-  String(
-    formDataLike.inventoryType === "COMMERCIAL"
-      ? formDataLike.officeType
-      : formDataLike.residentialPropertyType,
-  ).trim().toUpperCase();
+const getInventorySubtypeValue = (formDataLike = {}) => {
+  if (formDataLike.inventoryType === "COMMERCIAL") {
+    return String(formDataLike.officeType || "").trim().toUpperCase();
+  }
+  // The form keeps FLAT / HOUSE (the values the server stores), while the
+  // dropdown and the subtype config use APARTMENT / INDEPENDENT_HOUSE.
+  const residentialType = String(formDataLike.residentialPropertyType || "").trim().toUpperCase();
+  if (residentialType === "FLAT") return "APARTMENT";
+  if (residentialType === "HOUSE") return "INDEPENDENT_HOUSE";
+  return residentialType;
+};
 
+const BHK_TYPE_VALUES = new Set(["1BHK", "2BHK", "3BHK", "4BHK", "5BHK", "STUDIO", "OTHER"]);
+
+/** "3 BHK" (subtype dropdown) -> "3BHK" (server enum). */
+const toBhkTypeValue = (value) => {
+  const normalized = String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+  return BHK_TYPE_VALUES.has(normalized) ? normalized : "";
+};
+
+/** "2 Bathrooms" / "5+ Bathrooms" -> 2 / 5. */
+const toLeadingNumber = (value) => {
+  const match = String(value ?? "").match(/\d+/);
+  return match ? Number(match[0]) : null;
+};
+
+/** "10-20" -> {min: 10, max: 20}; "50-" -> {min: 50, max: Infinity}. */
 const parseRangeInput = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return null;
-  const [minRaw, maxRaw] = raw.split("-").map((part) => part.trim());
-  const min = Number(minRaw);
-  const max = Number(maxRaw);
-  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  const [minRaw = "", maxRaw = ""] = raw.split("-").map((part) => part.trim());
+  const min = minRaw === "" ? 0 : Number(minRaw);
+  const max = maxRaw === "" ? Infinity : Number(maxRaw);
+  if (!Number.isFinite(min) || Number.isNaN(max)) return null;
   return { min, max };
 };
+
+/**
+ * Budget filter values look like "sale:5000000-10000000" or "rent:25000-50000".
+ * Sale ranges compare the sale price, rent ranges the monthly rent, so rental
+ * listings (whose sale price is 0) can be found by budget too.
+ */
+const parseBudgetFilter = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const [mode, range] = raw.includes(":") ? raw.split(":") : ["any", raw];
+  const parsed = parseRangeInput(range);
+  return parsed ? { ...parsed, mode } : null;
+};
+
+const getAssetSubtypeData = (asset) => ({
+  ...(asset?.commercialDetails?.subtypeData || {}),
+  ...(asset?.residentialDetails?.subtypeData || {}),
+});
+
+const assetHasParking = (asset) => {
+  const slots = toNumberOrNull(
+    asset?.commercialDetails?.buildingDetails?.parkingSlots
+      ?? asset?.residentialDetails?.parking,
+  );
+  if (slots !== null) return slots >= 1;
+  return getSubtypeCheckbox(getAssetSubtypeData(asset), "parking", "privateParking", "reservedParking");
+};
+
+/** Price a card shows first: monthly rent for rentals, sale price otherwise. */
+const getAssetSortPrice = (asset) => (
+  asset?.type === "Rent"
+    ? Number(asset?.rent ?? asset?.price) || 0
+    : Number(asset?.price) || 0
+);
 
 const parseBooleanInput = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -527,30 +572,39 @@ const hasAmenity = (asset, amenityToken) => {
   const r = asset?.residentialDetails || {};
   const cAmenities = c.amenities || {};
   const cBuilding = c.buildingDetails || {};
+  const cLayout = c.officeLayout || {};
   const rAmenities = r.amenities || {};
   const rUtilities = r.utilities || {};
+  // Records saved before the amenity sync fix only have the ticks in subtypeData.
+  const sub = getAssetSubtypeData(asset);
+  const token = String(amenityToken || "").replace(/_/g, "");
 
-  if (amenityToken === "PANTRY") return Boolean(cAmenities.pantry);
-  if (amenityToken === "LIFT") return Boolean(cAmenities.liftAvailable || rAmenities.lift);
-  if (amenityToken === "SECURITY") {
-    return Boolean(
-      rAmenities.security
-      || ["SECURITY_24X7", "CCTV", "BOTH"].includes(String(cBuilding.securityType || "").toUpperCase()),
-    );
+  switch (token) {
+    case "PANTRY": return Boolean(cAmenities.pantry || sub.pantry);
+    case "LIFT": return Boolean(cAmenities.liftAvailable || rAmenities.lift || sub.liftAvailable || sub.liftAccess || sub.lift);
+    case "SECURITY":
+      return Boolean(
+        rAmenities.security
+        || sub.security
+        || ["SECURITY_24X7", "CCTV", "BOTH"].includes(String(cBuilding.securityType || "").toUpperCase()),
+      );
+    case "POWERBACKUP": return Boolean(cAmenities.powerBackup || rAmenities.powerBackup || sub.powerBackup);
+    case "CENTRALAC": case "AC": return Boolean(cAmenities.centralAC || sub.centralAC);
+    case "CAFETERIA": return Boolean(cAmenities.cafeteria || sub.cafeteria);
+    case "SERVERROOM": return Boolean(cAmenities.serverRoom || sub.serverRoom);
+    case "STORAGEROOM": return Boolean(cAmenities.storageRoom || sub.storageRoom);
+    case "BREAKOUTAREA": return Boolean(cAmenities.breakoutArea || sub.breakoutArea);
+    case "RECEPTION": case "RECEPTIONAREA": return Boolean(cLayout.receptionArea || sub.receptionArea || sub.reception);
+    case "FIRESAFETY": return Boolean(cBuilding.fireSafety || sub.fireSafety);
+    case "PARKING": return assetHasParking(asset);
+    case "INTERNET": case "WIFI": return Boolean(sub.internetRequired || sub.wifi);
+    case "GYM": return Boolean(rAmenities.gym || sub.gym);
+    case "SWIMMINGPOOL": return Boolean(rAmenities.swimmingPool || sub.swimmingPool);
+    case "CLUBHOUSE": return Boolean(rAmenities.clubhouse || sub.clubhouse);
+    case "MODULARKITCHEN": return Boolean(rAmenities.modularKitchen || sub.modularKitchen);
+    case "GASPIPELINE": return Boolean(rUtilities.gasPipeline || sub.gasPipeline);
+    default: return false;
   }
-  if (amenityToken === "POWER_BACKUP" || amenityToken === "POWERBACKUP") {
-    return Boolean(cAmenities.powerBackup || rAmenities.powerBackup);
-  }
-  if (amenityToken === "GYM") return Boolean(rAmenities.gym);
-  if (amenityToken === "SWIMMING_POOL" || amenityToken === "SWIMMINGPOOL") return Boolean(rAmenities.swimmingPool);
-  if (amenityToken === "CLUBHOUSE") return Boolean(rAmenities.clubhouse);
-  if (amenityToken === "MODULAR_KITCHEN" || amenityToken === "MODULARKITCHEN") {
-    return Boolean(rAmenities.modularKitchen);
-  }
-  if (amenityToken === "GAS_PIPELINE" || amenityToken === "GASPIPELINE") {
-    return Boolean(rUtilities.gasPipeline);
-  }
-  return false;
 };
 
 const formatPrice = (asset) => {
@@ -560,6 +614,9 @@ const formatPrice = (asset) => {
   }
 
   const value = Number(asset.price) || 0;
+  if (asset.type === "Both" && Number(asset.rent) > 0) {
+    return `Rs ${value.toLocaleString("en-IN")} · Rs ${Number(asset.rent).toLocaleString("en-IN")}/mo`;
+  }
   return `Rs ${value.toLocaleString("en-IN")}`;
 };
 
@@ -750,22 +807,21 @@ const formatRequestValue = (key, value) => {
 
 const AssetVault = () => {
   const navigate = useNavigate();
-  const locationProvider = String(import.meta.env.VITE_LOCATION_PROVIDER || "osm")
-    .trim()
-    .toLowerCase();
   const googleMapsApiKey = String(import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "").trim();
   const googlePlacesCountry = String(import.meta.env.VITE_GOOGLE_MAPS_PLACES_COUNTRY || "in")
     .trim()
     .toLowerCase();
-  const useGooglePlaces = locationProvider === "google" && Boolean(googleMapsApiKey);
+  const useGooglePlaces = Boolean(googleMapsApiKey);
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingMoreAssets, setLoadingMoreAssets] = useState(false);
   const [assetPagination, setAssetPagination] = useState(null);
+  // Set when a background page load fails, so it is not retried in a loop.
+  const autoLoadStoppedRef = useRef(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingAssetId, setEditingAssetId] = useState("");
-  const [modeType, setModeType] = useState("sale");
+  const [modeType, setModeType] = useState("all");
   const [viewMode, setViewMode] = useState("cards");
   const [sortOrder, setSortOrder] = useState("latest");
   const [uploading, setUploading] = useState(false);
@@ -815,6 +871,9 @@ const AssetVault = () => {
   const [error, setError] = useState("");
   const [formError, setFormErrorMessage] = useState("");
   const [formErrorPersistent, setFormErrorPersistent] = useState(true);
+  const [formStep, setFormStep] = useState(INVENTORY_FORM_STEPS[0].id);
+  const formStepIndex = Math.max(0, INVENTORY_FORM_STEPS.findIndex((step) => step.id === formStep));
+  const inventoryFormStepClass = (stepId) => (formStep === stepId ? "space-y-3" : "hidden");
   const setFormError = (message, persistent = true) => {
     setFormErrorMessage(message);
     setFormErrorPersistent(persistent);
@@ -848,7 +907,6 @@ const AssetVault = () => {
   });
   const locationSuggestionFetchIdRef = useRef(0);
   const googleAutocompleteServiceRef = useRef(null);
-  const googleGeocoderRef = useRef(null);
 
   const role = getStoredUserRole();
   const { canPageAction, enforcePageAccess } = usePermissions();
@@ -856,12 +914,16 @@ const AssetVault = () => {
   const canChooseInventoryRoleType = role === "ADMIN" || userRoleType === "BOTH";
   const canManage = role === "ADMIN" || role === "MANAGER"
     || (enforcePageAccess && canPageAction("inventory", "edit"));
+  // A Manager never deletes directly: their delete is a request an Admin
+  // approves, even when their page access includes Delete.
   const canDeleteDirect = role === "ADMIN"
-    || (enforcePageAccess && canPageAction("inventory", "delete"));
+    || (role !== "MANAGER" && enforcePageAccess && canPageAction("inventory", "delete"));
   const canRequestDelete = !canDeleteDirect
     && (UPDATE_STATUS_REQUEST_ROLES.has(role)
       || (enforcePageAccess && canPageAction("inventory", "delete")));
-  const canReviewInventoryRequests = role === "ADMIN"
+  // Admin and Manager both review partner / executive inventory requests
+  // (the backend review roles are ADMIN + MANAGER).
+  const canReviewInventoryRequests = role === "ADMIN" || role === "MANAGER"
     || (enforcePageAccess && canPageAction("inventory", "approve"));
   const canCreateInventory = CREATE_REQUEST_ROLES.has(role)
     || (enforcePageAccess && canPageAction("inventory", "create"));
@@ -880,7 +942,11 @@ const AssetVault = () => {
   const inventoryFurnishingOptions =
     inventorySubtypeConfig?.showFurnishing === false
       ? []
-      : FURNISHING_OPTIONS.filter((option) => option.value);
+      : FURNISHING_OPTIONS.filter((option) => (
+        option.value
+        // Bare / warm shell only describe commercial handovers.
+        && (formData.inventoryType !== "RESIDENTIAL" || !["BARE_SHELL", "WARM_SHELL"].includes(option.value))
+      ));
   const updateInventorySubtypeData = useCallback((fieldKey, value) => {
     setFormData((prev) => {
       const nextSubtypeData = {
@@ -924,15 +990,39 @@ const AssetVault = () => {
     () => assets.find((asset) => String(asset?._id || "") === String(reserveAssetId || "")) || null,
     [assets, reserveAssetId],
   );
+  const totalInventoryCount = Math.max(Number(assetPagination?.totalCount || 0), assets.length);
   const statusCounts = useMemo(() => {
-    const counts = { all: assets.length, Available: 0, Blocked: 0, Sold: 0, Rented: 0 };
-    assets.forEach((asset) => {
+    const visibleTypeAssets = assets.filter((asset) =>
+      !inventoryTypeFilter || inventoryTypeFilter === "all"
+        || String(asset.inventoryType || "").toUpperCase() === inventoryTypeFilter);
+    const counts = { all: visibleTypeAssets.length, Available: 0, Blocked: 0, Sold: 0, Rented: 0 };
+    visibleTypeAssets.forEach((asset) => {
       const status = toApiStatus(asset?.status);
       if (counts[status] !== undefined) counts[status] += 1;
       if (["RENT", "BOTH"].includes(String(asset?.type || "").trim().toUpperCase())) counts.Rented += 1;
     });
     return counts;
+  }, [assets, inventoryTypeFilter]);
+
+  const categoryCounts = useMemo(() => {
+    const counts = { all: assets.length, COMMERCIAL: 0, RESIDENTIAL: 0 };
+    assets.forEach((asset) => {
+      const type = String(asset?.inventoryType || "").toUpperCase();
+      if (counts[type] !== undefined) counts[type] += 1;
+    });
+    return counts;
   }, [assets]);
+
+  // Switching category drops filters that only mean something for the other one.
+  const handleCategoryChange = (nextCategory) => {
+    setInventoryTypeFilter(nextCategory);
+    if (nextCategory !== "RESIDENTIAL") setBhkFilter("");
+    if (nextCategory !== "COMMERCIAL") {
+      setCabinsFilter("");
+      setSeatsFilter("");
+      setPantryFilter("");
+    }
+  };
 
   const sortedLeadOptions = useMemo(
     () =>
@@ -1126,6 +1216,7 @@ const AssetVault = () => {
       ]);
 
       const list = Array.isArray(result?.assets) ? result.assets : [];
+      autoLoadStoppedRef.current = false;
       setAssetPagination(result?.pagination || null);
       setAssets((prev) => {
         if (!append) return list;
@@ -1147,6 +1238,8 @@ const AssetVault = () => {
         setAssets([]);
         setPendingRequests([]);
         setAssetPagination(null);
+      } else {
+        autoLoadStoppedRef.current = true;
       }
       setError(toErrorMessage(fetchError, "Failed to load inventory"));
     } finally {
@@ -1158,6 +1251,18 @@ const AssetVault = () => {
   useEffect(() => {
     fetchAssets();
   }, [fetchAssets]);
+
+  /*
+   * R13: search, filters and the status counts all work on the loaded list, so
+   * a list that stopped at the first page quietly hid every property after it.
+   * Keep loading the remaining pages in the background until the list is whole.
+   */
+  useEffect(() => {
+    if (loading || loadingMoreAssets || !assetPagination?.hasNextPage || autoLoadStoppedRef.current) return;
+    const nextPage = Number(assetPagination.page || 1) + 1;
+    if (nextPage > 60) return;
+    fetchAssets({ page: nextPage, append: true });
+  }, [assetPagination, fetchAssets, loading, loadingMoreAssets]);
 
   useEffect(() => {
     if (!canOpenEditModal) {
@@ -1212,18 +1317,16 @@ const AssetVault = () => {
   useEffect(() => {
     if (!useGooglePlaces || !(isAddModalOpen || isEditModalOpen)) {
       googleAutocompleteServiceRef.current = null;
-      googleGeocoderRef.current = null;
       setGooglePlacesReady(false);
       return undefined;
     }
 
     let cancelled = false;
 
-    loadGoogleMapsPlacesScript(googleMapsApiKey)
-      .then((google) => {
+    loadPlaces(googleMapsApiKey)
+      .then(() => {
         if (cancelled) return;
-        googleAutocompleteServiceRef.current = new google.maps.places.AutocompleteService();
-        googleGeocoderRef.current = new google.maps.Geocoder();
+        googleAutocompleteServiceRef.current = createPlacesAutocompleteSession();
         setGooglePlacesReady(true);
       })
       .catch((loadError) => {
@@ -1239,7 +1342,7 @@ const AssetVault = () => {
 
   const filteredAssets = useMemo(() => {
     const normalizedSearch = debouncedSearchTerm.trim().toLowerCase();
-    const budgetRange = parseRangeInput(debouncedBudgetRangeFilter);
+    const budgetRange = parseBudgetFilter(debouncedBudgetRangeFilter);
     const minCabins = toNumberOrNull(debouncedCabinsFilter);
     const minSeats = toNumberOrNull(debouncedSeatsFilter);
     const minFloor = toNumberOrNull(debouncedFloorFilter);
@@ -1251,9 +1354,8 @@ const AssetVault = () => {
       .filter(Boolean);
 
     return assets.filter((asset) => {
-      const typeMatch = modeType === "sale"
-        ? asset.type === "Sale" || asset.type === "Both"
-        : asset.type === "Rent" || asset.type === "Both";
+      const typeMatch = modeType !== "rent"
+        || asset.type === "Rent" || asset.type === "Both";
       const statusMatch =
         statusFilter === "all"
           ? true
@@ -1290,7 +1392,9 @@ const AssetVault = () => {
         ? normalizeToken(asset?.residentialDetails?.bhkType) === normalizeToken(bhkFilter)
         : true;
 
-      const cabinsValue = toNumberOrNull(asset?.commercialDetails?.officeLayout?.totalCabins);
+      const subtypeData = getAssetSubtypeData(asset);
+      const cabinsValue = toNumberOrNull(asset?.commercialDetails?.officeLayout?.totalCabins)
+        ?? toSubtypeDataNumber(subtypeData, "cabins", "privateCabins");
       const cabinsMatch = minCabins === null
         ? true
         : (cabinsValue !== null && cabinsValue >= minCabins);
@@ -1298,34 +1402,31 @@ const AssetVault = () => {
       const seatsValue = toNumberOrNull(
         asset?.commercialDetails?.officeLayout?.seats
           ?? asset?.commercialDetails?.officeLayout?.workstations,
-      );
+      ) ?? toSubtypeDataNumber(subtypeData, "seats", "workstations", "workstation");
       const seatsMatch = minSeats === null
         ? true
         : (seatsValue !== null && seatsValue >= minSeats);
 
-      const priceValue = toNumberOrNull(asset.price);
-      const budgetMatch = budgetRange
-        ? (priceValue !== null && priceValue >= budgetRange.min && priceValue <= budgetRange.max)
-        : true;
+      const inBudget = (value) => value !== null && value >= budgetRange.min && value <= budgetRange.max;
+      const salePriceValue = asset.type === "Rent" ? null : toNumberOrNull(asset.price);
+      const monthlyRentValue = asset.type === "Sale" ? null : toNumberOrNull(asset.rent);
+      let budgetMatch = true;
+      if (budgetRange?.mode === "sale") budgetMatch = inBudget(salePriceValue);
+      else if (budgetRange?.mode === "rent") budgetMatch = inBudget(monthlyRentValue);
+      else if (budgetRange) budgetMatch = inBudget(salePriceValue) || inBudget(monthlyRentValue);
 
       const floorNumberValue = toNumberOrNull(asset.floorNumber);
       const floorMatch = minFloor === null
         ? true
         : (floorNumberValue !== null && floorNumberValue >= minFloor);
 
-      const parkingSlotsValue = toNumberOrNull(
-        asset?.commercialDetails?.buildingDetails?.parkingSlots
-          ?? asset?.residentialDetails?.parking,
-      );
       const parkingMatch = parkingAvailable === null
         ? true
-        : parkingAvailable
-          ? (parkingSlotsValue !== null && parkingSlotsValue >= 1)
-          : (parkingSlotsValue === null || parkingSlotsValue <= 0);
+        : assetHasParking(asset) === parkingAvailable;
 
       const pantryMatch = pantryAvailable === null
         ? true
-        : Boolean(asset?.commercialDetails?.amenities?.pantry) === pantryAvailable;
+        : hasAmenity(asset, "PANTRY") === pantryAvailable;
 
       const amenitiesMatch = amenityTokens.every((token) => hasAmenity(asset, token));
 
@@ -1364,8 +1465,8 @@ const AssetVault = () => {
 
   const sortedAssets = useMemo(() => {
     const rows = [...filteredAssets];
-    if (sortOrder === "price-high") return rows.sort((a, b) => Number(b?.price || 0) - Number(a?.price || 0));
-    if (sortOrder === "price-low") return rows.sort((a, b) => Number(a?.price || 0) - Number(b?.price || 0));
+    if (sortOrder === "price-high") return rows.sort((a, b) => getAssetSortPrice(b) - getAssetSortPrice(a));
+    if (sortOrder === "price-low") return rows.sort((a, b) => getAssetSortPrice(a) - getAssetSortPrice(b));
     return rows.sort((a, b) => new Date(b?.createdAt || 0).getTime() - new Date(a?.createdAt || 0).getTime());
   }, [filteredAssets, sortOrder]);
 
@@ -1502,6 +1603,7 @@ const AssetVault = () => {
   };
 
   const closeFormModal = () => {
+    setFormStep(INVENTORY_FORM_STEPS[0].id);
     setIsAddModalOpen(false);
     setIsEditModalOpen(false);
     setEditingAssetId("");
@@ -1516,100 +1618,21 @@ const AssetVault = () => {
     setIsEditModalOpen(false);
     setEditingAssetId("");
     resetForm();
+    setFormStep(INVENTORY_FORM_STEPS[0].id);
     setIsAddModalOpen(true);
   };
+
+  useEffect(() => {
+    if (!formError) return;
+    const match = INVENTORY_ERROR_STEP_RULES.find((rule) => rule.pattern.test(formError));
+    if (match) setFormStep(match.step);
+  }, [formError]);
 
   const lookupCoordinatesByLocation = useCallback(async (rawLocation) => {
     const query = String(rawLocation || "").trim();
     if (!query) return null;
-
-    const searchUrl = new URL(GEOCODING_SEARCH_ENDPOINT);
-    searchUrl.search = new URLSearchParams({
-      format: "jsonv2",
-      q: query,
-      limit: "1",
-      addressdetails: "0",
-      countrycodes: "in",
-    }).toString();
-
-    const response = await fetch(searchUrl.toString(), {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Location lookup failed");
-    }
-
-    const rows = await response.json();
-    const first = Array.isArray(rows) ? rows[0] : null;
-    const lat = toCoordinateNumber(first?.lat);
-    const lng = toCoordinateNumber(first?.lon);
-
-    if (lat === null || lng === null) {
-      return null;
-    }
-
-    return {
-      query,
-      lat,
-      lng,
-    };
-  }, []);
-
-  const lookupLocationSuggestions = useCallback(async (rawLocation) => {
-    const query = String(rawLocation || "").trim();
-    if (!query) return [];
-
-    const searchUrl = new URL(GEOCODING_SEARCH_ENDPOINT);
-    searchUrl.search = new URLSearchParams({
-      format: "jsonv2",
-      q: query,
-      limit: String(LOCATION_SUGGESTION_LIMIT),
-      addressdetails: "1",
-      countrycodes: "in",
-    }).toString();
-
-    const response = await fetch(searchUrl.toString(), {
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Location suggestions lookup failed");
-    }
-
-    const rows = await response.json();
-    if (!Array.isArray(rows)) return [];
-
-    const seen = new Set();
-    return rows
-      .map((row) => {
-        const label = String(row?.display_name || row?.name || "").trim();
-        const lat = toCoordinateNumber(row?.lat);
-        const lng = toCoordinateNumber(row?.lon);
-
-        if (!label || lat === null || lng === null) {
-          return null;
-        }
-
-        const dedupeKey = `${label}:${lat}:${lng}`;
-        if (seen.has(dedupeKey)) {
-          return null;
-        }
-
-        seen.add(dedupeKey);
-        return {
-          id: String(row?.place_id || dedupeKey),
-          label,
-          lat,
-          lng,
-        };
-      })
-      .filter(Boolean);
-  }, []);
+    return geocodeAddress(query, googlePlacesCountry);
+  }, [googlePlacesCountry]);
 
   const lookupGoogleLocationSuggestions = useCallback((rawLocation) => {
     if (!useGooglePlaces) return Promise.resolve([]);
@@ -1617,92 +1640,25 @@ const AssetVault = () => {
     const query = String(rawLocation || "").trim();
     if (!query) return Promise.resolve([]);
 
-    const service = googleAutocompleteServiceRef.current;
-    const placesStatus = window.google?.maps?.places?.PlacesServiceStatus;
-
-    if (!service || !placesStatus) {
-      return Promise.resolve([]);
-    }
-
-    return new Promise((resolve, reject) => {
-      const request = {
-        input: query,
-        types: ["geocode"],
-      };
-
-      if (googlePlacesCountry) {
-        request.componentRestrictions = { country: googlePlacesCountry };
-      }
-
-      service.getPlacePredictions(request, (predictions, status) => {
-        if (status === placesStatus.ZERO_RESULTS) {
-          resolve([]);
-          return;
-        }
-
-        if (status !== placesStatus.OK || !Array.isArray(predictions)) {
-          reject(new Error("Google location suggestions lookup failed"));
-          return;
-        }
-
-        const rows = predictions
-          .map((prediction) => {
-            const label = String(prediction?.description || "").trim();
-            const placeId = String(prediction?.place_id || "").trim();
-            if (!label || !placeId) return null;
-
-            return {
-              id: placeId,
-              label,
-              placeId,
-            };
-          })
-          .filter(Boolean);
-
-        resolve(rows);
-      });
-    });
+    return fetchPlacePredictions(
+      googleAutocompleteServiceRef.current,
+      query,
+      googlePlacesCountry,
+    );
   }, [googlePlacesCountry, useGooglePlaces]);
 
   const resolveGooglePlaceSuggestion = useCallback((suggestion) => {
     if (!useGooglePlaces) return Promise.resolve(null);
 
-    const placeId = String(suggestion?.placeId || "").trim();
-    const geocoder = googleGeocoderRef.current;
-    const geocoderStatus = window.google?.maps?.GeocoderStatus;
-
-    if (!placeId || !geocoder || !geocoderStatus) {
-      return Promise.resolve(null);
-    }
-
-    return new Promise((resolve, reject) => {
-      geocoder.geocode({ placeId }, (results, status) => {
-        if (status === geocoderStatus.ZERO_RESULTS) {
-          resolve(null);
-          return;
+    return resolvePlaceSuggestion(suggestion).then((resolved) => {
+      googleAutocompleteServiceRef.current = createPlacesAutocompleteSession();
+      return resolved
+        ? {
+          ...resolved,
+          id: suggestion?.placeId || suggestion?.id || resolved.label,
+          placeId: suggestion?.placeId || "",
         }
-
-        if (status !== geocoderStatus.OK || !Array.isArray(results) || !results[0]) {
-          reject(new Error("Google place details lookup failed"));
-          return;
-        }
-
-        const first = results[0];
-        const lat = toCoordinateNumber(first?.geometry?.location?.lat?.());
-        const lng = toCoordinateNumber(first?.geometry?.location?.lng?.());
-        if (lat === null || lng === null) {
-          resolve(null);
-          return;
-        }
-
-        resolve({
-          id: placeId,
-          placeId,
-          label: String(first.formatted_address || suggestion?.label || "").trim(),
-          lat,
-          lng,
-        });
-      });
+        : null;
     });
   }, [useGooglePlaces]);
 
@@ -1713,28 +1669,9 @@ const AssetVault = () => {
       setResolvingLocation(true);
       setError("");
 
-      let resolvedSuggestion =
-        suggestion.placeId
-          ? await resolveGooglePlaceSuggestion(suggestion)
-          : suggestion;
-      let lat = toCoordinateNumber(resolvedSuggestion?.lat);
-      let lng = toCoordinateNumber(resolvedSuggestion?.lng);
-
-      // If Google place details are unavailable, fall back to OpenStreetMap geocoding.
-      if (!resolvedSuggestion || lat === null || lng === null) {
-        const fallbackQuery = String(suggestion?.label || suggestion?.id || "").trim();
-        const fallback = await lookupCoordinatesByLocation(fallbackQuery);
-        if (fallback) {
-          resolvedSuggestion = {
-            id: suggestion.id || fallback.query,
-            label: suggestion.label || fallback.query,
-            lat: fallback.lat,
-            lng: fallback.lng,
-          };
-          lat = toCoordinateNumber(fallback.lat);
-          lng = toCoordinateNumber(fallback.lng);
-        }
-      }
+      const resolvedSuggestion = await resolveGooglePlaceSuggestion(suggestion);
+      const lat = toCoordinateNumber(resolvedSuggestion?.lat);
+      const lng = toCoordinateNumber(resolvedSuggestion?.lng);
 
       if (!resolvedSuggestion || lat === null || lng === null) {
         setError("Unable to resolve selected location coordinates");
@@ -1755,7 +1692,7 @@ const AssetVault = () => {
     } finally {
       setResolvingLocation(false);
     }
-  }, [lookupCoordinatesByLocation, resolveGooglePlaceSuggestion]);
+  }, [resolveGooglePlaceSuggestion]);
 
   const resolveCoordinatesFromLocation = async (rawLocation) => {
     const query = String(rawLocation || "").trim();
@@ -1819,16 +1756,9 @@ const AssetVault = () => {
     const timer = setTimeout(async () => {
       try {
         setLoadingLocationSuggestions(true);
-        let rows = [];
-        if (useGooglePlaces && googlePlacesReady && googleAutocompleteServiceRef.current) {
-          try {
-            rows = await lookupGoogleLocationSuggestions(query);
-          } catch {
-            rows = await lookupLocationSuggestions(query);
-          }
-        } else {
-          rows = await lookupLocationSuggestions(query);
-        }
+        const rows = useGooglePlaces && googlePlacesReady && googleAutocompleteServiceRef.current
+          ? await lookupGoogleLocationSuggestions(query)
+          : [];
 
         if (locationSuggestionFetchIdRef.current !== fetchId) return;
         setLocationSuggestions(rows);
@@ -1850,7 +1780,6 @@ const AssetVault = () => {
     useGooglePlaces,
     googlePlacesReady,
     lookupGoogleLocationSuggestions,
-    lookupLocationSuggestions,
     showLocationSuggestions,
   ]);
 
@@ -1927,6 +1856,16 @@ const AssetVault = () => {
   }) => {
     const inventoryType = String(formData.inventoryType || "COMMERCIAL").toUpperCase();
     const subtypeData = formData.inventorySubtypeData || {};
+    const payloadSubtype = getInventorySubtypeValue(formData);
+    const isLandOnlyPayload = ["PLOT", "FARM_HOUSE"].includes(payloadSubtype);
+    const subtypeFieldKeys = new Set(
+      (getInventorySubtypeConfig(inventoryType, payloadSubtype)?.fields || []).map((field) => field.key),
+    );
+    const subtypeHasField = (...keys) => keys.some((key) => subtypeFieldKeys.has(key));
+    // When the chosen property type shows its own checkbox for an amenity, that
+    // checkbox is the source of truth; otherwise keep the older form field.
+    const subtypeFlag = (keys, legacyValue) =>
+      (subtypeHasField(...keys) ? getSubtypeCheckbox(subtypeData, ...keys) : Boolean(legacyValue));
 
     const payload = {
       title: formData.title.trim(),
@@ -1942,8 +1881,13 @@ const AssetVault = () => {
       buildingName: String(formData.buildingName || "").trim(),
       floorNumber: toNumberOrNull(formData.floorNumber),
       totalFloors: toNumberOrNull(formData.totalFloors),
-      totalArea: toNumberOrNull(formData.totalArea),
-      carpetArea: toNumberOrNull(formData.carpetArea),
+      // Plots / farm houses fall back to the plot or land area from their details.
+      totalArea: toNumberOrNull(formData.totalArea)
+        ?? (isLandOnlyPayload ? toSubtypeDataNumber(subtypeData, "plotArea", "landArea") : null),
+      // The "Carpet Area" input edits totalArea; save it as carpet area too.
+      carpetArea: isLandOnlyPayload
+        ? toNumberOrNull(formData.carpetArea)
+        : (toNumberOrNull(formData.totalArea) ?? toNumberOrNull(formData.carpetArea)),
       builtUpArea: toNumberOrNull(formData.builtUpArea),
       superBuiltUpArea: toNumberOrNull(formData.superBuiltUpArea),
       length: toNumberOrNull(formData.length),
@@ -1953,10 +1897,11 @@ const AssetVault = () => {
       price: isInventoryPriceRequired(formData.type) ? Number(formData.price) : toNumberOrNull(formData.price),
       rent: toNumberOrNull(formData.rent),
       maintenanceCharges: toNumberOrNull(formData.maintenanceCharges),
-      deposit: toNumberOrNull(formData.deposit),
-      depositMonths: toNumberOrNull(formData.depositMonths),
-      agreementYears: toNumberOrNull(formData.agreementYears),
-      lockInYears: toNumberOrNull(formData.lockInYears),
+      // Rental-only terms are cleared for sale-only listings.
+      deposit: isInventoryRentRequired(formData.type) ? toNumberOrNull(formData.deposit) : null,
+      depositMonths: isInventoryRentRequired(formData.type) ? toNumberOrNull(formData.depositMonths) : null,
+      agreementYears: isInventoryRentRequired(formData.type) ? toNumberOrNull(formData.agreementYears) : null,
+      lockInYears: isInventoryRentRequired(formData.type) ? toNumberOrNull(formData.lockInYears) : null,
       officeNumber: String(formData.officeNumber || "").trim(),
       documentsAvailable: {
         registry: Boolean(formData.documentsAvailable?.registry),
@@ -1976,7 +1921,11 @@ const AssetVault = () => {
       propertyDate: formData.propertyDate || null,
       gstApplicable: Boolean(formData.gstApplicable),
       type: formData.type,
-      category: formData.category,
+      // Derive the residential category from the chosen property type so a
+      // House is never saved (or kept, on edit) as the default "Flat".
+      category: inventoryType === "RESIDENTIAL" && formData.residentialPropertyType
+        ? normalizeInventoryCategory(formData.residentialPropertyType, "RESIDENTIAL")
+        : formData.category,
       furnishingStatus: String(formData.furnishingStatus || "").toUpperCase(),
       status: formData.status,
       reservationReason: isReservedStatusValue(formData.status)
@@ -2014,15 +1963,15 @@ const AssetVault = () => {
         },
         subtypeData,
         amenities: {
-          pantry: getSubtypeCheckbox(subtypeData, "pantry") || Boolean(formData.commercialPantry),
-          cafeteria: Boolean(formData.commercialCafeteria),
+          pantry: subtypeFlag(["pantry"], formData.commercialPantry),
+          cafeteria: subtypeFlag(["cafeteria"], formData.commercialCafeteria),
           washroomType: String(formData.commercialWashroomType || "").toUpperCase(),
-          serverRoom: Boolean(formData.commercialServerRoom),
-          storageRoom: Boolean(formData.commercialStorageRoom),
-          breakoutArea: Boolean(formData.commercialBreakoutArea),
-          liftAvailable: Boolean(formData.commercialLiftAvailable),
-          powerBackup: getSubtypeCheckbox(subtypeData, "powerBackup") || Boolean(formData.commercialPowerBackup),
-          centralAC: Boolean(formData.commercialCentralAC),
+          serverRoom: subtypeFlag(["serverRoom"], formData.commercialServerRoom),
+          storageRoom: subtypeFlag(["storageRoom"], formData.commercialStorageRoom),
+          breakoutArea: subtypeFlag(["breakoutArea"], formData.commercialBreakoutArea),
+          liftAvailable: subtypeFlag(["liftAvailable", "liftAccess"], formData.commercialLiftAvailable),
+          powerBackup: subtypeFlag(["powerBackup"], formData.commercialPowerBackup),
+          centralAC: subtypeFlag(["centralAC"], formData.commercialCentralAC),
         },
         buildingDetails: {
           totalFloors: toNumberOrNull(formData.commercialBuildingTotalFloors),
@@ -2033,7 +1982,7 @@ const AssetVault = () => {
             toNumberOrNull(formData.commercialParkingSlots)
             ?? (getSubtypeCheckbox(subtypeData, "parking", "reservedParking") ? 1 : null),
           securityType: String(formData.commercialSecurityType || "").toUpperCase(),
-          fireSafety: Boolean(formData.commercialFireSafety),
+          fireSafety: subtypeFlag(["fireSafety"], formData.commercialFireSafety),
         },
         availability: {
           readyToMove: Boolean(formData.commercialReadyToMove),
@@ -2047,28 +1996,42 @@ const AssetVault = () => {
       payload.residentialDetails = {
         propertyType: normalizeInventoryResidentialPropertyType(formData.residentialPropertyType),
         subtypeData,
-        bhkType: String(formData.residentialBhkType || "").toUpperCase(),
+        bhkType: subtypeHasField("bhkType")
+          ? toBhkTypeValue(subtypeData.bhkType)
+          : String(formData.residentialBhkType || "").toUpperCase(),
         bedrooms: toNumberOrNull(formData.residentialBedrooms),
-        bathrooms: toNumberOrNull(formData.residentialBathrooms),
-        balcony: toNumberOrNull(formData.residentialBalcony),
-        studyRoom: Boolean(formData.residentialStudyRoom),
-        servantRoom: Boolean(formData.residentialServantRoom),
-        parking: toNumberOrNull(formData.residentialParking),
+        bathrooms: subtypeHasField("bathrooms")
+          ? toLeadingNumber(subtypeData.bathrooms)
+          : toNumberOrNull(formData.residentialBathrooms),
+        balcony: subtypeHasField("balconies")
+          ? toSubtypeDataNumber(subtypeData, "balconies")
+          : toNumberOrNull(formData.residentialBalcony),
+        studyRoom: subtypeFlag(["studyRoom"], formData.residentialStudyRoom),
+        servantRoom: subtypeFlag(["servantRoom"], formData.residentialServantRoom),
+        parking: subtypeHasField("parking", "privateParking")
+          ? (getSubtypeCheckbox(subtypeData, "parking", "privateParking")
+            ? (toNumberOrNull(formData.residentialParking) || 1)
+            : null)
+          : toNumberOrNull(formData.residentialParking),
         amenities: {
-          modularKitchen: Boolean(formData.residentialModularKitchen),
-          lift: Boolean(formData.residentialLift),
-          security: Boolean(formData.residentialSecurity),
-          powerBackup: Boolean(formData.residentialPowerBackup),
-          gym: Boolean(formData.residentialGym),
-          swimmingPool: Boolean(formData.residentialSwimmingPool),
-          clubhouse: Boolean(formData.residentialClubhouse),
+          modularKitchen: subtypeFlag(["modularKitchen"], formData.residentialModularKitchen),
+          lift: subtypeFlag(["lift"], formData.residentialLift),
+          security: subtypeFlag(["security"], formData.residentialSecurity),
+          powerBackup: subtypeFlag(["powerBackup"], formData.residentialPowerBackup),
+          gym: subtypeFlag(["gym"], formData.residentialGym),
+          swimmingPool: subtypeFlag(["swimmingPool"], formData.residentialSwimmingPool),
+          clubhouse: subtypeFlag(["clubhouse"], formData.residentialClubhouse),
         },
         utilities: {
           waterSupply: String(formData.residentialWaterSupply || "").toUpperCase(),
           electricityBackup: Boolean(formData.residentialElectricityBackup),
-          gasPipeline: Boolean(formData.residentialGasPipeline),
+          gasPipeline: subtypeFlag(["gasPipeline"], formData.residentialGasPipeline),
         },
       };
+    }
+
+    if (isReservedStatusValue(formData.status)) {
+      payload.reservationLeadId = String(formData.reservationLeadId || "").trim() || null;
     }
 
     if (parsedSiteLocation.value) {
@@ -2089,6 +2052,11 @@ const AssetVault = () => {
 
     if (!formData.title.trim() || !finalLocation) {
       setFormError("Property name and location are required");
+      return;
+    }
+
+    if (!isValidPincode(formData.pincode)) {
+      setFormError("Pincode must be a 6-digit Indian PIN code");
       return;
     }
 
@@ -2113,6 +2081,10 @@ const AssetVault = () => {
     }
 
     const trimmedReservationReason = String(formData.reservationReason || "").trim();
+    if (isReservedStatusValue(formData.status) && !String(formData.reservationLeadId || "").trim()) {
+      setFormError("Select the lead this property is blocked for");
+      return;
+    }
     if (isReservedStatusValue(formData.status) && !trimmedReservationReason) {
       setFormError("Block reason is required when status is Blocked");
       return;
@@ -2137,9 +2109,23 @@ const AssetVault = () => {
         parsedSiteLocation,
       });
 
+      // A Channel Partner's property waits for Admin / Manager approval.
+      if (role === "CHANNEL_PARTNER") {
+        await createInventoryCreateRequest(payload);
+        setSuccess("Property sent to Admin / Manager for approval");
+        closeFormModal();
+        fetchAssets();
+        return;
+      }
+
       const createdAsset = await createInventoryAsset(payload);
-      setAssets((prev) => [createdAsset, ...prev]);
-      setSuccess("Asset added to inventory");
+      if (createdAsset) {
+        setAssets((prev) => [createdAsset, ...prev]);
+        setSuccess("Asset added to inventory");
+      } else {
+        setSuccess("Property sent for approval");
+        fetchAssets();
+      }
       closeFormModal();
     } catch (saveError) {
       console.error(`Save asset failed: ${toErrorMessage(saveError, "Unknown error")}`);
@@ -2166,7 +2152,9 @@ const AssetVault = () => {
     }
 
     const forcedStatus = String(options?.status || "").trim();
-    const resolvedStatus = forcedStatus || asset.status || "Available";
+    // The API reports Blocked as the legacy "Reserved"; map it back so the
+    // Status dropdown shows Blocked instead of falling back to Available.
+    const resolvedStatus = toApiStatus(forcedStatus || asset.status || "Available");
     const existingSaleDetails = asset?.saleDetails || {};
 
     const existingSiteLat = toCoordinateNumber(asset?.siteLocation?.lat);
@@ -2295,6 +2283,7 @@ const AssetVault = () => {
       residentialElectricityBackup: Boolean(existingResidentialUtilities.electricityBackup),
       residentialGasPipeline: Boolean(existingResidentialUtilities.gasPipeline),
       reservationReason: asset.reservationReason || "",
+      reservationLeadId: String(asset?.reservationLeadId?._id || asset?.reservationLeadId || "").trim(),
       saleLeadId: String(existingSaleDetails?.leadId?._id || existingSaleDetails?.leadId || "").trim(),
       salePaymentMode: String(existingSaleDetails?.paymentMode || "").trim().toUpperCase(),
       salePaymentType: String(existingSaleDetails?.paymentType || "").trim().toUpperCase(),
@@ -2322,6 +2311,7 @@ const AssetVault = () => {
       locationLat: existingSiteLat === null ? "" : String(existingSiteLat),
       locationLng: existingSiteLng === null ? "" : String(existingSiteLng),
     });
+    setFormStep(INVENTORY_FORM_STEPS[0].id);
     setIsEditModalOpen(true);
   };
 
@@ -2336,6 +2326,11 @@ const AssetVault = () => {
 
     if (!formData.title.trim() || !finalLocation) {
       setFormError("Property name and location are required");
+      return;
+    }
+
+    if (!isValidPincode(formData.pincode)) {
+      setFormError("Pincode must be a 6-digit Indian PIN code");
       return;
     }
 
@@ -2402,6 +2397,10 @@ const AssetVault = () => {
       }
 
       const trimmedReservationReason = String(formData.reservationReason || "").trim();
+      if (isReservedStatusValue(formData.status) && !String(formData.reservationLeadId || "").trim()) {
+        setFormError("Select the lead this property is blocked for");
+        return;
+      }
       if (isReservedStatusValue(formData.status) && !trimmedReservationReason) {
         setFormError("Block reason is required when status is Blocked");
         return;
@@ -2460,9 +2459,13 @@ const AssetVault = () => {
       setSuccess("");
 
       if (canDeleteDirect) {
-        await deleteInventoryAsset(assetId);
-        setAssets((prev) => prev.filter((asset) => asset._id !== assetId));
-        setSuccess("Asset deleted");
+        const result = await deleteInventoryAsset(assetId);
+        if (isDeleteApprovalPending(result)) {
+          setSuccess(deleteOutcomeMessage(result));
+        } else {
+          setAssets((prev) => prev.filter((asset) => asset._id !== assetId));
+          setSuccess("Asset deleted");
+        }
       } else {
         const request = await requestInventoryDelete(assetId, "Delete requested from inventory workspace");
         if (request) {
@@ -2680,10 +2683,26 @@ const AssetVault = () => {
     }
   };
 
+  const hasActiveInventoryFilters = Boolean(
+    furnishingFilter || bhkFilter || cabinsFilter || seatsFilter || budgetRangeFilter
+    || floorFilter || parkingFilter || pantryFilter || amenitiesFilter,
+  );
+  const clearInventoryFilters = () => {
+    setFurnishingFilter("");
+    setBhkFilter("");
+    setCabinsFilter("");
+    setSeatsFilter("");
+    setBudgetRangeFilter("");
+    setFloorFilter("");
+    setParkingFilter("");
+    setPantryFilter("");
+    setAmenitiesFilter("");
+  };
+
   const inventoryRequirementSection = (
     <div className={`${INVENTORY_MODAL_SECTION_CLASS} space-y-2 sm:col-span-2`}>
       <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>
-        Inventory Requirement (Lead Format)
+        Property Details
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
@@ -2842,7 +2861,7 @@ const AssetVault = () => {
         </div>
         <div>
           <label className={INVENTORY_MODAL_FIELD_TITLE_CLASS}>
-            Carpet Area
+            {isLandOnlyPropertyType ? "Total Area" : "Carpet Area"}
           </label>
           <input
             type="number"
@@ -2911,12 +2930,26 @@ const AssetVault = () => {
 
   return (
     <div className="ui-page-shell inventory-route-page asset-vault-page custom-scrollbar relative flex flex-col bg-slate-50/50">
-      {role !== "CHANNEL_PARTNER" && (
-        <div className="flex flex-wrap justify-end gap-4 px-4 py-2">
-          <Link to="/inventory/owners" className="text-sm font-semibold text-blue-600 hover:underline">Owner Database</Link>
-          <Link to="/inventory/brokers" className="text-sm font-semibold text-blue-600 hover:underline">Broker Database</Link>
+      <header className="inventory-page-header flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-[22px] font-bold tracking-tight text-slate-950">Inventory</h1>
+          <p className="mt-0.5 text-[13.5px] text-slate-500">
+            {totalInventoryCount} {totalInventoryCount === 1 ? "property" : "properties"} in your inventory
+            {assetPagination?.hasNextPage ? ` · loading ${assets.length} of ${totalInventoryCount}...` : ""}
+          </p>
         </div>
-      )}
+        {role !== "CHANNEL_PARTNER" ? (
+          <nav aria-label="Contact databases" className="flex flex-wrap gap-2">
+            <Link to="/inventory/owners" className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-[13.5px] font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">Owner Database</Link>
+            <Link to="/inventory/brokers" className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-[13.5px] font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">Broker Database</Link>
+          </nav>
+        ) : null}
+      </header>
+
+      {canChooseInventoryRoleType ? (
+        <InventoryCategoryTabs value={inventoryTypeFilter} onChange={handleCategoryChange} counts={categoryCounts} />
+      ) : null}
+
       <InventoryToolbar
         modeType={modeType}
         onModeChange={setModeType}
@@ -2931,9 +2964,6 @@ const AssetVault = () => {
 
       <AssetVaultFilters
         inventoryTypeFilter={inventoryTypeFilter}
-        onInventoryTypeFilterChange={setInventoryTypeFilter}
-        canChooseInventoryRoleType={canChooseInventoryRoleType}
-        userRoleType={userRoleType}
         furnishingFilter={furnishingFilter}
         onFurnishingFilterChange={setFurnishingFilter}
         bhkFilter={bhkFilter}
@@ -2952,6 +2982,8 @@ const AssetVault = () => {
         onPantryFilterChange={setPantryFilter}
         amenitiesFilter={amenitiesFilter}
         onAmenitiesFilterChange={setAmenitiesFilter}
+        hasActiveFilters={hasActiveInventoryFilters}
+        onClearFilters={clearInventoryFilters}
       />
 
       <ToastNotice message={error} type="error" onDismiss={() => setError("")} />
@@ -2959,6 +2991,7 @@ const AssetVault = () => {
 
       <PendingInventoryRequestsPanel
         canManage={canReviewInventoryRequests}
+        canApproveDelete={role === "ADMIN"}
         pendingRequests={pendingRequests}
         reviewingRequestId={reviewingRequestId}
         requestFieldLabels={REQUEST_FIELD_LABELS}
@@ -2971,7 +3004,11 @@ const AssetVault = () => {
       />
 
       <div className="inventory-results-bar flex items-center justify-between gap-3">
-        <p className="text-[16px] font-semibold text-slate-900">{sortedAssets.length} properties found</p>
+        <p className="text-[16px] font-semibold text-slate-900">
+          {sortedAssets.length === assets.length && !assetPagination?.hasNextPage
+            ? `${sortedAssets.length} ${sortedAssets.length === 1 ? "property" : "properties"}`
+            : `${sortedAssets.length} matching ${sortedAssets.length === 1 ? "property" : "properties"}`}
+        </p>
         <label className="flex items-center gap-2 text-[13px] text-slate-500">
           <span className="hidden sm:inline">Sort by</span>
           <select value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} className="h-10 rounded-xl border border-slate-200 bg-white px-3 font-semibold text-slate-700 outline-none focus:border-blue-500">
@@ -3020,7 +3057,7 @@ const AssetVault = () => {
         }}
       />
 
-      {assetPagination?.hasNextPage ? (
+      {assetPagination?.hasNextPage && (Number(assetPagination.page || 1) >= 60 || autoLoadStoppedRef.current) ? (
         <div className="flex justify-center px-4 pb-6">
           <button
             type="button"
@@ -3053,13 +3090,18 @@ const AssetVault = () => {
               className="mobile-fullscreen-panel ui-soft-panel flex h-dvh max-h-dvh w-full max-w-3xl flex-col overflow-hidden bg-white shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-2xl"
             >
               <div className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-5">
-                <h3 className="min-w-0 truncate text-lg font-bold text-slate-900">
-                  {isEditModalOpen
-                    ? canManage
-                      ? "Edit Property"
-                      : "Request Property Edit"
-                    : "New Inventory Asset"}
-                </h3>
+                <div className="min-w-0">
+                  <h3 className="min-w-0 truncate text-lg font-bold text-slate-900">
+                    {isEditModalOpen
+                      ? canManage
+                        ? "Edit Property"
+                        : "Request Property Edit"
+                      : "Add Property"}
+                  </h3>
+                  <p className="text-[12.5px] text-slate-500">
+                    Step {formStepIndex + 1} of {INVENTORY_FORM_STEPS.length} · {INVENTORY_FORM_STEPS[formStepIndex].hint}
+                  </p>
+                </div>
                 <button
                   onClick={closeFormModal}
                   className="ml-3 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100"
@@ -3071,7 +3113,39 @@ const AssetVault = () => {
 
               <ToastNotice message={formError} type="error" persistent={formErrorPersistent} onDismiss={() => setFormError("")} />
 
+              <nav aria-label="Property form steps" className="inventory-form-steps shrink-0 border-b border-slate-200 bg-slate-50/70 px-3 py-2 sm:px-5">
+                <ol className="custom-scrollbar flex gap-1.5 overflow-x-auto pb-0.5">
+                  {INVENTORY_FORM_STEPS.map((step, index) => {
+                    const active = step.id === formStep;
+                    const done = index < formStepIndex;
+                    return (
+                      <li key={step.id} className="shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setFormStep(step.id)}
+                          aria-current={active ? "step" : undefined}
+                          title={step.hint}
+                          className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 text-left transition ${
+                            active
+                              ? "border-blue-600 bg-white text-blue-700 shadow-sm"
+                              : "border-transparent text-slate-600 hover:bg-white hover:text-slate-900"
+                          }`}
+                        >
+                          <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-full text-[12px] font-bold ${
+                            active ? "bg-blue-600 text-white" : done ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600"
+                          }`}>
+                            {done ? <Check size={13} strokeWidth={3} /> : index + 1}
+                          </span>
+                          <span className="text-[13px] font-semibold leading-tight">{step.label}</span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </nav>
+
               <div className="mobile-modal-scroll custom-scrollbar inventory-form-uppercase flex-1 space-y-3 px-3 py-3 sm:px-5">
+                <div className={inventoryFormStepClass("basics")}>
                 <div className={INVENTORY_MODAL_SECTION_CLASS}>
                   <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Inventory Details</div>
                   <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
@@ -3156,117 +3230,211 @@ const AssetVault = () => {
                     className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
                   />
                 </div>
-
-                {inventoryRequirementSection}
-
                 <div className={`${INVENTORY_MODAL_SECTION_CLASS} grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4`}>
                   <div className="sm:col-span-2">
-                    <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Price</div>
+                    <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Availability</div>
                   </div>
-                  {isInventoryPriceRequired(formData.type) ? (
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                        Price (Rs)
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      Status
+                    </label>
+                    <select
+                      value={formData.status}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, status: e.target.value }))}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                    >
+                      {STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {isReservedStatusValue(formData.status) ? (
+                    <div className="sm:col-span-2">
+                      <label className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
+                        Blocked For Lead *
                       </label>
-                      <input
-                        type="number"
-                        placeholder="12500000"
-                        value={formData.price}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, price: e.target.value }))}
-                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      <select
+                        value={formData.reservationLeadId}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, reservationLeadId: e.target.value }))}
+                        className="mt-1 mb-3 w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-amber-500"
+                      >
+                        <option value="">
+                          {loadingLeadOptions ? "Loading leads..." : "Select lead"}
+                        </option>
+                        {leadOptions.map((lead) => (
+                          <option key={lead._id} value={lead._id}>
+                            {getLeadOptionLabel(lead)}
+                          </option>
+                        ))}
+                      </select>
+                      <label className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
+                        Block Reason *
+                      </label>
+                      <textarea
+                        value={formData.reservationReason}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            reservationReason: e.target.value,
+                          }))
+                        }
+                        placeholder="Mention why this property is being blocked"
+                        rows={3}
+                        className="mt-1 w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-amber-500 resize-none"
                       />
                     </div>
                   ) : null}
 
-                  {isInventoryRentRequired(formData.type) ? (
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                        Rent (Rs)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="85000"
-                        value={formData.rent}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, rent: e.target.value }))}
-                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
-                      />
+                  {isSoldStatusValue(formData.status) ? (
+                    <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 sm:col-span-2">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+                        Sold Details (Mandatory)
+                      </p>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                          Sold To Lead *
+                        </label>
+                        <select
+                          value={formData.saleLeadId}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, saleLeadId: e.target.value }))}
+                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                        >
+                          <option value="">
+                            {loadingLeadOptions ? "Loading leads..." : "Select lead"}
+                          </option>
+                          {leadOptions.map((lead) => (
+                            <option key={lead._id} value={lead._id}>
+                              {getLeadOptionLabel(lead)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                            Payment Mode *
+                          </label>
+                          <select
+                            value={formData.salePaymentMode}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, salePaymentMode: e.target.value }))}
+                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="">Select mode</option>
+                            {SOLD_PAYMENT_MODE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                            Payment Type *
+                          </label>
+                          <select
+                            value={formData.salePaymentType}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, salePaymentType: e.target.value }))}
+                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                          >
+                            <option value="">Select type</option>
+                            {SOLD_PAYMENT_TYPE_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                            Total Amount *
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={formData.saleTotalAmount}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, saleTotalAmount: e.target.value }))}
+                            placeholder="Enter sold amount"
+                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
+
+                        {formData.salePaymentType === "PARTIAL" ? (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                              Remaining Amount *
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={formData.saleRemainingAmount}
+                              onChange={(e) => setFormData((prev) => ({ ...prev, saleRemainingAmount: e.target.value }))}
+                              placeholder="Enter remaining"
+                              className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                            />
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                              Remaining Amount
+                            </label>
+                            <input
+                              type="text"
+                              readOnly
+                              value="0"
+                              className="mt-1 w-full p-3 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-500"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                          Payment Reference {isNonCashPaymentMode(formData.salePaymentMode) ? "*" : ""}
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.salePaymentReference}
+                          onChange={(e) =>
+                            setFormData((prev) => ({ ...prev, salePaymentReference: e.target.value }))
+                          }
+                          placeholder={
+                            isNonCashPaymentMode(formData.salePaymentMode)
+                              ? "Enter UTR / transaction / cheque number"
+                              : "Not required for cash payment"
+                          }
+                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                          Sale Note
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={formData.saleNote}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, saleNote: e.target.value }))}
+                          placeholder="Add important context (payment proof, remarks, commitments, etc.)"
+                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 resize-none"
+                        />
+                      </div>
                     </div>
                   ) : null}
-
-                  {isInventoryRentRequired(formData.type) ? (
-                    <div>
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                        Security Deposit (Rs)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="250000"
-                        value={formData.deposit}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, deposit: e.target.value }))}
-                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
-                      />
-                    </div>
-                  ) : null}
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Maintenance Charges
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="25000"
-                      value={formData.maintenanceCharges}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, maintenanceCharges: e.target.value }))}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Security Deposit (Months)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="2"
-                      value={formData.depositMonths}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, depositMonths: e.target.value }))}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Agreement (Years)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="3"
-                      value={formData.agreementYears}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, agreementYears: e.target.value }))}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Lock-in (Years)
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="1"
-                      value={formData.lockInYears}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, lockInYears: e.target.value }))}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
-                    />
-                  </div>
                 </div>
-
+                </div>
+                <div className={inventoryFormStepClass("details")}>
+                {inventoryRequirementSection}
+                </div>
+                <div className={inventoryFormStepClass("location")}>
                 <div className={`${INVENTORY_MODAL_SECTION_CLASS} grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4`}>
                   <div className="sm:col-span-2">
                     <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Location</div>
@@ -3300,9 +3468,7 @@ const AssetVault = () => {
                           {loadingLocationSuggestions ? (
                             <div className="px-3 py-2 text-xs text-slate-500 flex items-center gap-2">
                               <Loader size={12} className="animate-spin" />
-                              {useGooglePlaces && googlePlacesReady
-                                ? "Searching Google locations..."
-                                : "Searching locations..."}
+                              Searching Google locations...
                             </div>
                           ) : locationSuggestions.length > 0 ? (
                             locationSuggestions.map((suggestion) => (
@@ -3318,8 +3484,10 @@ const AssetVault = () => {
                                 {suggestion.label}
                               </button>
                             ))
+                          ) : !useGooglePlaces ? (
+                            <p className="px-3 py-2 text-xs text-slate-500">Configure Google Maps to search addresses.</p>
                           ) : String(formData.location || "").trim().length >= 3 ? (
-                            <p className="px-3 py-2 text-xs text-slate-500">No suggestions found</p>
+                            <p className="px-3 py-2 text-xs text-slate-500">No Google locations found</p>
                           ) : (
                             <p className="px-3 py-2 text-xs text-slate-500">
                               Type at least 3 characters
@@ -3331,7 +3499,7 @@ const AssetVault = () => {
                     <button
                       type="button"
                       onClick={() => resolveCoordinatesFromLocation(formData.location)}
-                      disabled={resolvingLocation || !formData.location.trim()}
+                      disabled={!useGooglePlaces || resolvingLocation || !formData.location.trim()}
                       className="mt-2 h-[42px] min-w-[124px] rounded-xl border border-slate-200 bg-white px-3 text-[10px] font-bold uppercase tracking-widest text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
                     >
                       {resolvingLocation ? (
@@ -3348,8 +3516,8 @@ const AssetVault = () => {
                     </button>
                     <p className="mt-1 text-[10px] text-slate-400">
                       {useGooglePlaces
-                        ? "Type address for Google-style suggestions. Press Enter to auto-fill coordinates."
-                        : "Type address for free OpenStreetMap suggestions. Press Enter to auto-fill coordinates."}
+                        ? "Search a Google location or click the map to set its coordinates."
+                        : "Configure Google Maps to search addresses, or enter coordinates manually."}
                     </p>
                   </div>
 
@@ -3382,6 +3550,21 @@ const AssetVault = () => {
                     </div>
                   </div>
 
+                  <div className="sm:col-span-2">
+                    <GoogleMapPicker
+                      latitude={formData.locationLat}
+                      longitude={formData.locationLng}
+                      onChange={({ lat, lng }) => {
+                        setFormData((prev) => ({
+                          ...prev,
+                          locationLat: String(lat),
+                          locationLng: String(lng),
+                        }));
+                      }}
+                      heightClass="h-52 sm:h-60"
+                    />
+                  </div>
+
                   <div className="grid grid-cols-1 gap-3 sm:col-span-2 sm:grid-cols-3 sm:gap-4">
                     <div>
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
@@ -3397,7 +3580,7 @@ const AssetVault = () => {
                     </div>
                     <div>
                       <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                        Area
+                        Locality
                       </label>
                       <input
                         type="text"
@@ -3475,22 +3658,6 @@ const AssetVault = () => {
                     </select>
                   </div>
 
-                  <div className="sm:col-span-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Status
-                    </label>
-                    <select
-                      value={formData.status}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, status: e.target.value }))}
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
-                    >
-                      {STATUS_OPTIONS.map((status) => (
-                        <option key={status} value={status}>
-                          {status}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
 
                   {SHOW_LEGACY_INVENTORY_DETAIL_FIELDS && formData.inventoryType === "COMMERCIAL" ? (
                     <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/80 p-3 sm:col-span-2 sm:p-4">
@@ -3929,210 +4096,140 @@ const AssetVault = () => {
                     </div>
                   ) : null}
 
-                  {isReservedStatusValue(formData.status) ? (
-                    <div className="sm:col-span-2">
-                      <label className="text-[10px] font-bold text-amber-700 uppercase tracking-widest">
-                        Block Reason *
+
+                </div>
+                </div>
+                <div className={inventoryFormStepClass("pricing")}>
+                <div className={`${INVENTORY_MODAL_SECTION_CLASS} grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4`}>
+                  <div className="sm:col-span-2">
+                    <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Price</div>
+                  </div>
+                  {isInventoryPriceRequired(formData.type) ? (
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Price (Rs)
                       </label>
-                      <textarea
-                        value={formData.reservationReason}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            reservationReason: e.target.value,
-                          }))
-                        }
-                        placeholder="Mention why this property is being blocked"
-                        rows={3}
-                        className="mt-1 w-full p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-amber-500 resize-none"
+                      <input
+                        type="number"
+                        placeholder="12500000"
+                        value={formData.price}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, price: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
                       />
                     </div>
                   ) : null}
 
-                  {isSoldStatusValue(formData.status) ? (
-                    <div className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 sm:col-span-2">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
-                        Sold Details (Mandatory)
-                      </p>
+                  {isInventoryRentRequired(formData.type) ? (
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Rent (Rs)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="85000"
+                        value={formData.rent}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, rent: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                  ) : null}
 
+                  {isInventoryRentRequired(formData.type) ? (
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                        Security Deposit (Rs)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="250000"
+                        value={formData.deposit}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, deposit: e.target.value }))}
+                        className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                      />
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      Maintenance Charges
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="25000"
+                      value={formData.maintenanceCharges}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, maintenanceCharges: e.target.value }))}
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                    />
+                  </div>
+
+                  {/* Deposit months, agreement and lock-in only apply to rentals. */}
+                  {isInventoryRentRequired(formData.type) ? (
+                    <>
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                          Sold To Lead *
-                        </label>
-                        <select
-                          value={formData.saleLeadId}
-                          onChange={(e) => setFormData((prev) => ({ ...prev, saleLeadId: e.target.value }))}
-                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                        >
-                          <option value="">
-                            {loadingLeadOptions ? "Loading leads..." : "Select lead"}
-                          </option>
-                          {leadOptions.map((lead) => (
-                            <option key={lead._id} value={lead._id}>
-                              {getLeadOptionLabel(lead)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                            Payment Mode *
-                          </label>
-                          <select
-                            value={formData.salePaymentMode}
-                            onChange={(e) => setFormData((prev) => ({ ...prev, salePaymentMode: e.target.value }))}
-                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                          >
-                            <option value="">Select mode</option>
-                            {SOLD_PAYMENT_MODE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                            Payment Type *
-                          </label>
-                          <select
-                            value={formData.salePaymentType}
-                            onChange={(e) => setFormData((prev) => ({ ...prev, salePaymentType: e.target.value }))}
-                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                          >
-                            <option value="">Select type</option>
-                            {SOLD_PAYMENT_TYPE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div>
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                            Total Amount *
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={formData.saleTotalAmount}
-                            onChange={(e) => setFormData((prev) => ({ ...prev, saleTotalAmount: e.target.value }))}
-                            placeholder="Enter sold amount"
-                            className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                          />
-                        </div>
-
-                        {formData.salePaymentType === "PARTIAL" ? (
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                              Remaining Amount *
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={formData.saleRemainingAmount}
-                              onChange={(e) => setFormData((prev) => ({ ...prev, saleRemainingAmount: e.target.value }))}
-                              placeholder="Enter remaining"
-                              className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                            />
-                          </div>
-                        ) : (
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                              Remaining Amount
-                            </label>
-                            <input
-                              type="text"
-                              readOnly
-                              value="0"
-                              className="mt-1 w-full p-3 bg-slate-100 border border-slate-200 rounded-xl text-sm text-slate-500"
-                            />
-                          </div>
-                        )}
-                      </div>
-
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                          Payment Reference {isNonCashPaymentMode(formData.salePaymentMode) ? "*" : ""}
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          Security Deposit (Months)
                         </label>
                         <input
-                          type="text"
-                          value={formData.salePaymentReference}
-                          onChange={(e) =>
-                            setFormData((prev) => ({ ...prev, salePaymentReference: e.target.value }))
-                          }
-                          placeholder={
-                            isNonCashPaymentMode(formData.salePaymentMode)
-                              ? "Enter UTR / transaction / cheque number"
-                              : "Not required for cash payment"
-                          }
-                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
+                          type="number"
+                          min="0"
+                          placeholder="2"
+                          value={formData.depositMonths}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, depositMonths: e.target.value }))}
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
                         />
                       </div>
 
                       <div>
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
-                          Sale Note
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          Agreement (Years)
                         </label>
-                        <textarea
-                          rows={3}
-                          value={formData.saleNote}
-                          onChange={(e) => setFormData((prev) => ({ ...prev, saleNote: e.target.value }))}
-                          placeholder="Add important context (payment proof, remarks, commitments, etc.)"
-                          className="mt-1 w-full p-3 bg-white border border-emerald-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:border-emerald-500 resize-none"
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="3"
+                          value={formData.agreementYears}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, agreementYears: e.target.value }))}
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
                         />
                       </div>
-                    </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                          Lock-in (Years)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="1"
+                          value={formData.lockInYears}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, lockInYears: e.target.value }))}
+                          className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-900 focus:outline-none focus:border-emerald-500 mt-1"
+                        />
+                      </div>
+                    </>
                   ) : null}
                 </div>
-
-                <div className={INVENTORY_MODAL_SECTION_CLASS}>
-                  <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Documents Available</div>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      ["registry", "Registry"],
-                      ["searchReport", "Search Report"],
-                      ["electricityNoc", "Electricity NOC"],
-                      ["maintenanceNoc", "Maintenance NOC"],
-                      ["taxReceipt", "Tax Receipt"],
-                      ["loanNoc", "Loan NOC"],
-                    ].map(([key, label]) => (
-                      <label key={key} className={INVENTORY_MODAL_CHECKBOX_CLASS}>
-                        <input
-                          type="checkbox"
-                          checked={Boolean(formData.documentsAvailable?.[key])}
-                          onChange={(e) =>
-                            setFormData((prev) => ({
-                              ...prev,
-                              documentsAvailable: {
-                                ...prev.documentsAvailable,
-                                [key]: e.target.checked,
-                              },
-                            }))
-                          }
-                          className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                        />
-                        {label}
-                      </label>
-                    ))}
-                    <label className={INVENTORY_MODAL_CHECKBOX_CLASS}>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(formData.gstApplicable)}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, gstApplicable: e.target.checked }))}
-                        className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                      />
-                      GST Applicable
+                <div className={`${INVENTORY_MODAL_SECTION_CLASS} grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4`}>
+                  <div className="sm:col-span-2">
+                    <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Deal Details</div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      Property Date
                     </label>
+                    <input
+                      type="date"
+                      value={formData.propertyDate}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, propertyDate: e.target.value }))}
+                      className={`${INVENTORY_MODAL_INPUT_CLASS} mt-1`}
+                    />
                   </div>
                 </div>
-
+                </div>
+                <div className={inventoryFormStepClass("owner")}>
                 <div className={`${INVENTORY_MODAL_SECTION_CLASS} grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4`}>
                   <div className="sm:col-span-2">
                     <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Owner Details</div>
@@ -4190,7 +4287,6 @@ const AssetVault = () => {
                     </select>
                   </div>
                 </div>
-
                 <div className={`${INVENTORY_MODAL_SECTION_CLASS} grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4`}>
                   <div className="sm:col-span-2">
                     <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Key Manager Details</div>
@@ -4220,24 +4316,8 @@ const AssetVault = () => {
                     />
                   </div>
                 </div>
-
-                <div className={`${INVENTORY_MODAL_SECTION_CLASS} grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4`}>
-                  <div className="sm:col-span-2">
-                    <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Deal Details</div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                      Property Date
-                    </label>
-                    <input
-                      type="date"
-                      value={formData.propertyDate}
-                      onChange={(e) => setFormData((prev) => ({ ...prev, propertyDate: e.target.value }))}
-                      className={`${INVENTORY_MODAL_INPUT_CLASS} mt-1`}
-                    />
-                  </div>
                 </div>
-
+                <div className={inventoryFormStepClass("media")}>
                 <div className={INVENTORY_MODAL_SECTION_CLASS}>
                   <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Inventory Media</div>
                   <label className={`${INVENTORY_MODAL_FIELD_TITLE_CLASS} mb-2 block`}>
@@ -4251,7 +4331,7 @@ const AssetVault = () => {
                           key={`${url}-${index}`}
                           className="relative w-16 h-16 rounded-lg overflow-hidden shrink-0 group"
                         >
-                          <img src={url} className="w-full h-full object-cover" alt="asset" />
+                          <FittedImage src={url} alt="asset" backdrop={false} />
                           <button
                             onClick={() => removeImage(url)}
                             className="absolute top-0 right-0 bg-red-500 text-white p-1 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -4412,15 +4492,73 @@ const AssetVault = () => {
                     </div>
                   </div>
                 </div>
+                <div className={INVENTORY_MODAL_SECTION_CLASS}>
+                  <div className={INVENTORY_MODAL_SECTION_HEADING_CLASS}>Documents Available</div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      ["registry", "Registry"],
+                      ["searchReport", "Search Report"],
+                      ["electricityNoc", "Electricity NOC"],
+                      ["maintenanceNoc", "Maintenance NOC"],
+                      ["taxReceipt", "Tax Receipt"],
+                      ["loanNoc", "Loan NOC"],
+                    ].map(([key, label]) => (
+                      <label key={key} className={INVENTORY_MODAL_CHECKBOX_CLASS}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(formData.documentsAvailable?.[key])}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              documentsAvailable: {
+                                ...prev.documentsAvailable,
+                                [key]: e.target.checked,
+                              },
+                            }))
+                          }
+                          className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        {label}
+                      </label>
+                    ))}
+                    <label className={INVENTORY_MODAL_CHECKBOX_CLASS}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(formData.gstApplicable)}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, gstApplicable: e.target.checked }))}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      />
+                      GST Applicable
+                    </label>
+                  </div>
+                </div>
+                </div>
               </div>
 
-              <div className="mobile-safe-footer flex shrink-0 gap-3 border-t border-slate-100 bg-slate-50/50 px-3 pt-3 sm:p-6">
+              <div className="mobile-safe-footer flex shrink-0 flex-wrap gap-3 border-t border-slate-100 bg-slate-50/50 px-3 pt-3 sm:p-6">
                 <button
                   onClick={closeFormModal}
                   className="flex-1 py-3 text-xs font-bold uppercase text-slate-500 hover:bg-slate-100 rounded-xl"
                 >
                   Cancel
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setFormStep(INVENTORY_FORM_STEPS[Math.max(0, formStepIndex - 1)].id)}
+                  disabled={formStepIndex === 0}
+                  className="flex-1 rounded-xl border border-slate-200 bg-white py-3 text-xs font-bold uppercase text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Back
+                </button>
+                {formStepIndex < INVENTORY_FORM_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setFormStep(INVENTORY_FORM_STEPS[formStepIndex + 1].id)}
+                    className="flex-1 rounded-xl border border-blue-600 bg-white py-3 text-xs font-bold uppercase text-blue-700 hover:bg-blue-50"
+                  >
+                    Next: {INVENTORY_FORM_STEPS[formStepIndex + 1].label}
+                  </button>
+                ) : null}
                 <button
                   onClick={isEditModalOpen ? handleUpdateAsset : handleSaveAsset}
                   disabled={uploading || uploadingFloorPlans || uploadingDocuments || saving || resolvingLocation}

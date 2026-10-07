@@ -27,6 +27,7 @@ const toUserDto = (user) => ({
   _id: user._id,
   name: user.name,
   role: user.role,
+  profileImageUrl: user.profileImageUrl || "",
   roleLabel: toRoleLabel(user.role),
 });
 
@@ -109,7 +110,7 @@ const ensureCanTalkToRecipient = async (user, recipientId) => {
     _id: recipientId,
     isActive: true,
   })
-    .select("_id name role")
+    .select("_id name role profileImageUrl")
     .lean();
 
   if (!recipient) {
@@ -124,7 +125,7 @@ const getOrCreateConversationByRecipient = async ({ user, recipientId }) => {
   const hash = buildParticipantHash(user._id, recipient._id);
 
   let conversation = await ChatConversation.findOne({ participantHash: hash })
-    .populate("participants", "name role")
+    .populate("participants", "name role profileImageUrl")
     .lean();
 
   if (!conversation) {
@@ -137,7 +138,7 @@ const getOrCreateConversationByRecipient = async ({ user, recipientId }) => {
     });
 
     conversation = await ChatConversation.findById(created._id)
-      .populate("participants", "name role")
+      .populate("participants", "name role profileImageUrl")
       .lean();
   }
 
@@ -149,7 +150,7 @@ const getConversationForUser = async ({ user, conversationId }) => {
     _id: conversationId,
     participants: user._id,
   })
-    .populate("participants", "name role")
+    .populate("participants", "name role profileImageUrl")
     .lean();
 
   if (!conversation) {
@@ -196,7 +197,7 @@ const getContactUsers = async (user) => {
     isActive: true,
     _id: { $ne: user._id },
   })
-    .select("_id name role")
+    .select("_id name role profileImageUrl")
     .lean();
 
   return users.map(toUserDto).sort(sortByName);
@@ -212,7 +213,7 @@ const getUserConversations = async (user) => {
     participants: user._id,
   })
     .sort({ lastMessageAt: -1, updatedAt: -1 })
-    .populate("participants", "name role")
+    .populate("participants", "name role profileImageUrl")
     .lean();
 
   return conversations
@@ -241,7 +242,7 @@ const getConversationMessages = async ({ user, conversationId, limit, before }) 
   const rows = await ChatMessage.find(query)
     .sort({ createdAt: -1 })
     .limit(resolvedLimit)
-    .populate("sender", "name role")
+    .populate("sender", "name role profileImageUrl")
     .lean();
 
   return rows.reverse().map(toMessageDto);
@@ -276,10 +277,10 @@ const sendDirectMessage = async ({ user, text, conversationId, recipientId }) =>
 
   const [savedMessage, updatedConversation] = await Promise.all([
     ChatMessage.findById(created._id)
-      .populate("sender", "name role")
+      .populate("sender", "name role profileImageUrl")
       .lean(),
     ChatConversation.findById(conversation._id)
-      .populate("participants", "name role")
+      .populate("participants", "name role profileImageUrl")
       .lean(),
   ]);
 

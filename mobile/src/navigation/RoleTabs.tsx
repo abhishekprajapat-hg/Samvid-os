@@ -1,19 +1,33 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Platform, Pressable, Text } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useAuth } from "../context/AuthContext";
+import { Glyph, type GlyphName } from "../components/ui/Glyph";
+import { PageAccessGate, CoworkingPermissionGate } from "../components/auth/PageAccessGate";
+import { ErrorBoundary } from "../components/common/ErrorBoundary";
 import { useRealtimeAlerts } from "../context/RealtimeAlertsContext";
 import type { UserRole } from "../types";
+import type { NavItem } from "./navigationCatalogue";
 
 import { ManagerDashboardScreen } from "../modules/manager/ManagerDashboardScreen";
 import { ExecutiveDashboardScreen } from "../modules/executive/ExecutiveDashboardScreen";
 import { FieldDashboardScreen } from "../modules/field/FieldDashboardScreen";
 import { LeadsMatrixScreen } from "../modules/leads/LeadsMatrixScreen";
 import { LeadDetailsScreen } from "../modules/leads/LeadDetailsScreen";
+import { AddLeadScreen } from "../modules/leads/AddLeadScreen";
+import { TransactionsScreen } from "../modules/finance/TransactionsScreen";
+import { InvoiceDetailsScreen } from "../modules/finance/InvoiceDetailsScreen";
+import { AddEntryScreen } from "../modules/finance/AddEntryScreen";
+import { SalesReportScreen } from "../modules/reports/SalesReportScreen";
+import { FinanceReportScreen } from "../modules/reports/FinanceReportScreen";
+import { CustomReportScreen } from "../modules/reports/CustomReportScreen";
+import { PerformerScreen } from "../modules/reports/PerformerScreen";
+import { PipelineIntelligenceScreen } from "../modules/reports/PipelineIntelligenceScreen";
+import { AchievementsScreen } from "../modules/reports/AchievementsScreen";
+import { UpdateLeadScreen } from "../modules/leads/UpdateLeadScreen";
 import { AssetVaultScreen } from "../modules/inventory/AssetVaultScreen";
+import { AddPropertyScreen } from "../modules/inventory/AddPropertyScreen";
 import { InventoryDetailsScreen } from "../modules/inventory/InventoryDetailsScreen";
 import { TeamChatScreen } from "../modules/chat/TeamChatScreen";
 import { OfficeAssistantScreen } from "../modules/chat/OfficeAssistantScreen";
@@ -26,208 +40,251 @@ import { MasterScheduleScreen } from "../modules/calendar/MasterScheduleScreen";
 import { FieldOpsScreen } from "../modules/field/FieldOpsScreen";
 import { AttendanceScreen } from "../modules/attendance/AttendanceScreen";
 import { TeamManagerScreen } from "../modules/admin/TeamManagerScreen";
+import { AddTeamMemberScreen } from "../modules/admin/AddTeamMemberScreen";
+import { MemberDetailsScreen } from "../modules/admin/MemberDetailsScreen";
+import { RolesPermissionsScreen } from "../modules/admin/RolesPermissionsScreen";
 import { SystemSettingsScreen } from "../modules/admin/SystemSettingsScreen";
 import { AdminMetaAdsScreen } from "../modules/admin/AdminMetaAdsScreen";
+import { AdminCommandConsoleScreen } from "../modules/admin/AdminCommandConsoleScreen";
+import { UserDetailsEditorScreen } from "../modules/admin/UserDetailsEditorScreen";
+import { UserPageAccessScreen } from "../modules/admin/UserPageAccessScreen";
 import { FinancialCoreScreen } from "../modules/finance/FinancialCoreScreen";
 import { NotificationsScreen } from "../modules/notifications/NotificationsScreen";
 import { ProfileScreen } from "../modules/profile/ProfileScreen";
 import { MoreMenuScreen } from "../modules/more/MoreMenuScreen";
 import { TaskManagerScreen } from "../modules/tasks/TaskManagerScreen";
+import { TaskDetailsScreen } from "../modules/tasks/TaskDetailsScreen";
+import { NewTaskScreen } from "../modules/tasks/NewTaskScreen";
+import { ContactsScreen } from "../modules/contacts/ContactsScreen";
+import { AttendanceStack } from "./AttendanceStack";
+import { OwnerDatabaseScreen } from "../modules/inventory/OwnerDatabaseScreen";
+import { BrokerDatabaseScreen } from "../modules/inventory/BrokerDatabaseScreen";
+import { ProjectsScreen } from "../modules/inventory/ProjectsScreen";
+import { ProjectDetailsScreen } from "../modules/inventory/ProjectDetailsScreen";
+import { ProjectFormScreen } from "../modules/inventory/ProjectFormScreen";
+import { SharedInventoryViewScreen } from "../modules/inventory/SharedInventoryViewScreen";
+import { PropertyFormScreen } from "../modules/inventory/PropertyFormScreen";
+import { ProductionDashboardScreen } from "../modules/production/ProductionDashboardScreen";
+import { BookingBoardScreen } from "../modules/coworking/BookingBoardScreen";
+import { CoworkingClientsScreen } from "../modules/coworking/CoworkingClientsScreen";
+import { CoworkingClientProfileScreen } from "../modules/coworking/CoworkingClientProfileScreen";
+import { OnboardClientScreen } from "../modules/coworking/OnboardClientScreen";
+import { DataUseNoticeScreen, ServiceTermsNoticeScreen } from "../modules/legal/LegalNoticeScreen";
 import { RealtimePopupOverlay } from "../components/common/RealtimePopupOverlay";
+import { AppHeader } from "../components/common/AppHeader";
+import { brand, type as brandType } from "../theme/brand";
+import { fontFamily } from "../theme/fonts";
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-const toTabBadge = (count: number) => {
-  const normalized = Math.max(0, Number(count || 0));
-  if (!normalized) return undefined;
-  return normalized > 99 ? 99 : normalized;
+/*
+ * Tabs are computed from what the role can actually reach, not hardcoded.
+ *
+ * The previous version had five per-role blocks of <Tab.Screen> and decided
+ * visibility with `role === "ADMIN"`. That disagreed with the web app for any
+ * account with customised page access, and left COWORKING_ADMIN and the two
+ * production roles falling through to a generic tab set. Now the same
+ * algorithm the web sidebar uses picks the tabs - see navigation/access.ts.
+ */
+
+/*
+ * Every destination in the catalogue is now built. The set is kept because the
+ * catalogue mirrors the web nav, so anything web adds shows up here first and
+ * must not be offered as a route until mobile has it.
+ */
+const BUILT_SCREENS = new Set([
+  "Dashboard", "Leads", "Inventory", "Chat", "Tasks", "Attendance", "Calendar",
+  "Finance", "Reports", "Leaderboard", "Targets", "Field Ops", "Users",
+  "Console", "MetaAds", "Notifications", "Settings", "Profile",
+  "OwnerDatabase", "BrokerDatabase", "Projects",
+  "CoworkingBooking", "CoworkingClients", "Contacts",
+]);
+
+export const isScreenBuilt = (item: NavItem) => BUILT_SCREENS.has(item.screen);
+
+/*
+ * The bottom bar the mobile comps draw: five fixed destinations, the same for
+ * every role, rather than the four the access algorithm used to pick.
+ *
+ * Choosing the tabs by role kept the bar in step with the web sidebar, and
+ * giving that up is a deliberate trade the design asks for. Access itself is
+ * not given up: each tab is still wrapped in its PageAccessGate, so a role
+ * without the grant lands on the gate rather than a screen it may not read,
+ * and everything that is no longer a tab stays reachable from More.
+ *
+ * Contacts covers both contact directories, so Owner and Broker are listed
+ * here too - otherwise More would offer a second door to the same screen.
+ */
+export const TAB_SCREENS = ["Dashboard", "Leads", "Tasks", "Inventory"] as const;
+
+/*
+ * Contacts is no longer a tab, so it is not excluded from More any more -
+ * but the two directories it wraps still are, otherwise More would offer
+ * three doors to the same screen. Attendance left the bar when the comp put
+ * Inventory there, so More picks it up again automatically.
+ */
+export const MORE_EXCLUDED_SCREENS = [
+  ...TAB_SCREENS,
+  "OwnerDatabase",
+  "BrokerDatabase",
+];
+
+type FixedTab = {
+  name: string;
+  label: string;
+  /* The comp's bar is Ionicons: a solid glyph when selected, its outline cut
+     when not. See components/ui/Glyph.tsx for why these are not lucide. */
+  icon: GlyphName;
+  iconOutline: GlyphName;
+  page: string;
+  component?: React.ComponentType<any>;
+  /* The inventory comp draws its own page header, so the wordmark bar would
+     be a second one stacked above it. */
+  ownHeader?: boolean;
 };
 
-const getTabIconName = (routeName: string, focused: boolean) => {
-  const iconMap: Record<string, { focused: React.ComponentProps<typeof Ionicons>["name"]; unfocused: React.ComponentProps<typeof Ionicons>["name"] }> = {
-    Dashboard: { focused: "speedometer", unfocused: "speedometer-outline" },
-    Leads: { focused: "people", unfocused: "people-outline" },
-    Inventory: { focused: "cube", unfocused: "cube-outline" },
-    Attendance: { focused: "time", unfocused: "time-outline" },
-    Reports: { focused: "bar-chart", unfocused: "bar-chart-outline" },
-    Finance: { focused: "wallet", unfocused: "wallet-outline" },
-    Chat: { focused: "chatbubble", unfocused: "chatbubble-outline" },
-    Users: { focused: "person-circle", unfocused: "person-circle-outline" },
-    Settings: { focused: "settings", unfocused: "settings-outline" },
-    Targets: { focused: "trophy", unfocused: "trophy-outline" },
-    Notifications: { focused: "notifications", unfocused: "notifications-outline" },
-    Profile: { focused: "person", unfocused: "person-outline" },
-    More: { focused: "menu", unfocused: "menu-outline" },
-    Calendar: { focused: "calendar", unfocused: "calendar-outline" },
-    "Field Ops": { focused: "map", unfocused: "map-outline" },
-  };
+const FIXED_TABS: FixedTab[] = [
+  { name: "Dashboard", label: "Home", icon: "home", iconOutline: "home-outline", page: "dashboard" },
+  { name: "Leads", label: "Leads", icon: "people", iconOutline: "people-outline", page: "leads", component: LeadsMatrixScreen, ownHeader: true },
+  { name: "Tasks", label: "Tasks", icon: "checkbox", iconOutline: "checkbox-outline", page: "tasks", component: TaskManagerScreen, ownHeader: true },
+  { name: "Inventory", label: "Inventory", icon: "business", iconOutline: "business-outline", page: "inventory", component: AssetVaultScreen, ownHeader: true },
+];
 
-  const selected = iconMap[routeName] ?? { focused: "ellipse", unfocused: "ellipse-outline" };
-  return focused ? selected.focused : selected.unfocused;
+const dashboardFor = (role: UserRole) => {
+  if (role === "EXECUTIVE") return ExecutiveDashboardScreen;
+  if (role === "FIELD_EXECUTIVE") return FieldDashboardScreen;
+  if (role === "PRODUCTION_EXECUTIVE" || role === "COMMUNITY_MANAGER") {
+    return ProductionDashboardScreen;
+  }
+  return ManagerDashboardScreen;
+};
+
+const TAB_COMPONENTS: Record<string, React.ComponentType<any>> = {
+  Leads: LeadsMatrixScreen,
+  Inventory: AssetVaultScreen,
+  Chat: TeamChatScreen,
+  Tasks: TaskManagerScreen,
+  Attendance: AttendanceScreen,
+  Finance: FinancialCoreScreen,
+  Reports: IntelligenceReportsScreen,
+  CoworkingBooking: BookingBoardScreen,
+};
+
+/*
+ * Coworking is the one module with per-action permissions on top of page
+ * access, so its screens carry both gates - the same pairing web applies with
+ * PageAccessGate + CoworkingPermissionGate.
+ */
+const coworkingGated = (Component: React.ComponentType<any>, page: string, permission: string) => {
+  const Gated = (props: any) => (
+    <ErrorBoundary label={page}>
+      <PageAccessGate page={page}>
+        <CoworkingPermissionGate permission={permission}>
+          <Component {...props} />
+        </CoworkingPermissionGate>
+      </PageAccessGate>
+    </ErrorBoundary>
+  );
+  Gated.displayName = `CoworkingGated(${page})`;
+  return Gated;
+};
+
+/** Wraps a tab's screen in its page gate, so a deep link cannot bypass it. */
+const gated = (Component: React.ComponentType<any>, page: string) => {
+  const Gated = (props: any) => (
+    <ErrorBoundary label={page}>
+      <PageAccessGate page={page}>
+        <Component {...props} />
+      </PageAccessGate>
+    </ErrorBoundary>
+  );
+  Gated.displayName = `Gated(${page})`;
+  return Gated;
 };
 
 const RoleMainTabs = ({ role }: { role: UserRole }) => {
-  const { logout } = useAuth();
   const { chatUnreadTotal, notificationUnreadTotal } = useRealtimeAlerts();
   const insets = useSafeAreaInsets();
+
   const bottomSpacing = Math.max(insets.bottom, Platform.OS === "android" ? 16 : 10);
-  const chatBadge = toTabBadge(chatUnreadTotal);
-  const notificationBadge = toTabBadge(notificationUnreadTotal);
 
-  const sharedOptions = {
-    headerRight: () => (
-      <Pressable onPress={logout} style={{ marginRight: 12 }}>
-        <Text style={{ color: "#0f172a", fontWeight: "600" }}>Logout</Text>
-      </Pressable>
-    ),
-    tabBarLabelStyle: { fontSize: 11, marginBottom: 2 },
-    tabBarIconStyle: { marginTop: -2 },
-    tabBarStyle: {
-      height: 56 + bottomSpacing,
-      paddingBottom: bottomSpacing,
-      paddingTop: 6,
-    },
-    tabBarActiveTintColor: "#0f172a",
-    tabBarInactiveTintColor: "#64748b",
-  };
+  const moreBadge = (() => {
+    const count = Math.max(0, Number(notificationUnreadTotal || 0) + Number(chatUnreadTotal || 0));
+    if (!count) return undefined;
+    return count > 99 ? 99 : count;
+  })();
 
-  if (role === "ADMIN") {
-    return (
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          ...sharedOptions,
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={getTabIconName(route.name, focused)}
-              size={size}
-              color={color}
-            />
-          ),
-        })}
-      >
-        <Tab.Screen name="Dashboard" component={ManagerDashboardScreen} />
-        <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
-        <Tab.Screen name="Inventory" component={AssetVaultScreen} />
-        <Tab.Screen
-          name="Notifications"
-          component={NotificationsScreen}
-          options={{ tabBarBadge: notificationBadge }}
-        />
-        <Tab.Screen name="More" component={MoreMenuScreen} options={{ tabBarBadge: chatBadge }} />
-      </Tab.Navigator>
-    );
-  }
-
-  if (role === "MANAGER") {
-    return (
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          ...sharedOptions,
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={getTabIconName(route.name, focused)}
-              size={size}
-              color={color}
-            />
-          ),
-        })}
-      >
-        <Tab.Screen name="Dashboard" component={ManagerDashboardScreen} />
-        <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
-        <Tab.Screen name="Inventory" component={AssetVaultScreen} />
-        <Tab.Screen name="Chat" component={TeamChatScreen} options={{ tabBarBadge: chatBadge }} />
-        <Tab.Screen name="More" component={MoreMenuScreen} />
-      </Tab.Navigator>
-    );
-  }
-
-  if (role === "EXECUTIVE") {
-    return (
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          ...sharedOptions,
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={getTabIconName(route.name, focused)}
-              size={size}
-              color={color}
-            />
-          ),
-        })}
-      >
-        <Tab.Screen name="Dashboard" component={ExecutiveDashboardScreen} />
-        <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
-        <Tab.Screen name="Inventory" component={AssetVaultScreen} />
-        <Tab.Screen name="Chat" component={TeamChatScreen} options={{ tabBarBadge: chatBadge }} />
-        <Tab.Screen name="More" component={MoreMenuScreen} />
-      </Tab.Navigator>
-    );
-  }
-
-  if (role === "FIELD_EXECUTIVE") {
-    return (
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          ...sharedOptions,
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={getTabIconName(route.name, focused)}
-              size={size}
-              color={color}
-            />
-          ),
-        })}
-      >
-        <Tab.Screen name="Dashboard" component={FieldDashboardScreen} />
-        <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
-        <Tab.Screen name="Field Ops" component={FieldOpsScreen} />
-        <Tab.Screen name="Chat" component={TeamChatScreen} options={{ tabBarBadge: chatBadge }} />
-        <Tab.Screen name="More" component={MoreMenuScreen} />
-      </Tab.Navigator>
-    );
-  }
-
-  if (role === "PRODUCTION_EXECUTIVE" || role === "COMMUNITY_MANAGER") {
-    return (
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          ...sharedOptions,
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={getTabIconName(route.name, focused)}
-              size={size}
-              color={color}
-            />
-          ),
-        })}
-      >
-        <Tab.Screen name="Dashboard" component={TaskManagerScreen} />
-        <Tab.Screen name="Attendance" component={AttendanceScreen} />
-        <Tab.Screen name="Chat" component={TeamChatScreen} options={{ tabBarBadge: chatBadge }} />
-        <Tab.Screen name="More" component={MoreMenuScreen} />
-      </Tab.Navigator>
-    );
-  }
-
-  // Default fallback for CHANNEL_PARTNER or unknown roles
   return (
     <Tab.Navigator
-      screenOptions={({ route }) => ({
-        ...sharedOptions,
-        tabBarIcon: ({ focused, color, size }) => (
-          <Ionicons
-            name={getTabIconName(route.name, focused)}
-            size={size}
-            color={color}
-          />
-        ),
-      })}
+      screenOptions={{
+        /*
+         * The wordmark bar replaces the default title bar. React Navigation
+         * still treats the top inset as consumed by a custom header, so the
+         * screens below keep laying out the way they did.
+         */
+        header: () => <AppHeader />,
+        /*
+         * fontFamily is set rather than left to the global Inter patch: the
+         * label comes from @react-navigation/elements, which already puts the
+         * navigation theme's own face on it, and an explicit family always
+         * wins over the patch.
+         */
+        tabBarLabelStyle: {
+          fontSize: brandType.label,
+          lineHeight: 14,
+          fontFamily: fontFamily.medium,
+          marginTop: 3,
+        },
+        /*
+         * The icon slot is 31x28 by default, sized to Apple's tab-bar metrics
+         * rather than to the glyph. The comp's mark is 22, and the extra 6pt
+         * matters: the item is a fixed-height column, so whatever the icon
+         * takes comes off the label, and the label - a shrinkable flex child
+         * on web - collapses to nothing rather than overflowing. The bar then
+         * renders with icons and no words.
+         */
+        tabBarIconStyle: { height: 22 },
+        /* 6 above the item, then the item's own 5 + 22 + 3 + 14 + 5. */
+        tabBarStyle: {
+          height: 55 + bottomSpacing,
+          paddingBottom: bottomSpacing,
+          paddingTop: 6,
+          borderTopColor: brand.hairline,
+          backgroundColor: brand.surface,
+        },
+        tabBarActiveTintColor: brand.green,
+        tabBarInactiveTintColor: brand.textSecondary,
+      }}
     >
-      <Tab.Screen name="Leads" component={LeadsMatrixScreen} />
-      <Tab.Screen name="Inventory" component={AssetVaultScreen} />
-      <Tab.Screen name="Targets" component={PerformanceScreen} />
-      <Tab.Screen name="More" component={MoreMenuScreen} />
+      {FIXED_TABS.map((item) => {
+        const Component =
+          item.name === "Dashboard" ? dashboardFor(role) : (item.component as React.ComponentType<any>);
+
+        return (
+          <Tab.Screen
+            key={item.name}
+            name={item.name}
+            component={gated(Component, item.page)}
+            options={{
+              title: item.label,
+              headerShown: !item.ownHeader,
+              tabBarIcon: ({ focused, color }) => (
+                <Glyph name={focused ? item.icon : item.iconOutline} size={22} color={color} />
+              ),
+            }}
+          />
+        );
+      })}
+
+      <Tab.Screen
+        name="More"
+        component={MoreMenuScreen}
+        options={{
+          tabBarBadge: moreBadge,
+          tabBarIcon: ({ color }) => <Glyph name="ellipsis-horizontal" size={22} color={color} />,
+        }}
+      />
     </Tab.Navigator>
   );
 };
@@ -235,87 +292,102 @@ const RoleMainTabs = ({ role }: { role: UserRole }) => {
 export const RoleTabs = ({ role }: { role: UserRole }) => (
   <>
     <Stack.Navigator>
-      <Stack.Screen
-        name="MainTabs"
-        options={{ headerShown: false }}
-      >
+      <Stack.Screen name="MainTabs" options={{ headerShown: false }}>
         {() => <RoleMainTabs role={role} />}
       </Stack.Screen>
-      <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Attendance" }} />
-      <Stack.Screen name="Finance" component={FinancialCoreScreen} options={{ title: "Finance" }} />
-      <Stack.Screen name="Targets" component={PerformanceScreen} options={{ title: "Targets" }} />
-      <Stack.Screen name="Calendar" component={MasterScheduleScreen} options={{ title: "Calendar" }} />
-      <Stack.Screen name="Reports" component={IntelligenceReportsScreen} options={{ title: "Reports" }} />
+
+      {/*
+        * Every pushed destination carries the same gate its tab would.
+        *
+        * Inventory and Tasks appear here as well as on the bar. The pushed
+        * copy keeps a navigator header - it is reached by deep link, and the
+        * comps draw no back control inside those pages, so without one there
+        * is no way out. Anything in the app that wants the tab should switch
+        * to it rather than push, the way the dashboard does.
+        */}
+      <Stack.Screen name="Attendance" component={gated(AttendanceStack, "attendance")} options={{ headerShown: false }} />
+      <Stack.Screen name="Finance" component={gated(FinancialCoreScreen, "finance")} options={{ headerShown: false }} />
+      <Stack.Screen name="Targets" component={gated(PerformanceScreen, "targets")} options={{ title: "Targets" }} />
+      <Stack.Screen name="Calendar" component={gated(MasterScheduleScreen, "calendar")} options={{ headerShown: false }} />
+      <Stack.Screen name="Reports" component={gated(IntelligenceReportsScreen, "reports")} options={{ headerShown: false }} />
+      <Stack.Screen name="Leaderboard" component={gated(RoleLeaderboardScreen, "leaderboard")} options={{ headerShown: false }} />
+      <Stack.Screen name="Tasks" component={gated(TaskManagerScreen, "tasks")} options={{ title: "Tasks" }} />
+      <Stack.Screen name="Leads" component={gated(LeadsMatrixScreen, "leads")} options={{ title: "Pipeline" }} />
+      <Stack.Screen name="Inventory" component={gated(AssetVaultScreen, "inventory")} options={{ title: "Inventory" }} />
+      <Stack.Screen name="AddProperty" component={gated(AddPropertyScreen, "inventory")} options={{ headerShown: false }} />
+      <Stack.Screen name="PropertyForm" component={gated(PropertyFormScreen, "inventory")} options={{ headerShown: false }} />
+      <Stack.Screen name="Field Ops" component={gated(FieldOpsScreen, "field_ops")} options={{ title: "Field Ops" }} />
+      <Stack.Screen name="OwnerDatabase" component={gated(OwnerDatabaseScreen, "inventory")} options={{ title: "Owner Database" }} />
+      <Stack.Screen name="BrokerDatabase" component={gated(BrokerDatabaseScreen, "inventory")} options={{ title: "Broker Database" }} />
+      <Stack.Screen name="Projects" component={gated(ProjectsScreen, "projects")} options={{ headerShown: false }} />
+      <Stack.Screen name="ProjectForm" component={gated(ProjectFormScreen, "projects")} options={{ headerShown: false }} />
       <Stack.Screen
-        name="LeadDetails"
-        component={LeadDetailsScreen}
-        options={{ title: "Lead Details" }}
-      />
-      <Stack.Screen
-        name="Tasks"
-        component={TaskManagerScreen}
-        options={{ title: "Tasks" }}
-      />
-      <Stack.Screen
-        name="InventoryDetails"
-        component={InventoryDetailsScreen}
-        options={{ title: "Inventory Details" }}
-      />
-      <Stack.Screen
-        name="ChatConversation"
-        component={ChatConversationScreen}
+        name="CoworkingBooking"
+        component={coworkingGated(BookingBoardScreen, "coworking_booking", "cabins.view")}
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="Chat"
-        component={TeamChatScreen}
+        name="CoworkingOnboard"
+        component={coworkingGated(OnboardClientScreen, "coworking_booking", "cabins.view")}
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="Office Assistant"
-        component={OfficeAssistantScreen}
-        options={{ title: "Office Assistant" }}
-      />
-      <Stack.Screen
-        name="CallScreen"
-        component={CallScreen}
+        name="CoworkingClients"
+        component={coworkingGated(CoworkingClientsScreen, "coworking_clients", "clients.view")}
         options={{ headerShown: false }}
       />
       <Stack.Screen
-        name="Notifications"
-        component={NotificationsScreen}
-        options={{ title: "Notifications" }}
+        name="CoworkingClientProfile"
+        component={coworkingGated(CoworkingClientProfileScreen, "coworking_clients", "clients.view")}
+        options={{ headerShown: false }}
       />
-      <Stack.Screen
-        name="Users"
-        component={TeamManagerScreen}
-        options={{ title: "Users" }}
-      />
-      <Stack.Screen
-        name="Profile"
-        component={ProfileScreen}
-        options={{ title: "Profile" }}
-      />
-      <Stack.Screen
-        name="Settings"
-        component={SystemSettingsScreen}
-        options={{ title: "Settings" }}
-      />
-      <Stack.Screen
-        name="MetaAds"
-        component={AdminMetaAdsScreen}
-        options={{ title: "Meta Ads" }}
-      />
-      <Stack.Screen
-        name="Field Ops"
-        component={FieldOpsScreen}
-        options={{ title: "Field Ops" }}
-      />
-      <Stack.Screen
-        name="Leaderboard"
-        component={RoleLeaderboardScreen}
-        options={{ title: "Leaderboard" }}
-      />
+      <Stack.Screen name="Users" component={gated(TeamManagerScreen, "admin_team")} options={{ headerShown: false }} />
+      <Stack.Screen name="Console" component={gated(AdminCommandConsoleScreen, "admin_console")} options={{ title: "Console" }} />
+      <Stack.Screen name="MetaAds" component={gated(AdminMetaAdsScreen, "admin_meta_ads")} options={{ title: "Meta Ads" }} />
+      <Stack.Screen name="Notifications" component={gated(NotificationsScreen, "admin_notifications")} options={{ title: "Notifications" }} />
+      <Stack.Screen name="Settings" component={gated(SystemSettingsScreen, "settings")} options={{ title: "Settings" }} />
+      <Stack.Screen name="Profile" component={gated(ProfileScreen, "profile")} options={{ title: "Profile" }} />
+
+      {/* Detail and modal routes: reached from a gated parent, so not gated again. */}
+      {/* Both task screens draw their own bar, so the wordmark one would be a
+          second header stacked above it. */}
+      <Stack.Screen name="TaskDetails" component={TaskDetailsScreen} options={{ headerShown: false }} />
+      {/* The form is a full-page sheet in the comp - no wordmark bar above it. */}
+      <Stack.Screen name="NewTask" component={NewTaskScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Contacts" component={gated(ContactsScreen, "inventory")} options={{ title: "Contacts" }} />
+      <Stack.Screen name="LeadDetails" component={LeadDetailsScreen} options={{ headerShown: false }} />
+      {/* Both draw their own bar, as the comps do - a wordmark header above
+          them would be a second one. */}
+      <Stack.Screen name="AddLead" component={AddLeadScreen} options={{ headerShown: false }} />
+      {/* The finance comps draw their own bars. */}
+      <Stack.Screen name="Transactions" component={TransactionsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="InvoiceDetails" component={InvoiceDetailsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="AddEntry" component={AddEntryScreen} options={{ headerShown: false }} />
+      {/* The report comps draw their own bars. */}
+      <Stack.Screen name="SalesReport" component={SalesReportScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="FinanceReport" component={FinanceReportScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CustomReport" component={CustomReportScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Performer" component={PerformerScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="PipelineIntelligence" component={gated(PipelineIntelligenceScreen, "reports")} options={{ headerShown: false }} />
+      <Stack.Screen name="Achievements" component={AchievementsScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="UpdateLead" component={UpdateLeadScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="InventoryDetails" component={InventoryDetailsScreen} options={{ title: "Inventory Details" }} />
+      <Stack.Screen name="ProjectDetails" component={ProjectDetailsScreen} options={{ headerShown: false }} />
+      {/* Reached by share token. Deliberately ungated - it is the one screen
+          meant for someone outside the company. */}
+      <Stack.Screen name="SharedInventory" component={SharedInventoryViewScreen} options={{ title: "Shared Listing" }} />
+      <Stack.Screen name="UserDetails" component={UserDetailsEditorScreen} options={{ title: "User Details" }} />
+      <Stack.Screen name="UserPageAccess" component={gated(UserPageAccessScreen, "admin_team")} options={{ headerShown: false }} />
+      {/* The team comps draw their own bars. */}
+      <Stack.Screen name="AddTeamMember" component={gated(AddTeamMemberScreen, "admin_team")} options={{ headerShown: false }} />
+      <Stack.Screen name="MemberDetails" component={gated(MemberDetailsScreen, "admin_team")} options={{ headerShown: false }} />
+      <Stack.Screen name="RolesPermissions" component={gated(RolesPermissionsScreen, "admin_team")} options={{ headerShown: false }} />
+      <Stack.Screen name="Chat" component={TeamChatScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="ChatConversation" component={ChatConversationScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="CallScreen" component={CallScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Office Assistant" component={OfficeAssistantScreen} options={{ title: "Office Assistant" }} />
+      <Stack.Screen name="Privacy" component={DataUseNoticeScreen} options={{ title: "Privacy Policy" }} />
+      <Stack.Screen name="Terms" component={ServiceTermsNoticeScreen} options={{ title: "Terms & Conditions" }} />
     </Stack.Navigator>
     <RealtimePopupOverlay />
   </>

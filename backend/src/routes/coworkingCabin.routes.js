@@ -4,13 +4,27 @@ const router = express.Router();
 const cabinController = require("../controllers/coworkingCabin.controller");
 const { requirePermission } = require("../middleware/permission.middleware");
 const { writeLimiter } = require("../middleware/rateLimit.middleware");
+const CoworkingCabin = require("../models/CoworkingCabin");
+const { requireAdminApprovalForDelete, describeByModel } = require("../services/deleteApproval.service");
 
 router.get("/", requirePermission("cabins.view"), cabinController.listCabins);
 router.get("/floor-view", requirePermission("cabins.view"), cabinController.getFloorView);
 router.get("/:cabinId", requirePermission("cabins.view"), cabinController.getCabin);
 router.post("/", writeLimiter, requirePermission("cabins.create"), cabinController.createCabin);
 router.patch("/:cabinId", writeLimiter, requirePermission("cabins.update"), cabinController.updateCabin);
-router.delete("/:cabinId", writeLimiter, requirePermission("cabins.delete"), cabinController.deleteCabin);
+router.delete(
+  "/:cabinId",
+  writeLimiter,
+  requirePermission("cabins.delete"),
+  requireAdminApprovalForDelete("coworking_cabin", {
+    label: "Cabin",
+    pageKey: "coworking_booking",
+    idParam: "cabinId",
+    handler: cabinController.deleteCabin,
+    describe: describeByModel(CoworkingCabin, ["name"]),
+  }),
+  cabinController.deleteCabin,
+);
 
 router.post("/:cabinId/block", writeLimiter, requirePermission("cabins.block"), cabinController.blockCabin);
 router.post("/:cabinId/unblock", writeLimiter, requirePermission("cabins.block"), cabinController.unblockCabin);

@@ -10,10 +10,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
+import { useNavigation, useRoute } from "@react-navigation/native";
+import { Icon } from "../../components/ui/Icon";
 import { Screen } from "../../components/common/Screen";
-import { getMessengerContacts, getMessengerConversations } from "../../services/chatService";
+import { getMessengerContacts, getMessengerConversations, markConversationRead } from "../../services/chatService";
 import { createChatSocket } from "../../services/chatSocket";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtimeAlerts } from "../../context/RealtimeAlertsContext";
@@ -21,6 +21,8 @@ import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { updateCallLog } from "../../services/chatService";
 import type { ChatContact, ChatConversation } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
+import { toAbsoluteUrl } from "../../services/uploadService";
 
 const initials = (name: string) =>
   (name || "")
@@ -32,8 +34,30 @@ const initials = (name: string) =>
 
 export const TeamChatScreen = () => {
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
+  /*
+   * A property handed over from inventory ("Share to chat"). Web opens its chat
+   * with the card queued and waits for a conversation to be picked; this list
+   * does the same, and the conversation opened next receives it.
+   */
+  const [pendingShare, setPendingShare] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    const share = route.params?.shareProperty;
+    if (share && typeof share === "object" && share.inventoryId) {
+      setPendingShare(share);
+      navigation.setParams({ shareProperty: undefined });
+    }
+  }, [navigation, route.params?.shareProperty]);
   const { token, user } = useAuth();
-  const { markAllChatRead, markChatConversationRead, syncChatUnreadFromConversations } = useRealtimeAlerts();
+  const {
+    chatUnreadByConversation,
+    markAllChatRead,
+    markChatConversationRead,
+    syncChatUnreadFromConversations,
+  } = useRealtimeAlerts();
+  /* Web's "All Chats" / "Unread" switch over the conversation list. */
+  const [chatFilter, setChatFilter] = useState<"all" | "unread">("all");
+  const [markingAllRead, setMarkingAllRead] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -185,14 +209,16 @@ export const TeamChatScreen = () => {
       contactName,
       contactRole,
       contactAvatar,
+      ...(pendingShare ? { shareProperty: pendingShare } : {}),
     });
+    if (pendingShare) setPendingShare(null);
   };
 
   const renderAvatar = (person: { name?: string; avatarUrl?: string }, size = 28) => {
     if (person?.avatarUrl) {
       return (
         <Image
-          source={{ uri: person.avatarUrl }}
+          source={{ uri: toAbsoluteUrl(String(person.avatarUrl)) }}
           style={{ width: size, height: size, borderRadius: size / 2 }}
         />
       );
@@ -205,10 +231,41 @@ export const TeamChatScreen = () => {
     );
   };
 
+  const unreadCountOf = useCallback(
+    (conversationId: string) => Math.max(0, Number(chatUnreadByConversation[String(conversationId)] || 0)),
+    [chatUnreadByConversation],
+  );
+  const unreadTotal = useMemo(
+    () => conversations.reduce((sum, row) => sum + unreadCountOf(row._id), 0),
+    [conversations, unreadCountOf],
+  );
+
+  /*
+   * Web's "Mark all read": every conversation with unread messages is marked
+   * read on the server, so the senders see them as seen and the counts stay
+   * cleared on the next load. Web also does this whenever its chat page opens;
+   * the phone waits for the tap, so the badges below mean something.
+   */
+  const markEveryConversationRead = async () => {
+    const ids = conversations.map((row) => String(row._id)).filter((id) => unreadCountOf(id) > 0);
+    if (!ids.length || markingAllRead) return;
+    setMarkingAllRead(true);
+    try {
+      markAllChatRead();
+      await Promise.all(ids.map((id) => markConversationRead(id).catch(() => null)));
+      setConversations((prev) => prev.map((row) => (ids.includes(String(row._id)) ? { ...row, unreadCount: 0 } : row)));
+    } finally {
+      setMarkingAllRead(false);
+    }
+  };
+
   const filteredConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return conversations;
-    return conversations.filter((conversation) => {
+    const scoped = chatFilter === "unread"
+      ? conversations.filter((conversation) => unreadCountOf(conversation._id) > 0)
+      : conversations;
+    if (!q) return scoped;
+    return scoped.filter((conversation) => {
       const peer = conversation.participants.find(
         (participant) => String(participant._id) !== String(user?._id || user?.id || ""),
       );
@@ -218,7 +275,7 @@ export const TeamChatScreen = () => {
         || String(conversation.lastMessage || "").toLowerCase().includes(q)
       );
     });
-  }, [conversations, search, user]);
+  }, [chatFilter, conversations, search, unreadCountOf, user]);
 
   const filteredContacts = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -244,17 +301,29 @@ export const TeamChatScreen = () => {
       >
         <View style={styles.quickTop}>
           <Pressable style={styles.quickBtn} onPress={goBack}>
-            <Ionicons name="arrow-back" size={16} color="#334155" />
+            <Icon name="arrow-back" size={16} color={themeColor("#39424f")} />
           </Pressable>
           <View style={styles.quickTopRight}>
             <Pressable style={styles.quickBtn} onPress={() => load(true)}>
-              <Ionicons name="refresh" size={15} color="#64748b" />
+              <Icon name="refresh" size={15} color={themeColor("#6c7789")} />
             </Pressable>
             <Pressable style={styles.quickBtn} onPress={() => setProfileVisible(true)}>
               {renderAvatar({ name: user?.name || "Me", avatarUrl: user?.profileImageUrl || "" }, 24)}
             </Pressable>
           </View>
         </View>
+
+        {pendingShare ? (
+          <View style={styles.shareBanner}>
+            <Icon name="share-social-outline" size={16} color={themeColor("#0a6544")} />
+            <Text style={styles.shareBannerText} numberOfLines={2}>
+              Pick a chat to share {String(pendingShare.title || "this property")}
+            </Text>
+            <Pressable onPress={() => setPendingShare(null)} hitSlop={8} accessibilityLabel="Cancel sharing">
+              <Icon name="close" size={16} color={themeColor("#0a6544")} />
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.searchCard}>
           <View style={styles.searchHead}>
@@ -263,7 +332,7 @@ export const TeamChatScreen = () => {
           </View>
 
           <View style={styles.searchRow}>
-            <Ionicons name="search" size={14} color="#94a3b8" />
+            <Icon name="search" size={14} color={themeColor("#98a3b5")} />
             <TextInput
               style={styles.searchInput}
               value={search}
@@ -280,6 +349,41 @@ export const TeamChatScreen = () => {
             </Pressable>
           </View>
 
+          {activeTab === "CHATS" ? (
+            <View style={styles.filterRow}>
+              <View style={[styles.tabRow, styles.filterTabs]}>
+                <Pressable
+                  style={[styles.tabBtn, chatFilter === "all" && styles.tabBtnActive]}
+                  onPress={() => setChatFilter("all")}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: chatFilter === "all" }}
+                >
+                  <Text style={[styles.tabText, chatFilter === "all" && styles.tabTextActive]}>All Chats</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.tabBtn, chatFilter === "unread" && styles.tabBtnActive]}
+                  onPress={() => setChatFilter("unread")}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: chatFilter === "unread" }}
+                >
+                  <Text style={[styles.tabText, chatFilter === "unread" && styles.tabTextActive]}>
+                    Unread{unreadTotal > 0 ? ` (${unreadTotal > 99 ? "99+" : unreadTotal})` : ""}
+                  </Text>
+                </Pressable>
+              </View>
+              <Pressable
+                style={[styles.markAllBtn, (!unreadTotal || markingAllRead) && styles.smallBtnDisabled]}
+                onPress={markEveryConversationRead}
+                disabled={!unreadTotal || markingAllRead}
+                accessibilityRole="button"
+                accessibilityLabel="Mark all read"
+              >
+                <Icon name="checkmark-done" size={14} color={themeColor("#0a6544")} />
+                <Text style={styles.markAllText}>{markingAllRead ? "Marking…" : "Mark all read"}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+
           <Text style={[styles.connection, connected ? styles.connectionOn : styles.connectionOff]}>
             {connected ? "Realtime connected" : "Realtime reconnecting"}
           </Text>
@@ -287,12 +391,15 @@ export const TeamChatScreen = () => {
 
         <View style={styles.listCard}>
           <Text style={styles.panelLabel}>{activeTab === "CHATS" ? "Conversations" : "Contacts"}</Text>
-          {activeTab === "CHATS" && filteredConversations.length === 0 ? <Text style={styles.empty}>No conversations</Text> : null}
+          {activeTab === "CHATS" && filteredConversations.length === 0 ? (
+            <Text style={styles.empty}>{chatFilter === "unread" ? "No unread conversations" : "No conversations"}</Text>
+          ) : null}
           {activeTab === "CHATS" ? filteredConversations.map((item) => {
             const peer = item.participants.find(
               (participant) => String(participant._id) !== String(user?._id || user?.id || ""),
             );
             if (!peer) return null;
+            const unread = unreadCountOf(item._id);
 
             return (
               <Pressable
@@ -310,13 +417,20 @@ export const TeamChatScreen = () => {
                 {renderAvatar({ name: peer.name, avatarUrl: peer.avatarUrl || "" })}
                 <View style={styles.userBody}>
                   <Text style={styles.userName}>{peer.name}</Text>
-                  <Text style={styles.userSub} numberOfLines={1}>
+                  <Text style={[styles.userSub, unread > 0 && styles.userSubUnread]} numberOfLines={1}>
                     {item.lastMessage || "No messages yet"}
                   </Text>
                 </View>
-                <Text style={styles.rowTime}>
-                  {formatDateTime(item.lastMessageAt || item.updatedAt)}
-                </Text>
+                <View style={styles.rowEnd}>
+                  <Text style={styles.rowTime}>
+                    {formatDateTime(item.lastMessageAt || item.updatedAt)}
+                  </Text>
+                  {unread > 0 ? (
+                    <View style={styles.unreadBadge} accessibilityLabel={`${unread} unread`}>
+                      <Text style={styles.unreadBadgeText}>{unread > 99 ? "99+" : unread}</Text>
+                    </View>
+                  ) : null}
+                </View>
               </Pressable>
             );
           }) : null}
@@ -392,7 +506,19 @@ export const TeamChatScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
+  shareBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 10,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: c.emerald[200],
+    backgroundColor: c.emerald[50],
+  },
+  shareBannerText: { flex: 1, fontSize: 12, fontWeight: "600", color: c.emerald[800] },
   quickTop: {
     marginBottom: 10,
     flexDirection: "row",
@@ -409,16 +535,16 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#d1d5db",
-    backgroundColor: "#fff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   profileCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 10,
   },
@@ -434,13 +560,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   profileTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "700",
     fontSize: 13,
   },
   profileSubtitle: {
     marginTop: 2,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
   },
   profileActions: {
@@ -450,31 +576,31 @@ const styles = StyleSheet.create({
   },
   smallBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 10,
     height: 34,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   smallBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
   smallBtnDanger: {
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 8,
     paddingHorizontal: 10,
     height: 34,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff1f2",
+    backgroundColor: c.errorBg,
   },
   smallBtnDangerText: {
-    color: "#b91c1c",
+    color: c.rose[700],
     fontSize: 12,
     fontWeight: "700",
   },
@@ -483,9 +609,9 @@ const styles = StyleSheet.create({
   },
   searchCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 10,
   },
@@ -496,29 +622,29 @@ const styles = StyleSheet.create({
   },
   searchTitle: {
     fontSize: 13,
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "700",
   },
   iconBtn: {
     width: 28,
     height: 28,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   searchMeta: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
   },
   searchRow: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -527,13 +653,13 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    color: "#0f172a",
+    color: c.text,
     fontSize: 12,
   },
   tabRow: {
     marginTop: 10,
     flexDirection: "row",
-    backgroundColor: "#f1f5f9",
+    backgroundColor: c.surfaceMuted,
     borderRadius: 10,
     padding: 2,
     gap: 4,
@@ -546,17 +672,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   tabBtnActive: {
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
   },
   tabText: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
   tabTextActive: {
-    color: "#0f172a",
+    color: c.text,
   },
   connection: {
     marginTop: 8,
@@ -570,24 +696,24 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   connectionOn: {
-    backgroundColor: "#dcfce7",
-    color: "#166534",
+    backgroundColor: c.emerald[100],
+    color: c.emerald[800],
   },
   connectionOff: {
-    backgroundColor: "#fef3c7",
-    color: "#92400e",
+    backgroundColor: c.amber[100],
+    color: c.amber[800],
   },
   listCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 10,
   },
   panelLabel: {
     fontSize: 11,
-    color: "#64748b",
+    color: c.textMuted,
     textTransform: "uppercase",
     letterSpacing: 0.7,
     fontWeight: "700",
@@ -597,20 +723,20 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
     padding: 8,
     marginBottom: 6,
     gap: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   avatar: {
-    backgroundColor: "#e2e8f0",
+    backgroundColor: c.border,
     alignItems: "center",
     justifyContent: "center",
   },
   avatarText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 10,
     fontWeight: "700",
   },
@@ -618,20 +744,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   userName: {
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "700",
     fontSize: 13,
   },
   userSub: {
     marginTop: 2,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
   },
   roleBadge: {
     marginTop: 3,
     alignSelf: "flex-start",
-    backgroundColor: "#dcfce7",
-    color: "#166534",
+    backgroundColor: c.emerald[100],
+    color: c.emerald[800],
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -640,13 +766,39 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   rowTime: {
-    color: "#94a3b8",
+    color: c.textTertiary,
     fontSize: 10,
     marginLeft: 6,
   },
+  rowEnd: { alignItems: "flex-end", gap: 4 },
+  userSubUnread: { color: c.text, fontWeight: "600" },
+  unreadBadge: {
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: c.emerald[600],
+  },
+  unreadBadgeText: { color: "#ffffff", fontSize: 10, fontWeight: "700" },
+  filterRow: { marginTop: 8, flexDirection: "row", alignItems: "center", gap: 8 },
+  filterTabs: { flex: 1, marginTop: 0 },
+  markAllBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    height: 34,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: c.emerald[200],
+    backgroundColor: c.emerald[50],
+  },
+  markAllText: { fontSize: 11, fontWeight: "700", color: c.emerald[800] },
   empty: {
     textAlign: "center",
-    color: "#94a3b8",
+    color: c.textTertiary,
     fontSize: 12,
     marginVertical: 10,
   },
@@ -659,26 +811,26 @@ const styles = StyleSheet.create({
   },
   callCard: {
     width: "100%",
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     padding: 16,
     alignItems: "center",
     gap: 6,
   },
   callTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 18,
     fontWeight: "700",
   },
   callPeer: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 15,
     fontWeight: "600",
   },
   callSub: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 12,
   },
   callActions: {
@@ -695,20 +847,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   callReject: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fff1f2",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
   },
   callAccept: {
-    borderColor: "#86efac",
-    backgroundColor: "#dcfce7",
+    borderColor: c.emerald[300],
+    backgroundColor: c.emerald[100],
   },
   callRejectText: {
-    color: "#b91c1c",
+    color: c.rose[700],
     fontWeight: "700",
     fontSize: 13,
   },
   callAcceptText: {
-    color: "#166534",
+    color: c.emerald[800],
     fontWeight: "700",
     fontSize: 13,
   },
@@ -721,15 +873,15 @@ const styles = StyleSheet.create({
   },
   profileModal: {
     width: "100%",
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     padding: 14,
     gap: 10,
   },
   profileModalTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 18,
     fontWeight: "700",
     marginBottom: 4,
@@ -740,12 +892,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   profileKey: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 12,
     fontWeight: "600",
   },
   profileVal: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 13,
     fontWeight: "700",
     flex: 1,
@@ -753,7 +905,7 @@ const styles = StyleSheet.create({
   },
   profileHint: {
     marginTop: 4,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
   },
   profileCloseBtn: {
@@ -761,13 +913,13 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     alignItems: "center",
     justifyContent: "center",
   },
   profileCloseText: {
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "700",
     fontSize: 13,
   },
-});
+}));

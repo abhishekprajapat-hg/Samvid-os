@@ -133,7 +133,7 @@ const AdminRequestAlertToast = ({ userRole }) => {
       } else {
         navigate("/admin/notifications");
       }
-    } else if (activeAlert.source === "user-delete" || activeAlert.source === "password") {
+    } else if (["user-delete", "record-delete", "password"].includes(activeAlert.source)) {
       navigate("/admin/notifications");
     } else {
       navigate("/leads");
@@ -248,6 +248,8 @@ const AdminRequestAlertToast = ({ userRole }) => {
                   ? "Remaining Payment Alert"
                   : activeAlert.source === "user-delete"
                     ? "User Delete Request"
+                    : activeAlert.source === "record-delete"
+                      ? "Delete Request"
                     : activeAlert.source === "password"
                       ? "Password Request"
                       : "New Admin Request"}
@@ -262,6 +264,8 @@ const AdminRequestAlertToast = ({ userRole }) => {
                 ? "Inventory workflow"
                 : activeAlert.source === "user-delete"
                   ? "User management"
+                  : activeAlert.source === "record-delete"
+                    ? "Needs your approval"
                   : activeAlert.source === "password"
                     ? "Account security"
                 : isLeadDealClosedAlert

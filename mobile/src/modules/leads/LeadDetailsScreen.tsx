@@ -16,8 +16,15 @@ import {
   View,
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Icon } from "../../components/ui/Icon";
+import { Glyph } from "../../components/ui/Glyph";
+import { brand, brandStyles, layout, round, type as bt } from "../../theme/brand";
+import { BrokerPhoneHint } from "./components/BrokerPhoneHint";
+import { LeadOverview } from "./components/LeadOverview";
+import { AppSheet } from "../../components/ui/Overlay";
 import DateTimePicker, { DateTimePickerAndroid, type DateTimePickerEvent } from "@react-native-community/datetimepicker";
+import * as Clipboard from "expo-clipboard";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as MailComposer from "expo-mail-composer";
@@ -29,11 +36,14 @@ import {
   addLeadRelatedProperty,
   assignLead,
   getAllLeads,
+  getLeadById,
   getLeadActivity,
   getLeadDiary,
   getLeadStatusRequests,
+  clearLeadFollowUp,
   requestLeadStatusChange,
   removeLeadRelatedProperty,
+  selectLeadRelatedProperty,
   updateLeadBasics,
   updateLeadDiaryEntry,
   updateLeadStatus,
@@ -48,14 +58,30 @@ import {
   type Task,
 } from "../../services/taskService";
 import { uploadChatFile } from "../../services/chatService";
+import api from "../../services/api";
+import { toAbsoluteUrl } from "../../services/uploadService";
+import { sessionStorage } from "../../storage/sessionStorage";
 import { getInventoryAssets } from "../../services/inventoryService";
 import { getUsers } from "../../services/userService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { useAuth } from "../../context/AuthContext";
 import type { Lead } from "../../types";
+import {
+  buildLeadRequirementsPayloadFromDraft,
+  createDefaultLeadRequirementsDraft,
+  mapLeadRequirementsToDraft,
+  validateLeadRequirementDraft,
+  withSubtypeField,
+  type CoworkingDraft,
+} from "./leadRequirements";
+import { getPropertySubtypeConfig, getPropertySubtypeOptions } from "../../config/propertyRequirementConfig";
+import { SubtypeFieldsEditor } from "../../components/common/SubtypeFieldsEditor";
+import { CoworkingRequirementEditor } from "../../components/common/CoworkingRequirementEditor";
 import { AppButton, AppCard, AppChip, AppInput } from "../../components/common/ui";
+import { AppSegmentedTabs } from "../../components/ui";
 import { colors } from "../../theme/tokens";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const STATUSES = [
   "NEW",
@@ -185,126 +211,6 @@ const toObjectIdString = (value: unknown) => {
   return String(value || "");
 };
 
-const createDefaultLeadRequirementsDraft = () => ({
-  inventoryType: "",
-  transactionType: "",
-  furnishingStatus: "",
-  budgetMin: "",
-  budgetMax: "",
-  areaMin: "",
-  areaMax: "",
-  areaUnit: "SQ_FT",
-  commercial: {
-    seats: "",
-    cabins: "",
-    conferenceRooms: "",
-    parkingAvailable: false,
-    pantry: false,
-  },
-  residential: {
-    bhkType: "",
-    floor: "",
-    amenities: {
-      lift: false,
-      security: false,
-      gym: false,
-      swimmingPool: false,
-      clubhouse: false,
-      powerBackup: false,
-      parking: false,
-    },
-  },
-});
-
-const toRequirementDraftText = (value: any) => {
-  if (value === null || value === undefined) return "";
-  return String(value).trim();
-};
-
-const mapLeadRequirementsToDraft = (requirements: any = {}) => {
-  const base = createDefaultLeadRequirementsDraft();
-  const commercial = requirements?.commercial || {};
-  const residential = requirements?.residential || {};
-  const amenities = residential?.amenities || {};
-
-  return {
-    inventoryType: toRequirementDraftText(requirements?.inventoryType).toUpperCase(),
-    transactionType: toRequirementDraftText(requirements?.transactionType).toUpperCase(),
-    furnishingStatus: toRequirementDraftText(requirements?.furnishingStatus).toUpperCase(),
-    budgetMin: toRequirementDraftText(requirements?.budgetMin),
-    budgetMax: toRequirementDraftText(requirements?.budgetMax),
-    areaMin: "",
-    areaMax: "",
-    areaUnit: base.areaUnit,
-    commercial: {
-      seats: toRequirementDraftText(commercial?.seats),
-      cabins: toRequirementDraftText(commercial?.cabins),
-      conferenceRooms: toRequirementDraftText(commercial?.conferenceRooms),
-      parkingAvailable: Boolean(commercial?.parkingAvailable),
-      pantry: Boolean(commercial?.pantry),
-    },
-    residential: {
-      bhkType: toRequirementDraftText(residential?.bhkType).toUpperCase(),
-      floor: toRequirementDraftText(residential?.floor),
-      amenities: {
-        lift: Boolean(amenities?.lift),
-        security: Boolean(amenities?.security),
-        gym: Boolean(amenities?.gym),
-        swimmingPool: Boolean(amenities?.swimmingPool),
-        clubhouse: Boolean(amenities?.clubhouse),
-        powerBackup: Boolean(amenities?.powerBackup),
-        parking: Boolean(amenities?.parking),
-      },
-    },
-  };
-};
-
-const toAmountNumber = (value: any) => {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "string" && value.trim() === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-};
-
-const toRequirementTransactionType = (value: any) => {
-  const normalized = String(value || "").trim().toUpperCase();
-  if (normalized === "RENT") return "RENT";
-  if (normalized === "LEASE") return "LEASE";
-  if (normalized === "SALE") return "SALE";
-  return "";
-};
-
-const buildLeadRequirementsPayloadFromDraft = (draft: any = {}) => ({
-  inventoryType: String(draft?.inventoryType || "").trim().toUpperCase(),
-  transactionType: toRequirementTransactionType(draft?.transactionType),
-  furnishingStatus: String(draft?.furnishingStatus || "").trim().toUpperCase(),
-  budgetMin: toAmountNumber(draft?.budgetMin),
-  budgetMax: toAmountNumber(draft?.budgetMax),
-  areaMin: null,
-  areaMax: null,
-  areaUnit: null,
-  commercial: {
-    seats: toAmountNumber(draft?.commercial?.seats),
-    cabins: toAmountNumber(draft?.commercial?.cabins),
-    conferenceRooms: toAmountNumber(draft?.commercial?.conferenceRooms),
-    parkingAvailable: Boolean(draft?.commercial?.parkingAvailable),
-    pantry: Boolean(draft?.commercial?.pantry),
-  },
-  residential: {
-    bhkType: String(draft?.residential?.bhkType || "").trim().toUpperCase(),
-    floor: toAmountNumber(draft?.residential?.floor),
-    amenities: {
-      lift: Boolean(draft?.residential?.amenities?.lift),
-      security: Boolean(draft?.residential?.amenities?.security),
-      gym: Boolean(draft?.residential?.amenities?.gym),
-      swimmingPool: Boolean(draft?.residential?.amenities?.swimmingPool),
-      clubhouse: Boolean(draft?.residential?.amenities?.clubhouse),
-      powerBackup: Boolean(draft?.residential?.amenities?.powerBackup),
-      parking: Boolean(draft?.residential?.amenities?.parking),
-    },
-  },
-});
-
 const LEAD_REQUIREMENT_FURNISHING_OPTIONS = [
   { value: "", label: "Any Furnishing" },
   { value: "UNFURNISHED", label: "Unfurnished" },
@@ -367,6 +273,15 @@ const getInventoryLeadLabel = (inventory: any) =>
     .filter(Boolean)
     .join(" - ");
 
+// Client-facing name for a property in proposals: its ID and listing name only.
+// Building, tower (filled from the building name) and unit/office number stay internal.
+const getInventoryClientLabel = (inventory: any) =>
+  [inventory?.propertyId, inventory?.projectName]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .filter((value, index, all) => all.indexOf(value) === index)
+    .join(" - ");
+
 const getLeadRelatedInventories = (lead: any) => {
   if (!lead) return [];
   const merged: any[] = [];
@@ -410,6 +325,23 @@ const resolveMediaUrl = (rawUrl?: string) => {
   return `${base}${safe.startsWith("/") ? "" : "/"}${safe}`;
 };
 
+/*
+ * The five tabs the comps give this screen. The sections underneath were
+ * already here as one long scroll; the tabs group them rather than replacing
+ * them, which is why the guards wrap existing cards instead of new ones.
+ */
+type DetailTab = "overview" | "requirements" | "notes" | "tasks" | "activity";
+
+const DETAIL_TABS = [
+  /* The comp's summary is the overview now; this tab is the linked properties
+     and the proposal generator that used to sit under that name. */
+  { key: "overview", label: "Properties" },
+  { key: "requirements", label: "Requirements" },
+  { key: "notes", label: "Notes" },
+  { key: "tasks", label: "Tasks" },
+  { key: "activity", label: "Activity" },
+];
+
 export const LeadDetailsScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -437,7 +369,17 @@ export const LeadDetailsScreen = () => {
 
   const [lead, setLead] = useState<Lead | null>(initialRouteLead);
   const [activities, setActivities] = useState<Array<{ _id: string; action: string; createdAt: string; performedBy?: { name?: string } }>>([]);
+  const [tab, setTab] = useState<DetailTab>("overview");
   const [diaryEntries, setDiaryEntries] = useState<LeadDiaryEntry[]>([]);
+  /* The comp's kebab: the contact shortcuts the command-center strip used to hold. */
+  const [overviewSheet, setOverviewSheet] = useState(false);
+  /*
+   * The profile card below predates the comp and holds the editable contact
+   * fields. The comp's summary already shows all of it read-only, so it stays
+   * closed until someone actually wants to edit - otherwise the screen reads
+   * as two different apps stacked on top of each other.
+   */
+  const [editOpen, setEditOpen] = useState(false);
   const [statusRequestHistory, setStatusRequestHistory] = useState<LeadStatusRequest[]>([]);
   const [saleLeadOptions, setSaleLeadOptions] = useState<Array<{ _id: string; name: string; phone?: string }>>([]);
   const [executives, setExecutives] = useState<Array<{ _id?: string; name: string; role?: string; isActive?: boolean }>>([]);
@@ -535,9 +477,39 @@ export const LeadDetailsScreen = () => {
       return {
         ...prev,
         inventoryType: value,
+        propertySubtype: "",
+        subtypeData: {},
         furnishingStatus: nextFurnishingStatus,
       };
     });
+  }, []);
+
+  /* Web's updateRequirementPropertySubtype: a new subtype starts its
+     preferences empty and drops furnishing where the subtype has none. */
+  const updateRequirementPropertySubtype = useCallback((value: string) => {
+    setRequirementsDraft((prev: any) => {
+      const nextConfig = getPropertySubtypeConfig(String(prev?.inventoryType || ""), value);
+      return {
+        ...prev,
+        propertySubtype: value,
+        subtypeData: {},
+        furnishingStatus: (nextConfig as any)?.showFurnishing === false ? "" : prev?.furnishingStatus || "",
+        areaMin: "",
+        areaMax: "",
+        areaUnit: "SQ_FT",
+      };
+    });
+  }, []);
+
+  const updateRequirementSubtypeField = useCallback((field: string, value: unknown) => {
+    setRequirementsDraft((prev: any) => ({
+      ...prev,
+      subtypeData: withSubtypeField(prev?.subtypeData || {}, field, value),
+    }));
+  }, []);
+
+  const updateRequirementCoworking = useCallback((next: CoworkingDraft) => {
+    setRequirementsDraft((prev: any) => ({ ...prev, coworking: next }));
   }, []);
 
   const updateRequirementCommercialField = useCallback((field: string, value: any) => {
@@ -691,11 +663,27 @@ export const LeadDetailsScreen = () => {
       setLoading(true);
       setError("");
 
-      const leadRowsResult = await getAllLeads();
-      const [usersResult, inventoryRowsResult] = await Promise.allSettled([
-        canManage ? getUsers() : Promise.resolve({ users: [] }),
-        getInventoryAssets({ page: 1, limit: 200 }),
-      ]);
+      /*
+       * The lead itself comes from GET /leads/:id, not from filtering the full
+       * list. That endpoint scopes through findAccessibleLeadById and 404s a
+       * lead this user is not entitled to, so it is both the cheap answer and
+       * the correct one - fetching every lead to render one was a real cost on
+       * mobile data, and the "not found" path used to fall through to showing
+       * somebody else's record.
+       *
+       * The list is still fetched, but only to populate the sale-lead picker,
+       * and a failure there must not stop the lead from rendering.
+       */
+      const [leadResult, leadRowsResultSettled, usersResult, inventoryRowsResult] =
+        await Promise.allSettled([
+          getLeadById(leadId || fallbackRouteLeadId),
+          getAllLeads(),
+          canManage ? getUsers() : Promise.resolve({ users: [] }),
+          getInventoryAssets({ page: 1, limit: 200 }),
+        ]);
+
+      const leadRowsResult =
+        leadRowsResultSettled.status === "fulfilled" ? leadRowsResultSettled.value : [];
       let resolvedInventoryRows: any[] =
         inventoryRowsResult.status === "fulfilled" && Array.isArray(inventoryRowsResult.value)
           ? inventoryRowsResult.value
@@ -711,13 +699,21 @@ export const LeadDetailsScreen = () => {
       }
 
       const leadRows = Array.isArray(leadRowsResult) ? leadRowsResult : [];
-      let currentLead = leadRows.find((row) => String((row as any)?._id || "") === leadId) || null;
-      if (!currentLead && fallbackRouteLeadId) {
-        currentLead = leadRows.find((row) => String((row as any)?._id || "") === fallbackRouteLeadId) || null;
+
+      let currentLead =
+        leadResult.status === "fulfilled" && leadResult.value ? (leadResult.value as any) : null;
+
+      /*
+       * The route can carry the lead object itself (pushed from the pipeline
+       * list), which is a legitimate fallback if the fetch failed. The list is
+       * the last resort - and only ever matched by id.
+       */
+      if (!currentLead && initialRouteLead) currentLead = initialRouteLead;
+      if (!currentLead) {
+        const wanted = leadId || fallbackRouteLeadId;
+        currentLead = leadRows.find((row) => String((row as any)?._id || "") === wanted) || null;
       }
-      if (!currentLead && leadRows.length > 0) {
-        currentLead = leadRows[0];
-      }
+
       if (!currentLead) {
         setError("Lead not found");
         setLead(null);
@@ -1038,6 +1034,11 @@ export const LeadDetailsScreen = () => {
 
   const saveUpdate = async () => {
     if (!lead) return;
+    const requirementError = validateLeadRequirementDraft(requirementsDraft);
+    if (requirementError) {
+      setError(requirementError);
+      return;
+    }
 
     const payload: any = {
       status: statusDraft,
@@ -1223,6 +1224,25 @@ export const LeadDetailsScreen = () => {
       setNewTaskDueDate(selectedDate.toISOString().split("T")[0]);
     }
     setShowTaskDatePicker(false);
+  };
+
+  /*
+   * "Mark done" on the comp's follow-up card. It clears `nextFollowUp` rather
+   * than moving the status - the stage is the stepper's job, and clearing is
+   * exactly what the endpoint the web app uses for this does.
+   */
+  const markFollowUpDone = async () => {
+    if (!lead?._id) return;
+    try {
+      setSaving(true);
+      const updated = await clearLeadFollowUp(lead._id, lead.status || "NEW");
+      if (updated) setLead(updated);
+      setSuccess("Follow-up marked done");
+    } catch (e) {
+      setError(toErrorMessage(e, "Could not clear the follow-up"));
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openDialer = async (phone?: string) => {
@@ -1447,7 +1467,7 @@ export const LeadDetailsScreen = () => {
     ];
 
     selectedRows.forEach((inventory: any, index) => {
-      const label = getInventoryLeadLabel(inventory) || `Property ${index + 1}`;
+      const label = getInventoryClientLabel(inventory) || `Property ${index + 1}`;
       lines.push(`Property ${index + 1}: ${label}`);
       lines.push(`Project: ${String(inventory?.projectName || (lead as any)?.projectInterested || "-")}`);
       lines.push(`Location: ${String(inventory?.location || (lead as any)?.city || "-")}`);
@@ -1476,11 +1496,11 @@ export const LeadDetailsScreen = () => {
         <head>
           <meta charset="utf-8" />
           <style>
-            body { font-family: Arial, sans-serif; color: #0f172a; padding: 24px; line-height: 1.5; }
+            body { font-family: Arial, sans-serif; color: #161c24; padding: 24px; line-height: 1.5; }
             pre { white-space: pre-wrap; font-family: Arial, sans-serif; font-size: 12px; }
             h1 { margin: 0 0 12px; font-size: 20px; }
             .imageGrid { margin-top: 16px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
-            .imageGrid img { width: 100%; max-height: 220px; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 6px; }
+            .imageGrid img { width: 100%; max-height: 220px; object-fit: cover; border: 1px solid #e0e5ed; border-radius: 6px; }
           </style>
         </head>
         <body>
@@ -1498,40 +1518,132 @@ export const LeadDetailsScreen = () => {
       return;
     }
     if (!message.trim()) return;
-    const nav = globalThis as any;
-    if (nav?.navigator?.clipboard?.writeText) {
-      await nav.navigator.clipboard.writeText(message).then(() => {
-        setSuccess("Proposal copied");
-      }).catch(() => {
-        setError("Unable to copy proposal text");
-      });
+    try {
+      await Clipboard.setStringAsync(message);
+      setSuccess("Proposal copied");
+    } catch {
+      setError("Unable to copy proposal text");
+    }
+  };
+
+  /*
+   * Web's "Img Links" and "Share Images". Web lists every image of each
+   * selected property and attaches the first four of each, eight at most.
+   */
+  const proposalImageEntries = useMemo(
+    () =>
+      selectedProposalRows
+        .flatMap((row: any, rowIndex: number) => {
+          const label = getInventoryClientLabel(row) || `Property ${rowIndex + 1}`;
+          const urls: string[] = (Array.isArray(row?.images) ? row.images : [])
+            .map((url: string) => toAbsoluteUrl(String(url || "").trim()))
+            .filter(Boolean);
+          return urls.slice(0, 4).map((url, imageIndex) => ({ url, label, imageIndex: imageIndex + 1 }));
+        })
+        .slice(0, 8),
+    [selectedProposalRows],
+  );
+
+  const proposalImageLinksText = useMemo(() => {
+    const lines: string[] = [];
+    selectedProposalRows.forEach((row: any, rowIndex: number) => {
+      lines.push(`${rowIndex + 1}. ${getInventoryClientLabel(row) || `Property ${rowIndex + 1}`}`);
+      const urls: string[] = (Array.isArray(row?.images) ? row.images : [])
+        .map((url: string) => toAbsoluteUrl(String(url || "").trim()))
+        .filter(Boolean);
+      if (!urls.length) lines.push("   - No images");
+      urls.forEach((url, imageIndex) => lines.push(`   - ${imageIndex + 1}. ${url}`));
+      lines.push("");
+    });
+    return lines.join("\n").trim();
+  }, [selectedProposalRows]);
+
+  const copyProposalImageLinks = async () => {
+    if (!proposalImageEntries.length) {
+      setError("No property images found");
       return;
     }
-    if (Platform.OS === "web") {
-      try {
-        const doc = (globalThis as any)?.document;
-        if (!doc?.createElement || !doc?.body) {
-          throw new Error("Document unavailable");
+    try {
+      await Clipboard.setStringAsync(proposalImageLinksText);
+      setSuccess("Image links copied");
+    } catch {
+      setError("Unable to copy image links");
+    }
+  };
+
+  const askToContinue = (title: string, message: string) =>
+    new Promise<boolean>((resolve) => {
+      Alert.alert(title, message, [
+        { text: "Stop", style: "cancel", onPress: () => resolve(false) },
+        { text: "Next image", onPress: () => resolve(true) },
+      ], { cancelable: true, onDismiss: () => resolve(false) });
+    });
+
+  const shareProposalImages = async () => {
+    if (!proposalImageEntries.length) {
+      setError("No property images found");
+      return;
+    }
+    setProposalBusy(true);
+    const files: Array<{ uri: string; mimeType: string }> = [];
+    try {
+      /*
+       * Uploaded files are released only to a signed-in caller, so each image
+       * is fetched with this session's token - but only from this app's own
+       * server; an image hosted elsewhere is fetched without it.
+       */
+      const token = await sessionStorage.getToken();
+      const ownOrigin = String(api.defaults.baseURL || "").replace(/\/api\/?$/, "");
+      for (const entry of proposalImageEntries) {
+        const extension = (/\.(jpe?g|png|webp|gif|heic)(?:\?|$)/i.exec(entry.url)?.[1] || "jpg").toLowerCase();
+        const slug = entry.label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "property";
+        const target = `${FileSystem.cacheDirectory}${slug}-image-${entry.imageIndex}.${extension}`;
+        const ownFile = Boolean(ownOrigin) && entry.url.startsWith(ownOrigin);
+        try {
+          const result = await FileSystem.downloadAsync(entry.url, target, {
+            headers: ownFile && token ? { Authorization: `Bearer ${token}` } : {},
+          });
+          if (result.status >= 200 && result.status < 300) {
+            files.push({ uri: result.uri, mimeType: extension === "jpg" || extension === "jpeg" ? "image/jpeg" : `image/${extension}` });
+          }
+        } catch {
+          /* One image failing should not stop the rest. */
         }
-        const textArea = doc.createElement("textarea");
-        textArea.value = message;
-        textArea.style.position = "absolute";
-        textArea.style.left = "-9999px";
-        doc.body.appendChild(textArea);
-        textArea.select();
-        doc.execCommand?.("copy");
-        doc.body.removeChild(textArea);
-        setSuccess("Proposal copied");
-        return;
+      }
+    } finally {
+      setProposalBusy(false);
+    }
+
+    if (!files.length) {
+      setError("Images could not be prepared for sharing");
+      return;
+    }
+    if (!(await Sharing.isAvailableAsync())) {
+      setError("Sharing is not available on this device");
+      return;
+    }
+
+    /*
+     * The phone's share sheet takes one file at a time, where a browser's
+     * takes a list. Each image gets its own sheet, with a chance to stop
+     * between them.
+     */
+    for (let index = 0; index < files.length; index += 1) {
+      try {
+        await Sharing.shareAsync(files[index].uri, {
+          mimeType: files[index].mimeType,
+          dialogTitle: `Property image ${index + 1} of ${files.length}`,
+        });
       } catch {
-        // fall through
+        setError("Image share failed");
+        return;
+      }
+      if (index < files.length - 1) {
+        const next = await askToContinue(`Shared ${index + 1} of ${files.length}`, "Share the next image?");
+        if (!next) return;
       }
     }
-    if (Platform.OS !== "web") {
-      setError("Copy unavailable on this device. Please use a clipboard-enabled build.");
-      return;
-    }
-    Alert.alert("Copy unavailable", "Clipboard copy is not supported on this device/browser.");
+    setSuccess(`Shared ${files.length} image(s)`);
   };
 
   const generateProposalPdf = async () => {
@@ -1863,6 +1975,27 @@ export const LeadDetailsScreen = () => {
     } finally {
       setPropertyActionInventoryId("");
       setLinkingProperty(false);
+    }
+  };
+
+  /*
+   * Makes one of the linked properties the lead's active one - web's
+   * handleSelectRelatedProperty, which it runs when a property card is
+   * clicked. The active property is what the proposal and the deal close use.
+   */
+  const onSelectRelatedProperty = async (inventoryId: string) => {
+    if (!lead || !inventoryId || inventoryId === selectedLeadActiveInventoryId) return;
+    try {
+      setPropertyActionInventoryId(inventoryId);
+      setError("");
+      const updatedLead = await selectLeadRelatedProperty(lead._id, inventoryId);
+      if (updatedLead?._id) setLead(updatedLead);
+      else await loadData();
+      setSuccess("Property selected");
+    } catch (e) {
+      setError(toErrorMessage(e, "Failed to select property"));
+    } finally {
+      setPropertyActionInventoryId("");
     }
   };
 
@@ -2471,7 +2604,7 @@ export const LeadDetailsScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#0f172a" size="large" />
+        <ActivityIndicator color={themeColor("#161c24")} size="large" />
       </View>
     );
   }
@@ -2494,28 +2627,75 @@ export const LeadDetailsScreen = () => {
   const roleLabel = String(role || "USER").replace(/_/g, " ");
 
   return (
+    <SafeAreaView style={comp.root} edges={["top", "left", "right"]}>
+      {/*
+       * The comp's bar. The pencil opens Update Lead - the stage, the
+       * interaction and the follow-up all live there - and the kebab keeps the
+       * contact shortcuts the old command-center strip used to carry.
+       */}
+      <View style={comp.bar}>
+        <Pressable
+          onPress={() => navigation.goBack()}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+        >
+          <Glyph name="chevron-back" size={25} color={brand.text} />
+        </Pressable>
+        <Text style={comp.barTitle} numberOfLines={1}>Lead Details</Text>
+        <Pressable
+          onPress={() => navigation.navigate("UpdateLead", { leadId: lead._id, lead })}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Update lead"
+        >
+          <Glyph name="pencil" size={20} color={brand.text} />
+        </Pressable>
+        <Pressable
+          onPress={() => setOverviewSheet(true)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Lead actions"
+        >
+          <Glyph name="ellipsis-horizontal" size={21} color={brand.text} />
+        </Pressable>
+      </View>
+
     <ScrollView style={styles.root} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       {success ? <Text style={styles.success}>{success}</Text> : null}
 
-      <View style={styles.commandCenterBar}>
-        <Text style={styles.commandCenterTitle}>Leads Command Center</Text>
-        <View style={styles.commandMetaRow}>
-          <Text style={styles.commandMetaChip}>PIPELINE</Text>
-          <Text style={styles.commandMetaChip}>ROLE: {roleLabel}</Text>
-          <Text style={styles.commandMetaChip}>{commandDateLabel}</Text>
-        </View>
-      </View>
+      <LeadOverview
+        lead={lead}
+        assigneeName={assigneeName}
+        matches={selectedLeadRelatedInventories as any}
+        notes={diaryEntries}
+        activities={activities}
+        onCall={() => openDialer(lead.phone)}
+        onWhatsApp={() => openWhatsApp(lead.phone)}
+        onEmail={() => openMail(lead.email)}
+        onUpdate={() => navigation.navigate("UpdateLead", { leadId: lead._id, lead })}
+        onReschedule={() => navigation.navigate("UpdateLead", { leadId: lead._id, lead })}
+        onMarkDone={markFollowUpDone}
+        onAddNote={() => setTab("notes")}
+        onOpenMatch={(asset: any) =>
+          navigation.navigate("InventoryDetails", { assetId: asset?._id, asset })
+        }
+        onSeeAllMatches={() => setTab("overview")}
+      />
 
+      {editOpen ? (
       <AppCard style={styles.card as object}>
-        <View style={styles.profileHeaderRow}>
-          <Text style={styles.profileLabel}>Lead Profile</Text>
-          <Pressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-            <Text style={styles.backBtnText}>Back</Text>
+        <View style={comp.editHead}>
+          <Text style={comp.editTitle}>Edit lead</Text>
+          <Pressable
+            style={comp.editDone}
+            onPress={() => setEditOpen(false)}
+            accessibilityRole="button"
+          >
+            <Glyph name="close" size={19} color={brand.textSecondary} />
           </Pressable>
         </View>
-        <Text style={styles.name}>{lead.name}</Text>
-        <Text style={styles.meta}>{lead.projectInterested || "Project not tagged yet"}</Text>
         <View style={styles.profileMetaRow}>
           <Text style={styles.statusTag}>{statusDraft || lead.status || "NEW"}</Text>
           <Text style={styles.idTag}>ID: {String(lead._id || "").slice(-6).toUpperCase()}</Text>
@@ -2541,30 +2721,13 @@ export const LeadDetailsScreen = () => {
           </View>
         </View>
 
-        <View style={styles.quickActionRow}>
-          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openDialer(lead.phone)}>
-            <Ionicons name="call-outline" size={16} color="#0f172a" />
-            <Text style={styles.quickActionText}>Call</Text>
-          </Pressable>
-          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openWhatsApp(lead.phone)}>
-            <Ionicons name="logo-whatsapp" size={16} color="#16a34a" />
-            <Text style={styles.quickActionText}>WhatsApp</Text>
-          </Pressable>
-          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={() => openMail(lead.email)}>
-            <Ionicons name="mail-outline" size={16} color="#2563eb" />
-            <Text style={styles.quickActionText}>Mail</Text>
-          </Pressable>
-          <Pressable style={[styles.quickActionBtn, isCompact ? styles.quickActionBtnHalf : null]} onPress={openMaps}>
-            <Ionicons name="location-outline" size={16} color="#0ea5e9" />
-            <Text style={styles.quickActionText}>Maps</Text>
-          </Pressable>
-        </View>
         <Text style={styles.section}>Name</Text>
         <AppInput style={styles.input as object} value={leadNameDraft} onChangeText={setLeadNameDraft} placeholder="Lead name" />
         {isCompact ? (
           <>
             <Text style={styles.section}>Phone</Text>
             <AppInput style={styles.input as object} value={leadPhoneDraft} onChangeText={setLeadPhoneDraft} placeholder="Phone" keyboardType="phone-pad" />
+            <BrokerPhoneHint phone={leadPhoneDraft} />
             <Text style={styles.section}>Email</Text>
             <AppInput style={styles.input as object} value={leadEmailDraft} onChangeText={setLeadEmailDraft} placeholder="Email" />
             <Text style={styles.section}>City</Text>
@@ -2578,6 +2741,7 @@ export const LeadDetailsScreen = () => {
               <View style={{ flex: 1 }}>
                 <Text style={styles.section}>Phone</Text>
                 <AppInput style={styles.input as object} value={leadPhoneDraft} onChangeText={setLeadPhoneDraft} placeholder="Phone" keyboardType="phone-pad" />
+                <BrokerPhoneHint phone={leadPhoneDraft} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.section}>Email</Text>
@@ -2605,7 +2769,35 @@ export const LeadDetailsScreen = () => {
           style={styles.profileSaveBtn as object}
         />
       </AppCard>
+      ) : null}
 
+      {/*
+       * The section switcher, in the comp's language rather than the web
+       * kit's. The bodies below it are still the ported web screens; this at
+       * least stops the strip reading as a different app from the cards above.
+       */}
+      <View style={comp.tabsWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={comp.tabsRow}>
+          {DETAIL_TABS.map((entry) => {
+            const active = tab === entry.key;
+            return (
+              <Pressable
+                key={entry.key}
+                style={[comp.tabChip, active && comp.tabChipOn]}
+                onPress={() => setTab(entry.key as DetailTab)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+              >
+                <Text style={[comp.tabLabel, active && comp.tabLabelOn]}>{entry.label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+
+      {tab === "requirements" ? (
+        <>
       <AppCard style={styles.card as object}>
         <Text style={styles.section}>Lead Requirements</Text>
         
@@ -2615,6 +2807,7 @@ export const LeadDetailsScreen = () => {
             { value: "", label: "Any" },
             { value: "COMMERCIAL", label: "Commercial" },
             { value: "RESIDENTIAL", label: "Residential" },
+            { value: "COWORKING", label: "Coworking" },
           ].map((item) => (
             <AppChip
               key={`req-inv-${item.value}`}
@@ -2625,6 +2818,25 @@ export const LeadDetailsScreen = () => {
             />
           ))}
         </View>
+
+        {getPropertySubtypeOptions(requirementsDraft?.inventoryType).length ? (
+          <>
+            <Text style={styles.metricLabel}>
+              {requirementsDraft?.inventoryType === "RESIDENTIAL" ? "Residential Property Type" : "Commercial Property Type"}
+            </Text>
+            <View style={styles.modalChipWrap}>
+              {[{ value: "", label: "Any" }, ...getPropertySubtypeOptions(requirementsDraft?.inventoryType)].map((item) => (
+                <AppChip
+                  key={`req-sub-${item.value}`}
+                  label={item.label}
+                  active={String(requirementsDraft?.propertySubtype || "") === item.value}
+                  onPress={() => updateRequirementPropertySubtype(item.value)}
+                  style={styles.modalChip as object}
+                />
+              ))}
+            </View>
+          </>
+        ) : null}
 
         <Text style={styles.metricLabel}>Deal Type</Text>
         <View style={styles.modalChipWrap}>
@@ -2644,18 +2856,22 @@ export const LeadDetailsScreen = () => {
           ))}
         </View>
 
-        <Text style={styles.metricLabel}>Furnishing Status</Text>
-        <View style={styles.modalChipWrap}>
-          {getRequirementFurnishingOptions(requirementsDraft?.inventoryType).map((item) => (
-            <AppChip
-              key={`req-furn-${item.value}`}
-              label={item.label}
-              active={requirementsDraft?.furnishingStatus === item.value}
-              onPress={() => updateRequirementRootField("furnishingStatus", item.value)}
-              style={styles.modalChip as object}
-            />
-          ))}
-        </View>
+        {(getPropertySubtypeConfig(requirementsDraft?.inventoryType, requirementsDraft?.propertySubtype) as any)?.showFurnishing === false ? null : (
+          <>
+            <Text style={styles.metricLabel}>Furnishing Status</Text>
+            <View style={styles.modalChipWrap}>
+              {getRequirementFurnishingOptions(requirementsDraft?.inventoryType).map((item) => (
+                <AppChip
+                  key={`req-furn-${item.value}`}
+                  label={item.label}
+                  active={requirementsDraft?.furnishingStatus === item.value}
+                  onPress={() => updateRequirementRootField("furnishingStatus", item.value)}
+                  style={styles.modalChip as object}
+                />
+              ))}
+            </View>
+          </>
+        )}
 
         <View style={styles.twoColRow}>
           <View style={{ flex: 1 }}>
@@ -2680,8 +2896,20 @@ export const LeadDetailsScreen = () => {
           </View>
         </View>
 
-        {requirementsDraft?.inventoryType === "COMMERCIAL" ? (
-          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#f8fafc" }}>
+        {requirementsDraft?.inventoryType === "COWORKING" ? (
+          <CoworkingRequirementEditor value={requirementsDraft?.coworking} onChange={updateRequirementCoworking} />
+        ) : null}
+
+        <SubtypeFieldsEditor
+          config={getPropertySubtypeConfig(requirementsDraft?.inventoryType, requirementsDraft?.propertySubtype)}
+          value={requirementsDraft?.subtypeData || {}}
+          onChange={updateRequirementSubtypeField}
+        />
+
+        {/* The older fixed blocks are what a lead without a subtype carries;
+            with a subtype chosen, its preferences above replace them, as on web. */}
+        {requirementsDraft?.inventoryType === "COMMERCIAL" && !requirementsDraft?.propertySubtype ? (
+          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: themeColor("#c8d0dd"), borderRadius: 10, backgroundColor: themeColor("#f5f7fa") }}>
             <Text style={[styles.section, { fontSize: 13, marginBottom: 6 }]}>Commercial Preferences</Text>
             <View style={styles.twoColRow}>
               <View style={{ flex: 1 }}>
@@ -2721,10 +2949,10 @@ export const LeadDetailsScreen = () => {
                 style={[styles.checkboxItem, requirementsDraft?.commercial?.parkingAvailable && styles.checkboxItemActive]}
                 onPress={() => updateRequirementCommercialField("parkingAvailable", !requirementsDraft?.commercial?.parkingAvailable)}
               >
-                <Ionicons
+                <Icon
                   name={requirementsDraft?.commercial?.parkingAvailable ? "checkbox" : "square-outline"}
                   size={14}
-                  color={requirementsDraft?.commercial?.parkingAvailable ? "#10b981" : "#475569"}
+                  color={requirementsDraft?.commercial?.parkingAvailable ? themeColor("#12a06a") : themeColor("#4e5867")}
                 />
                 <Text style={styles.checkboxLabel}>Parking Available</Text>
               </Pressable>
@@ -2733,10 +2961,10 @@ export const LeadDetailsScreen = () => {
                 style={[styles.checkboxItem, requirementsDraft?.commercial?.pantry && styles.checkboxItemActive]}
                 onPress={() => updateRequirementCommercialField("pantry", !requirementsDraft?.commercial?.pantry)}
               >
-                <Ionicons
+                <Icon
                   name={requirementsDraft?.commercial?.pantry ? "checkbox" : "square-outline"}
                   size={14}
-                  color={requirementsDraft?.commercial?.pantry ? "#10b981" : "#475569"}
+                  color={requirementsDraft?.commercial?.pantry ? themeColor("#12a06a") : themeColor("#4e5867")}
                 />
                 <Text style={styles.checkboxLabel}>Pantry</Text>
               </Pressable>
@@ -2744,8 +2972,8 @@ export const LeadDetailsScreen = () => {
           </View>
         ) : null}
 
-        {requirementsDraft?.inventoryType === "RESIDENTIAL" ? (
-          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: "#cbd5e1", borderRadius: 10, backgroundColor: "#f8fafc" }}>
+        {requirementsDraft?.inventoryType === "RESIDENTIAL" && !requirementsDraft?.propertySubtype ? (
+          <View style={{ marginTop: 10, padding: 10, borderWidth: 1, borderColor: themeColor("#c8d0dd"), borderRadius: 10, backgroundColor: themeColor("#f5f7fa") }}>
             <Text style={[styles.section, { fontSize: 13, marginBottom: 6 }]}>Residential Preferences</Text>
             
             <Text style={styles.metricLabel}>BHK Type</Text>
@@ -2780,10 +3008,10 @@ export const LeadDetailsScreen = () => {
                     style={[styles.checkboxItem, checked && styles.checkboxItemActive]}
                     onPress={() => updateRequirementResidentialAmenity(field.key, !checked)}
                   >
-                    <Ionicons
+                    <Icon
                       name={checked ? "checkbox" : "square-outline"}
                       size={14}
-                      color={checked ? "#10b981" : "#475569"}
+                      color={checked ? themeColor("#12a06a") : themeColor("#4e5867")}
                     />
                     <Text style={styles.checkboxLabel}>{field.label}</Text>
                   </Pressable>
@@ -2793,7 +3021,11 @@ export const LeadDetailsScreen = () => {
           </View>
         ) : null}
       </AppCard>
+        </>
+      ) : null}
 
+      {tab === "overview" ? (
+        <>
       <AppCard style={styles.card as object}>
         <View style={styles.sectionRow}>
           <Text style={styles.section}>Properties</Text>
@@ -2813,11 +3045,22 @@ export const LeadDetailsScreen = () => {
                 <Text style={styles.meta}>{String(inventory?.location || "").trim() || "-"}</Text>
                 <View style={styles.propertyActionRow}>
                   <Pressable
+                    style={[styles.propertyActionBtn, isPrimary && styles.propertyActionBtnActive]}
+                    onPress={() => onSelectRelatedProperty(inventoryId)}
+                    disabled={!inventoryId || isPrimary || propertyActionInventoryId === inventoryId}
+                    accessibilityState={{ selected: Boolean(isPrimary) }}
+                  >
+                    <Icon name={isPrimary ? "checkmark-circle-outline" : "checkmark"} size={13} color={themeColor(isPrimary ? "#0a6544" : "#39424f")} />
+                    <Text style={[styles.propertyActionText, isPrimary && { color: themeColor("#0a6544") }]}>
+                      {isPrimary ? "Active" : "Make active"}
+                    </Text>
+                  </Pressable>
+                  <Pressable
                     style={styles.propertyActionBtn}
                     onPress={() => onViewRelatedProperty(inventoryId)}
                     disabled={!inventoryId || propertyActionInventoryId === inventoryId}
                   >
-                    <Ionicons name="eye-outline" size={13} color="#334155" />
+                    <Icon name="eye-outline" size={13} color={themeColor("#39424f")} />
                     <Text style={styles.propertyActionText}>View</Text>
                   </Pressable>
                   <Pressable
@@ -2825,8 +3068,8 @@ export const LeadDetailsScreen = () => {
                     onPress={() => onRemoveRelatedProperty(inventoryId)}
                     disabled={!inventoryId || propertyActionInventoryId === inventoryId}
                   >
-                    <Ionicons name="trash-outline" size={13} color="#b91c1c" />
-                    <Text style={[styles.propertyActionText, { color: "#b91c1c" }]}>Remove</Text>
+                    <Icon name="trash-outline" size={13} color={themeColor("#942626")} />
+                    <Text style={[styles.propertyActionText, { color: themeColor("#942626") }]}>Remove</Text>
                   </Pressable>
                 </View>
               </View>
@@ -2857,7 +3100,7 @@ export const LeadDetailsScreen = () => {
                   )
                   : "Select property to link"}
               </Text>
-              <Ionicons name={linkDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color="#475569" />
+              <Icon name={linkDropdownOpen ? "chevron-up" : "chevron-down"} size={16} color={themeColor("#4e5867")} />
             </Pressable>
             <Pressable style={styles.linkAddBtn} onPress={onLinkPropertyToLead} disabled={linkingProperty || !relatedInventoryDraft}>
               <Text style={styles.linkAddBtnText}>{linkingProperty ? "Adding..." : "+ Add"}</Text>
@@ -2923,7 +3166,7 @@ export const LeadDetailsScreen = () => {
               onPress={() => toggleProposalProperty(inventoryId)}
               style={[styles.propertyCheckboxRow, selected && styles.propertyCheckboxRowActive]}
             >
-              <Ionicons name={selected ? "checkbox-outline" : "square-outline"} size={16} color={selected ? "#0f766e" : "#64748b"} />
+              <Icon name={selected ? "checkbox-outline" : "square-outline"} size={16} color={selected ? themeColor("#0a6544") : themeColor("#6c7789")} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.propertyTitle}>{getInventoryLeadLabel(inventory) || "Property"}</Text>
                 <Text style={styles.meta}>{String(inventory?.status || "Available")} | {(Array.isArray(inventory?.images) ? inventory.images.length : 0)} image(s)</Text>
@@ -2982,27 +3225,39 @@ export const LeadDetailsScreen = () => {
         />
         <View style={styles.proposalActionGrid}>
           <Pressable style={styles.proposalBtn} onPress={copyProposalText}>
-            <Ionicons name="copy-outline" size={13} color="#334155" />
+            <Icon name="copy-outline" size={13} color={themeColor("#39424f")} />
             <Text style={styles.proposalBtnText}>Copy</Text>
           </Pressable>
           <Pressable style={[styles.proposalBtn, styles.proposalBtnPrimary]} onPress={downloadProposalPdf} disabled={proposalBusy}>
-            <Ionicons name="download-outline" size={13} color="#0f766e" />
+            <Icon name="download-outline" size={13} color={themeColor("#0a6544")} />
             <Text style={[styles.proposalBtnText, styles.proposalBtnPrimaryText]}>
               {proposalBusy ? "Generating..." : "PDF"}
             </Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalWhatsApp}>
-            <Ionicons name="logo-whatsapp" size={13} color="#16a34a" />
+            <Icon name="logo-whatsapp" size={13} color={themeColor("#0d8055")} />
             <Text style={styles.proposalBtnText}>WhatsApp</Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalEmail}>
-            <Ionicons name="mail-outline" size={13} color="#334155" />
+            <Icon name="mail-outline" size={13} color={themeColor("#39424f")} />
             <Text style={styles.proposalBtnText}>Email</Text>
           </Pressable>
           <Pressable style={styles.proposalBtn} onPress={shareProposalPdf} disabled={proposalBusy}>
-            <Ionicons name="paper-plane-outline" size={13} color="#334155" />
+            <Icon name="paper-plane-outline" size={13} color={themeColor("#39424f")} />
             <Text style={styles.proposalBtnText}>Share PDF</Text>
           </Pressable>
+          {proposalImageEntries.length ? (
+            <Pressable style={styles.proposalBtn} onPress={copyProposalImageLinks}>
+              <Glyph name="link-outline" size={13} color={themeColor("#39424f")} />
+              <Text style={styles.proposalBtnText}>Img Links</Text>
+            </Pressable>
+          ) : null}
+          {proposalImageEntries.length && Platform.OS !== "web" ? (
+            <Pressable style={styles.proposalBtn} onPress={shareProposalImages} disabled={proposalBusy}>
+              <Glyph name="images-outline" size={13} color={themeColor("#39424f")} />
+              <Text style={styles.proposalBtnText}>Share Images</Text>
+            </Pressable>
+          ) : null}
         </View>
       </AppCard>
 
@@ -3026,10 +3281,10 @@ export const LeadDetailsScreen = () => {
                 <Text style={styles.meta}>{doc.kind || "file"} | {Math.max(0, Number(doc.size || 0))} bytes</Text>
               </View>
               <Pressable style={styles.docIconBtn} onPress={() => Linking.openURL(String(doc.url || "")).catch(() => setError("Unable to open document"))}>
-                <Ionicons name="eye-outline" size={14} color="#334155" />
+                <Icon name="eye-outline" size={14} color={themeColor("#39424f")} />
               </Pressable>
               <Pressable style={styles.docIconBtn} onPress={() => removeClosureDocument(String(doc.url || ""))}>
-                <Ionicons name="trash-outline" size={14} color="#b91c1c" />
+                <Icon name="trash-outline" size={14} color={themeColor("#942626")} />
               </Pressable>
             </View>
           ))
@@ -3059,7 +3314,7 @@ export const LeadDetailsScreen = () => {
             placeholder="dd-mm-yyyy hh:mm"
           />
           <Pressable style={styles.followUpCalendarBtn} onPress={openFollowUpPicker}>
-            <Ionicons name="calendar-outline" size={16} color="#334155" />
+            <Icon name="calendar-outline" size={16} color={themeColor("#39424f")} />
           </Pressable>
         </View>
         {showFollowUpPicker && Platform.OS === "ios" ? (
@@ -3091,7 +3346,7 @@ export const LeadDetailsScreen = () => {
         <TextInput
           style={[styles.diaryInput, { height: 84 }]}
           placeholder="Add conversation notes, visit details, objections, or next steps..."
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor={themeColor("#98a3b5")}
           value={diaryNoteDraft}
           onChangeText={setDiaryNoteDraft}
           multiline
@@ -3103,13 +3358,13 @@ export const LeadDetailsScreen = () => {
           <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
           <View style={styles.diaryActionRow}>
             <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={saving || !isDiaryMicSupported}>
-              <Ionicons name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#94a3b8" : "#334155"} />
+              <Icon name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? themeColor("#98a3b5") : themeColor("#39424f")} />
               <Text style={[styles.voiceBtnText, (saving || !isDiaryMicSupported) && styles.voiceBtnTextDisabled]}>
                 {isDiaryListening ? "Stop" : "Voice"}
               </Text>
             </Pressable>
             <Pressable style={[styles.addNoteBtn, saving && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving}>
-              <Ionicons name="document-text-outline" size={14} color="#fff" />
+              <Icon name="document-text-outline" size={14} color={themeColor("#ffffff")} />
               <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
             </Pressable>
           </View>
@@ -3217,6 +3472,8 @@ export const LeadDetailsScreen = () => {
 
         <AppButton title={saving ? "Saving..." : saveButtonTitle.replace("Save Details", "Save Lead Update")} onPress={saveUpdate} disabled={saving} />
       </AppCard>
+        </>
+      ) : null}
 
       {false ? (
       <AppCard style={styles.card as object}>
@@ -3224,7 +3481,7 @@ export const LeadDetailsScreen = () => {
         <TextInput
           style={[styles.diaryInput, { height: 84 }]}
           placeholder="Add conversation notes, visit details, objections, or next step context..."
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor={themeColor("#98a3b5")}
           value={diaryNoteDraft}
           onChangeText={setDiaryNoteDraft}
           multiline
@@ -3236,13 +3493,13 @@ export const LeadDetailsScreen = () => {
           <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
           <View style={styles.diaryActionRow}>
             <Pressable style={styles.voiceBtn} onPress={handleDiaryVoiceToggle} disabled={saving || !isDiaryMicSupported}>
-              <Ionicons name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? "#94a3b8" : "#334155"} />
+              <Icon name={isDiaryListening ? "mic-off" : "mic"} size={14} color={saving || !isDiaryMicSupported ? themeColor("#98a3b5") : themeColor("#39424f")} />
               <Text style={[styles.voiceBtnText, (saving || !isDiaryMicSupported) && styles.voiceBtnTextDisabled]}>
                 {isDiaryListening ? "Stop" : "Voice"}
               </Text>
             </Pressable>
             <Pressable style={[styles.addNoteBtn, saving && styles.addNoteBtnDisabled]} onPress={submitDiary} disabled={saving}>
-              <Ionicons name="document-text-outline" size={14} color="#fff" />
+              <Icon name="document-text-outline" size={14} color={themeColor("#ffffff")} />
               <Text style={styles.addNoteText}>{saving ? "Saving..." : "Add Note"}</Text>
             </Pressable>
           </View>
@@ -3308,6 +3565,8 @@ export const LeadDetailsScreen = () => {
       </AppCard>
       ) : null}
 
+      {tab === "activity" ? (
+        <>
       <AppCard style={styles.card as object}>
         <Text style={styles.section}>Status Request History ({statusRequestHistory.length})</Text>
         {statusRequestHistory.length === 0 ? (
@@ -3337,7 +3596,7 @@ export const LeadDetailsScreen = () => {
                   <Text style={styles.meta}>Reviewed at: {formatDateTime(request.reviewedAt)}</Text>
                 ) : null}
                 {request.rejectionReason ? (
-                  <Text style={[styles.meta, { color: "#b91c1c" }]}>Reject reason: {request.rejectionReason}</Text>
+                  <Text style={[styles.meta, { color: themeColor("#942626") }]}>Reject reason: {request.rejectionReason}</Text>
                 ) : null}
                 {request.attachment?.fileUrl ? (
                   <Pressable
@@ -3360,7 +3619,63 @@ export const LeadDetailsScreen = () => {
           })
         )}
       </AppCard>
+        </>
+      ) : null}
 
+      {tab === "notes" ? (
+        <AppCard style={styles.card as object}>
+          <View style={styles.sectionRow}>
+            <Text style={styles.section}>Notes</Text>
+            <Text style={styles.meta}>{diaryEntries.length} total</Text>
+          </View>
+
+          <TextInput
+            style={[styles.diaryInput, { height: 96 }]}
+            placeholder="Add conversation notes, visit details, objections, or next steps..."
+            placeholderTextColor={themeColor("#98a3b5")}
+            value={diaryNoteDraft}
+            onChangeText={setDiaryNoteDraft}
+            multiline
+            maxLength={2000}
+          />
+          <View style={styles.sectionRow}>
+            <Text style={styles.diaryCounterText}>{diaryNoteDraft.length}/2000</Text>
+            <AppButton
+              title={saving ? "Saving..." : "Add Note"}
+              onPress={submitDiary}
+              disabled={saving || !diaryNoteDraft.trim()}
+            />
+          </View>
+
+          {diaryEntries.length === 0 ? (
+            <Text style={styles.meta}>No notes yet. The first one goes above.</Text>
+          ) : (
+            visibleDiaryEntries.map((entry) => (
+              <View key={entry._id} style={styles.diaryEntryCard}>
+                <Text style={styles.diaryLine}>{entry.note || "-"}</Text>
+                <Text style={styles.diaryEntryMetaRow}>
+                  {formatDateTime(entry.createdAt)}
+                  {entry.createdBy?.name ? ` · ${entry.createdBy.name}` : ""}
+                </Text>
+              </View>
+            ))
+          )}
+
+          {diaryEntries.length > 2 ? (
+            <View style={styles.inlineActionRow}>
+              <View />
+              <Pressable onPress={() => setShowAllDiaryEntries((prev) => !prev)}>
+                <Text style={styles.linkTextCompact}>
+                  {showAllDiaryEntries ? "Show less" : "See more"}
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
+        </AppCard>
+      ) : null}
+
+      {tab === "tasks" ? (
+        <>
       {canManage ? (
         <AppCard style={styles.card as object}>
           <Text style={styles.section}>Assign Executive</Text>
@@ -3474,10 +3789,10 @@ export const LeadDetailsScreen = () => {
                   paddingHorizontal: 10,
                   borderRadius: 10,
                   borderWidth: 1,
-                  borderColor: "#cbd5e1",
+                  borderColor: themeColor("#c8d0dd"),
                   fontSize: 12,
-                  backgroundColor: "#fff",
-                  color: "#334155",
+                  backgroundColor: themeColor("#ffffff"),
+                  color: themeColor("#39424f"),
                   outlineStyle: "none"
                 } as any}
               />
@@ -3491,7 +3806,7 @@ export const LeadDetailsScreen = () => {
                   editable={false}
                 />
                 <Pressable style={styles.followUpCalendarBtn} onPress={openTaskDatePicker}>
-                  <Ionicons name="calendar-outline" size={16} color="#334155" />
+                  <Icon name="calendar-outline" size={16} color={themeColor("#39424f")} />
                 </Pressable>
               </>
             )}
@@ -3515,7 +3830,7 @@ export const LeadDetailsScreen = () => {
         {/* Tasks list */}
         <View style={{ marginTop: 14 }}>
           {loadingTasks ? (
-            <ActivityIndicator color="#0f172a" style={{ marginVertical: 12 }} />
+            <ActivityIndicator color={themeColor("#161c24")} style={{ marginVertical: 12 }} />
           ) : leadTasks.length === 0 ? (
             <Text style={styles.meta}>No tasks linked to this lead.</Text>
           ) : (
@@ -3543,7 +3858,7 @@ export const LeadDetailsScreen = () => {
                     onPress={() => handleToggleLeadTaskStatus(task)}
                   >
                     {isCompleted ? (
-                      <Ionicons name="checkmark" size={12} color="#fff" />
+                      <Icon name="checkmark" size={12} color={themeColor("#ffffff")} />
                     ) : null}
                   </Pressable>
 
@@ -3564,22 +3879,22 @@ export const LeadDetailsScreen = () => {
                           {
                             color:
                               task.priority === "HIGH"
-                                ? "#b91c1c"
+                                ? themeColor("#942626")
                                 : task.priority === "MEDIUM"
-                                ? "#d97706"
-                                : "#2563eb",
+                                ? themeColor("#a26f06")
+                                : themeColor("#2549d6"),
                             backgroundColor:
                               task.priority === "HIGH"
-                                ? "#fef2f2"
+                                ? themeColor("#fdedec")
                                 : task.priority === "MEDIUM"
-                                ? "#fef3c7"
-                                : "#eff6ff",
+                                ? themeColor("#fbe9c4")
+                                : themeColor("#eef3ff"),
                             borderColor:
                               task.priority === "HIGH"
-                                ? "#fecaca"
+                                ? themeColor("#f6b8b5")
                                 : task.priority === "MEDIUM"
-                                ? "#fde68a"
-                                : "#bfdbfe",
+                                ? themeColor("#f6d68c")
+                                : themeColor("#bcd0ff"),
                           },
                         ]}
                       >
@@ -3591,9 +3906,9 @@ export const LeadDetailsScreen = () => {
                           style={[
                             styles.taskBadge,
                             {
-                              color: "#475569",
-                              backgroundColor: "#f1f5f9",
-                              borderColor: "#cbd5e1",
+                              color: themeColor("#4e5867"),
+                              backgroundColor: themeColor("#edf0f5"),
+                              borderColor: themeColor("#c8d0dd"),
                             },
                           ]}
                         >
@@ -3606,9 +3921,9 @@ export const LeadDetailsScreen = () => {
                           style={[
                             styles.taskBadge,
                             {
-                              color: expired ? "#b91c1c" : "#475569",
-                              backgroundColor: expired ? "#fef2f2" : "#f1f5f9",
-                              borderColor: expired ? "#fecaca" : "#cbd5e1",
+                              color: expired ? themeColor("#942626") : themeColor("#4e5867"),
+                              backgroundColor: expired ? themeColor("#fdedec") : themeColor("#edf0f5"),
+                              borderColor: expired ? themeColor("#f6b8b5") : themeColor("#c8d0dd"),
                               fontWeight: expired ? "700" : "600",
                             },
                           ]}
@@ -3624,7 +3939,7 @@ export const LeadDetailsScreen = () => {
                     style={styles.taskDeleteBtn}
                     onPress={() => handleDeleteLeadTask(task._id)}
                   >
-                    <Ionicons name="trash-outline" size={14} color="#b91c1c" />
+                    <Icon name="trash-outline" size={14} color={themeColor("#942626")} />
                   </Pressable>
                 </View>
               );
@@ -3632,7 +3947,11 @@ export const LeadDetailsScreen = () => {
           )}
         </View>
       </AppCard>
+        </>
+      ) : null}
 
+      {tab === "activity" ? (
+        <>
       <View style={styles.sectionRow}>
         <Text style={styles.section}>Activity Timeline</Text>
       </View>
@@ -3657,6 +3976,8 @@ export const LeadDetailsScreen = () => {
         ))
       )}
 
+        </>
+      ) : null}
       <Modal visible={statusRequestOpen} animationType="fade" transparent onRequestClose={closeStatusRequestModal}>
         <Pressable style={styles.modalWrap} onPress={closeStatusRequestModal}>
           <KeyboardAvoidingView
@@ -3737,7 +4058,7 @@ export const LeadDetailsScreen = () => {
             />
             <View style={styles.dateFieldActionRow}>
               <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("remainingDueDate")}>
-                <Ionicons name="calendar-outline" size={14} color="#334155" />
+                <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                 <Text style={styles.dateFieldBtnText}>Pick due date</Text>
               </Pressable>
             </View>
@@ -3752,7 +4073,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3775,7 +4096,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3792,7 +4113,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("chequeDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
                   </Pressable>
                 </View>
@@ -3839,7 +4160,7 @@ export const LeadDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openClosedDatePicker("paymentDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                   </Pressable>
                 </View>
@@ -3869,7 +4190,7 @@ export const LeadDetailsScreen = () => {
                   onPress={() => setStatusRequestAttachment(null)}
                   disabled={saving}
                 >
-                  <Ionicons name="close" size={16} color="#991b1b" />
+                  <Icon name="close" size={16} color={themeColor("#741f1f")} />
                 </Pressable>
               ) : null}
             </View>
@@ -3912,13 +4233,138 @@ export const LeadDetailsScreen = () => {
       </Modal>
 
     </ScrollView>
+
+      <AppSheet
+        visible={overviewSheet}
+        onClose={() => setOverviewSheet(false)}
+        title={lead.name || "Lead"}
+        subtitle={lead.phone || undefined}
+      >
+        {[
+          { id: "call", label: "Call", icon: "call-outline" },
+          { id: "whatsapp", label: "WhatsApp", icon: "logo-whatsapp" },
+          { id: "email", label: "Email", icon: "mail-outline" },
+          { id: "maps", label: "Open in Maps", icon: "navigate-outline" },
+          { id: "edit", label: "Edit contact details", icon: "create-outline" },
+        ].map((entry) => (
+          <Pressable
+            key={entry.id}
+            style={comp.sheetRow}
+            accessibilityRole="button"
+            onPress={() => {
+              setOverviewSheet(false);
+              if (entry.id === "call") openDialer(lead.phone);
+              else if (entry.id === "whatsapp") openWhatsApp(lead.phone);
+              else if (entry.id === "email") openMail(lead.email);
+              else if (entry.id === "maps") openMaps();
+              else setEditOpen(true);
+            }}
+          >
+            <Glyph name={entry.icon as any} size={18} color={brand.textSecondary} />
+            <Text style={comp.sheetLabel}>{entry.label}</Text>
+          </Pressable>
+        ))}
+      </AppSheet>
+    </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f8fafc" },
+/* The comp's chrome, kept apart from the web-parity sheet the tabs still use. */
+const comp = brandStyles((b) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: b.bg,
+    },
+    bar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 16,
+      paddingHorizontal: layout.gutter,
+      paddingTop: 6,
+      paddingBottom: 10,
+    },
+    barTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: bt.hero,
+      lineHeight: 25,
+      fontWeight: "700",
+      letterSpacing: -0.5,
+      color: b.text,
+    },
+    tabsWrap: {
+      marginTop: 14,
+      marginBottom: 4,
+      marginHorizontal: -layout.gutter,
+    },
+    tabsRow: {
+      flexDirection: "row",
+      gap: 6,
+      paddingHorizontal: layout.gutter,
+    },
+    tabChip: {
+      height: 34,
+      justifyContent: "center",
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.field,
+      backgroundColor: b.surface,
+    },
+    tabChipOn: {
+      borderColor: b.greenBright,
+      backgroundColor: "#dff2e8",
+    },
+    tabLabel: {
+      fontSize: bt.cardTitle,
+      fontWeight: "500",
+      color: b.textSecondary,
+    },
+    tabLabelOn: {
+      fontWeight: "700",
+      color: b.text,
+    },
+    editHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      marginBottom: 10,
+    },
+    editTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: bt.barTitle,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    editDone: {
+      width: 30,
+      height: 30,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    sheetRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: b.hairline,
+    },
+    sheetLabel: {
+      fontSize: bt.field,
+      color: b.text,
+    },
+  }),
+);
+
+const styles = themedStyles((c) => StyleSheet.create({
+  detailTabs: { marginBottom: 12 },
+  root: { flex: 1, backgroundColor: c.bg },
   content: { padding: 12, paddingBottom: 24 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: c.bg },
   commandCenterBar: {
     marginBottom: 10,
     borderRadius: 12,
@@ -3934,7 +4380,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   commandCenterTitle: {
-    color: "#f8fafc",
+    color: c.bg,
     fontSize: 16,
     fontWeight: "700",
   },
@@ -3950,7 +4396,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#bae6fd",
+    color: c.infoBorder,
     fontSize: 10,
     textTransform: "uppercase",
     fontWeight: "700",
@@ -3959,14 +4405,14 @@ const styles = StyleSheet.create({
   },
   card: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     padding: 12,
     marginBottom: 10,
   },
   profileLabel: {
-    color: "#0891b2",
+    color: c.info,
     textTransform: "uppercase",
     letterSpacing: 1.1,
     fontSize: 10,
@@ -3983,20 +4429,20 @@ const styles = StyleSheet.create({
     minWidth: 54,
     height: 28,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   backBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "700",
     textTransform: "uppercase",
   },
-  name: { fontSize: 18, fontWeight: "700", color: colors.text },
+  name: { fontSize: 18, fontWeight: "700", color: c.text },
   profileMetaRow: {
     marginTop: 6,
     marginBottom: 10,
@@ -4006,26 +4452,26 @@ const styles = StyleSheet.create({
   },
   statusTag: {
     borderWidth: 1,
-    borderColor: "#67e8f9",
+    borderColor: c.cyan[300],
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#0e7490",
+    color: c.cyan[700],
     fontSize: 10,
     fontWeight: "700",
-    backgroundColor: "#ecfeff",
+    backgroundColor: c.infoBg,
     overflow: "hidden",
   },
   idTag: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    color: "#475569",
+    color: c.slate[600],
     fontSize: 10,
     fontWeight: "600",
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     overflow: "hidden",
   },
   summaryGrid: {
@@ -4038,14 +4484,14 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     minWidth: 140,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   summaryLabel: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 10,
     textTransform: "uppercase",
     letterSpacing: 1,
@@ -4053,18 +4499,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   summaryValue: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 12,
     fontWeight: "600",
   },
-  section: { marginBottom: 8, color: "#334155", fontWeight: "700" },
+  section: { marginBottom: 8, color: c.slate[700], fontWeight: "700" },
   sectionRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   linkText: {
-    color: "#2563eb",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
     marginBottom: 8,
@@ -4076,11 +4522,11 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   linkTextCompact: {
-    color: "#2563eb",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
   },
-  meta: { marginTop: 4, fontSize: 12, color: "#64748b" },
+  meta: { marginTop: 4, fontSize: 12, color: c.textMuted },
   statusWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, alignItems: "center", alignContent: "flex-start" },
   assignRow: { flexDirection: "row", gap: 8, alignItems: "center", paddingBottom: 2 },
   chip: {},
@@ -4099,9 +4545,9 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -4113,39 +4559,39 @@ const styles = StyleSheet.create({
   dateFieldBtn: {
     height: 30,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
   },
   dateFieldBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   selectInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 42,
     paddingHorizontal: 12,
     justifyContent: "center",
     marginBottom: 12,
   },
   selectInputText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 13,
   },
   selectMenu: {
     maxHeight: 170,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     marginBottom: 10,
   },
   selectMenuScroll: {
@@ -4155,14 +4601,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#e2e8f0",
+    borderBottomColor: c.border,
   },
   selectMenuItemText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 13,
   },
   emptySelectText: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 12,
     padding: 12,
   },
@@ -4176,9 +4622,9 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
@@ -4190,22 +4636,22 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#334155",
+    color: c.slate[700],
   },
   propertyRow: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
   },
   propertyRowActive: {
-    borderColor: "#86efac",
-    backgroundColor: "#f0fdf4",
+    borderColor: c.emerald[300],
+    backgroundColor: c.successBg,
   },
   propertyTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4222,35 +4668,35 @@ const styles = StyleSheet.create({
   propertyStatusDropdown: {
     height: 32,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   propertyStatusText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
   propertyStatusMenu: {
     marginTop: 4,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     overflow: "hidden",
   },
   propertyStatusMenuItem: {
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: "#eef2ff",
+    borderBottomColor: c.violet[50],
   },
   propertyStatusMenuText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -4273,14 +4719,14 @@ const styles = StyleSheet.create({
     width: 74,
     height: 40,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   linkAddBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4290,24 +4736,24 @@ const styles = StyleSheet.create({
     height: 34,
     alignSelf: "flex-start",
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   docUploadBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
   docRow: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 8,
     flexDirection: "row",
     alignItems: "center",
@@ -4317,9 +4763,9 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -4329,26 +4775,27 @@ const styles = StyleSheet.create({
     height: 32,
     alignSelf: "flex-start",
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   liveLocationBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
   profileSaveBtn: {
     marginTop: 10,
   },
+  propertyActionBtnActive: { borderColor: c.emerald[300], backgroundColor: c.emerald[50] },
   propertyActionBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     height: 30,
     alignItems: "center",
@@ -4357,7 +4804,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   propertyActionText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -4368,24 +4815,24 @@ const styles = StyleSheet.create({
   },
   smallTextBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 8,
     height: 24,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   smallTextBtnText: {
-    color: "#475569",
+    color: c.slate[600],
     fontSize: 11,
     fontWeight: "700",
   },
   propertyCheckboxRow: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
     flexDirection: "row",
@@ -4393,8 +4840,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   propertyCheckboxRowActive: {
-    borderColor: "#86efac",
-    backgroundColor: "#f0fdf4",
+    borderColor: c.emerald[300],
+    backgroundColor: c.successBg,
   },
   metricsRow: {
     flexDirection: "row",
@@ -4404,21 +4851,21 @@ const styles = StyleSheet.create({
   metricBox: {
     flex: 1,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
   metricLabel: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 10,
     marginBottom: 2,
     fontWeight: "700",
     textTransform: "uppercase",
   },
   metricValue: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 14,
     fontWeight: "700",
   },
@@ -4437,9 +4884,9 @@ const styles = StyleSheet.create({
   },
   proposalBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     minWidth: 102,
     height: 34,
     flexDirection: "row",
@@ -4449,34 +4896,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   proposalBtnPrimary: {
-    borderColor: "#5eead4",
-    backgroundColor: "#ecfeff",
+    borderColor: c.emerald[300],
+    backgroundColor: c.infoBg,
   },
   proposalBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "700",
   },
   proposalBtnPrimaryText: {
-    color: "#0f766e",
+    color: c.emerald[700],
   },
   activityCard: {
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: colors.surface,
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
   },
   diaryInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     paddingVertical: 10,
     marginBottom: 8,
-    color: "#0f172a",
+    color: c.text,
     fontSize: 12,
     textAlignVertical: "top",
   },
@@ -4491,7 +4938,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   diaryCounterText: {
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
   },
   diaryActionRow: {
@@ -4502,9 +4949,9 @@ const styles = StyleSheet.create({
   voiceBtn: {
     height: 34,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
@@ -4514,15 +4961,15 @@ const styles = StyleSheet.create({
   voiceBtnText: {
     fontSize: 12,
     fontWeight: "600",
-    color: "#334155",
+    color: c.slate[700],
   },
   voiceBtnTextDisabled: {
-    color: "#94a3b8",
+    color: c.textTertiary,
   },
   addNoteBtn: {
     height: 34,
     borderRadius: 10,
-    backgroundColor: "#0f172a",
+    backgroundColor: c.text,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
@@ -4533,13 +4980,13 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   addNoteText: {
-    color: "#fff",
+    color: c.surface,
     fontSize: 12,
     fontWeight: "700",
   },
   diaryHint: {
     marginTop: 8,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 11,
   },
   diaryListWrap: {
@@ -4548,13 +4995,13 @@ const styles = StyleSheet.create({
   },
   diaryEntryCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     padding: 10,
   },
   diaryLine: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     marginBottom: 3,
   },
@@ -4566,14 +5013,14 @@ const styles = StyleSheet.create({
   },
   entryEditBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   entryEditText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "700",
   },
@@ -4585,37 +5032,37 @@ const styles = StyleSheet.create({
   },
   editCancelBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 12,
     height: 32,
     alignItems: "center",
     justifyContent: "center",
   },
   editCancelText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   editSaveBtn: {
     borderRadius: 8,
-    backgroundColor: "#0f172a",
+    backgroundColor: c.text,
     paddingHorizontal: 12,
     height: 32,
     alignItems: "center",
     justifyContent: "center",
   },
   editSaveText: {
-    color: "#fff",
+    color: c.surface,
     fontSize: 11,
     fontWeight: "700",
   },
   requestCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
     padding: 10,
     marginBottom: 8,
   },
@@ -4626,10 +5073,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   reqPending: {
-    color: "#0f766e",
-    backgroundColor: "#ecfeff",
+    color: c.emerald[700],
+    backgroundColor: c.infoBg,
     borderWidth: 1,
-    borderColor: "#99f6e4",
+    borderColor: c.successBorder,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4638,10 +5085,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   reqApproved: {
-    color: "#166534",
-    backgroundColor: "#f0fdf4",
+    color: c.emerald[800],
+    backgroundColor: c.successBg,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: c.emerald[300],
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4650,10 +5097,10 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   reqRejected: {
-    color: "#b91c1c",
-    backgroundColor: "#fef2f2",
+    color: c.rose[700],
+    backgroundColor: c.errorBg,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 2,
@@ -4664,15 +5111,15 @@ const styles = StyleSheet.create({
   reviewBtn: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 34,
     alignItems: "center",
     justifyContent: "center",
   },
   reviewBtnText: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4687,7 +5134,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   modalCard: {
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     borderRadius: 14,
     padding: 14,
   },
@@ -4716,16 +5163,16 @@ const styles = StyleSheet.create({
   },
   statusAttachBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 34,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   statusAttachBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -4733,55 +5180,55 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fff1f2",
+    backgroundColor: c.errorBg,
     alignItems: "center",
     justifyContent: "center",
   },
   uploadStatusText: {
     marginBottom: 10,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 12,
   },
   attachmentLinkText: {
     marginTop: 6,
-    color: "#2563eb",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
   },
   reviewBox: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
     padding: 8,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
   },
   reviewTitle: {
     fontSize: 12,
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "700",
     marginBottom: 4,
   },
   reviewSubBox: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 8,
     padding: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   reviewSubTitle: {
     fontSize: 11,
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "700",
     marginBottom: 2,
   },
   modalTitle: {
     fontSize: 17,
     fontWeight: "700",
-    color: "#0f172a",
+    color: c.text,
     marginBottom: 6,
   },
   modalRow: {
@@ -4798,29 +5245,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   modalCancelBtn: {
-    borderColor: "#cbd5e1",
-    backgroundColor: "#fff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
   },
   modalPrimaryBtn: {
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
+    borderColor: c.text,
+    backgroundColor: c.text,
   },
   modalDangerBtn: {
-    borderColor: "#fecaca",
-    backgroundColor: "#fff1f2",
+    borderColor: c.errorBorder,
+    backgroundColor: c.errorBg,
   },
   modalPrimaryText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
   modalCancelText: {
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "600",
     fontSize: 12,
   },
   modalDangerText: {
-    color: "#991b1b",
+    color: c.rose[800],
     fontWeight: "700",
     fontSize: 12,
   },
@@ -4828,25 +5275,25 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
   taskRow: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
     flexDirection: "row",
@@ -4855,13 +5302,13 @@ const styles = StyleSheet.create({
   },
   taskRowCompleted: {
     opacity: 0.6,
-    backgroundColor: "#f8fafc",
+    backgroundColor: c.bg,
   },
   taskCheckbox: {
     width: 20,
     height: 20,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 4,
     alignItems: "center",
     justifyContent: "center",
@@ -4869,17 +5316,17 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   taskCheckboxCompleted: {
-    backgroundColor: "#10b981",
-    borderColor: "#10b981",
+    backgroundColor: c.emerald[500],
+    borderColor: c.emerald[500],
   },
   taskTitle: {
     fontSize: 13,
     fontWeight: "600",
-    color: "#0f172a",
+    color: c.text,
   },
   taskTitleCompleted: {
     textDecorationLine: "line-through",
-    color: "#64748b",
+    color: c.textMuted,
   },
   taskMetaRow: {
     flexDirection: "row",
@@ -4910,26 +5357,26 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 8,
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   taskFormSelectText: {
     fontSize: 11,
-    color: "#334155",
+    color: c.slate[700],
   },
   taskAddBtn: {
     height: 36,
     borderRadius: 8,
-    backgroundColor: "#0f172a",
+    backgroundColor: c.text,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 16,
   },
   taskAddBtnText: {
-    color: "#fff",
+    color: c.surface,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -4944,18 +5391,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 6,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   checkboxItemActive: {
-    borderColor: "#10b981",
-    backgroundColor: "#f0fdf4",
+    borderColor: c.emerald[500],
+    backgroundColor: c.successBg,
   },
   checkboxLabel: {
     fontSize: 11,
-    color: "#334155",
+    color: c.slate[700],
   },
-});
+}));

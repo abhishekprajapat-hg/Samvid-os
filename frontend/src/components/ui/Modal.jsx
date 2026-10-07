@@ -1,8 +1,13 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import IconButton from "./IconButton";
 import { cn } from "./utils";
+
+const FOCUSABLE = [
+  "a[href]", "button:not([disabled])", "input:not([disabled]):not([type='hidden'])",
+  "select:not([disabled])", "textarea:not([disabled])", "[tabindex]:not([tabindex='-1'])",
+].join(",");
 
 const sizes = {
   sm: "max-w-sm",
@@ -21,15 +26,53 @@ const Modal = ({
   size = "md",
   className,
 }) => {
+  const dialogRef = useRef(null);
+
+  /*
+   * Escape to dismiss, plus the focus handling a dialog owes a keyboard or
+   * screen-reader user: focus moves in when it opens, Tab cycles inside it
+   * rather than wandering onto the page behind, and focus returns to whatever
+   * opened it on close.
+   */
   useEffect(() => {
     if (!open) return undefined;
 
+    const previouslyFocused = document.activeElement;
+
+    const focusables = () =>
+      Array.from(dialogRef.current?.querySelectorAll(FOCUSABLE) || [])
+        .filter((el) => el.offsetParent !== null || el === document.activeElement);
+
+    // Prefer the first real control; fall back to the dialog itself.
+    const initial = focusables()[0] || dialogRef.current;
+    initial?.focus?.();
+
     const onKeyDown = (event) => {
-      if (event.key === "Escape") onClose?.();
+      if (event.key === "Escape") {
+        onClose?.();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const items = focusables();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+    };
   }, [onClose, open]);
 
   if (!open) return null;
@@ -43,8 +86,10 @@ const Modal = ({
         onClick={onClose}
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         aria-labelledby={title ? "modal-title" : undefined}
         className={cn(
           "relative flex max-h-[90vh] w-full flex-col rounded-xl border border-slate-200 bg-white shadow-crm-panel outline-none dark:border-slate-700 dark:bg-slate-950",

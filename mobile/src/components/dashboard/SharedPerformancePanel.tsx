@@ -4,6 +4,7 @@ import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgT
 import type { Lead } from "../../types";
 import type { CompanyPerformanceOverview } from "../../services/leadService";
 import { useAuth } from "../../context/AuthContext";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const clampPercent = (value: number) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
 
@@ -94,21 +95,21 @@ const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number;
     <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
       <Defs>
         <LinearGradient id="createdBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#38bdf8" stopOpacity="0.55" />
-          <Stop offset="1" stopColor="#38bdf8" stopOpacity="0.12" />
+          <Stop offset="0" stopColor={themeColor("#4c9dd3")} stopOpacity="0.55" />
+          <Stop offset="1" stopColor={themeColor("#4c9dd3")} stopOpacity="0.12" />
         </LinearGradient>
         <LinearGradient id="closedAreaGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#10b981" stopOpacity="0.35" />
-          <Stop offset="1" stopColor="#10b981" stopOpacity="0.05" />
+          <Stop offset="0" stopColor={themeColor("#12a06a")} stopOpacity="0.35" />
+          <Stop offset="1" stopColor={themeColor("#12a06a")} stopOpacity="0.05" />
         </LinearGradient>
       </Defs>
-      <Rect x={0} y={0} width={w} height={h} fill="#fff" rx={10} />
+      <Rect x={0} y={0} width={w} height={h} fill={themeColor("#ffffff")} rx={10} />
       {[0, 1, 2, 3, 4].map((idx) => {
         const y = p + (idx / 4) * (h - p * 2);
-        return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />;
+        return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke={themeColor("#e0e5ed")} strokeDasharray="4 4" />;
       })}
       {latestActiveIdx >= 0 ? (
-        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill="#22d3ee" opacity={0.09} rx={8} />
+        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill={themeColor("#4c9dd3")} opacity={0.09} rx={8} />
       ) : null}
       {preparedRows.map((row, idx) => {
         const x = p + idx * step;
@@ -122,27 +123,27 @@ const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number;
           fill="url(#closedAreaGrad)"
         />
       ) : null}
-      <Path d={createdPath} fill="none" stroke="#0284c7" strokeWidth={2.6} />
-      <Path d={closedPath} fill="none" stroke="#10b981" strokeWidth={3} />
-      <Path d={openPath} fill="none" stroke="#1d4ed8" strokeWidth={2.2} strokeDasharray="4 3" />
+      <Path d={createdPath} fill="none" stroke={themeColor("#1f6499")} strokeWidth={2.6} />
+      <Path d={closedPath} fill="none" stroke={themeColor("#12a06a")} strokeWidth={3} />
+      <Path d={openPath} fill="none" stroke={themeColor("#1c37ab")} strokeWidth={2.2} strokeDasharray="4 3" />
       {createdPoints.map((point, idx) => (
-        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill="#0284c7" />
+        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill={themeColor("#1f6499")} />
       ))}
       {closedPoints.map((point, idx) => (
-        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill="#10b981" />
+        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill={themeColor("#12a06a")} />
       ))}
       {openPoints.map((point, idx) => (
-        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill="#1d4ed8" />
+        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill={themeColor("#1c37ab")} />
       ))}
-      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill="#0284c7">Created</SvgText>
-      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill="#10b981">Closed</SvgText>
-      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill="#1d4ed8">Open</SvgText>
+      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill={themeColor("#1f6499")}>Created</SvgText>
+      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill={themeColor("#12a06a")}>Closed</SvgText>
+      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill={themeColor("#1c37ab")}>Open</SvgText>
       {preparedRows.map((row, idx) => {
         const x = p + idx * step;
         const showLabel = preparedRows.length <= 6 || idx === 0 || idx === preparedRows.length - 1 || idx % 2 === 0;
         if (!showLabel) return null;
         return (
-          <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill="#64748b">
+          <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill={themeColor("#6c7789")}>
             {row.label}
           </SvgText>
         );
@@ -160,12 +161,12 @@ const CircularScore = ({ percent }: { percent: number }) => {
   const offset = circumference - (safe / 100) * circumference;
   return (
     <Svg width={size} height={size}>
-      <Circle cx={size / 2} cy={size / 2} r={radius} stroke="#e2e8f0" strokeWidth={stroke} fill="none" />
+      <Circle cx={size / 2} cy={size / 2} r={radius} stroke={themeColor("#e0e5ed")} strokeWidth={stroke} fill="none" />
       <Circle
         cx={size / 2}
         cy={size / 2}
         r={radius}
-        stroke="#0ea5e9"
+        stroke={themeColor("#2b7fbf")}
         strokeWidth={stroke}
         strokeLinecap="round"
         fill="none"
@@ -173,7 +174,7 @@ const CircularScore = ({ percent }: { percent: number }) => {
         strokeDashoffset={offset}
         transform={`rotate(-90 ${size / 2} ${size / 2})`}
       />
-      <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="700" fill="#0f172a">
+      <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="700" fill={themeColor("#161c24")}>
         {Math.round(safe)}%
       </SvgText>
     </Svg>
@@ -374,22 +375,22 @@ export const SharedPerformancePanel = ({
   );
 };
 
-const styles = StyleSheet.create({
+const styles = themedStyles((c) => StyleSheet.create({
   section: {
     borderWidth: 1,
-    borderColor: "#dbeafe",
+    borderColor: c.blue[100],
     borderRadius: 14,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
   },
   sectionTitle: {
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "800",
     fontSize: 20,
   },
   sectionSubTitle: {
     marginTop: 2,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 12,
   },
   graphSplit: {
@@ -398,15 +399,15 @@ const styles = StyleSheet.create({
   },
   velocityPanel: {
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: c.blue[200],
     borderRadius: 12,
-    backgroundColor: "#f8fbff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   metricLabel: {
     fontSize: 10,
     textTransform: "uppercase",
-    color: "#64748b",
+    color: c.textMuted,
     fontWeight: "700",
   },
   velocityScoreRow: {
@@ -420,27 +421,27 @@ const styles = StyleSheet.create({
   },
   velocityPercent: {
     fontSize: 36,
-    color: "#0f172a",
+    color: c.text,
     fontWeight: "800",
   },
   metricHelper: {
     fontSize: 12,
-    color: "#64748b",
+    color: c.textMuted,
   },
   chartPanel: {
     borderWidth: 1,
-    borderColor: "#dbeafe",
+    borderColor: c.blue[100],
     borderRadius: 12,
-    backgroundColor: "#ffffff",
+    backgroundColor: c.surface,
     padding: 6,
     minHeight: 210,
   },
   leaderRow: {
     marginTop: 10,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: c.blue[200],
     borderRadius: 12,
-    backgroundColor: "#f8fbff",
+    backgroundColor: c.surface,
     padding: 10,
   },
   leaderTopRow: {
@@ -452,12 +453,12 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: c.border,
     alignItems: "center",
     justifyContent: "center",
   },
   leaderRankText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "800",
   },
@@ -465,7 +466,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   progressLabel: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 20,
     fontWeight: "800",
   },
@@ -477,13 +478,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     height: 8,
     borderRadius: 99,
-    backgroundColor: "#dbeafe",
+    backgroundColor: c.blue[100],
     overflow: "hidden",
   },
   leaderFill: {
     height: "100%",
     borderRadius: 99,
-    backgroundColor: "#0ea5e9",
+    backgroundColor: c.cyan[500],
   },
   inlineActionRow: {
     marginTop: 2,
@@ -492,8 +493,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   linkTextCompact: {
-    color: "#2563eb",
+    color: c.primary,
     fontSize: 12,
     fontWeight: "600",
   },
-});
+}));

@@ -1,3 +1,4 @@
+const axios = require("axios");
 const webpush = require("web-push");
 const Subscription = require("../models/PushSubscription");
 const logger = require("../config/logger");
@@ -42,20 +43,87 @@ const buildPayload = ({ title, body, url = "/", tag = "", data = {} }) => JSON.s
 
 const GONE_STATUSES = new Set([404, 410]);
 
+/*
+ * Expo delivers to native devices through its own service, which takes a plain
+ * HTTPS call and no server credentials - so this works on a deployment that has
+ * no VAPID keys at all, and is why the web `configured` flag does not gate it.
+ *
+ * A "DeviceNotRegistered" ticket is Expo's equivalent of the 404/410 a browser
+ * push service returns: the token will never work again, so the row goes.
+ */
+const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
+
+const sendExpoBatch = async (rows, notification, result) => {
+  if (!rows.length) return;
+
+  const messages = rows.map((row) => ({
+    to: row.endpoint,
+    title: String(notification?.title || "The Office on Rent").slice(0, 120),
+    body: String(notification?.body || "").slice(0, 300),
+    // The tap handler reads `url` to decide which screen to open.
+    data: { url: String(notification?.url || "/"), ...(notification?.data || {}) },
+    sound: "default",
+    channelId: "default",
+  }));
+
+  try {
+    const response = await axios.post(EXPO_PUSH_URL, messages, {
+      headers: { "Content-Type": "application/json" },
+      timeout: 15000,
+    });
+
+    // Expo answers with one ticket per message, in the order they were sent.
+    const tickets = Array.isArray(response.data?.data) ? response.data.data : [];
+    await Promise.all(rows.map(async (row, index) => {
+      const ticket = tickets[index];
+      if (ticket?.status === "ok") {
+        result.sent += 1;
+        await Subscription.updateOne({ _id: row._id }, { $set: { lastSentAt: new Date(), failureCount: 0 } });
+        return;
+      }
+
+      if (ticket?.details?.error === "DeviceNotRegistered") {
+        await Subscription.deleteOne({ _id: row._id });
+        result.removed += 1;
+        return;
+      }
+
+      result.failed += 1;
+      await Subscription.updateOne({ _id: row._id }, { $inc: { failureCount: 1 } });
+      logger.warn({ error: ticket?.details?.error || ticket?.message, message: "Expo push delivery failed" });
+    }));
+  } catch (error) {
+    // A transport failure is not the devices' fault, so nothing is deleted.
+    result.failed += rows.length;
+    logger.warn({ error: error.message, count: rows.length, message: "Expo push request failed" });
+  }
+};
+
 /**
  * Sends to every device a user has registered. Never throws.
  * @returns {Promise<{sent: number, removed: number, failed: number}>}
  */
 const sendToUser = async (userId, notification) => {
   const result = { sent: 0, removed: 0, failed: 0 };
-  if (!configured || !userId) return result;
+  if (!userId) return result;
 
   try {
     const subscriptions = await Subscription.find({ userId }).lean();
     if (!subscriptions.length) return result;
 
+    /*
+     * Two transports, one collection. Expo devices go out even when VAPID is
+     * unset; browser subscriptions still need it, so they are skipped rather
+     * than attempted when it is missing.
+     */
+    const expoRows = subscriptions.filter((row) => row.kind === "EXPO");
+    const webRows = configured ? subscriptions.filter((row) => row.kind !== "EXPO") : [];
+
+    await sendExpoBatch(expoRows, notification, result);
+    if (!webRows.length) return result;
+
     const payload = buildPayload(notification);
-    await Promise.all(subscriptions.map(async (row) => {
+    await Promise.all(webRows.map(async (row) => {
       try {
         await webpush.sendNotification(
           { endpoint: row.endpoint, keys: row.keys },

@@ -5,6 +5,37 @@ const {
   getMyRequests,
 } = require("../services/inventoryWorkflow.service");
 
+// Channel Partners never see the owner's or key manager's contact details on
+// an existing property, including the copy attached to their own requests.
+const CHANNEL_PARTNER_ROLE = "CHANNEL_PARTNER";
+const PARTNER_HIDDEN_INVENTORY_FIELDS = [
+  "ownerName",
+  "ownerNumber",
+  "ownerWhatsappNumber",
+  "ownerType",
+  "ownerContactId",
+  "keyManagerName",
+  "keyManagerNumber",
+];
+
+const toPartnerRequestView = (request) => {
+  if (!request || typeof request !== "object") return request;
+  const row =
+    typeof request.toObject === "function" ? request.toObject() : { ...request };
+  if (row.inventoryId && typeof row.inventoryId === "object") {
+    const inventory =
+      typeof row.inventoryId.toObject === "function"
+        ? row.inventoryId.toObject()
+        : { ...row.inventoryId };
+    PARTNER_HIDDEN_INVENTORY_FIELDS.forEach((field) => delete inventory[field]);
+    row.inventoryId = inventory;
+  }
+  return row;
+};
+
+const toRoleBasedRequest = (user, request) =>
+  user?.role === CHANNEL_PARTNER_ROLE ? toPartnerRequestView(request) : request;
+
 const handleControllerError = (res, error, fallbackMessage) => {
   const statusCode = error.statusCode || 500;
   const message = statusCode >= 500 ? fallbackMessage : error.message;
@@ -26,7 +57,7 @@ exports.createRequest = async (req, res) => {
 
     return res.status(201).json({
       message: "Inventory create request submitted",
-      request,
+      request: toRoleBasedRequest(req.user, request),
     });
   } catch (error) {
     return handleControllerError(res, error, "Failed to submit create request");
@@ -46,7 +77,7 @@ exports.updateRequest = async (req, res) => {
 
     return res.status(201).json({
       message: "Inventory update request submitted",
-      request,
+      request: toRoleBasedRequest(req.user, request),
     });
   } catch (error) {
     return handleControllerError(res, error, "Failed to submit update request");
@@ -64,7 +95,7 @@ exports.deleteRequest = async (req, res) => {
 
     return res.status(201).json({
       message: "Inventory delete request submitted",
-      request,
+      request: toRoleBasedRequest(req.user, request),
     });
   } catch (error) {
     return handleControllerError(res, error, "Failed to submit delete request");
@@ -76,7 +107,7 @@ exports.getMyInventoryRequests = async (req, res) => {
     const requests = await getMyRequests({ user: req.user });
     return res.json({
       count: requests.length,
-      requests,
+      requests: requests.map((request) => toRoleBasedRequest(req.user, request)),
     });
   } catch (error) {
     return handleControllerError(res, error, "Failed to load your requests");

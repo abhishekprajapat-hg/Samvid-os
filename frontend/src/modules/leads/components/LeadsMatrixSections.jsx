@@ -1,4 +1,7 @@
 import BrokerPhoneHint from "./BrokerPhoneHint";
+import CoworkingRequirementFields from "./CoworkingRequirementFields";
+import PlaceAutocompleteInput from "../../../components/common/PlaceAutocompleteInput";
+import GoogleMapPicker from "../../../components/common/GoogleMapPicker";
 import React from "react";
 import { motion as Motion } from "framer-motion";
 import {
@@ -35,6 +38,7 @@ import ToastNotice from "../../../components/ui/ToastNotice";
 import {
   FURNISHING_OPTIONS,
   INVENTORY_TYPE_OPTIONS,
+  LEAD_SOURCE_CHANNELS,
   PLOT_LOCATION_OPTIONS,
   PLOT_OCCUPANCY_OPTIONS,
   PLOT_PURPOSE_OPTIONS,
@@ -1416,12 +1420,22 @@ export const AddLeadModal = ({
   const propertySubtypeConfig = getPropertySubtypeConfig(requirementInventoryType, requirementPropertySubtype);
   const showFurnishing = !propertySubtypeConfig || propertySubtypeConfig.showFurnishing !== false;
   const isPlotRequirement = requirementPropertySubtype === "PLOT";
-  const isFlatRequirement = requirementPropertySubtype === "APARTMENT";
+  const isCoworkingRequirement = requirementInventoryType === "COWORKING";
+  // Homes (not plots) are rented; shops and offices are leased; coworking is never bought.
+  const canRentRequirement = requirementInventoryType === "RESIDENTIAL" && !isPlotRequirement;
+  const canPurchaseRequirement = !isCoworkingRequirement;
+  const rawTransactionType = String(formData.requirementsTransactionType || "").trim().toUpperCase();
+  let transactionTypeValue = rawTransactionType;
+  if (rawTransactionType === "RENT" && !canRentRequirement) transactionTypeValue = "LEASE";
+  if (rawTransactionType === "SALE" && !canPurchaseRequirement) transactionTypeValue = "";
   const furnishingOptions = showFurnishing ? FURNISHING_OPTIONS : [];
   const furnishingValue = furnishingOptions.some((option) => option.value === formData.requirementsFurnishingStatus)
     ? formData.requirementsFurnishingStatus
     : "";
-  const budgetRangeOptions = getBudgetRangeOptions(formData.requirementsTransactionType);
+  // Coworking is always a monthly cost, whatever the deal type.
+  const budgetRangeOptions = isCoworkingRequirement
+    ? RENT_LEASE_BUDGET_RANGE_OPTIONS
+    : getBudgetRangeOptions(transactionTypeValue);
   const budgetRangeValue = getBudgetRangeOptionValue(
     formData.requirementsBudgetMin,
     formData.requirementsBudgetMax,
@@ -1442,6 +1456,11 @@ export const AddLeadModal = ({
   );
   const normalizedInventorySearchText = inventorySearchText.trim().toLowerCase();
   const filteredInventoryOptions = inventoryOptions.filter((inventory) => {
+    // Sold or blocked properties cannot be offered to a new lead; keep any the
+    // lead is already linked to so they can still be unticked.
+    const isSelected = selectedInventoryIds.has(String(inventory?._id || "").trim());
+    const status = String(inventory?.status || "Available").trim().toLowerCase();
+    if (!isSelected && status !== "available") return false;
     if (!normalizedInventorySearchText) return true;
     const inventoryLabel = getInventoryLeadLabel(inventory) || "Inventory Unit";
     const inventoryLocation = getInventoryLocationLabel(inventory);
@@ -1698,11 +1717,44 @@ export const AddLeadModal = ({
             <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="City">
               <input placeholder="City" value={formData.city} onChange={(event) => updateField("city", event.target.value)} className={inputClass} />
             </AddLeadFieldShell>
-            <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Location" className="md:col-span-2">
+            {/* Free text on purpose: any profession or business (Marketing, Lawyer, DSA...). */}
+            <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Work Profile">
               <input
-                placeholder="Add multiple locations separated by comma"
+                placeholder="e.g. Marketing, Lawyer, DSA"
+                value={formData.clientProfession || ""}
+                onChange={(event) => updateField("clientProfession", event.target.value)}
+                maxLength={120}
+                className={inputClass}
+              />
+            </AddLeadFieldShell>
+            {/* A coworking enquiry is often one person, so the firm is optional
+                and only asked for where it means something. */}
+            {requirementInventoryType === "COWORKING" ? (
+              <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Company (optional)">
+                <input placeholder="Company name" value={formData.company || ""} onChange={(event) => updateField("company", event.target.value)} className={inputClass} />
+              </AddLeadFieldShell>
+            ) : null}
+            <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Lead Source">
+              <AddLeadSelectControl inputClass={inputClass} isDark={isDark} value={formData.sourceChannel || ""} onChange={(event) => updateField("sourceChannel", event.target.value)}>
+                {LEAD_SOURCE_CHANNELS.map((option) => (
+                  <option key={option.value || "any-source"} value={option.value}>{option.label}</option>
+                ))}
+              </AddLeadSelectControl>
+            </AddLeadFieldShell>
+            <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Location" className="md:col-span-2">
+              <PlaceAutocompleteInput
+                multiValue
                 value={formData.preferredLocations}
-                onChange={(event) => updateField("preferredLocations", event.target.value)}
+                onChange={(next) => updateField("preferredLocations", next)}
+                onSelect={({ lat, lng }) => {
+                  // Coordinates only exist for a picked suggestion; a typed
+                  // locality leaves the site fields alone.
+                  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    updateField("siteLat", String(lat));
+                    updateField("siteLng", String(lng));
+                  }
+                }}
+                placeholder="Search a locality, or type several separated by comma"
                 className={inputClass}
               />
             </AddLeadFieldShell>
@@ -1717,6 +1769,20 @@ export const AddLeadModal = ({
             </AddLeadFieldShell>
           </div>
 
+          <GoogleMapPicker
+            latitude={formData.siteLat}
+            longitude={formData.siteLng}
+            onChange={({ lat, lng }) => {
+              setFormData((prev) => ({
+                ...prev,
+                siteLat: String(lat),
+                siteLng: String(lng),
+              }));
+            }}
+            heightClass="h-52 sm:h-60"
+            isDark={isDark}
+          />
+
           <div className={sectionCardClass}>
             <div className={sectionHeadingClass}>Lead Requirement (Inventory Filters)</div>
 
@@ -1728,7 +1794,7 @@ export const AddLeadModal = ({
                   ))}
                 </AddLeadSelectControl>
               </AddLeadFieldShell>
-              {requirementInventoryType ? (
+              {requirementInventoryType && requirementInventoryType !== "COWORKING" ? (
                 <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title={requirementInventoryType === "COMMERCIAL" ? "Commercial Property Type" : "Residential Property Type"}>
                   <AddLeadSelectControl inputClass={inputClass} isDark={isDark} value={formData.requirementsPropertySubtype} onChange={(event) => updateRequirementPropertySubtype(event.target.value)}>
                     <option value="">Property Type (Any)</option>
@@ -1739,10 +1805,10 @@ export const AddLeadModal = ({
                 </AddLeadFieldShell>
               ) : null}
               <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Deal Type">
-                <AddLeadSelectControl inputClass={inputClass} isDark={isDark} value={formData.requirementsTransactionType} onChange={(event) => updateTransactionType(event.target.value)}>
+                <AddLeadSelectControl inputClass={inputClass} isDark={isDark} value={transactionTypeValue} onChange={(event) => updateTransactionType(event.target.value)}>
                   <option value="">Deal Type (Any)</option>
-                  <option value="SALE">Purchase</option>
-                  {isFlatRequirement ? <option value="RENT">Rent</option> : null}
+                  {canPurchaseRequirement ? <option value="SALE">Purchase</option> : null}
+                  {canRentRequirement ? <option value="RENT">Rent</option> : null}
                   <option value="LEASE">Lease</option>
                 </AddLeadSelectControl>
               </AddLeadFieldShell>
@@ -1757,6 +1823,17 @@ export const AddLeadModal = ({
               ) : null}
             </div>
 
+            {requirementInventoryType === "COWORKING" ? (
+              <div className="mt-3">
+                <CoworkingRequirementFields
+                  value={formData.requirementsCoworking || {}}
+                  onChange={(next) => updateField("requirementsCoworking", next)}
+                  inputClass={inputClass}
+                  labelClass={fieldTitleClass}
+                />
+              </div>
+            ) : null}
+
             {isPlotRequirement ? (
               <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2">
                 <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Project Interested">
@@ -1764,14 +1841,6 @@ export const AddLeadModal = ({
                     placeholder="Project Interested"
                     value={formData.projectInterested}
                     onChange={(event) => updateField("projectInterested", event.target.value)}
-                    className={inputClass}
-                  />
-                </AddLeadFieldShell>
-                <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Client's Profession">
-                  <input
-                    placeholder="Client's Profession"
-                    value={formData.clientProfession}
-                    onChange={(event) => updateField("clientProfession", event.target.value)}
                     className={inputClass}
                   />
                 </AddLeadFieldShell>
@@ -1813,7 +1882,7 @@ export const AddLeadModal = ({
                     </AddLeadFieldShell>
                   </>
                 ) : null}
-                <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Location">
+                <AddLeadFieldShell fieldTitleClass={fieldTitleClass} title="Plot Location">
                   <AddLeadSelectControl
                     inputClass={inputClass}
                     isDark={isDark}
@@ -3071,6 +3140,18 @@ export const LeadDetailsDrawer = ({
                   : "Not configured by admin/manager"}
               </div>
             )}
+
+            <GoogleMapPicker
+              latitude={canConfigureSiteLocation ? siteLatDraft : selectedLeadSiteLat}
+              longitude={canConfigureSiteLocation ? siteLngDraft : selectedLeadSiteLng}
+              onChange={canConfigureSiteLocation ? ({ lat, lng }) => {
+                setSiteLatDraft(String(lat));
+                setSiteLngDraft(String(lng));
+              } : undefined}
+              heightClass="mt-3 h-48 sm:h-56"
+              isDark={isDark}
+              readOnly={!canConfigureSiteLocation}
+            />
 
             <div className={`mt-2 text-[10px] ${isDark ? "text-slate-400" : "text-slate-500"}`}>
               Site visit status is verified within {siteVisitRadiusMeters} meters.

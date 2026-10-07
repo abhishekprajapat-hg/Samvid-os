@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Search,
   Settings as SettingsIcon,
+  Trash2,
   UserRound,
   Users,
   XCircle,
@@ -34,6 +35,12 @@ import {
   getPendingInventoryRequests,
   rejectInventoryRequest,
 } from "../../services/inventoryService";
+import {
+  approveDeleteRequest,
+  cancelDeleteRequest,
+  getDeleteRequests,
+  rejectDeleteRequest,
+} from "../../services/deleteRequestService";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { useChatNotifications } from "../../context/useChatNotifications";
 import ToastNotice from "../../components/ui/ToastNotice";
@@ -274,6 +281,9 @@ const AdminNotifications = () => {
   const [leadRequests, setLeadRequests] = useState([]);
   const [inventoryRequests, setInventoryRequests] = useState([]);
   const [userDeleteRequests, setUserDeleteRequests] = useState([]);
+  // Deletes Managers asked for (tasks, projects, contacts, roles...). Admin
+  // sees everybody's and decides; a Manager sees their own and can cancel.
+  const [recordDeleteRequests, setRecordDeleteRequests] = useState([]);
   const [inboxTab, setInboxTab] = useState("all");
   const [dateFilter, setDateFilter] = useState("ALL");
   const [showInboxFilters, setShowInboxFilters] = useState(true);
@@ -289,6 +299,7 @@ const AdminNotifications = () => {
   const [reviewingLeadId, setReviewingLeadId] = useState("");
   const [reviewingInventoryRequestId, setReviewingInventoryRequestId] = useState("");
   const [reviewingUserDeleteRequestId, setReviewingUserDeleteRequestId] = useState("");
+  const [reviewingRecordDeleteId, setReviewingRecordDeleteId] = useState("");
   const loadNotifications = useCallback(async (asRefresh = false) => {
     try {
       if (asRefresh) {
@@ -299,7 +310,7 @@ const AdminNotifications = () => {
       setError("");
       setSuccess("");
 
-      const [leadResult, inventoryResult, userDeleteResult] = await Promise.allSettled([
+      const [leadResult, inventoryResult, userDeleteResult, recordDeleteResult] = await Promise.allSettled([
         getLeadPaymentRequests({
           approvalStatus: approvalFilter,
           limit: 300,
@@ -307,6 +318,9 @@ const AdminNotifications = () => {
         getPendingInventoryRequests(),
         userRole === "ADMIN"
           ? getAdminUserDeleteRequests({ status: "PENDING" })
+          : Promise.resolve([]),
+        ["ADMIN", "MANAGER"].includes(userRole)
+          ? getDeleteRequests({ status: "PENDING" })
           : Promise.resolve([]),
       ]);
 
@@ -327,12 +341,19 @@ const AdminNotifications = () => {
       } else {
         setUserDeleteRequests([]);
       }
+
+      setRecordDeleteRequests(
+        recordDeleteResult.status === "fulfilled" && Array.isArray(recordDeleteResult.value)
+          ? recordDeleteResult.value
+          : [],
+      );
     } catch (fetchError) {
       const message = toErrorMessage(fetchError, "Failed to load notifications");
       setError(message);
       setLeadRequests([]);
       setInventoryRequests([]);
       setUserDeleteRequests([]);
+      setRecordDeleteRequests([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -460,6 +481,17 @@ const AdminNotifications = () => {
       return searchableText.includes(normalizedQuery);
     });
   }, [normalizedQuery, userDeleteRequests]);
+
+  const filteredRecordDeleteRequests = useMemo(() => {
+    if (!normalizedQuery) return recordDeleteRequests;
+    return recordDeleteRequests.filter((request) => [
+      request?.entityLabel,
+      request?.entityName,
+      request?.requestedBy?.name,
+      request?.requestedBy?.email,
+      request?.reason,
+    ].join(" ").toLowerCase().includes(normalizedQuery));
+  }, [normalizedQuery, recordDeleteRequests]);
 
   const filteredRecentAlerts = useMemo(() => {
     if (!normalizedQuery) return recentAdminRequests;
@@ -599,6 +631,24 @@ const AdminNotifications = () => {
       });
     });
 
+    filteredRecordDeleteRequests.forEach((request) => {
+      const requestId = toObjectIdString(request?._id);
+      items.push({
+        id: `record-delete:${requestId}`,
+        kind: "record-delete",
+        category: "system",
+        status: "PENDING",
+        icon: Trash2,
+        title: `Delete ${String(request?.entityLabel || "record").toLowerCase()} request`,
+        subtitle: request?.requestedBy?.name || "-",
+        context: request?.entityName || request?.entityLabel || "-",
+        meta: request?.reason || "",
+        at: request?.createdAt,
+        request,
+        requestId,
+      });
+    });
+
     filteredRecentAlerts.forEach((alert, index) => {
       items.push({
         id: `alert:${alert?.id || index}`,
@@ -615,7 +665,7 @@ const AdminNotifications = () => {
     });
 
     return items.sort((x, y) => new Date(y.at || 0).getTime() - new Date(x.at || 0).getTime());
-  }, [filteredLeadRequests, filteredInventoryRequests, filteredUserDeleteRequests, filteredRecentAlerts]);
+  }, [filteredLeadRequests, filteredInventoryRequests, filteredUserDeleteRequests, filteredRecordDeleteRequests, filteredRecentAlerts]);
 
   const dateFilteredItems = useMemo(
     () => inboxItems.filter((item) => withinDateFilter(item.at, dateFilter)),
@@ -807,6 +857,60 @@ const AdminNotifications = () => {
       setError(toErrorMessage(reviewError, "Failed to reject user delete request"));
     } finally {
       setReviewingUserDeleteRequestId("");
+    }
+  }, [loadNotifications]);
+
+  const handleApproveRecordDelete = useCallback(async (requestId) => {
+    const resolvedId = String(requestId || "");
+    if (!resolvedId) return;
+    if (!window.confirm("Approve and delete this record now? This cannot be undone.")) return;
+    try {
+      setReviewingRecordDeleteId(resolvedId);
+      setError("");
+      setSuccess("");
+      const result = await approveDeleteRequest(resolvedId, "Approved from notifications");
+      setSuccess(result?.message || "Delete approved");
+      await loadNotifications(true);
+    } catch (reviewError) {
+      setError(toErrorMessage(reviewError, "Failed to approve delete request"));
+    } finally {
+      setReviewingRecordDeleteId("");
+    }
+  }, [loadNotifications]);
+
+  const handleRejectRecordDelete = useCallback(async (requestId) => {
+    const resolvedId = String(requestId || "");
+    if (!resolvedId) return;
+    const reason = window.prompt("Why are you rejecting this delete?", "Keep this record");
+    if (reason === null) return;
+    try {
+      setReviewingRecordDeleteId(resolvedId);
+      setError("");
+      setSuccess("");
+      await rejectDeleteRequest(resolvedId, String(reason || "").trim());
+      setSuccess("Delete request rejected; nothing was deleted");
+      await loadNotifications(true);
+    } catch (reviewError) {
+      setError(toErrorMessage(reviewError, "Failed to reject delete request"));
+    } finally {
+      setReviewingRecordDeleteId("");
+    }
+  }, [loadNotifications]);
+
+  const handleCancelRecordDelete = useCallback(async (requestId) => {
+    const resolvedId = String(requestId || "");
+    if (!resolvedId) return;
+    try {
+      setReviewingRecordDeleteId(resolvedId);
+      setError("");
+      setSuccess("");
+      await cancelDeleteRequest(resolvedId);
+      setSuccess("Delete request cancelled");
+      await loadNotifications(true);
+    } catch (reviewError) {
+      setError(toErrorMessage(reviewError, "Failed to cancel delete request"));
+    } finally {
+      setReviewingRecordDeleteId("");
     }
   }, [loadNotifications]);
 
@@ -1455,10 +1559,13 @@ const AdminNotifications = () => {
                   <div className={`mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4 ${
                     isDark ? "border-white/5" : "border-slate-100"
                   }`}>
+                    {String(request?.type || "").toLowerCase() === "delete" && userRole !== "ADMIN" ? (
+                      <p className={`mr-auto text-xs ${titleCls}`}>Only an Admin can approve a delete request.</p>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => handleApproveInventoryRequest(selectedItem.requestId)}
-                      disabled={isReviewing}
+                      disabled={isReviewing || (String(request?.type || "").toLowerCase() === "delete" && userRole !== "ADMIN")}
                       className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
                         isDark ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
                       }`}
@@ -1476,6 +1583,88 @@ const AdminNotifications = () => {
                     >
                       <XCircle size={14} /> Reject
                     </button>
+                  </div>
+                </>
+              );
+            })()
+          ) : selectedItem.kind === "record-delete" ? (
+            (() => {
+              const request = selectedItem.request || {};
+              const isReviewing = reviewingRecordDeleteId === selectedItem.requestId;
+              const canDecide = userRole === "ADMIN";
+              return (
+                <>
+                  {renderPanelHeader(
+                    Trash2,
+                    isDark ? "bg-rose-500/10 text-rose-300" : "bg-rose-50 text-rose-600",
+                    "Delete request",
+                    canDecide
+                      ? `${request?.requestedBy?.name || "A Manager"} wants to delete this ${String(request?.entityLabel || "record").toLowerCase()}`
+                      : "Waiting for an Admin to approve",
+                    <span className={`rounded-full border px-3 py-1 text-[11px] font-bold ${getApprovalTone("PENDING", isDark)}`}>
+                      PENDING
+                    </span>,
+                    null,
+                  )}
+
+                  <div className="mt-4 space-y-3">
+                    {renderSection(FileText, "Overview", renderFieldGrid(
+                      [
+                        ["Record", request?.entityLabel || "-"],
+                        ["Name", request?.entityName || "-"],
+                      ],
+                      [
+                        ["Requested by", formatUserWithRole(request?.requestedBy)],
+                        ["Requested at", formatDate(request?.createdAt)],
+                      ],
+                    ))}
+                    {renderSection(FileText, "Reason", (
+                      <p className={`text-xs ${titleCls}`}>{request?.reason || "-"}</p>
+                    ))}
+                    {renderSection(Clock3, "Activity timeline", renderTimeline([
+                      { label: "Requested", text: "Delete request created", at: request?.createdAt, done: true },
+                      { label: "Pending", text: "Nothing is deleted until an Admin approves", at: null, done: false },
+                    ]))}
+                  </div>
+
+                  <div className={`mt-4 flex flex-wrap items-center justify-end gap-2 border-t pt-4 ${
+                    isDark ? "border-white/5" : "border-slate-100"
+                  }`}>
+                    {canDecide ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleApproveRecordDelete(selectedItem.requestId)}
+                          disabled={isReviewing}
+                          className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
+                            isDark ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          }`}
+                        >
+                          {isReviewing ? <Loader size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                          Approve &amp; delete
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRejectRecordDelete(selectedItem.requestId)}
+                          disabled={isReviewing}
+                          className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${
+                            isDark ? "border-rose-500/40 bg-rose-500/10 text-rose-200" : "border-rose-200 bg-rose-50 text-rose-700"
+                          }`}
+                        >
+                          <XCircle size={14} /> Reject
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleCancelRecordDelete(selectedItem.requestId)}
+                        disabled={isReviewing}
+                        className={`flex h-10 items-center gap-1.5 rounded-xl border px-4 text-sm font-semibold disabled:opacity-60 ${btnCls}`}
+                      >
+                        {isReviewing ? <Loader size={14} className="animate-spin" /> : <XCircle size={14} />}
+                        Cancel request
+                      </button>
+                    )}
                   </div>
                 </>
               );

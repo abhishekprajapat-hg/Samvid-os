@@ -19,6 +19,10 @@ const RECEIPT_CATEGORIES = Object.freeze(["RECEIPT", "INVOICE", "OTHER"]);
 
 const EXPENSE_ALLOWED_CREATE_FIELDS = Object.freeze([
   "propertyId",
+  "inventoryId",
+  "leadId",
+  "contactId",
+  "referenceNumber",
   "category",
   "description",
   "amount",
@@ -29,6 +33,10 @@ const EXPENSE_ALLOWED_CREATE_FIELDS = Object.freeze([
 ]);
 
 const EXPENSE_ALLOWED_UPDATE_FIELDS = Object.freeze([
+  "inventoryId",
+  "leadId",
+  "contactId",
+  "referenceNumber",
   "category",
   "description",
   "amount",

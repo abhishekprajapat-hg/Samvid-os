@@ -1,16 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View, useWindowDimensions } from "react-native";
 import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
+import { Icon } from "../../components/ui/Icon";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import * as DocumentPicker from "expo-document-picker";
 import { addLeadDiaryEntry, getAllLeads } from "../../services/leadService";
 import { uploadChatFile } from "../../services/chatService";
 import { deleteInventoryAsset, getInventoryAssetActivity, getInventoryAssetById, requestInventoryStatusChange, updateInventoryAsset } from "../../services/inventoryService";
+import { createInventoryShareLink } from "../../services/inventoryService";
+import { toAbsoluteUrl } from "../../services/uploadService";
+import { getWebAppOrigin } from "../../services/api";
 import { toErrorMessage } from "../../utils/errorMessage";
 import { formatDateTime } from "../../utils/date";
 import { useAuth } from "../../context/AuthContext";
 import type { InventoryActivity, InventoryAsset } from "../../types";
+import { themedStyles, themeColor } from "../../theme/themedStyles";
 
 const STATUS_OPTIONS = ["Available", "Blocked", "Sold"];
 const STATUS_MODAL_OPTIONS = new Set(["Available", "Blocked", "Sold"]);
@@ -594,27 +598,69 @@ export const InventoryDetailsScreen = () => {
     }
   };
 
+  /*
+   * Web's "Share to chat": the property goes into a conversation as a card
+   * the other person can open, rather than as a pasted description.
+   */
+  const handleShareToChat = () => {
+    if (!asset?._id) return;
+    const images = Array.isArray((asset as any).images) ? (asset as any).images : [];
+    navigation.navigate("Chat", {
+      shareProperty: {
+        inventoryId: String(asset._id),
+        title: String(asset.title || "Inventory Unit"),
+        location: String(asset.location || ""),
+        price: Number(asset.price) || 0,
+        status: String(asset.status || ""),
+        image: images[0] ? toAbsoluteUrl(String(images[0])) : "",
+      },
+    });
+  };
+
   const handleShareAsset = async () => {
     if (!asset) return;
     try {
-      await Share.share({
-        message: `Inventory: ${asset.title}\nLocation: ${asset.location || "-"}\nType: ${asset.type || "-"}\nPrice: Rs ${Number(asset.price || 0).toLocaleString("en-IN")}`,
-      });
+      /*
+       * Web mints a tokenised public link and copies it; mobile used to share a
+       * plain text blurb, so the recipient got a description instead of
+       * something they could open. Same link now, handed to the native share
+       * sheet, with the summary kept as the accompanying text.
+       */
+      const summary = `Inventory: ${asset.title}\nLocation: ${asset.location || "-"}\nType: ${asset.type || "-"}\nPrice: Rs ${Number(asset.price || 0).toLocaleString("en-IN")}`;
+
+      let message = summary;
+      try {
+        const { shareToken } = await createInventoryShareLink(String(asset._id || ""));
+        if (shareToken) {
+          message = `${summary}\n\n${getWebAppOrigin()}/shared/inventory/${shareToken}`;
+        }
+      } catch {
+        // A share that cannot mint a token still beats no share at all.
+      }
+
+      await Share.share({ message });
     } catch (e) {
       setError(toErrorMessage(e, "Failed to share asset"));
     }
   };
 
+  /* Web's full property form; the page reloads when the form hands back. */
+  const reloadOnReturnRef = useRef(false);
+  useEffect(
+    () =>
+      navigation.addListener?.("focus", () => {
+        if (!reloadOnReturnRef.current) return;
+        reloadOnReturnRef.current = false;
+        void loadDetails();
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [navigation, assetId],
+  );
+
   const handleEditAsset = () => {
     if (!asset || !canEditAsset) return;
-    navigation.navigate("MainTabs", {
-      screen: "Inventory",
-      params: {
-        editAssetId: asset._id,
-        editAsset: asset,
-        editAt: Date.now(),
-      },
-    });
+    reloadOnReturnRef.current = true;
+    navigation.navigate("PropertyForm", { assetId: asset._id });
   };
 
   const handleDeleteAsset = async () => {
@@ -654,7 +700,7 @@ export const InventoryDetailsScreen = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#0f172a" size="large" />
+        <ActivityIndicator color={themeColor("#161c24")} size="large" />
       </View>
     );
   }
@@ -678,15 +724,18 @@ export const InventoryDetailsScreen = () => {
           <View style={styles.detailActions}>
             {canEditAsset ? (
               <Pressable style={styles.detailIconBtn} onPress={handleEditAsset}>
-                <Ionicons name="create-outline" size={15} color="#64748b" />
+                <Icon name="create-outline" size={15} color={themeColor("#6c7789")} />
               </Pressable>
             ) : null}
-            <Pressable style={styles.detailIconBtn} onPress={() => void handleShareAsset()}>
-              <Ionicons name="share-social-outline" size={15} color="#0891b2" />
+            <Pressable style={styles.detailIconBtn} onPress={handleShareToChat} accessibilityLabel="Share to chat">
+              <Icon name="chatbubble" size={15} color={themeColor("#1f6499")} />
+            </Pressable>
+            <Pressable style={styles.detailIconBtn} onPress={() => void handleShareAsset()} accessibilityLabel="Share link">
+              <Icon name="share-social-outline" size={15} color={themeColor("#1f6499")} />
             </Pressable>
             {isAdmin ? (
               <Pressable style={[styles.detailIconBtn, styles.detailIconDanger]} onPress={() => void handleDeleteAsset()}>
-                <Ionicons name="trash-outline" size={15} color="#ef4444" />
+                <Icon name="trash-outline" size={15} color={themeColor("#d64545")} />
               </Pressable>
             ) : null}
           </View>
@@ -896,7 +945,7 @@ export const InventoryDetailsScreen = () => {
                 />
                 <View style={styles.dateFieldActionRow}>
                   <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("remainingDueDate")}>
-                    <Ionicons name="calendar-outline" size={14} color="#334155" />
+                    <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                     <Text style={styles.dateFieldBtnText}>Pick due date</Text>
                   </Pressable>
                 </View>
@@ -910,7 +959,7 @@ export const InventoryDetailsScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -932,7 +981,7 @@ export const InventoryDetailsScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -948,7 +997,7 @@ export const InventoryDetailsScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("chequeDate")}>
-                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick cheque date</Text>
                       </Pressable>
                     </View>
@@ -994,7 +1043,7 @@ export const InventoryDetailsScreen = () => {
                     />
                     <View style={styles.dateFieldActionRow}>
                       <Pressable style={styles.dateFieldBtn} onPress={() => openSoldDatePicker("paymentDate")}>
-                        <Ionicons name="calendar-outline" size={14} color="#334155" />
+                        <Icon name="calendar-outline" size={14} color={themeColor("#39424f")} />
                         <Text style={styles.dateFieldBtnText}>Pick payment date</Text>
                       </Pressable>
                     </View>
@@ -1023,7 +1072,7 @@ export const InventoryDetailsScreen = () => {
                       onPress={() => setStatusAttachment(null)}
                       disabled={saving}
                     >
-                      <Ionicons name="close" size={16} color="#991b1b" />
+                      <Icon name="close" size={16} color={themeColor("#741f1f")} />
                     </Pressable>
                   ) : null}
                 </View>
@@ -1171,14 +1220,14 @@ export const InventoryDetailsScreen = () => {
   );
 };
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#f8fafc", padding: 12 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc" },
+const styles = themedStyles((c) => StyleSheet.create({
+  root: { flex: 1, backgroundColor: c.bg, padding: 12 },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: c.bg },
   card: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 12,
     marginBottom: 10,
   },
@@ -1188,7 +1237,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10,
   },
-  name: { flex: 1, fontSize: 18, fontWeight: "700", color: "#0f172a" },
+  name: { flex: 1, fontSize: 18, fontWeight: "700", color: c.text },
   detailActions: {
     flexDirection: "row",
     alignItems: "center",
@@ -1199,23 +1248,23 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: "#e2e8f0",
-    backgroundColor: "#ffffff",
+    borderColor: c.border,
+    backgroundColor: c.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   detailIconDanger: {
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
   },
-  section: { marginBottom: 8, color: "#334155", fontWeight: "700" },
-  meta: { marginTop: 4, fontSize: 12, color: "#64748b" },
-  reasonMeta: { marginTop: 5, fontSize: 12, color: "#b45309", fontWeight: "600" },
+  section: { marginBottom: 8, color: c.slate[700], fontWeight: "700" },
+  meta: { marginTop: 4, fontSize: 12, color: c.textMuted },
+  reasonMeta: { marginTop: 5, fontSize: 12, color: c.amber[700], fontWeight: "600" },
   rowWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sectionInline: {
     marginTop: 10,
     fontSize: 12,
     fontWeight: "700",
-    color: "#334155",
+    color: c.slate[700],
   },
   amenityWrap: {
     marginTop: 6,
@@ -1225,14 +1274,14 @@ const styles = StyleSheet.create({
   },
   amenityChip: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 14,
     paddingHorizontal: 10,
     paddingVertical: 4,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
   amenityText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
@@ -1244,51 +1293,51 @@ const styles = StyleSheet.create({
     width: 120,
     height: 90,
     borderRadius: 8,
-    backgroundColor: "#e2e8f0",
+    backgroundColor: c.border,
   },
   docLink: {
     marginTop: 6,
     borderWidth: 1,
-    borderColor: "#bfdbfe",
+    borderColor: c.blue[200],
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: "#eff6ff",
+    backgroundColor: c.blue[50],
   },
   docLinkText: {
-    color: "#1d4ed8",
+    color: c.accentStrong,
     fontWeight: "600",
     fontSize: 12,
   },
   chip: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 16,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
   },
-  chipActive: { borderColor: "#0f172a", backgroundColor: "#0f172a" },
-  chipText: { color: "#334155", fontSize: 12 },
-  chipTextActive: { color: "#fff" },
+  chipActive: { borderColor: c.text, backgroundColor: c.text },
+  chipText: { color: c.slate[700], fontSize: 12 },
+  chipTextActive: { color: c.surface },
   activityCard: {
     borderWidth: 1,
-    borderColor: "#e2e8f0",
+    borderColor: c.border,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 10,
     marginBottom: 8,
   },
   actionText: {
     fontSize: 13,
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "600",
   },
   reasonModalCard: {
     width: "100%",
     maxHeight: "88%",
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 14,
   },
   reasonModalContent: {
@@ -1297,26 +1346,26 @@ const styles = StyleSheet.create({
   reasonInput: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     minHeight: 92,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     textAlignVertical: "top",
   },
   selectInput: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
     minHeight: 40,
     paddingHorizontal: 12,
     justifyContent: "center",
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     marginTop: 10,
   },
   selectInputText: {
-    color: "#0f172a",
+    color: c.text,
     fontSize: 13,
     fontWeight: "600",
   },
@@ -1328,9 +1377,9 @@ const styles = StyleSheet.create({
   dateFieldBtn: {
     height: 30,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
@@ -1338,16 +1387,16 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   dateFieldBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 11,
     fontWeight: "600",
   },
   selectMenu: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     maxHeight: 180,
     overflow: "hidden",
   },
@@ -1358,10 +1407,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: "#f1f5f9",
+    borderBottomColor: c.surfaceMuted,
   },
   selectMenuItemText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -1374,16 +1423,16 @@ const styles = StyleSheet.create({
   },
   statusAttachBtn: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 10,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     height: 34,
     paddingHorizontal: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   statusAttachBtnText: {
-    color: "#334155",
+    color: c.slate[700],
     fontSize: 12,
     fontWeight: "600",
   },
@@ -1391,15 +1440,15 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fff1f2",
+    backgroundColor: c.errorBg,
     alignItems: "center",
     justifyContent: "center",
   },
   uploadStatusText: {
     marginBottom: 10,
-    color: "#64748b",
+    color: c.textMuted,
     fontSize: 12,
   },
   modalActionRow: {
@@ -1418,21 +1467,21 @@ const styles = StyleSheet.create({
   },
   modalActionGhost: {
     borderWidth: 1,
-    borderColor: "#cbd5e1",
-    backgroundColor: "#fff",
+    borderColor: c.borderStrong,
+    backgroundColor: c.surface,
   },
   modalActionPrimary: {
     borderWidth: 1,
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
+    borderColor: c.text,
+    backgroundColor: c.text,
   },
   modalActionGhostText: {
-    color: "#334155",
+    color: c.slate[700],
     fontWeight: "600",
     fontSize: 12,
   },
   modalActionPrimaryText: {
-    color: "#fff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
@@ -1444,7 +1493,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   timelineToggleText: {
-    color: "#1d4ed8",
+    color: c.accentStrong,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -1464,14 +1513,14 @@ const styles = StyleSheet.create({
     right: 16,
     zIndex: 2,
     borderRadius: 10,
-    backgroundColor: "#0f172a",
+    backgroundColor: c.text,
     borderWidth: 1,
-    borderColor: "#334155",
+    borderColor: c.slate[700],
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   viewerCloseText: {
-    color: "#ffffff",
+    color: c.surface,
     fontWeight: "700",
     fontSize: 12,
   },
@@ -1495,7 +1544,7 @@ const styles = StyleSheet.create({
   viewerCounter: {
     position: "absolute",
     bottom: 24,
-    color: "#e2e8f0",
+    color: c.border,
     fontSize: 12,
     fontWeight: "700",
   },
@@ -1507,9 +1556,9 @@ const styles = StyleSheet.create({
   },
   webDateModalCard: {
     borderWidth: 1,
-    borderColor: "#dbe3ee",
+    borderColor: c.border,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: c.surface,
     padding: 14,
   },
   webDateInput: {
@@ -1517,30 +1566,30 @@ const styles = StyleSheet.create({
     width: "100%",
     minHeight: 40,
     borderWidth: 1,
-    borderColor: "#cbd5e1",
+    borderColor: c.borderStrong,
     borderRadius: 9,
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 14,
-    color: "#0f172a",
-    backgroundColor: "#fff",
+    color: c.text,
+    backgroundColor: c.surface,
   },
   error: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#fecaca",
+    borderColor: c.errorBorder,
     borderRadius: 10,
-    backgroundColor: "#fef2f2",
-    color: "#b91c1c",
+    backgroundColor: c.errorBg,
+    color: c.rose[700],
   },
   success: {
     marginBottom: 10,
     padding: 10,
     borderWidth: 1,
-    borderColor: "#86efac",
+    borderColor: c.emerald[300],
     borderRadius: 10,
-    backgroundColor: "#f0fdf4",
-    color: "#166534",
+    backgroundColor: c.successBg,
+    color: c.emerald[800],
   },
-});
+}));

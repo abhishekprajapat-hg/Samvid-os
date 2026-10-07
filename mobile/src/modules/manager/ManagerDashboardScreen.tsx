@@ -1,248 +1,183 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation } from "@react-navigation/native";
-import DateTimePicker from "@react-native-community/datetimepicker";
-import { Ionicons } from "@expo/vector-icons";
-import Svg, { Circle, Defs, Line, LinearGradient, Path, Rect, Stop, Text as SvgText } from "react-native-svg";
-import { Screen } from "../../components/common/Screen";
+import { Glyph, type GlyphName } from "../../components/ui/Glyph";
 import { useAuth } from "../../context/AuthContext";
-import { getAllLeads, getCompanyPerformanceOverview } from "../../services/leadService";
+import { getAllLeads } from "../../services/leadService";
 import { getInventoryAssets } from "../../services/inventoryService";
 import { toErrorMessage } from "../../utils/errorMessage";
-import type { Lead, InventoryAsset } from "../../types";
-import type { CompanyPerformanceOverview } from "../../services/leadService";
+import { brand, brandStyles, layout, round, type as t } from "../../theme/brand";
+import type { InventoryAsset, Lead } from "../../types";
 
-const PIPELINE_STATUSES = new Set(["CONTACTED", "INTERESTED", "SITE_VISIT"]);
-const ACTIVE_STATUSES = new Set(["NEW", "CONTACTED", "INTERESTED", "SITE_VISIT"]);
+/*
+ * Home, drawn to the mobile comp.
+ *
+ * The comp is not the web dashboard reorganised for a phone - it is a
+ * different page: a greeting, four headline numbers, a revenue strip, four
+ * quick actions, the inventory split, and the two things happening next. The
+ * web page's occupancy area chart, inventory donut, pipeline snapshot, recent
+ * activity, revenue bar chart and team footer are not on it, so they are not
+ * here. Everything they linked to is still reachable - Inventory, Leads,
+ * Finance and Calendar all have their own destinations.
+ *
+ * The numbers come from the same endpoints the old page used, so the data
+ * contract in docs/mobile/00_MOBILE_PARITY_SPEC.md is unchanged.
+ *
+ * Sizes are the comp's, measured at 2x off a 430pt frame: an 18pt gutter, 9pt
+ * between grid cells, 100pt stat tiles, a 70pt revenue strip. Widths flex, so
+ * the same screen holds at 320pt.
+ */
+
 const REFRESH_INTERVAL_MS = 30000;
 
-const formatCurrency = (value: number) => `Rs ${Math.round(value).toLocaleString("en-IN")}`;
-
-const toPercent = (value: number) => `${Math.round(value)}%`;
-const clampPercent = (value: number) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-const pad2 = (value: number) => String(value).padStart(2, "0");
-const toDateInputValue = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
-const toMonthParam = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}`;
-const getLeadDate = (lead: Lead) => {
-  const raw = lead.updatedAt || lead.createdAt || "";
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-const toWeekBuckets = (anchorDate: Date, weeks = 8) => {
-  const end = new Date(anchorDate);
-  end.setHours(23, 59, 59, 999);
-  const buckets: Array<{ label: string; start: Date; end: Date; created: number; closed: number; open: number }> = [];
-  for (let i = weeks - 1; i >= 0; i -= 1) {
-    const weekEnd = new Date(end);
-    weekEnd.setDate(end.getDate() - i * 7);
-    const weekStart = new Date(weekEnd);
-    weekStart.setDate(weekEnd.getDate() - 6);
-    weekStart.setHours(0, 0, 0, 0);
-    buckets.push({
-      label: `${weekStart.getDate()} ${weekStart.toLocaleString("en-IN", { month: "short" })}`,
-      start: weekStart,
-      end: weekEnd,
-      created: 0,
-      closed: 0,
-      open: 0,
-    });
-  }
-  return buckets;
-};
-const findBucketIndex = (dateValue: string | undefined, buckets: ReturnType<typeof toWeekBuckets>) => {
-  if (!dateValue) return -1;
-  const when = new Date(dateValue);
-  if (Number.isNaN(when.getTime())) return -1;
-  return buckets.findIndex((bucket) => when >= bucket.start && when <= bucket.end);
+/*
+ * Fields the API returns on a lead that the shared Lead type does not carry
+ * yet - the dashboard reads all three straight off the raw payload.
+ */
+type DashboardLead = Lead & {
+  siteVisitDate?: string;
+  dealPayment?: { amount?: number } | null;
+  saleDetails?: { amount?: number } | null;
 };
 
-const MiniLineChart = ({ rows }: { rows: Array<{ label: string; created: number; closed: number; open: number }> }) => {
-  const w = 330;
-  const h = 200;
-  const p = 18;
-  const preparedRows = useMemo(() => {
-    if (!Array.isArray(rows) || rows.length === 0) return [{ label: "-", created: 0, closed: 0, open: 0 }];
-    const firstActiveIdx = rows.findIndex((row) => Math.max(row.created, row.closed, row.open) > 0);
-    if (firstActiveIdx <= 0) return rows;
-    const start = Math.max(0, firstActiveIdx - 1);
-    const trimmed = rows.slice(start);
-    if (trimmed.length >= 4) return trimmed;
-    const needed = 4 - trimmed.length;
-    const prefix = rows.slice(Math.max(0, start - needed), start);
-    return [...prefix, ...trimmed];
-  }, [rows]);
-  const rawMax = Math.max(1, ...preparedRows.map((row) => Math.max(row.created, row.closed, row.open)));
-  const maxY = rawMax <= 5 ? rawMax + 1 : Math.ceil(rawMax * 1.15);
-  const yRange = Math.max(1, maxY);
-  const step = (w - p * 2) / Math.max(preparedRows.length - 1, 1);
-  const toPoints = (selector: (row: (typeof rows)[number]) => number) =>
-    preparedRows.map((row, idx) => ({
-      x: p + idx * step,
-      y: h - p - (selector(row) / yRange) * (h - p * 2),
-    }));
-  const toSmoothPath = (points: Array<{ x: number; y: number }>) => {
-    if (points.length <= 1) {
-      const first = points[0] || { x: p, y: h - p };
-      return `M ${first.x} ${first.y}`;
-    }
-    let path = `M ${points[0].x} ${points[0].y}`;
-    for (let i = 0; i < points.length - 1; i += 1) {
-      const p0 = points[i - 1] || points[i];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[i + 2] || p2;
-      const cp1x = p1.x + (p2.x - p0.x) / 6;
-      const cp1y = p1.y + (p2.y - p0.y) / 6;
-      const cp2x = p2.x - (p3.x - p1.x) / 6;
-      const cp2y = p2.y - (p3.y - p1.y) / 6;
-      path += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2.x} ${p2.y}`;
-    }
-    return path;
-  };
-  const createdPoints = toPoints((r) => r.created);
-  const closedPoints = toPoints((r) => r.closed);
-  const openPoints = toPoints((r) => r.open);
-  const createdPath = toSmoothPath(createdPoints);
-  const closedPath = toSmoothPath(closedPoints);
-  const openPath = toSmoothPath(openPoints);
-  const latestActiveIdx = preparedRows.reduce((acc, row, idx) => (Math.max(row.created, row.closed, row.open) > 0 ? idx : acc), -1);
-  const latestBandX = latestActiveIdx >= 0 ? p + latestActiveIdx * step - step / 2 : -1;
-  const latestBandW = Math.max(16, step);
-  const barWidth = Math.min(18, Math.max(8, step * 0.34));
+type DatedLead = DashboardLead & { when: Date | null };
 
-  return (
-    <Svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`}>
-      <Defs>
-        <LinearGradient id="createdBarGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#38bdf8" stopOpacity="0.55" />
-          <Stop offset="1" stopColor="#38bdf8" stopOpacity="0.12" />
-        </LinearGradient>
-        <LinearGradient id="closedAreaGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#10b981" stopOpacity="0.35" />
-          <Stop offset="1" stopColor="#10b981" stopOpacity="0.05" />
-        </LinearGradient>
-      </Defs>
-      <Rect x={0} y={0} width={w} height={h} fill="#fff" rx={10} />
-      {[0, 1, 2, 3, 4].map((idx) => {
-        const y = p + (idx / 4) * (h - p * 2);
-        return <Line key={idx} x1={p} y1={y} x2={w - p} y2={y} stroke="#e2e8f0" strokeDasharray="4 4" />;
-      })}
-      {latestActiveIdx >= 0 ? (
-        <Rect x={latestBandX} y={p} width={latestBandW} height={h - p * 2} fill="#22d3ee" opacity={0.09} rx={8} />
-      ) : null}
-      {preparedRows.map((row, idx) => {
-        const x = p + idx * step;
-        const barBaseY = h - p;
-        const barHeight = (row.created / yRange) * (h - p * 2);
-        return <Rect key={`${row.label}-bar`} x={x - barWidth / 2} y={barBaseY - barHeight} width={barWidth} height={barHeight} fill="url(#createdBarGrad)" rx={5} />;
-      })}
-      {closedPoints.length > 1 ? (
-        <Path
-          d={`${closedPath} L ${closedPoints[closedPoints.length - 1].x} ${h - p} L ${closedPoints[0].x} ${h - p} Z`}
-          fill="url(#closedAreaGrad)"
-        />
-      ) : null}
-      <Path d={createdPath} fill="none" stroke="#0284c7" strokeWidth={2.6} />
-      <Path d={closedPath} fill="none" stroke="#10b981" strokeWidth={3} />
-      <Path d={openPath} fill="none" stroke="#1d4ed8" strokeWidth={2.2} strokeDasharray="4 3" />
-      {createdPoints.map((point, idx) => (
-        <Circle key={`c-${idx}`} cx={point.x} cy={point.y} r={2.2} fill="#0284c7" />
-      ))}
-      {closedPoints.map((point, idx) => (
-        <Circle key={`cl-${idx}`} cx={point.x} cy={point.y} r={2.4} fill="#10b981" />
-      ))}
-      {openPoints.map((point, idx) => (
-        <Circle key={`o-${idx}`} cx={point.x} cy={point.y} r={2} fill="#1d4ed8" />
-      ))}
-      <SvgText x={w - p} y={12} fontSize="8" textAnchor="end" fill="#0284c7">Created</SvgText>
-      <SvgText x={w - p - 48} y={12} fontSize="8" textAnchor="end" fill="#10b981">Closed</SvgText>
-      <SvgText x={w - p - 88} y={12} fontSize="8" textAnchor="end" fill="#1d4ed8">Open</SvgText>
-      {preparedRows.map((row, idx) => {
-        const x = p + idx * step;
-        const showLabel = preparedRows.length <= 6 || idx === 0 || idx === preparedRows.length - 1 || idx % 2 === 0;
-        if (!showLabel) return null;
-        return (
-          <SvgText key={row.label} x={x} y={h - 6} fontSize="8" textAnchor="middle" fill="#64748b">
-            {row.label}
-          </SvgText>
-        );
-      })}
-    </Svg>
-  );
+/* The comp writes the amount tight against the sign: "0", not " 0". */
+const money = (value: number) => {
+  const amount = Number(value || 0);
+  return amount >= 100000
+    ? `₹${(amount / 100000).toFixed(1)}L`
+    : `₹${amount.toLocaleString("en-IN")}`;
 };
 
-const CircularScore = ({ percent }: { percent: number }) => {
-  const size = 86;
-  const stroke = 10;
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const safe = clampPercent(percent);
-  const offset = circumference - (safe / 100) * circumference;
-  return (
-    <Svg width={size} height={size}>
-      <Circle cx={size / 2} cy={size / 2} r={radius} stroke="#e2e8f0" strokeWidth={stroke} fill="none" />
-      <Circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        stroke="#0ea5e9"
-        strokeWidth={stroke}
-        strokeLinecap="round"
-        fill="none"
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        transform={`rotate(-90 ${size / 2} ${size / 2})`}
-      />
-      <SvgText x={size / 2} y={size / 2 + 4} textAnchor="middle" fontSize="13" fontWeight="700" fill="#0f172a">
-        {Math.round(safe)}%
-      </SvgText>
-    </Svg>
-  );
+const dateOf = (value?: string | null) => {
+  const parsed = value ? new Date(value) : null;
+  return parsed && !Number.isNaN(parsed.getTime()) ? parsed : null;
 };
+
+const timeOf = (value: Date) =>
+  value
+    .toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true })
+    .toUpperCase();
+
+/*
+ * "Tue, 22 Sep" - the comp's date line.
+ *
+ * Spelled out rather than handed to Intl: recent ICU renders September's short
+ * month as "Sept", which is four characters where the comp has three and wide
+ * enough to change the line.
+ */
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const dayLabel = (value: Date) =>
+  `${WEEKDAYS[value.getDay()]}, ${String(value.getDate()).padStart(2, "0")} ${MONTHS[value.getMonth()]}`;
+
+const greetingFor = (hour: number) =>
+  hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+/** The comp greets by first name. */
+const firstNameOf = (name?: string) => String(name || "").trim().split(/\s+/)[0] || "there";
+
+const statusLabel = (status?: string) => String(status || "").replace(/_/g, " ");
+
+/*
+ * The comp puts a place under the visit's title, against a pin. A lead carries
+ * no address of its own, so it comes from the unit the visit is against, and
+ * falls back to the city the enquiry was filed under.
+ */
+const placeOf = (lead: DashboardLead) => {
+  const linked = lead.inventoryId;
+  if (linked && typeof linked === "object" && linked.location) return linked.location;
+  return lead.city || "";
+};
+
+/* ---------------------------------------------------------- building blocks -- */
+
+/** A section heading, with the comp's optional link on the right. */
+const SectionHead = ({
+  title,
+  onPress,
+  style,
+}: {
+  title: string;
+  onPress?: () => void;
+  style?: object;
+}) => (
+  <View style={[styles.sectionHead, style]}>
+    <Text style={styles.sectionTitle}>{title}</Text>
+    {onPress ? (
+      <Pressable style={styles.sectionLink} onPress={onPress} hitSlop={10} accessibilityRole="button">
+        <Text style={styles.sectionLinkText}>View all</Text>
+        <Glyph name="chevron-forward" size={16} color={brand.ink} />
+      </Pressable>
+    ) : null}
+  </View>
+);
+
+/**
+ * The two list cards at the foot of the page: a tinted badge, a title, a muted
+ * "View all", and a body indented to the title's column.
+ */
+const ListCard = ({
+  icon,
+  iconColor,
+  badgeColor,
+  title,
+  onViewAll,
+  /* The comp sets the body's own gap per card: 15 under a two-line note, 8
+     under a row. */
+  bodyGap = 15,
+  children,
+  style,
+}: {
+  icon: GlyphName;
+  iconColor: string;
+  badgeColor: string;
+  title: string;
+  onViewAll: () => void;
+  bodyGap?: number;
+  children: React.ReactNode;
+  style?: object;
+}) => (
+  <View style={[styles.card, style]}>
+    <View style={styles.cardHead}>
+      <View style={[styles.cardBadge, { backgroundColor: badgeColor }]}>
+        <Glyph name={icon} size={15} color={iconColor} />
+      </View>
+      <Text style={styles.cardTitle} numberOfLines={1}>
+        {title}
+      </Text>
+      <Pressable style={styles.cardLink} onPress={onViewAll} hitSlop={10} accessibilityRole="button">
+        <Text style={styles.cardLinkText}>View all</Text>
+        <Glyph name="chevron-forward" size={15} color={brand.textMuted} />
+      </Pressable>
+    </View>
+    <View style={[styles.cardBody, { marginTop: bodyGap }]}>{children}</View>
+  </View>
+);
+
+/* ---------------------------------------------------------------- screen -- */
 
 export const ManagerDashboardScreen = () => {
   const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const loggedInUserId = String(user?._id || user?.id || "");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [leads, setLeads] = useState<Lead[]>([]);
-  const [assets, setAssets] = useState<InventoryAsset[]>([]);
-  const [range, setRange] = useState<"ALL" | "THIS_MONTH" | "CUSTOM">("ALL");
-  const [selectedMonthDate, setSelectedMonthDate] = useState(new Date());
-  const [customFromDate, setCustomFromDate] = useState<Date | null>(null);
-  const [customToDate, setCustomToDate] = useState<Date | null>(null);
-  const [showMonthPicker, setShowMonthPicker] = useState(false);
-  const [showCustomFromPicker, setShowCustomFromPicker] = useState(false);
-  const [showCustomToPicker, setShowCustomToPicker] = useState(false);
-  const [webMonthPickerVisible, setWebMonthPickerVisible] = useState(false);
-  const [webMonthDateValue, setWebMonthDateValue] = useState(toDateInputValue(new Date()));
-  const [webCustomPickerVisible, setWebCustomPickerVisible] = useState(false);
-  const [webCustomFromValue, setWebCustomFromValue] = useState("");
-  const [webCustomToValue, setWebCustomToValue] = useState("");
-  const [companyPerformance, setCompanyPerformance] = useState<CompanyPerformanceOverview | null>(null);
-  const [showAllLeaderboard, setShowAllLeaderboard] = useState(false);
-
-  const performanceParams = useMemo(() => {
-    if (range === "THIS_MONTH") {
-      return {
-        range: "THIS_MONTH" as const,
-        month: toMonthParam(selectedMonthDate),
-      };
-    }
-    if (range === "CUSTOM") {
-      if (!customFromDate || !customToDate) return null;
-      return {
-        range: "CUSTOM" as const,
-        from: toDateInputValue(customFromDate),
-        to: toDateInputValue(customToDate),
-      };
-    }
-    return {
-      range: "ALL" as const,
-    };
-  }, [range, selectedMonthDate, customFromDate, customToDate]);
+  const [leads, setLeads] = useState<DashboardLead[]>([]);
+  const [inventory, setInventory] = useState<InventoryAsset[]>([]);
 
   const load = useCallback(async (silent = false) => {
     try {
@@ -250,23 +185,16 @@ export const ManagerDashboardScreen = () => {
       else setLoading(true);
       setError("");
 
-      const [leadRows, inventoryRows, performanceOverview] = await Promise.all([
-        getAllLeads(),
-        getInventoryAssets(),
-        performanceParams
-          ? getCompanyPerformanceOverview(performanceParams).catch(() => null)
-          : Promise.resolve(null),
-      ]);
-      setLeads(Array.isArray(leadRows) ? leadRows : []);
-      setAssets(Array.isArray(inventoryRows) ? inventoryRows : []);
-      setCompanyPerformance(performanceOverview);
+      const [leadRows, inventoryRows] = await Promise.all([getAllLeads(), getInventoryAssets()]);
+      setLeads(Array.isArray(leadRows) ? (leadRows as DashboardLead[]) : []);
+      setInventory(Array.isArray(inventoryRows) ? inventoryRows : []);
     } catch (e) {
-      setError(toErrorMessage(e, "Failed to load manager dashboard"));
+      setError(toErrorMessage(e, "Failed to load dashboard"));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [performanceParams]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -278,948 +206,675 @@ export const ManagerDashboardScreen = () => {
   }, [load]);
 
   const summary = useMemo(() => {
-    const totalLeads = leads.length;
-    const closed = leads.filter((lead) => lead.status === "CLOSED").length;
-    const siteVisits = leads.filter((lead) => lead.status === "SITE_VISIT").length;
-    const negotiation = leads.filter((lead) => PIPELINE_STATUSES.has(String(lead.status || ""))).length;
-    const activePipeline = Math.max(totalLeads - closed, 0);
-    const conversion = totalLeads > 0 ? (closed / totalLeads) * 100 : 0;
-    const estimatedRevenue = closed * 75000;
-    const avgTicket = closed > 0 ? estimatedRevenue / closed : 0;
+    const count = (status: string) =>
+      inventory.filter((asset) => String(asset.status).toUpperCase() === status).length;
+
+    const total = inventory.length;
+    const available = count("AVAILABLE");
+    const blocked = count("BLOCKED");
+    const maintenance = count("MAINTENANCE");
+    const occupied = Math.max(total - available - blocked - maintenance, 0);
+
+    const closed = leads.filter((lead) => String(lead.status).toUpperCase() === "CLOSED");
+    const open = leads.filter((lead) => String(lead.status).toUpperCase() !== "CLOSED");
+    const revenue = closed.reduce(
+      (sum, lead) => sum + Number(lead?.dealPayment?.amount || lead?.saleDetails?.amount || 0),
+      0,
+    );
+
+    const now = new Date();
+    const follow = leads
+      .map((lead): DatedLead => ({ ...lead, when: dateOf(lead.nextFollowUp) }))
+      .filter((lead) => lead.when?.toDateString() === now.toDateString())
+      .sort((a, b) => (a.when?.getTime() || 0) - (b.when?.getTime() || 0))
+      .slice(0, 3);
+    const upcoming = leads
+      .map((lead): DatedLead => ({ ...lead, when: dateOf(lead.siteVisitDate || lead.nextFollowUp) }))
+      .filter((lead) => !!lead.when && lead.when >= now)
+      .sort((a, b) => (a.when?.getTime() || 0) - (b.when?.getTime() || 0))[0];
 
     return {
-      totalLeads,
-      closed,
-      siteVisits,
-      negotiation,
-      activePipeline,
-      conversion,
-      estimatedRevenue,
-      avgTicket,
-      inventoryAssets: assets.length,
+      total,
+      available,
+      occupied,
+      occupancy: total ? Math.round((occupied / total) * 100) : 0,
+      clients: closed.length,
+      open: open.length,
+      revenue,
+      follow,
+      upcoming,
     };
-  }, [assets.length, leads]);
+  }, [inventory, leads]);
 
-  const funnelRows = useMemo(
-    () => [
-      {
-        label: "Negotiation",
-        value: summary.negotiation,
-        progress: summary.totalLeads > 0 ? (summary.negotiation / summary.totalLeads) * 100 : 0,
-      },
-      {
-        label: "Site Visits",
-        value: summary.siteVisits,
-        progress: summary.totalLeads > 0 ? (summary.siteVisits / summary.totalLeads) * 100 : 0,
-      },
-      {
-        label: "Closed Deals",
-        value: summary.closed,
-        progress: summary.conversion,
-      },
-    ],
-    [summary.closed, summary.conversion, summary.negotiation, summary.siteVisits, summary.totalLeads],
+  const go = useCallback(
+    (screen: string, params?: Record<string, unknown>) => () => navigation.navigate(screen, params),
+    [navigation],
   );
 
-  const scopedLeads = useMemo(() => {
-    if (range === "ALL") return leads;
-    if (range === "THIS_MONTH") {
-      return leads.filter((lead) => {
-        const d = getLeadDate(lead);
-        if (!d) return false;
-        return d.getFullYear() === selectedMonthDate.getFullYear() && d.getMonth() === selectedMonthDate.getMonth();
-      });
-    }
-    if (!customFromDate || !customToDate) return [];
-    const start = new Date(customFromDate);
-    start.setHours(0, 0, 0, 0);
-    const end = new Date(customToDate);
-    end.setHours(23, 59, 59, 999);
-    return leads.filter((lead) => {
-      const d = getLeadDate(lead);
-      if (!d) return false;
-      return d >= start && d <= end;
-    });
-  }, [range, leads, selectedMonthDate, customFromDate, customToDate]);
-
-  const periodLabel = useMemo(() => {
-    if (range === "ALL") return "All data";
-    if (range === "THIS_MONTH") return selectedMonthDate.toLocaleString("en-IN", { month: "long", year: "numeric" });
-    if (customFromDate && customToDate) {
-      return `${customFromDate.toLocaleDateString("en-IN")} to ${customToDate.toLocaleDateString("en-IN")}`;
-    }
-    if (customFromDate) return `From ${customFromDate.toLocaleDateString("en-IN")}`;
-    return "Custom range";
-  }, [range, selectedMonthDate, customFromDate, customToDate]);
-
-  const performanceSnapshot = useMemo(() => {
-    const totalLeads = scopedLeads.length;
-    const closed = scopedLeads.filter((lead) => String(lead.status || "").toUpperCase() === "CLOSED").length;
-    const latestLeadDate = scopedLeads
-      .map((lead) => getLeadDate(lead))
-      .filter((d): d is Date => d instanceof Date)
-      .sort((a, b) => b.getTime() - a.getTime())[0];
-    const weekBuckets = toWeekBuckets(latestLeadDate || new Date(), 8);
-
-    scopedLeads.forEach((lead) => {
-      const createdIdx = findBucketIndex(lead.createdAt, weekBuckets);
-      if (createdIdx >= 0) weekBuckets[createdIdx].created += 1;
-      if (String(lead.status || "").toUpperCase() === "CLOSED") {
-        const closedIdx = findBucketIndex(lead.updatedAt || lead.createdAt, weekBuckets);
-        if (closedIdx >= 0) weekBuckets[closedIdx].closed += 1;
-      }
-    });
-    weekBuckets.forEach((bucket) => {
-      bucket.open = Math.max(0, bucket.created - bucket.closed);
-    });
-
-    return {
-      totalLeads,
-      closed,
-      closeVelocity: totalLeads > 0 ? (closed / totalLeads) * 100 : 0,
-      weekly: weekBuckets.map((row) => ({ label: row.label, created: row.created, closed: row.closed, open: row.open })),
-    };
-  }, [scopedLeads]);
-
-  const leaderboard = useMemo(() => {
-    const rowMap = new Map<string, { id: string; name: string; role: string; assigned: number; closed: number; visits: number; scorePercent: number }>();
-
-    scopedLeads.forEach((lead) => {
-      const assigned = lead.assignedTo;
-      if (!assigned || typeof assigned !== "object") return;
-      const id = String((assigned as any)._id || (assigned as any).id || "");
-      if (!id) return;
-      const role = String((assigned as any).role || "-").toUpperCase();
-      if (role === "ADMIN") return;
-      const row = rowMap.get(id) || {
-        id,
-        name: String((assigned as any).name || "User"),
-        role,
-        assigned: 0,
-        closed: 0,
-        visits: 0,
-        scorePercent: 0,
-      };
-      row.assigned += 1;
-      const status = String(lead.status || "").toUpperCase();
-      if (status === "CLOSED") row.closed += 1;
-      if (status === "SITE_VISIT") row.visits += 1;
-      rowMap.set(id, row);
-    });
-
-    return Array.from(rowMap.values())
-      .map((row) => {
-        const closeRate = row.assigned > 0 ? (row.closed / row.assigned) * 100 : 0;
-        const visitRate = row.assigned > 0 ? (row.visits / row.assigned) * 100 : 0;
-        return {
-          ...row,
-          scorePercent: clampPercent(Math.round(closeRate * 0.8 + visitRate * 0.2)),
-        };
-      })
-      .sort((a, b) => b.scorePercent - a.scorePercent || b.closed - a.closed || b.assigned - a.assigned);
-  }, [scopedLeads]);
-
-  const resolvedPerformanceSnapshot = useMemo(
-    () =>
-      companyPerformance?.summary && Array.isArray(companyPerformance.weekly)
-        ? {
-          totalLeads: Number(companyPerformance.summary.totalLeads || 0),
-          closed: Number(companyPerformance.summary.closed || 0),
-          closeVelocity: Number(companyPerformance.summary.closeVelocity || 0),
-          weekly: companyPerformance.weekly.map((row) => ({
-            label: String(row.label || ""),
-            created: Number(row.created || 0),
-            closed: Number(row.closed || 0),
-            open: Number(row.open || 0),
-          })),
-        }
-        : performanceSnapshot,
-    [companyPerformance, performanceSnapshot],
+  /*
+   * Inventory, Leads and Tasks are tabs. Navigating to them by name would push
+   * the stack's copy on top of the bar instead, which shows a navigator header
+   * above the page header those screens already draw.
+   */
+  const goTab = useCallback(
+    (screen: string) => () => navigation.navigate("MainTabs", { screen }),
+    [navigation],
   );
 
-  const resolvedLeaderboard = useMemo(
-    () =>
-      Array.isArray(companyPerformance?.leaderboard)
-        ? companyPerformance.leaderboard.map((row) => ({
-          id: String(row.id || ""),
-          name: String(row.name || "User"),
-          role: String(row.role || "-"),
-          assigned: Number(row.assigned || 0),
-          closed: Number(row.closed || 0),
-          visits: Number(row.visits || 0),
-          scorePercent: clampPercent(Number(row.scorePercent || 0)),
-        }))
-        : leaderboard,
-    [companyPerformance, leaderboard],
-  );
+  const now = new Date();
 
-  const pinnedLeaderboard = useMemo(() => resolvedLeaderboard, [resolvedLeaderboard]);
-  const visibleLeaderboard = useMemo(
-    () => (showAllLeaderboard ? pinnedLeaderboard : pinnedLeaderboard.slice(0, 5)),
-    [pinnedLeaderboard, showAllLeaderboard],
-  );
+  const stats: Array<{ icon: GlyphName; label: string; value: string; onPress: () => void }> = [
+    { icon: "home", label: "Properties", value: String(summary.total), onPress: goTab("Inventory") },
+    { icon: "people", label: "Open leads", value: String(summary.open), onPress: goTab("Leads") },
+    { icon: "pie-chart", label: "Occupancy", value: `${summary.occupancy}%`, onPress: goTab("Inventory") },
+    { icon: "person", label: "Clients", value: String(summary.clients), onPress: go("CoworkingClients") },
+  ];
 
-  const openLeads = ({ status, preset, query }: { status?: string; preset?: string; query?: string }) => {
-    navigation.navigate("Leads", {
-      initialStatus: status || "ALL",
-      filterPreset: preset || "",
-      initialQuery: query || "",
-    });
-  };
+  const quickActions: Array<{ icon: GlyphName; label: string; onPress: () => void }> = [
+    { icon: "add-circle", label: "Add property", onPress: go("AddProperty") },
+    { icon: "people", label: "Add client", onPress: go("CoworkingClients") },
+    { icon: "calendar-outline", label: "Schedule visit", onPress: go("Calendar") },
+    { icon: "checkbox", label: "Create task", onPress: go("NewTask") },
+  ];
 
-  const openClosedDealsFromRevenue = () => {
-    navigation.navigate("Leads", {
-      initialStatus: "CLOSED",
-      filterPreset: "",
-      initialQuery: "",
-      highlightMetric: "ESTIMATED_REVENUE",
-      estimatedRevenue: summary.estimatedRevenue,
-      closedDeals: summary.closed,
-    });
-  };
-
-  const openInventory = () => {
-    navigation.navigate("Inventory");
-  };
-
-  const openMonthPicker = () => {
-    if (Platform.OS === "web") {
-      setWebMonthDateValue(toDateInputValue(selectedMonthDate));
-      setWebMonthPickerVisible(true);
-      return;
-    }
-    setShowMonthPicker(true);
-  };
-
-  const openCustomRangePicker = () => {
-    if (Platform.OS === "web") {
-      setWebCustomFromValue(customFromDate ? toDateInputValue(customFromDate) : "");
-      setWebCustomToValue(customToDate ? toDateInputValue(customToDate) : "");
-      setWebCustomPickerVisible(true);
-      return;
-    }
-    setShowCustomFromPicker(true);
-  };
-
-  const applyWebMonthPicker = () => {
-    if (!webMonthDateValue) {
-      setError("Please select date");
-      return;
-    }
-    const parsed = new Date(`${webMonthDateValue}T00:00:00`);
-    if (Number.isNaN(parsed.getTime())) {
-      setError("Please select valid date");
-      return;
-    }
-    setSelectedMonthDate(parsed);
-    setWebMonthPickerVisible(false);
-  };
-
-  const applyWebCustomRange = () => {
-    if (!webCustomFromValue || !webCustomToValue) {
-      setError("Please select from and to date");
-      return;
-    }
-    const parsedFrom = new Date(`${webCustomFromValue}T00:00:00`);
-    const parsedTo = new Date(`${webCustomToValue}T00:00:00`);
-    if (Number.isNaN(parsedFrom.getTime()) || Number.isNaN(parsedTo.getTime())) {
-      setError("Please select valid custom dates");
-      return;
-    }
-    if (parsedTo < parsedFrom) {
-      setError("To date cannot be before from date");
-      return;
-    }
-    setCustomFromDate(parsedFrom);
-    setCustomToDate(parsedTo);
-    setWebCustomPickerVisible(false);
-  };
+  /*
+   * The split bar is drawn from the two counts rather than the comp's fixed
+   * proportions, so it stays honest when the portfolio changes. An empty
+   * portfolio leaves the track showing rather than dividing by zero.
+   */
+  const availableShare = summary.total ? summary.available / summary.total : 0;
 
   return (
-    <Screen title="Manager Dashboard" subtitle="Command Deck" loading={loading} error={error}>
-      <ScrollView
-        contentContainerStyle={styles.container}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load(true)} />}
-      >
-        <View style={styles.hero}>
-          <Text style={styles.heroLabel}>CONTROL HOME</Text>
-          <Text style={styles.heroTitle}>Live Snapshot</Text>
-          <View style={styles.heroRow}>
-            <HeroChip
-              label="Active Pipeline"
-              value={summary.activePipeline}
-              clickable={summary.activePipeline > 0}
-              onPress={() => openLeads({ preset: "PIPELINE" })}
-            />
-            <HeroChip
-              label="Conversion"
-              value={toPercent(summary.conversion)}
-              clickable={summary.totalLeads > 0}
-              onPress={() => openLeads({ status: "CLOSED" })}
-            />
-            <HeroChip
-              label="Avg Ticket"
-              value={formatCurrency(summary.avgTicket)}
-              clickable={summary.closed > 0}
-              onPress={() => openLeads({ status: "CLOSED" })}
-            />
-          </View>
+    <SafeAreaView style={styles.root} edges={["left", "right"]}>
+      {loading ? (
+        <View style={styles.centred}>
+          <ActivityIndicator size="large" color={brand.green} />
         </View>
-
-        <View style={styles.section}>
-          <View style={styles.filterRow}>
-            <Pressable style={[styles.filterChip, range === "ALL" && styles.filterChipActive]} onPress={() => setRange("ALL")}>
-              <Text style={[styles.filterChipText, range === "ALL" && styles.filterChipTextActive]}>All</Text>
+      ) : (
+        <ScrollView
+          contentContainerStyle={[
+            styles.container,
+            { paddingBottom: 24 + Math.max(insets.bottom, Platform.OS === "android" ? 16 : 0) },
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => load(true)}
+              tintColor={brand.green}
+            />
+          }
+        >
+          {/*
+           * A transient failure sits above the page rather than replacing it:
+           * the numbers behind it are the last good ones and still worth
+           * showing while a refresh is retried.
+           */}
+          {error ? (
+            <Pressable style={styles.errorBanner} onPress={() => load()} accessibilityRole="button">
+              <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorRetry}>Tap to retry</Text>
             </Pressable>
-            <Pressable style={[styles.filterChip, range === "THIS_MONTH" && styles.filterChipActive]} onPress={() => setRange("THIS_MONTH")}>
-              <Text style={[styles.filterChipText, range === "THIS_MONTH" && styles.filterChipTextActive]}>This Month</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.filterChip, range === "CUSTOM" && styles.filterChipActive]}
-              onPress={() => {
-                setRange("CUSTOM");
-                openCustomRangePicker();
-              }}
-            >
-              <Text style={[styles.filterChipText, range === "CUSTOM" && styles.filterChipTextActive]}>Custom</Text>
-            </Pressable>
-            <Pressable style={styles.calendarIconBtn} onPress={openMonthPicker}>
-              <Ionicons name="calendar-outline" size={14} color="#334155" />
-            </Pressable>
-            <Pressable style={styles.refreshBtn} onPress={() => load(true)} disabled={refreshing}>
-              <Ionicons name={refreshing ? "sync" : "refresh"} size={14} color="#334155" />
-            </Pressable>
-          </View>
-          <Text style={styles.metricHelper}>Showing: {periodLabel}</Text>
-          {range === "CUSTOM" ? (
-            <View style={styles.customRangeRow}>
-              <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
-                <Text style={styles.customDateText}>From: {customFromDate ? customFromDate.toLocaleDateString("en-IN") : "Select"}</Text>
-              </Pressable>
-              <Pressable style={styles.customDateBtn} onPress={openCustomRangePicker}>
-                <Text style={styles.customDateText}>To: {customToDate ? customToDate.toLocaleDateString("en-IN") : "Select"}</Text>
-              </Pressable>
-            </View>
           ) : null}
-        </View>
 
-        {showMonthPicker ? (
-          <DateTimePicker
-            value={selectedMonthDate}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowMonthPicker(false);
-              if (next) setSelectedMonthDate(next);
-            }}
-          />
-        ) : null}
-        {showCustomFromPicker ? (
-          <DateTimePicker
-            value={customFromDate || new Date()}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowCustomFromPicker(false);
-              if (next) {
-                setCustomFromDate(next);
-                if (!customToDate || customToDate < next) setCustomToDate(next);
-                setTimeout(() => setShowCustomToPicker(true), 30);
-              }
-            }}
-          />
-        ) : null}
-        {showCustomToPicker ? (
-          <DateTimePicker
-            value={customToDate || customFromDate || new Date()}
-            mode="date"
-            display="default"
-            onChange={(_, next) => {
-              setShowCustomToPicker(false);
-              if (next) {
-                if (customFromDate && next < customFromDate) {
-                  setCustomToDate(customFromDate);
-                  return;
-                }
-                setCustomToDate(next);
-              }
-            }}
-          />
-        ) : null}
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Role Performance Graph</Text>
-          <Text style={styles.sectionSubTitle}>
-            {range === "ALL" ? "Weekly throughput across all data" : `Weekly throughput for ${String(companyPerformance?.periodLabel || periodLabel)}`}
-          </Text>
-          <View style={styles.graphSplit}>
-            <View style={styles.velocityPanel}>
-              <Text style={styles.metricLabel}>Close Velocity</Text>
-              <View style={styles.velocityScoreRow}>
-                <CircularScore percent={resolvedPerformanceSnapshot.closeVelocity} />
-                <View style={styles.velocityTextWrap}>
-                  <Text style={styles.velocityPercent}>{Math.round(resolvedPerformanceSnapshot.closeVelocity)}%</Text>
-                  <Text style={styles.metricHelper}>Closed {resolvedPerformanceSnapshot.closed} / Created {resolvedPerformanceSnapshot.totalLeads}</Text>
-                </View>
-              </View>
+          {/* ---- greeting ---- */}
+          <View style={styles.greetingRow}>
+            <View style={styles.greetingText}>
+              <Text style={styles.greeting} numberOfLines={2}>
+                {greetingFor(now.getHours())}, {firstNameOf(user?.name)}.
+              </Text>
+              <Text style={styles.date}>{dayLabel(now)}</Text>
             </View>
-            <View style={styles.chartPanel}>
-              <MiniLineChart rows={resolvedPerformanceSnapshot.weekly} />
-            </View>
-          </View>
-        </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Live Leaderboard</Text>
-          <Text style={styles.sectionSubTitle}>Who is doing how much work (% score)</Text>
-          {visibleLeaderboard.length === 0 ? (
-            <Text style={styles.metricHelper}>No leaderboard data available.</Text>
-          ) : (
-            visibleLeaderboard.map((row, index) => (
-              <View key={`${row.id}-${index}`} style={styles.leaderRow}>
-                <View style={styles.leaderTopRow}>
-                  <View style={styles.leaderRank}>
-                    <Text style={styles.leaderRankText}>#{index + 1}</Text>
-                  </View>
-                  <View style={styles.leaderInfo}>
-                    <Text style={styles.progressLabel}>{row.name}</Text>
-                    <Text style={styles.metricHelper}>{row.role}</Text>
-                  </View>
-                  <View style={styles.leaderScoreWrap}>
-                    <CircularScore percent={row.scorePercent} />
-                  </View>
-                </View>
-                <Text style={styles.metricHelper}>Leads {row.assigned} | Visits {row.visits} | Closed {row.closed}</Text>
-                <View style={styles.leaderTrack}>
-                  <View style={[styles.leaderFill, { width: `${clampPercent(row.scorePercent)}%` }]} />
-                </View>
-              </View>
-            ))
-          )}
-          {pinnedLeaderboard.length > 5 ? (
-            <View style={styles.inlineActionRow}>
-              <View />
-              <Pressable onPress={() => setShowAllLeaderboard((prev) => !prev)}>
-                <Text style={styles.linkTextCompact}>{showAllLeaderboard ? "Show less" : "Show more"}</Text>
-              </Pressable>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.grid}>
-          <MetricCard
-            label="Estimated Revenue"
-            value={formatCurrency(summary.estimatedRevenue)}
-            helper={`${summary.closed} closed x 75,000`}
-            clickable
-            onPress={openClosedDealsFromRevenue}
-          />
-          <MetricCard
-            label="Total Leads"
-            value={summary.totalLeads}
-            helper={`${summary.activePipeline} in pipeline`}
-            clickable={summary.activePipeline > 0}
-            onPress={() => openLeads({ preset: "PIPELINE" })}
-          />
-          <MetricCard
-            label="Inventory Assets"
-            value={summary.inventoryAssets}
-            helper="Current stock visible"
-            clickable={summary.inventoryAssets > 0}
-            onPress={openInventory}
-          />
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Pipeline Snapshot</Text>
-          {funnelRows.map((row) => (
             <Pressable
-              key={row.label}
-              style={[styles.progressCard, row.value > 0 && styles.cardClickable]}
-              disabled={row.value <= 0}
-              onPress={() => {
-                if (row.label === "Site Visits") {
-                  openLeads({ status: "SITE_VISIT" });
-                  return;
-                }
-                if (row.label === "Closed Deals") {
-                  openLeads({ status: "CLOSED" });
-                  return;
-                }
-                openLeads({ preset: "PIPELINE" });
-              }}
+              style={styles.cta}
+              onPress={goTab("Inventory")}
+              accessibilityRole="button"
+              accessibilityLabel="Find spaces"
             >
-              <View style={styles.progressHead}>
-                <Text style={styles.progressLabel}>{row.label}</Text>
-                <Text style={styles.progressMeta}>
-                  {row.value} ({toPercent(row.progress)})
+              <View style={styles.ctaText}>
+                <Text style={styles.ctaLine}>Find spaces</Text>
+                <Text style={styles.ctaLine}>Build tomorrow</Text>
+              </View>
+              <Glyph name="chevron-forward" size={18} color={brand.ink} />
+            </Pressable>
+          </View>
+
+          {/* ---- headline numbers ---- */}
+          <View style={styles.statRow}>
+            {stats.map((stat) => (
+              <Pressable
+                key={stat.label}
+                style={styles.statTile}
+                onPress={stat.onPress}
+                accessibilityRole="button"
+              >
+                <Glyph name={stat.icon} size={22} color={brand.green} />
+                <Text style={styles.statLabel} numberOfLines={1}>
+                  {stat.label}
                 </Text>
-              </View>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${Math.max(4, Math.min(100, row.progress))}%` }]} />
-              </View>
-            </Pressable>
-          ))}
-        </View>
-      </ScrollView>
+                <Text
+                  style={styles.statValue}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
+                >
+                  {stat.value}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
 
-      <Modal visible={webMonthPickerVisible} transparent animationType="fade" onRequestClose={() => setWebMonthPickerVisible(false)}>
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Month/Date</Text>
-            <View style={styles.webInputWrap}>
-              <input
-                value={webMonthDateValue}
-                onChange={(event) => setWebMonthDateValue((event.target as any).value)}
-                type="date"
-                style={styles.webDateInput as any}
-              />
+          {/* ---- revenue strip ---- */}
+          <Pressable style={styles.banner} onPress={go("Finance")} accessibilityRole="button">
+            <Glyph name="bar-chart" size={22} color={brand.green} />
+            <View style={styles.bannerText}>
+              <Text style={styles.bannerLabel}>Monthly revenue</Text>
+              <Text style={styles.bannerValue} numberOfLines={1}>
+                {money(summary.revenue)}
+              </Text>
             </View>
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancelBtn} onPress={() => setWebMonthPickerVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
+            {/* Decoration, not a chart - the comp draws four fixed bars. */}
+            <View style={styles.bannerBars} pointerEvents="none">
+              {[10, 20, 32, 50].map((height) => (
+                <View key={height} style={[styles.bannerBar, { height }]} />
+              ))}
+            </View>
+            <Glyph name="chevron-forward" size={20} color={brand.ink} />
+          </Pressable>
+
+          {/* ---- quick actions ---- */}
+          <SectionHead title="Quick actions" style={styles.sectionTop} />
+          <View style={styles.statRow}>
+            {quickActions.map((action) => (
+              <Pressable
+                key={action.label}
+                style={styles.actionTile}
+                onPress={action.onPress}
+                accessibilityRole="button"
+              >
+                <Glyph name={action.icon} size={26} color={brand.green} />
+                <Text style={styles.actionLabel} numberOfLines={1}>
+                  {action.label}
+                </Text>
               </Pressable>
-              <Pressable style={styles.modalApplyBtn} onPress={applyWebMonthPicker}>
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </Pressable>
+            ))}
+          </View>
+
+          {/* ---- inventory split ---- */}
+          <SectionHead title="Inventory status" onPress={goTab("Inventory")} style={styles.sectionTop} />
+          <View style={styles.splitBar}>
+            {availableShare > 0 ? (
+              <View style={[styles.splitFill, { flex: availableShare }]} />
+            ) : null}
+            {availableShare < 1 ? (
+              <View style={[styles.splitTrack, { flex: 1 - availableShare }]} />
+            ) : null}
+          </View>
+          <View style={styles.legendRow}>
+            <View>
+              <View style={styles.legendLabelRow}>
+                <View style={[styles.legendDot, { backgroundColor: brand.greenBright }]} />
+                <Text style={styles.legendLabel}>Available</Text>
+              </View>
+              <Text style={styles.legendValue}>{summary.available}</Text>
+            </View>
+            <View>
+              <View style={styles.legendLabelRow}>
+                <View style={[styles.legendDot, { backgroundColor: brand.track }]} />
+                <Text style={styles.legendLabel}>Occupied</Text>
+              </View>
+              <Text style={styles.legendValue}>{summary.occupied}</Text>
             </View>
           </View>
-        </View>
-      </Modal>
 
-      <Modal visible={webCustomPickerVisible} transparent animationType="fade" onRequestClose={() => setWebCustomPickerVisible(false)}>
-        <View style={styles.modalWrap}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Select Custom Range</Text>
-            <View style={styles.webInputWrap}>
-              <input
-                value={webCustomFromValue}
-                onChange={(event) => setWebCustomFromValue((event.target as any).value)}
-                type="date"
-                style={styles.webDateInput as any}
-              />
-            </View>
-            <View style={styles.webInputWrap}>
-              <input
-                value={webCustomToValue}
-                onChange={(event) => setWebCustomToValue((event.target as any).value)}
-                type="date"
-                style={styles.webDateInput as any}
-              />
-            </View>
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalCancelBtn} onPress={() => setWebCustomPickerVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
+          {/* ---- today's follow-ups ---- */}
+          <ListCard
+            icon="list"
+            iconColor={brand.ink}
+            badgeColor={brand.neutralBadge}
+            title="Today's follow-ups"
+            onViewAll={goTab("Leads")}
+            style={styles.cardTop}
+          >
+            {summary.follow.length ? (
+              summary.follow.map((lead) => (
+                <Pressable
+                  key={lead._id}
+                  style={styles.row}
+                  onPress={() => navigation.navigate("LeadDetails", { leadId: lead._id })}
+                  accessibilityRole="button"
+                >
+                  <View style={styles.rowText}>
+                    <Text style={styles.rowTitle} numberOfLines={1}>
+                      {lead.name || "Lead"}
+                    </Text>
+                    <View style={styles.rowMeta}>
+                      <Glyph name="time-outline" size={14} color={brand.textMuted} />
+                      <Text style={styles.rowMetaText} numberOfLines={1}>
+                        {lead.when ? timeOf(lead.when) : statusLabel(lead.status)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Glyph name="chevron-forward" size={18} color={brand.textMuted} />
+                </Pressable>
+              ))
+            ) : (
+              <>
+                <Text style={styles.emptyTitle}>No follow-ups today.</Text>
+                <Text style={styles.emptyNote}>{"You're all caught up! 🎉"}</Text>
+              </>
+            )}
+          </ListCard>
+
+          {/* ---- next visit ---- */}
+          <ListCard
+            icon="calendar-outline"
+            iconColor={brand.green}
+            badgeColor={brand.tintBadge}
+            title="Upcoming visit"
+            onViewAll={go("Calendar")}
+            bodyGap={8}
+            style={styles.cardNext}
+          >
+            {summary.upcoming ? (
+              <Pressable
+                style={styles.row}
+                onPress={() => navigation.navigate("LeadDetails", { leadId: summary.upcoming?._id })}
+                accessibilityRole="button"
+              >
+                <View style={styles.rowText}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>
+                    {summary.upcoming.projectInterested || summary.upcoming.name || "Site visit"}
+                  </Text>
+                  <View style={styles.rowMeta}>
+                    <Glyph name="location-outline" size={14} color={brand.textMuted} />
+                    <Text style={styles.rowMetaText} numberOfLines={1}>
+                      {placeOf(summary.upcoming) || summary.upcoming.name || "Lead"}
+                    </Text>
+                  </View>
+                  <View style={styles.rowMeta}>
+                    <Glyph name="time-outline" size={14} color={brand.textMuted} />
+                    <Text style={styles.rowMetaText} numberOfLines={1}>
+                      {summary.upcoming.when ? timeOf(summary.upcoming.when) : ""}
+                    </Text>
+                  </View>
+                </View>
+                <Glyph name="chevron-forward" size={18} color={brand.textMuted} />
               </Pressable>
-              <Pressable style={styles.modalApplyBtn} onPress={applyWebCustomRange}>
-                <Text style={styles.modalApplyText}>Apply</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </Screen>
+            ) : (
+              <>
+                <Text style={styles.emptyTitle}>No visits scheduled.</Text>
+                <Text style={styles.emptyNote}>Book one from a lead to see it here.</Text>
+              </>
+            )}
+          </ListCard>
+        </ScrollView>
+      )}
+    </SafeAreaView>
   );
 };
 
-const HeroChip = ({
-  label,
-  value,
-  clickable = false,
-  onPress,
-}: {
-  label: string;
-  value: string | number;
-  clickable?: boolean;
-  onPress?: () => void;
-}) => (
-  <Pressable
-    style={[styles.heroChip, clickable && styles.cardClickable]}
-    disabled={!clickable}
-    onPress={onPress}
-  >
-    <Text style={styles.heroChipLabel}>{label}</Text>
-    <Text style={styles.heroChipValue}>{value}</Text>
-  </Pressable>
-);
+const styles = brandStyles((b) =>
+  StyleSheet.create({
+    root: {
+      flex: 1,
+      backgroundColor: b.bg,
+    },
+    centred: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    container: {
+      paddingHorizontal: layout.gutter,
+      paddingTop: 12,
+    },
 
-const MetricCard = ({
-  label,
-  value,
-  helper,
-  clickable = false,
-  onPress,
-}: {
-  label: string;
-  value: string | number;
-  helper: string;
-  clickable?: boolean;
-  onPress?: () => void;
-}) => (
-  <Pressable
-    style={[styles.metricCard, clickable && styles.cardClickable]}
-    disabled={!clickable}
-    onPress={onPress}
-  >
-    <Text style={styles.metricLabel}>{label}</Text>
-    <Text style={styles.metricValue}>{value}</Text>
-    <Text style={styles.metricHelper}>{helper}</Text>
-  </Pressable>
-);
+    errorBanner: {
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.card,
+      backgroundColor: b.surface,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      marginBottom: 12,
+    },
+    errorText: {
+      fontSize: t.body,
+      lineHeight: 17,
+      color: b.text,
+    },
+    errorRetry: {
+      marginTop: 2,
+      fontSize: t.label,
+      fontWeight: "600",
+      color: b.ink,
+    },
 
-const styles = StyleSheet.create({
-  container: {
-    gap: 12,
-    paddingBottom: 14,
-  },
-  hero: {
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    borderRadius: 16,
-    backgroundColor: "#eff6ff",
-    padding: 14,
-  },
-  heroLabel: {
-    fontSize: 10,
-    color: "#1d4ed8",
-    letterSpacing: 1,
-    fontWeight: "700",
-  },
-  heroTitle: {
-    marginTop: 4,
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#0f172a",
-  },
-  heroRow: {
-    marginTop: 10,
-    flexDirection: "row",
-    gap: 8,
-  },
-  heroChip: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    borderRadius: 10,
-    backgroundColor: "#ffffff",
-    padding: 8,
-  },
-  heroChipLabel: {
-    fontSize: 10,
-    textTransform: "uppercase",
-    color: "#64748b",
-  },
-  heroChipValue: {
-    marginTop: 4,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#0f172a",
-  },
-  grid: {
-    gap: 10,
-  },
-  filterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 8,
-    flexWrap: "wrap",
-  },
-  filterChip: {
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    backgroundColor: "#fff",
-  },
-  filterChipActive: {
-    borderColor: "#0f172a",
-    backgroundColor: "#0f172a",
-  },
-  filterChipText: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  filterChipTextActive: {
-    color: "#fff",
-  },
-  calendarIconBtn: {
-    width: 34,
-    height: 34,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  refreshBtn: {
-    width: 34,
-    height: 34,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    backgroundColor: "#fff",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  customRangeRow: {
-    marginTop: 8,
-    flexDirection: "row",
-    gap: 8,
-  },
-  customDateBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    minHeight: 36,
-    justifyContent: "center",
-    paddingHorizontal: 10,
-  },
-  customDateText: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  metricCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-  },
-  metricLabel: {
-    fontSize: 11,
-    textTransform: "uppercase",
-    color: "#64748b",
-    fontWeight: "700",
-    letterSpacing: 0.8,
-  },
-  metricValue: {
-    marginTop: 8,
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#0f172a",
-  },
-  metricHelper: {
-    marginTop: 4,
-    fontSize: 12,
-    color: "#64748b",
-  },
-  section: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 12,
-    gap: 8,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#0f172a",
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
-  },
-  sectionSubTitle: {
-    marginTop: 2,
-    marginBottom: 8,
-    color: "#64748b",
-    fontSize: 12,
-  },
-  graphSplit: {
-    gap: 10,
-  },
-  velocityPanel: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    backgroundColor: "#f8fafc",
-    padding: 10,
-  },
-  velocityScoreRow: {
-    marginTop: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  velocityTextWrap: {
-    flex: 1,
-  },
-  velocityPercent: {
-    fontSize: 30,
-    fontWeight: "800",
-    color: "#0f172a",
-  },
-  chartPanel: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    backgroundColor: "#fff",
-    padding: 6,
-  },
-  progressCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 10,
-    backgroundColor: "#f8fafc",
-    padding: 10,
-  },
-  progressHead: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  progressLabel: {
-    color: "#0f172a",
-    fontWeight: "600",
-    fontSize: 12,
-  },
-  progressMeta: {
-    color: "#475569",
-    fontSize: 12,
-  },
-  progressTrack: {
-    marginTop: 8,
-    height: 8,
-    borderRadius: 6,
-    backgroundColor: "#dbeafe",
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: "#1d4ed8",
-  },
-  leaderRow: {
-    borderWidth: 1,
-    borderColor: "#bfdbfe",
-    borderRadius: 12,
-    backgroundColor: "#f8fbff",
-    padding: 10,
-    marginBottom: 8,
-  },
-  leaderTopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  leaderRank: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#e2e8f0",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  leaderRankText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#334155",
-  },
-  leaderInfo: {
-    flex: 1,
-  },
-  leaderScoreWrap: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  leaderTrack: {
-    marginTop: 8,
-    height: 8,
-    borderRadius: 6,
-    backgroundColor: "#dbeafe",
-    overflow: "hidden",
-  },
-  leaderFill: {
-    height: "100%",
-    backgroundColor: "#0ea5e9",
-  },
-  inlineActionRow: {
-    marginTop: 2,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  linkTextCompact: {
-    color: "#2563eb",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  cardClickable: {
-    opacity: 0.96,
-  },
-  modalWrap: {
-    flex: 1,
-    justifyContent: "center",
-    padding: 16,
-    backgroundColor: "rgba(15,23,42,0.45)",
-  },
-  modalCard: {
-    borderWidth: 1,
-    borderColor: "#e2e8f0",
-    borderRadius: 12,
-    backgroundColor: "#fff",
-    padding: 14,
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#0f172a",
-    marginBottom: 10,
-  },
-  webInputWrap: {
-    marginBottom: 8,
-  },
-  webDateInput: {
-    width: "100%",
-    minHeight: 40,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: "#fff",
-    color: "#0f172a",
-    fontSize: 13,
-  },
-  modalActions: {
-    marginTop: 10,
-    flexDirection: "row",
-    gap: 10,
-  },
-  modalCancelBtn: {
-    flex: 1,
-    minHeight: 38,
-    borderWidth: 1,
-    borderColor: "#cbd5e1",
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#fff",
-  },
-  modalCancelText: {
-    color: "#334155",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  modalApplyBtn: {
-    flex: 1,
-    minHeight: 38,
-    borderWidth: 1,
-    borderColor: "#0f172a",
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0f172a",
-  },
-  modalApplyText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
-  },
-});
+    /* ---- greeting ---- */
+    greetingRow: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 12,
+    },
+    greetingText: {
+      flex: 1,
+      /*
+       * Yoga treats a flex child's min-width as 0; CSS flexbox treats it as
+       * auto, so on the react-native-web build a row of flex children cannot
+       * shrink below its content and overflows the viewport. Every flex child
+       * in this file carries minWidth: 0 for that reason - it is a no-op
+       * natively and the fix on web.
+       */
+      minWidth: 0,
+    },
+    greeting: {
+      fontSize: t.hero,
+      lineHeight: 26,
+      fontWeight: "700",
+      letterSpacing: -0.45,
+      color: b.text,
+    },
+    date: {
+      marginTop: 2,
+      fontSize: t.body,
+      lineHeight: 16,
+      color: b.textMuted,
+    },
+    cta: {
+      width: 118,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+      borderRadius: round.banner,
+      backgroundColor: b.tint,
+      paddingLeft: 13,
+      paddingRight: 5,
+      paddingTop: 9,
+      paddingBottom: 10,
+    },
+    ctaText: {
+      flex: 1,
+      minWidth: 0,
+    },
+    ctaLine: {
+      fontSize: t.cta,
+      lineHeight: 14,
+      fontWeight: "600",
+      color: b.ink,
+    },
+
+    /* ---- the two four-up grids ---- */
+    statRow: {
+      marginTop: 15,
+      flexDirection: "row",
+      gap: layout.gridGap,
+    },
+    statTile: {
+      flex: 1,
+      minWidth: 0,
+      height: 100,
+      justifyContent: "center",
+      paddingHorizontal: 14,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.card,
+      backgroundColor: b.surface,
+    },
+    statLabel: {
+      marginTop: 6,
+      fontSize: t.label,
+      lineHeight: 14,
+      fontWeight: "500",
+      color: b.textSecondary,
+    },
+    statValue: {
+      marginTop: 4,
+      fontSize: t.hero,
+      lineHeight: 26,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    actionTile: {
+      flex: 1,
+      minWidth: 0,
+      height: 78,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 6,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.card,
+      backgroundColor: b.surface,
+    },
+    actionLabel: {
+      marginTop: 6,
+      fontSize: t.label,
+      lineHeight: 14,
+      fontWeight: "500",
+      textAlign: "center",
+      color: b.textSecondary,
+    },
+
+    /* ---- revenue strip ---- */
+    banner: {
+      marginTop: 10,
+      height: 70,
+      flexDirection: "row",
+      alignItems: "center",
+      overflow: "hidden",
+      borderRadius: round.banner,
+      backgroundColor: b.tintSoft,
+      paddingLeft: 15,
+      paddingRight: 14,
+    },
+    bannerText: {
+      flex: 1,
+      minWidth: 0,
+      marginLeft: 18,
+    },
+    bannerLabel: {
+      fontSize: t.label,
+      lineHeight: 15,
+      fontWeight: "500",
+      color: b.textSecondary,
+    },
+    bannerValue: {
+      fontSize: t.hero,
+      lineHeight: 26,
+      fontWeight: "700",
+      letterSpacing: -0.4,
+      color: b.text,
+    },
+    bannerBars: {
+      /*
+       * Laid out in the row rather than positioned absolutely: Yoga measures
+       * an absolute child from the parent's padding box, so `right: 0` here
+       * would already be inset by the strip's 14pt and the bars would drift.
+       * flex-end drops them onto the strip's bottom edge, where the comp
+       * clips them.
+       */
+      alignSelf: "flex-end",
+      marginRight: 8,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 6,
+    },
+    bannerBar: {
+      width: 13,
+      borderTopLeftRadius: 3,
+      borderTopRightRadius: 3,
+      backgroundColor: b.tintBar,
+    },
+
+    /* ---- section heads ---- */
+    sectionHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+    },
+    sectionTop: {
+      marginTop: 16,
+    },
+    sectionTitle: {
+      flexShrink: 1,
+      minWidth: 0,
+      fontSize: t.sectionTitle,
+      lineHeight: 20,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
+    sectionLink: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 3,
+    },
+    sectionLinkText: {
+      fontSize: t.label,
+      fontWeight: "600",
+      color: b.ink,
+    },
+
+    /* ---- inventory split ---- */
+    splitBar: {
+      marginTop: 8,
+      height: 14,
+      flexDirection: "row",
+      gap: 2,
+    },
+    splitFill: {
+      borderRadius: round.pill,
+      backgroundColor: b.greenBright,
+    },
+    splitTrack: {
+      borderRadius: round.pill,
+      backgroundColor: b.track,
+    },
+    legendRow: {
+      marginTop: 9,
+      flexDirection: "row",
+      justifyContent: "space-between",
+    },
+    legendLabelRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    legendDot: {
+      width: 12,
+      height: 12,
+      borderRadius: round.pill,
+    },
+    legendLabel: {
+      fontSize: t.label,
+      lineHeight: 15,
+      fontWeight: "500",
+      color: b.textMuted,
+    },
+    legendValue: {
+      marginTop: 1,
+      marginLeft: 22,
+      fontSize: t.metric,
+      lineHeight: 21,
+      fontWeight: "700",
+      letterSpacing: -0.3,
+      color: b.text,
+    },
+
+    /* ---- list cards ---- */
+    card: {
+      padding: 14,
+      borderWidth: 1,
+      borderColor: b.border,
+      borderRadius: round.card,
+      backgroundColor: b.surface,
+    },
+    cardTop: {
+      marginTop: 15,
+    },
+    cardNext: {
+      marginTop: 11,
+    },
+    cardHead: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+    },
+    cardBadge: {
+      width: 28,
+      height: 28,
+      borderRadius: round.pill,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    cardTitle: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: t.cardTitle,
+      lineHeight: 18,
+      fontWeight: "700",
+      letterSpacing: -0.2,
+      color: b.text,
+    },
+    cardLink: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 2,
+    },
+    cardLinkText: {
+      fontSize: t.label,
+      fontWeight: "500",
+      color: b.textMuted,
+    },
+    cardBody: {
+      /* Indented to the title's column: the badge plus the gap beside it. */
+      paddingLeft: 28 + 14,
+    },
+    emptyTitle: {
+      fontSize: t.body,
+      lineHeight: 16,
+      fontWeight: "600",
+      color: b.text,
+    },
+    emptyNote: {
+      marginTop: 4,
+      fontSize: t.body,
+      lineHeight: 16,
+      color: b.textMuted,
+    },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      paddingVertical: 2,
+    },
+    rowText: {
+      flex: 1,
+      minWidth: 0,
+    },
+    rowTitle: {
+      fontSize: t.rowTitle,
+      lineHeight: 19,
+      fontWeight: "700",
+      letterSpacing: -0.2,
+      color: b.text,
+    },
+    rowMeta: {
+      marginTop: 3,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+    },
+    rowMetaText: {
+      flexShrink: 1,
+      minWidth: 0,
+      fontSize: t.body,
+      lineHeight: 16,
+      color: b.textMuted,
+    },
+  }),
+);
