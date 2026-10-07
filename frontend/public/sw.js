@@ -8,8 +8,8 @@
  * default.
  */
 
-const ICON = "/favicon.png";
-const BADGE = "/favicon.png";
+const ICON = "/samvid-mark-192.png";
+const BADGE = "/samvid-mark-192.png";
 
 /*
  * The direct /api mount, not the /api/client one the app's axios uses. A worker
