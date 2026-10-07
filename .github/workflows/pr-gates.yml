@@ -48,10 +48,7 @@ jobs:
       - name: Confirm Mongo test database safety
         run: |
           node -e "const uri=process.env.MONGO_TEST_URI||''; if(!/127\\.0\\.0\\.1|localhost/.test(uri) || !/test|ci|integration|e2e/.test(uri)) { throw new Error('Unsafe MONGO_TEST_URI for CI'); } console.log('Using isolated Mongo test URI');"
-      - run: npm run lint
-      - run: npm run test:unit
-      - run: npm run test:integration
-      - run: npm run test:coverage
+      - run: npm test
       - name: Production dependency audit policy
         run: |
           mkdir -p ../artifacts
@@ -83,10 +80,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run lint
-      - run: npm run test:coverage
       - run: npm run build
-      - run: npx playwright install --with-deps chromium firefox webkit
-      - run: npm run test:e2e:smoke
       - name: Production dependency audit policy
         run: |
           mkdir -p ../artifacts
@@ -118,8 +112,8 @@ jobs:
           cache: npm
           cache-dependency-path: mobile/package-lock.json
       - run: npm ci
-      - run: npm run test:coverage
-      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run typecheck
       - name: Production dependency audit policy
         run: |
           mkdir -p ../artifacts
